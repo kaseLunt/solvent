@@ -20,6 +20,7 @@
 // Playwright's transpiler as well as by Next.
 
 import type { LabRunBookEngine, RunBookAggregate } from "../../lib/runbook";
+import { belowOneLanes, crossingCounts, readTransitions } from "./labTransition";
 import { labUsd } from "./frontierView";
 
 /** Σ of bucket counts whose whole range sits at-or-below the wad scale. */
@@ -41,85 +42,146 @@ export function measuredCount(aggregate: RunBookAggregate): number {
 }
 
 /**
- * The histogram pair's reading line: the NET population change between the two
- * distributions.
+ * The histogram pair's reading line: the NET population change AND the two
+ * gross crossings that produced it.
  *
- * # Why it says NET and says it out loud
+ * # What changed at contract 1.7.0, and why the old sentence had to go rather
+ * # than be reworded
  *
- * The only quantity derivable here is `belowOne(after) − belowOne(before)`, and
- * that is a difference of two POPULATIONS — not a count of accounts that
- * crossed. An account that fell below 1.00 and another that rose above it
- * cancel exactly, and this response carries nothing that would reveal either.
- * The earlier sentence called that difference "accounts that crossed/left",
- * which claimed a gross measurement the wire never served.
+ * This sentence used to carry an IMPOSSIBILITY CAVEAT: "this response serves
+ * the two populations, not the crossings between them ... no gross crossing
+ * count is claimed here". Its central claim — that computing the gross count
+ * here was impossible from two histograms — was TRUE and is now FALSE.
+ * `hf_transitions` serves the joint distribution, so the crossings are derived
+ * from its cells, and a stale impossibility caveat printed beside a served
+ * gross count is itself the defect the caveat existed to prevent.
  *
- * The honest options were: serve the gross count (the API does not), compute it
- * here (impossible from two histograms), or DISCLOSE the limitation. This
- * sentence discloses it.
+ * The NET is kept beside the gross rather than replaced by it: it is still the
+ * population change, and the whole point of the pair is that on an offsetting
+ * book they are different numbers.
+ *
+ * Two constraints the rewrite keeps:
+ *
+ *   - the denominator is the SERVER's `measured_rows`, not a recomputed
+ *     `measuredCount`. The exclusion of the unmeasured tail is now a number the
+ *     server publishes, and reading it is strictly better than reproducing it.
+ *   - `lane_changed_rows` is NOT described as a 1.00-crossing count, because it
+ *     is not one: it counts every lane change, including moves that never touch
+ *     this boundary.
  *
  * The eligible-region count is the quantity both comparators can honestly
  * report — on Aave it is the engine's own liquidation set, on the Debt Manager
  * it is a DISCLOSURE and the sentence says so rather than passing it off as a
- * verdict. The refused tail is named in the same breath, because a shift
+ * verdict. The unmeasured tail is named in the same breath, because a shift
  * measured over a book with rows missing from it is a shift over a different
  * book.
  */
 export function histogramShiftReadingLine(engine: LabRunBookEngine): string {
   const before = engine.before;
   const after = engine.after;
-  const from = belowOneCount(before);
-  const to = belowOneCount(after);
-  const measured = measuredCount(after);
+  const reading = readTransitions(engine);
+  const head = "What this shows: how the book's health factors moved under this scenario. ";
 
-  // What "below 1.00" MEANS on this engine — a verdict on Aave, a disclosure on
-  // the Debt Manager, and the sentence never lets the two read alike.
-  const regionTail =
-    before.hf_histogram.comparator === "hf_wad"
-      ? "where this engine may liquidate"
-      : "the borrow-headroom ratio, a DISCLOSURE rather than this engine's trigger";
-
-  // THE NET CAVEAT, in so many words. Two populations subtracted is a NET
-  // change and nothing else: an account that fell below 1.00 and another that
-  // rose above it cancel here, and neither is visible. Saying so is the only
-  // honest option — a GROSS crossing count computed on this side would be an
-  // invention, because no field on this response carries one.
-  const netCaveat =
-    " That is a NET figure: this response serves the two populations, not the crossings between " +
-    "them, so accounts may have moved in BOTH directions and no gross crossing count is claimed here.";
-
-  let movement: string;
-  if (measured === 0) {
-    // No account was measured at all. There is no shift to describe, and
-    // "0 accounts moved" would claim a measurement nobody made.
+  // A MATRIX THIS BODY CONTRADICTS IS NOT READ. The net alone is still honest —
+  // it is a difference of two bars printed on the page — so the sentence falls
+  // back to it and SAYS that the crossings were withheld rather than printing
+  // numbers derived from a matrix the page refuses to draw.
+  if (reading.kind === "contradictory") {
     return (
-      "What this shows: how the book's health factors moved under this scenario. " +
-      "This scenario measured no account on this engine, so there is no shift to read." +
-      refusedTail(after)
+      head +
+      netOnlyMovement(belowOneCount(before), belowOneCount(after), measuredCount(after)) +
+      " The gross crossings are NOT stated here: this response's transition matrix disagrees with " +
+      "the two distributions beside it, and a crossing count derived from it would not answer to " +
+      `them. ${regionClause(before)}${unmeasuredTail(after)}`
     );
-  } else if (to === from) {
-    movement =
-      `${String(from)} of ${String(measured)} measured accounts sat below 1.00 before the shock ` +
-      `and ${String(to)} after: the below-1.00 population did not change.`;
-  } else {
-    const verb = to > from ? "grew" : "shrank";
-    movement =
-      `${String(from)} of ${String(measured)} measured accounts sat below 1.00 before the shock, ` +
-      `${String(to)} after: the below-1.00 population ${verb} by ${String(Math.abs(to - from))}.`;
   }
 
+  const t = reading.transitions;
+  const measured = t.measured_rows;
+  if (measured === 0) {
+    // No row was measured at all. There is no shift to describe, and
+    // "0 accounts moved" would claim a measurement nobody made.
+    return (
+      head +
+      "This scenario measured no account on this engine, so there is no shift to read." +
+      unmeasuredTail(after)
+    );
+  }
+
+  const region = belowOneLanes(t);
+  const { entries, exits, net } = crossingCounts(t, region);
+  const from = belowOneCount(before);
+  const to = belowOneCount(after);
+
+  const movement =
+    net === 0
+      ? `${String(from)} of ${String(measured)} measured rows sat below 1.00 before the shock ` +
+        `and ${String(to)} after: the below-1.00 population did not change.`
+      : `${String(from)} of ${String(measured)} measured rows sat below 1.00 before the shock, ` +
+        `${String(to)} after: the below-1.00 population ${net > 0 ? "grew" : "shrank"} by ` +
+        `${String(Math.abs(net))}.`;
+
+  // THE GROSS SPLIT, BESIDE THE NET RATHER THAN A CAVEAT INSTEAD OF IT. These
+  // two are read off the transition matrix's cells — the joint distribution the
+  // server computes — and the net is what is left when they cancel.
+  const gross =
+    ` The crossings behind that figure are served: ${String(entries)} ` +
+    `${entries === 1 ? "row" : "rows"} moved INTO the region and ${String(exits)} ` +
+    `${exits === 1 ? "row" : "rows"} moved OUT of it, so the net is what is left after they cancel.`;
+
+  return `${head}${movement}${gross} ${regionClause(before)}${unmeasuredTail(after)}`;
+}
+
+/** The net-only sentence, used when the matrix cannot be read. */
+function netOnlyMovement(from: number, to: number, measured: number): string {
+  if (measured === 0) {
+    return "This scenario measured no account on this engine, so there is no shift to read.";
+  }
+  if (to === from) {
+    return (
+      `${String(from)} of ${String(measured)} measured rows sat below 1.00 before the shock ` +
+      `and ${String(to)} after: the below-1.00 population did not change.`
+    );
+  }
   return (
-    "What this shows: how the book's health factors moved under this scenario. " +
-    `${movement}${netCaveat} Below 1.00 is ${regionTail}.${refusedTail(after)}`
+    `${String(from)} of ${String(measured)} measured rows sat below 1.00 before the shock, ` +
+    `${String(to)} after: the below-1.00 population ${to > from ? "grew" : "shrank"} by ` +
+    `${String(Math.abs(to - from))}.`
   );
 }
 
-/** The refused tail, named in the same breath as the shift or not at all. */
-function refusedTail(after: RunBookAggregate): string {
+/**
+ * What "below 1.00" MEANS on this engine — a verdict on Aave, a DISCLOSURE on
+ * the Debt Manager, and the sentence never lets the two read alike. Serving the
+ * joint changes nothing about this: a move into a below-1.00 lane is still not
+ * an eligibility flip on an engine whose lanes are a ratio it does not
+ * liquidate on.
+ */
+function regionClause(before: RunBookAggregate): string {
+  return before.hf_histogram.comparator === "hf_wad"
+    ? "Below 1.00 is where this engine may liquidate."
+    : "Below 1.00 is the borrow-headroom ratio, a DISCLOSURE rather than this engine's trigger.";
+}
+
+/**
+ * The unmeasured tail, named in the same breath as the shift or not at all.
+ *
+ * CORRECTED at 1.7.0. This clause used to say those rows "sit in neither
+ * distribution", and the second half is now false: they sit in the matrix's
+ * last lane, which IS a position in the joint distribution, with both margins
+ * carrying them and the cause split beside them. The naming obligation is
+ * unchanged; what changed is that there is now somewhere to point.
+ */
+function unmeasuredTail(after: RunBookAggregate): string {
   const refused = after.hf_histogram.refused_count;
   if (refused === 0) {
     return "";
   }
-  return ` ${String(refused)} more ${refused === 1 ? "row is" : "rows are"} counted refused and sit in neither distribution.`;
+  return (
+    ` ${String(refused)} more ${refused === 1 ? "row is" : "rows are"} counted refused; ` +
+    `${refused === 1 ? "it sits" : "they sit"} in the matrix's "not measured" lane, inside both ` +
+    `margins and outside every measured count above.`
+  );
 }
 
 /**

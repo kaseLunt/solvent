@@ -555,6 +555,17 @@ export class SolventClient {
    * against the whole book. POST because the evaluation is computed on
    * request; it writes nothing. An id outside the committed set is a 404 —
    * and an id outside the contract's pattern is refused locally, never sent.
+   *
+   * Contract 1.7.0: every `engines[]` row carries `hf_transitions`, the
+   * BEFORE-to-AFTER flow of that engine's POSITION ROWS over the same lanes its
+   * two `hf_histogram`s are stated in. The two histograms cannot produce it —
+   * two marginals do not determine a joint — so the server computes it. Two
+   * hazards ride with it: `held_rows` and `lane_changed_rows` are `number |
+   * null`, where `null` means this run measured no row on that engine and `0`
+   * means every measured row changed lane, so `!t.held_rows` collapses two
+   * different statements; and a cell's `debt_before_usd` / `debt_after_usd` are
+   * null exactly when this run measured none of that cell's rows, so
+   * `Number(cell.debt_before_usd)` would coerce an unknowable to 0.
    */
   async runBookScenario(id: string, signal?: AbortSignal): Promise<RunBookResponse> {
     if (typeof id !== "string" || !SCENARIO_ID_PATTERN.test(id)) {

@@ -408,6 +408,21 @@ export interface paths {
          *     `movers_note` — the accounts the scenario moved, ranked by that engine's
          *     own definition of movement, bounded to the top 20 with the truncation
          *     stated rather than silent.
+         *
+         *     ADDED 1.7.0, additive: each engine carries `hf_transitions`, the
+         *     BEFORE-to-AFTER flow of its POSITION ROWS over the same lanes the two
+         *     histograms beside it are stated in. The two histograms cannot produce
+         *     it — two marginals do not determine a joint, and a row that fell below
+         *     1.00 and another that rose above it cancel exactly in their difference —
+         *     so the joint is computed on the server, which is the only place that
+         *     holds both sides of the same row. Its margins ARE those two histograms,
+         *     lane for lane; the two lanes past the buckets are `infinite_count`'s and
+         *     `refused_count`'s populations, and the second of those is split by cause
+         *     so a reader can tell which coverage field holds those rows. The same
+         *     release CORRECTS `RunBookHistogram.refused_count`'s description, which
+         *     defined that tally as "positions carrying no comparator ... also in
+         *     `coverage.excluded`" — a sentence that was wrong in both halves and, on
+         *     this route's own example, pointed at an empty array.
          */
         post: operations["runBookScenario"];
         delete?: never;
@@ -2115,13 +2130,252 @@ export interface components {
             /** @description Accounts with NO DEBT on this side — the health factor is undefined-because-unbounded, never a large number and never a bucket. */
             infinite_count: number;
             /**
-             * @description Positions on this engine carrying no comparator on this side,
-             *     including the rows this layer could not rebuild (which are also in
-             *     `coverage.excluded`). They are COUNTED here rather than dropped: an
-             *     aggregate histogram that silently omitted them would read as a
-             *     complete census of a book it does not cover.
+             * @description Positions on this engine that THIS RUN MEASURED ON NEITHER SIDE:
+             *     rows that reached no arithmetic at all. They are COUNTED here rather
+             *     than dropped, because an aggregate histogram that silently omitted
+             *     them would read as a complete census of a book it does not cover.
+             *
+             *     CORRECTED at 1.7.0, and the correction is not cosmetic. This
+             *     description used to say "positions carrying no comparator ...
+             *     (which are also in `coverage.excluded`)", and both halves were
+             *     wrong. No MEASURED row on either engine can lack a comparator —
+             *     `ComputeAaveHealth` sets the health-factor wad exactly when it
+             *     clears `is_infinite`, and `ComputeDMHealth` sets its rational
+             *     exactly when borrowings are positive — and the rows this count DOES
+             *     hold are predominantly riskd's own refusals, which are in
+             *     `coverage.refused_in_batch` and NOT in `coverage.excluded`. On this
+             *     route's own committed example that sentence pointed at an empty
+             *     array.
+             *
+             *     `hf_transitions` states this same population as its last lane and
+             *     SPLITS it by cause, so a reader can tell which coverage field
+             *     actually holds these rows on this engine:
+             *     `unmeasured_refused_in_batch_rows` and
+             *     `unmeasured_excluded_by_this_layer_rows`.
              */
             refused_count: number;
+            note: string;
+        };
+        /**
+         * @description One lane of the transition matrix (ADDED 1.7.0). Lanes 0..N-1 ARE the
+         *     buckets `hf_histogram` serves: same order, same labels, same edges,
+         *     placed by the same law. The two lanes after them are the two tallies
+         *     that sit BESIDE those buckets on every histogram this surface serves.
+         *     There is no lane a histogram does not have and no histogram tally
+         *     without a lane.
+         */
+        RunBookTransitionLane: {
+            /**
+             * @description This lane's position. It is the value `outflows[].from` and
+             *     `cells[].to` reference, and the index at which `from_rows` and
+             *     `to_rows` carry this lane's two whole populations.
+             */
+            index: number;
+            /** @enum {string} */
+            kind: "bucket" | "infinite" | "unmeasured";
+            /**
+             * @description For a `bucket` lane this is byte-identical to the corresponding
+             *     `hf_histogram.buckets[].label`. For the two others it names the
+             *     population in the words that describe it: "no debt (unbounded)" and
+             *     "not measured".
+             */
+            label: string;
+            lower_wad: components["schemas"]["NullableDecimal"];
+            /**
+             * @description Null on the open-ended top bucket AND on both non-bucket lanes,
+             *     which have no edges at all. An unbounded health factor is not a
+             *     large number, and a row nobody measured has no health factor to
+             *     bound.
+             */
+            upper_wad: components["schemas"]["NullableDecimal"];
+        };
+        /**
+         * @description One occupied cell (ADDED 1.7.0): the position rows whose BEFORE lane is
+         *     this outflow's `from` and whose AFTER lane is `to`. A cell is emitted
+         *     only when it holds at least one row.
+         */
+        RunBookTransitionCell: {
+            /** @description The AFTER lane's `index`. */
+            to: number;
+            /**
+             * @description Position rows in this cell. An empty cell is ABSENT, never a row of
+             *     zeros. Like every other field here whose name ends in `rows`, this
+             *     is a COUNT of position rows.
+             */
+            rows: number;
+            /**
+             * @description The exact sum of BEFORE-side debt over the rows in this cell THAT
+             *     THIS RUN MEASURED, at this engine's `usd_decimals`, in this engine's
+             *     own unit, never summed with another engine's. Each row contributes
+             *     the debt computed on the BEFORE side for that row; the figure is
+             *     derived per side and never from the lane. NULL, never "0", when this
+             *     run measured none of this cell's rows, which today is exactly the
+             *     (N+1, N+1) cell: a debt nobody computed and a debt of zero are
+             *     different facts. A no-debt row (lane N) contributes an exact "0" on
+             *     the side where it has no debt, because that zero IS knowable.
+             */
+            debt_before_usd: components["schemas"]["NullableDecimal"];
+            /**
+             * @description The same sum on the AFTER side, derived the same way. It is a
+             *     SEPARATE figure because debt on this engine may be PRICED: Aave's
+             *     `total_debt_base` is the per-reserve sum of
+             *     `MulDivCeil(live_debt, price, den)`, so a shock that moves the price
+             *     of an asset a row BORROWS moves it. The Debt Manager's `borrowings`
+             *     is USD-normalized and is copied verbatim across the shock, so on
+             *     that engine the two figures are equal by construction. One debt
+             *     number per cell could conserve on at most one margin.
+             */
+            debt_after_usd: components["schemas"]["NullableDecimal"];
+        };
+        /**
+         * @description One BEFORE lane's outflow (ADDED 1.7.0): where that lane's rows went.
+         *     Every lane gets an entry, including empty ones, so the shape is stable.
+         *     This lane's whole BEFORE population is `from_rows[from]`; it is not
+         *     repeated here.
+         */
+        RunBookTransitionOutflow: {
+            from: number;
+            /** @description The occupied cells of this outflow, ascending by `to`. Empty when this lane held no row before the shock. */
+            cells: components["schemas"]["RunBookTransitionCell"][];
+        };
+        /**
+         * @description The BEFORE-to-AFTER flow of this engine's POSITION ROWS (ADDED 1.7.0): a
+         *     joint distribution over the SAME lanes the two `hf_histogram`s beside it
+         *     are stated in.
+         *
+         *     THE TWO HISTOGRAMS CANNOT PRODUCE THIS. Two marginals do not determine a
+         *     joint: a row that fell below 1.00 and another that rose above it cancel
+         *     exactly in a marginal difference, and no client-side arithmetic can
+         *     separate them. `movers` cannot either: it is capped, and it is ranked by
+         *     drop magnitude or by an eligibility flip rather than by lane change. So
+         *     the joint is computed HERE, in the one place that holds both sides of
+         *     the same row.
+         *
+         *     The lanes ARE the histogram's tallies, so the margins of this matrix are
+         *     the two histograms exactly. Nothing is bucketed twice and no second edge
+         *     table exists.
+         *
+         *     EVERY FIELD HERE WHOSE NAME ENDS IN `rows` IS A COUNT of position rows
+         *     on this engine, or an array of such counts, in the same unit
+         *     `coverage.batch_positions` uses, never a count of distinct addresses.
+         *     Arrays of objects are named for their elements: `lanes`, `outflows`,
+         *     `cells`.
+         */
+        RunBookTransitions: {
+            /**
+             * @description The SAME per-engine vocabulary `RunBookHistogram` names, repeated so
+             *     this matrix is readable without the histograms in scope. On the Debt
+             *     Manager the lanes are the exact rational maxBorrowLT/borrowings, a
+             *     DISCLOSURE. A move into a below-1.00 lane is NOT an eligibility
+             *     flip; take eligibility from `newly_eligible_accounts` and `movers`.
+             * @enum {string}
+             */
+            comparator: "hf_wad" | "hf_num/hf_den";
+            wad_scale: components["schemas"]["Decimal"];
+            lanes: components["schemas"]["RunBookTransitionLane"][];
+            /**
+             * @description One entry per lane, in lane order, always. A lane with no BEFORE
+             *     population still gets an entry, with no cells; its zero is stated by
+             *     `from_rows` at the same index.
+             */
+            outflows: components["schemas"]["RunBookTransitionOutflow"][];
+            /**
+             * @description THE ROW MARGIN: each lane's whole BEFORE population, in lane order.
+             *     `from_rows[i]` EQUALS the corresponding tally on
+             *     `before.hf_histogram` (`buckets[i].count` for a bucket lane,
+             *     `infinite_count` for lane N, `refused_count` for lane N+1), and it
+             *     equals the sum of `outflows[i].cells[].rows`.
+             */
+            from_rows: number[];
+            /**
+             * @description THE COLUMN MARGIN: each lane's whole AFTER population, in lane order,
+             *     stated the same way against `after.hf_histogram`. It equals the
+             *     column sums of the cells. Both margins are served densely so that
+             *     the sparse cells lose nothing: an absent cell is a KNOWABLE zero,
+             *     and these dense margins are what make that knowable.
+             */
+            to_rows: number[];
+            /**
+             * @description Every position row of THIS ENGINE that this run touched, the grand
+             *     total of the matrix. It is `before.accounts` plus `unmeasured_rows`,
+             *     and it is also `after.accounts` plus the same number. Nothing is in
+             *     two cells and nothing is in none.
+             *
+             *     IT IS A PER-ENGINE TOTAL AND IT RECONCILES AGAINST NOTHING ELSE.
+             *     It is not `coverage.batch_positions`, which counts the WHOLE batch
+             *     including engines this scenario does not cover. It is not
+             *     `coverage.in_book` either, and summing it across `engines[]` does not
+             *     produce `coverage.in_book`: a WITHHELD engine's rebuildable rows are
+             *     inside `coverage.in_book` while that engine has no `engines[]` entry
+             *     at all, and every engine's unmeasured rows are inside `total_rows`
+             *     while being outside `coverage.in_book`. The two errors can cancel on
+             *     a given book, so an equality observed once is not the law. The note
+             *     beside this field says the same thing in prose.
+             */
+            total_rows: number;
+            /**
+             * @description The rows this run MEASURED on both sides, that is `total_rows` minus
+             *     `unmeasured_rows`. It equals `before.accounts` and `after.accounts`.
+             *     It is the denominator every movement statement on this surface is
+             *     made against.
+             */
+            measured_rows: number;
+            /**
+             * @description Rows of this engine that reached NO arithmetic in this run. They
+             *     carry no health factor on either side, they sit in exactly one cell
+             *     (lane N+1 to lane N+1), and this run computed no debt for them, so
+             *     that cell's two debt figures are null rather than "0". This is NOT a
+             *     statement that the row holds no debt: the batch's persisted numbers
+             *     for these rows are served, unchanged, by `/v1/positions` and
+             *     `/v1/address/{addr}`.
+             */
+            unmeasured_rows: number;
+            /**
+             * @description The part of `unmeasured_rows` that RISKD itself refused: rows whose
+             *     persisted status is `refused` (a missing price witness, a
+             *     never-swept collateral position, and the rest of the gate
+             *     vocabulary). Every one of them is inside `coverage.refused_in_batch`,
+             *     which is a BOOK-WIDE count on this response, and each is served per
+             *     row with its refusal code and detail by `/v1/positions` and
+             *     `/v1/address/{addr}`. They are NOT in `coverage.excluded`.
+             */
+            unmeasured_refused_in_batch_rows: number;
+            /**
+             * @description The part of `unmeasured_rows` that riskd COMPUTED and THIS SERVICE
+             *     could not rebuild or could not verify against the persisted row.
+             *     Every one of these is listed, with its engine, account, code and
+             *     reason, in `coverage.excluded`, and counted in
+             *     `coverage.excluded_by_this_layer`.
+             */
+            unmeasured_excluded_by_this_layer_rows: number;
+            /**
+             * @description MEASURED rows whose lane did not change: the diagonal over lanes 0..N,
+             *     excluding the unmeasured lane entirely. NULL when `measured_rows` is
+             *     0, because "0 rows held" over a book this run never measured would
+             *     claim a measurement nobody made. When non-null,
+             *     `held_rows + lane_changed_rows + unmeasured_rows == total_rows`.
+             *     HAZARD: `null` and `0` are different statements and `!held_rows`
+             *     collapses them.
+             */
+            held_rows: number | null;
+            /**
+             * @description MEASURED rows whose LANE changed: the off-diagonal, and the gross
+             *     count the two histograms structurally could not give. NULL under the
+             *     same condition as `held_rows`, and hazardous under `!` for the same
+             *     reason.
+             *
+             *     READ IT FOR WHAT IT IS. A row that moved a long way INSIDE one lane
+             *     is not counted. A row that moved one wei across an edge is. It is
+             *     therefore a function of the histogram's own bucket table, and not of
+             *     the scenario's magnitude. It is NOT `movers_total` (Aave ranks
+             *     strict health-factor drops; the Debt Manager counts eligibility
+             *     flips) and NOT `newly_eligible_accounts` (a signed net), and on a
+             *     real committed fixture all three are different numbers. It is also
+             *     not a crossing count of any particular edge: derive that from the
+             *     cells, and on the Debt Manager label it as the comparator's
+             *     disclosure rather than as a verdict.
+             */
+            lane_changed_rows: number | null;
             note: string;
         };
         /**
@@ -2218,6 +2472,20 @@ export interface components {
             usd_decimals: number;
             before: components["schemas"]["RunBookAggregate"];
             after: components["schemas"]["RunBookAggregate"];
+            /**
+             * @description ADDED 1.7.0. The BEFORE-to-AFTER flow of this engine's position
+             *     rows: which lane each row left and which lane it arrived in. It is
+             *     PER ENGINE and not per aggregate, because the matrix spans both
+             *     sides and is a property of neither one, and its two margins ARE the
+             *     `before` and `after` histograms above, lane for lane.
+             *
+             *     It exists because two marginals do not determine a joint. A row that
+             *     fell below 1.00 and another that rose above it cancel exactly in the
+             *     difference of the two histograms, and nothing else on this response
+             *     can separate them: `movers` is capped at 20 and ranked by drop
+             *     magnitude or by an eligibility flip rather than by lane change.
+             */
+            hf_transitions: components["schemas"]["RunBookTransitions"];
             newly_eligible_accounts: number;
             /** @description DELTA-ONLY — after minus before, the scenario's own contribution over the positions in the run. Can be negative. */
             eligible_debt_delta_usd: components["schemas"]["Decimal"];
@@ -3766,7 +4034,7 @@ export interface operations {
                      *               ],
                      *               "infinite_count": 0,
                      *               "refused_count": 1,
-                     *               "note": "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator — both are counted here rather than dropped, so the buckets plus these two account for the whole run."
+                     *               "note": "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is the positions this run measured on NEITHER side — both are counted here rather than dropped, so the buckets plus these two account for the whole run. `hf_transitions` states that same population as its last lane and splits it by cause."
                      *             },
                      *             "collateral_by_asset": [
                      *               {
@@ -3851,7 +4119,7 @@ export interface operations {
                      *               ],
                      *               "infinite_count": 0,
                      *               "refused_count": 1,
-                     *               "note": "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator — both are counted here rather than dropped, so the buckets plus these two account for the whole run."
+                     *               "note": "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is the positions this run measured on NEITHER side — both are counted here rather than dropped, so the buckets plus these two account for the whole run. `hf_transitions` states that same population as its last lane and splits it by cause."
                      *             },
                      *             "collateral_by_asset": [
                      *               {
@@ -3872,6 +4140,170 @@ export interface operations {
                      *                 "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
                      *               }
                      *             ]
+                     *           },
+                     *           "hf_transitions": {
+                     *             "comparator": "hf_wad",
+                     *             "wad_scale": "1000000000000000000",
+                     *             "lanes": [
+                     *               {
+                     *                 "index": 0,
+                     *                 "kind": "bucket",
+                     *                 "label": "< 0.90",
+                     *                 "lower_wad": null,
+                     *                 "upper_wad": "900000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 1,
+                     *                 "kind": "bucket",
+                     *                 "label": "0.90 – 1.00",
+                     *                 "lower_wad": "900000000000000000",
+                     *                 "upper_wad": "1000000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 2,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.00 – 1.05",
+                     *                 "lower_wad": "1000000000000000000",
+                     *                 "upper_wad": "1050000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 3,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.05 – 1.10",
+                     *                 "lower_wad": "1050000000000000000",
+                     *                 "upper_wad": "1100000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 4,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.10 – 1.25",
+                     *                 "lower_wad": "1100000000000000000",
+                     *                 "upper_wad": "1250000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 5,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.25 – 1.50",
+                     *                 "lower_wad": "1250000000000000000",
+                     *                 "upper_wad": "1500000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 6,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.50 – 2.00",
+                     *                 "lower_wad": "1500000000000000000",
+                     *                 "upper_wad": "2000000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 7,
+                     *                 "kind": "bucket",
+                     *                 "label": ">= 2.00",
+                     *                 "lower_wad": "2000000000000000000",
+                     *                 "upper_wad": null
+                     *               },
+                     *               {
+                     *                 "index": 8,
+                     *                 "kind": "infinite",
+                     *                 "label": "no debt (unbounded)",
+                     *                 "lower_wad": null,
+                     *                 "upper_wad": null
+                     *               },
+                     *               {
+                     *                 "index": 9,
+                     *                 "kind": "unmeasured",
+                     *                 "label": "not measured",
+                     *                 "lower_wad": null,
+                     *                 "upper_wad": null
+                     *               }
+                     *             ],
+                     *             "outflows": [
+                     *               {
+                     *                 "from": 0,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 1,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 2,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 3,
+                     *                 "cells": [
+                     *                   {
+                     *                     "to": 3,
+                     *                     "rows": 1,
+                     *                     "debt_before_usd": "600000000000",
+                     *                     "debt_after_usd": "600000000000"
+                     *                   }
+                     *                 ]
+                     *               },
+                     *               {
+                     *                 "from": 4,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 5,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 6,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 7,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 8,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 9,
+                     *                 "cells": [
+                     *                   {
+                     *                     "to": 9,
+                     *                     "rows": 1,
+                     *                     "debt_before_usd": null,
+                     *                     "debt_after_usd": null
+                     *                   }
+                     *                 ]
+                     *               }
+                     *             ],
+                     *             "from_rows": [
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               1,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               1
+                     *             ],
+                     *             "to_rows": [
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               1,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               1
+                     *             ],
+                     *             "total_rows": 2,
+                     *             "measured_rows": 1,
+                     *             "unmeasured_rows": 1,
+                     *             "unmeasured_refused_in_batch_rows": 1,
+                     *             "unmeasured_excluded_by_this_layer_rows": 0,
+                     *             "held_rows": 1,
+                     *             "lane_changed_rows": 0,
+                     *             "note": "ROWS ARE THE BEFORE LANE AND COLUMNS ARE THE AFTER LANE, over the POSITION ROWS of this engine in this run. Every count here counts rows, the same unit `coverage.batch_positions` uses, never distinct addresses; on this batch one row IS one account on this engine, and the server CHECKED that over every row in this matrix, measured and unmeasured alike, rather than assuming it. Lanes 0 to 7 are the SAME buckets, on the SAME comparator and the SAME edges, that the two `hf_histogram`s beside them serve. Lane 8 is rows with NO DEBT, unbounded and never a bucket, and IS `infinite_count`'s population. Lane 9 is rows this run measured on NEITHER side, and IS `refused_count`'s population. `from_rows` IS the before histogram and `to_rows` IS the after histogram, lane for lane: a weld, not a hope. A cell absent from `cells` holds ZERO rows. The dense `lanes`, `outflows`, `from_rows` and `to_rows` arrays are what make that omission complete. Lane 9's rows reached no arithmetic here: `unmeasured_refused_in_batch_rows` of them riskd refused (counted in `coverage.refused_in_batch`, and served per row with its refusal code by `/v1/positions` and `/v1/address/{addr}`), and `unmeasured_excluded_by_this_layer_rows` of them this service could not rebuild or verify (listed per row in `coverage.excluded`). Their persisted numbers still exist on those surfaces. THIS RUN measured none of them, which is why their cell's two debts are null and never \"0\". Debt is in THIS engine's own 8-decimal unit and is never summed with another engine's. The two sides are SEPARATE figures because Aave's debt is a PRICED sum a shock can move, while the Debt Manager's is USD-normalized and copied across the shock unchanged. A no-debt row's \"0\" is a knowable zero; a null is an unknowable. `lane_changed_rows` counts rows whose LANE changed. A move of any size INSIDE one lane is not counted and a move of one wei across an edge is, so it follows the histogram's edges rather than the scenario's magnitude. It is NOT `movers_total` (Aave ranks strict health-factor drops; the Debt Manager counts eligibility flips) and NOT `newly_eligible_accounts` (a signed net), and it is not a crossing count of any particular edge: derive that from the cells. Under this scenario no row can enter or leave lane 8 or lane 9, so every lane change here is between buckets. On the Debt Manager these lanes are the exact rational maxBorrowLT/borrowings, a DISCLOSURE and not the liquidation verdict: take eligibility from `newly_eligible_accounts` and `movers`. When `measured_rows` is 0 both `held_rows` and `lane_changed_rows` are NULL rather than 0, because a zero there would claim a measurement nobody made. `total_rows` is THIS ENGINE's whole book in this run. It is not `coverage.batch_positions`, which counts the whole batch including engines this scenario does not cover, and summing it across engines does not give `coverage.in_book`: a withheld engine's rebuildable rows are inside `coverage.in_book` with no `engines[]` entry at all, and this engine's unmeasured rows are inside `total_rows` and outside `coverage.in_book`. The two differences can cancel on a given book, so an equality seen once is not a law."
                      *           },
                      *           "newly_eligible_accounts": 0,
                      *           "eligible_debt_delta_usd": "0",
@@ -3956,7 +4388,7 @@ export interface operations {
                      *               ],
                      *               "infinite_count": 0,
                      *               "refused_count": 1,
-                     *               "note": "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator — both are counted here rather than dropped, so the buckets plus these two account for the whole run."
+                     *               "note": "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is the positions this run measured on NEITHER side — both are counted here rather than dropped, so the buckets plus these two account for the whole run. `hf_transitions` states that same population as its last lane and splits it by cause."
                      *             },
                      *             "collateral_by_asset": [
                      *               {
@@ -4033,7 +4465,7 @@ export interface operations {
                      *               ],
                      *               "infinite_count": 0,
                      *               "refused_count": 1,
-                     *               "note": "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator — both are counted here rather than dropped, so the buckets plus these two account for the whole run."
+                     *               "note": "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is the positions this run measured on NEITHER side — both are counted here rather than dropped, so the buckets plus these two account for the whole run. `hf_transitions` states that same population as its last lane and splits it by cause."
                      *             },
                      *             "collateral_by_asset": [
                      *               {
@@ -4046,6 +4478,170 @@ export interface operations {
                      *                 "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
                      *               }
                      *             ]
+                     *           },
+                     *           "hf_transitions": {
+                     *             "comparator": "hf_num/hf_den",
+                     *             "wad_scale": "1000000000000000000",
+                     *             "lanes": [
+                     *               {
+                     *                 "index": 0,
+                     *                 "kind": "bucket",
+                     *                 "label": "< 0.90",
+                     *                 "lower_wad": null,
+                     *                 "upper_wad": "900000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 1,
+                     *                 "kind": "bucket",
+                     *                 "label": "0.90 – 1.00",
+                     *                 "lower_wad": "900000000000000000",
+                     *                 "upper_wad": "1000000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 2,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.00 – 1.05",
+                     *                 "lower_wad": "1000000000000000000",
+                     *                 "upper_wad": "1050000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 3,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.05 – 1.10",
+                     *                 "lower_wad": "1050000000000000000",
+                     *                 "upper_wad": "1100000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 4,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.10 – 1.25",
+                     *                 "lower_wad": "1100000000000000000",
+                     *                 "upper_wad": "1250000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 5,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.25 – 1.50",
+                     *                 "lower_wad": "1250000000000000000",
+                     *                 "upper_wad": "1500000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 6,
+                     *                 "kind": "bucket",
+                     *                 "label": "1.50 – 2.00",
+                     *                 "lower_wad": "1500000000000000000",
+                     *                 "upper_wad": "2000000000000000000"
+                     *               },
+                     *               {
+                     *                 "index": 7,
+                     *                 "kind": "bucket",
+                     *                 "label": ">= 2.00",
+                     *                 "lower_wad": "2000000000000000000",
+                     *                 "upper_wad": null
+                     *               },
+                     *               {
+                     *                 "index": 8,
+                     *                 "kind": "infinite",
+                     *                 "label": "no debt (unbounded)",
+                     *                 "lower_wad": null,
+                     *                 "upper_wad": null
+                     *               },
+                     *               {
+                     *                 "index": 9,
+                     *                 "kind": "unmeasured",
+                     *                 "label": "not measured",
+                     *                 "lower_wad": null,
+                     *                 "upper_wad": null
+                     *               }
+                     *             ],
+                     *             "outflows": [
+                     *               {
+                     *                 "from": 0,
+                     *                 "cells": [
+                     *                   {
+                     *                     "to": 0,
+                     *                     "rows": 1,
+                     *                     "debt_before_usd": "4620000000",
+                     *                     "debt_after_usd": "4620000000"
+                     *                   }
+                     *                 ]
+                     *               },
+                     *               {
+                     *                 "from": 1,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 2,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 3,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 4,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 5,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 6,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 7,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 8,
+                     *                 "cells": []
+                     *               },
+                     *               {
+                     *                 "from": 9,
+                     *                 "cells": [
+                     *                   {
+                     *                     "to": 9,
+                     *                     "rows": 1,
+                     *                     "debt_before_usd": null,
+                     *                     "debt_after_usd": null
+                     *                   }
+                     *                 ]
+                     *               }
+                     *             ],
+                     *             "from_rows": [
+                     *               1,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               1
+                     *             ],
+                     *             "to_rows": [
+                     *               1,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               0,
+                     *               1
+                     *             ],
+                     *             "total_rows": 2,
+                     *             "measured_rows": 1,
+                     *             "unmeasured_rows": 1,
+                     *             "unmeasured_refused_in_batch_rows": 1,
+                     *             "unmeasured_excluded_by_this_layer_rows": 0,
+                     *             "held_rows": 1,
+                     *             "lane_changed_rows": 0,
+                     *             "note": "ROWS ARE THE BEFORE LANE AND COLUMNS ARE THE AFTER LANE, over the POSITION ROWS of this engine in this run. Every count here counts rows, the same unit `coverage.batch_positions` uses, never distinct addresses; on this batch one row IS one account on this engine, and the server CHECKED that over every row in this matrix, measured and unmeasured alike, rather than assuming it. Lanes 0 to 7 are the SAME buckets, on the SAME comparator and the SAME edges, that the two `hf_histogram`s beside them serve. Lane 8 is rows with NO DEBT, unbounded and never a bucket, and IS `infinite_count`'s population. Lane 9 is rows this run measured on NEITHER side, and IS `refused_count`'s population. `from_rows` IS the before histogram and `to_rows` IS the after histogram, lane for lane: a weld, not a hope. A cell absent from `cells` holds ZERO rows. The dense `lanes`, `outflows`, `from_rows` and `to_rows` arrays are what make that omission complete. Lane 9's rows reached no arithmetic here: `unmeasured_refused_in_batch_rows` of them riskd refused (counted in `coverage.refused_in_batch`, and served per row with its refusal code by `/v1/positions` and `/v1/address/{addr}`), and `unmeasured_excluded_by_this_layer_rows` of them this service could not rebuild or verify (listed per row in `coverage.excluded`). Their persisted numbers still exist on those surfaces. THIS RUN measured none of them, which is why their cell's two debts are null and never \"0\". Debt is in THIS engine's own 6-decimal unit and is never summed with another engine's. The two sides are SEPARATE figures because Aave's debt is a PRICED sum a shock can move, while the Debt Manager's is USD-normalized and copied across the shock unchanged. A no-debt row's \"0\" is a knowable zero; a null is an unknowable. `lane_changed_rows` counts rows whose LANE changed. A move of any size INSIDE one lane is not counted and a move of one wei across an edge is, so it follows the histogram's edges rather than the scenario's magnitude. It is NOT `movers_total` (Aave ranks strict health-factor drops; the Debt Manager counts eligibility flips) and NOT `newly_eligible_accounts` (a signed net), and it is not a crossing count of any particular edge: derive that from the cells. Under this scenario no row can enter or leave lane 8 or lane 9, so every lane change here is between buckets. On the Debt Manager these lanes are the exact rational maxBorrowLT/borrowings, a DISCLOSURE and not the liquidation verdict: take eligibility from `newly_eligible_accounts` and `movers`. When `measured_rows` is 0 both `held_rows` and `lane_changed_rows` are NULL rather than 0, because a zero there would claim a measurement nobody made. `total_rows` is THIS ENGINE's whole book in this run. It is not `coverage.batch_positions`, which counts the whole batch including engines this scenario does not cover, and summing it across engines does not give `coverage.in_book`: a withheld engine's rebuildable rows are inside `coverage.in_book` with no `engines[]` entry at all, and this engine's unmeasured rows are inside `total_rows` and outside `coverage.in_book`. The two differences can cancel on a given book, so an equality seen once is not a law."
                      *           },
                      *           "newly_eligible_accounts": 0,
                      *           "eligible_debt_delta_usd": "0",

@@ -580,6 +580,22 @@ func bucketIndexOf(engine string, hfWad, hfNum, hfDen *big.Int) int {
 	}
 }
 
+// The two lanes that sit BESIDE the buckets on every histogram this service
+// serves, given indices so a matrix can state its margins over the whole
+// histogram rather than over its bucket array alone.
+//
+// `histogramEdges` is a package-level slice, so these are `var` and not `const`:
+// `len()` of a slice is not a constant expression. There is deliberately no
+// `laneIndexOf` wrapper — `bucketIndexOf` above stays the single bucket law, and
+// the lane assignment lives in the one place that already writes the tally
+// (`runMeasure.place`), so a matrix that disagreed with its histogram would
+// require one function to write two different numbers.
+var (
+	laneInfinite   = len(histogramEdges)     // rows with NO DEBT
+	laneUnmeasured = len(histogramEdges) + 1 // rows this run measured on neither side
+	laneCount      = len(histogramEdges) + 2
+)
+
 func wireWaterfallFrom(series risk.WaterfallSeries, err error) wireWaterfall {
 	out := wireWaterfall{
 		ScenarioID:      series.ScenarioID,

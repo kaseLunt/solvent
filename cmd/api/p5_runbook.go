@@ -138,12 +138,131 @@ type wireRunBookMover struct {
 	DebtUSD        *string `json:"debt_usd"`
 }
 
+// The lane `kind` vocabulary. It is closed: lanes 0..N-1 ARE the histogram's
+// buckets, and the only two others are the two tallies that sit beside those
+// buckets on every histogram this service serves.
+const (
+	laneKindBucket     = "bucket"
+	laneKindInfinite   = "infinite"
+	laneKindUnmeasured = "unmeasured"
+)
+
+// wireRunBookTransitionLane is one lane of the transition matrix. Lanes 0..N-1
+// are the SAME buckets `hf_histogram` serves — same order, same labels, same
+// edges, placed by the same law — and the two after them are `infinite_count`'s
+// and `refused_count`'s populations. There is no lane a histogram does not have
+// and no histogram tally without a lane.
+type wireRunBookTransitionLane struct {
+	Index int    `json:"index"`
+	Kind  string `json:"kind"`
+	Label string `json:"label"`
+	// LowerWad/UpperWad are null on the open-ended top bucket AND on both
+	// non-bucket lanes, which have no edges at all: an unbounded health factor is
+	// not a large number, and a row nobody measured has no health factor to bound.
+	LowerWad *string `json:"lower_wad"`
+	UpperWad *string `json:"upper_wad"`
+}
+
+// wireRunBookTransitionCell is one OCCUPIED cell: the position rows whose BEFORE
+// lane is the enclosing outflow's `from` and whose AFTER lane is `to`. A cell is
+// emitted only when it holds at least one row.
+type wireRunBookTransitionCell struct {
+	To int `json:"to"`
+	// Rows is a COUNT of position rows, like every other field on this surface
+	// whose name ends in `rows`. An empty cell is ABSENT, never a row of zeros.
+	Rows int `json:"rows"`
+	// DebtBeforeUSD is the exact sum of BEFORE-side debt over the rows in this
+	// cell THAT THIS RUN MEASURED, at this engine's usd_decimals, never summed
+	// with another engine's. NULL — never "0" — when this run measured none of
+	// this cell's rows: a debt nobody computed and a debt of zero are different
+	// facts. A no-debt row contributes an exact "0", because that zero IS
+	// knowable.
+	DebtBeforeUSD *string `json:"debt_before_usd"`
+	// DebtAfterUSD is the same sum on the AFTER side, derived the same way and
+	// SEPARATELY, because Aave's debt is a PRICED sum: a shock that moves the
+	// price of an asset a row BORROWS moves it. One figure per cell could
+	// conserve on at most one margin.
+	DebtAfterUSD *string `json:"debt_after_usd"`
+}
+
+// wireRunBookTransitionOutflow is one BEFORE lane's outflow: where that lane's
+// rows went. Every lane gets an entry, including empty ones, so the shape is
+// stable; this lane's whole BEFORE population is `from_rows[from]` and is not
+// repeated here.
+type wireRunBookTransitionOutflow struct {
+	From  int                         `json:"from"`
+	Cells []wireRunBookTransitionCell `json:"cells"`
+}
+
+// wireRunBookTransitions is the BEFORE-to-AFTER flow of one engine's POSITION
+// ROWS: a joint distribution over the SAME lanes the two hf_histograms beside it
+// are stated in.
+//
+// THE TWO HISTOGRAMS CANNOT PRODUCE THIS. Two marginals do not determine a
+// joint: a row that fell below 1.00 and another that rose above it cancel
+// exactly in a marginal difference, and no client-side arithmetic separates
+// them. `movers` cannot either — it is capped, and it is ranked by drop
+// magnitude or by an eligibility flip rather than by lane change. So the joint
+// is computed HERE, in the one place that holds both sides of the same row.
+//
+// EVERY FIELD WHOSE NAME ENDS IN `rows` IS A COUNT of position rows on this
+// engine, or an array of such counts, in the same unit `coverage.batch_positions`
+// uses — never a count of distinct addresses. Arrays of OBJECTS are named for
+// their elements: `lanes`, `outflows`, `cells`.
+type wireRunBookTransitions struct {
+	Comparator string                         `json:"comparator"`
+	WadScale   string                         `json:"wad_scale"`
+	Lanes      []wireRunBookTransitionLane    `json:"lanes"`
+	Outflows   []wireRunBookTransitionOutflow `json:"outflows"`
+	// FromRows is THE ROW MARGIN: each lane's whole BEFORE population, in lane
+	// order. It EQUALS the corresponding tally on before.hf_histogram and equals
+	// the sum of outflows[i].cells[].rows.
+	FromRows []int `json:"from_rows"`
+	// ToRows is THE COLUMN MARGIN, stated the same way against after.hf_histogram.
+	// Both margins are served densely so the sparse cells lose nothing: an absent
+	// cell is a KNOWABLE zero, and these dense margins are what make it knowable.
+	ToRows []int `json:"to_rows"`
+	// TotalRows is every position row of THIS ENGINE this run touched. It is a
+	// PER-ENGINE total and it reconciles against nothing else: not
+	// coverage.batch_positions, and summing it across engines does not produce
+	// coverage.in_book.
+	TotalRows int `json:"total_rows"`
+	// MeasuredRows is the rows this run measured on both sides. It equals
+	// before.accounts and after.accounts, and it is the denominator every
+	// movement statement on this surface is made against.
+	MeasuredRows int `json:"measured_rows"`
+	// UnmeasuredRows is the rows of this engine that reached NO arithmetic in
+	// this run. They sit in exactly one cell (lane N+1 to lane N+1).
+	UnmeasuredRows int `json:"unmeasured_rows"`
+	// UnmeasuredRefusedInBatchRows is the part of UnmeasuredRows that RISKD
+	// refused. Every one is inside coverage.refused_in_batch and is served per
+	// row by /v1/positions and /v1/address/{addr}. They are NOT in
+	// coverage.excluded.
+	UnmeasuredRefusedInBatchRows int `json:"unmeasured_refused_in_batch_rows"`
+	// UnmeasuredExcludedByThisLayerRows is the part riskd COMPUTED and THIS
+	// SERVICE could not rebuild or verify. Every one is listed in
+	// coverage.excluded and counted in coverage.excluded_by_this_layer.
+	UnmeasuredExcludedByThisLayerRows int `json:"unmeasured_excluded_by_this_layer_rows"`
+	// HeldRows is MEASURED rows whose lane did not change. NULL — never 0 — when
+	// MeasuredRows is 0, because "0 rows held" over a book this run never
+	// measured would claim a measurement nobody made.
+	HeldRows *int `json:"held_rows"`
+	// LaneChangedRows is MEASURED rows whose LANE changed: the gross count the
+	// two histograms structurally could not give. NULL under the same condition.
+	LaneChangedRows *int `json:"lane_changed_rows"`
+	Note            string `json:"note"`
+}
+
 type wireRunBookEngine struct {
 	Engine                string               `json:"engine"`
 	UsdDecimals           uint8                `json:"usd_decimals"`
 	Before                wireRunBookAggregate `json:"before"`
 	After                 wireRunBookAggregate `json:"after"`
-	NewlyEligibleAccounts int                  `json:"newly_eligible_accounts"`
+	// HFTransitions is the joint distribution the two histograms above cannot
+	// produce: which BEFORE lane each position row left and which AFTER lane it
+	// arrived in. Its margins ARE those two histograms, lane for lane.
+	HFTransitions         wireRunBookTransitions `json:"hf_transitions"`
+	NewlyEligibleAccounts int                    `json:"newly_eligible_accounts"`
 	EligibleDebtDeltaUSD  string               `json:"eligible_debt_delta_usd"`
 	BadDebtDeltaUSD       string               `json:"bad_debt_delta_usd"`
 	// Movers is at most runBookMoversCap rows of the accounts this scenario
@@ -200,6 +319,28 @@ type runMeasure struct {
 	refused    int
 	collateral map[runCollateralKey]*runCollateral
 	states     map[common.Address]*runAccountState
+
+	// lanes is ORDERED, one entry per POSITION ROW, in walk order. It is what
+	// makes the transition matrix a joint distribution rather than a guess: the
+	// two sides' slices are index-aligned by construction (measureRunBook walks
+	// its argument in slice order and ApplyScenario neither reorders nor drops),
+	// so pairing by index needs no map and marginal agreement holds BY
+	// CONSTRUCTION rather than by assertion.
+	//
+	// It carries BOTH populations: the measured entries appended by `place`
+	// beside the tally it writes, and the unmeasured entries the handler folds
+	// onto both sides. `accounts` and `states` see only the first of those.
+	lanes []runLaneEntry
+}
+
+// runLaneEntry is ONE position row's placement on ONE side of the shock.
+type runLaneEntry struct {
+	account common.Address
+	lane    int
+	// debtUSD is nil ONLY on an unmeasured row — the row this run computed no
+	// debt for. That nil is what makes cell (N+1, N+1)'s two debts null rather
+	// than "0", and it is never a stand-in for a zero this run actually computed.
+	debtUSD *big.Int
 }
 
 // runBookMoversCap bounds the `movers` array. It is a CONSTANT and it is named
@@ -241,6 +382,10 @@ type runCollateral struct {
 // runAccountState is ONE account's comparator state on ONE side of the shock.
 // The movers join is over these: no position is measured twice to build it.
 type runAccountState struct {
+	// account is the row this state was computed for. It is `h.Account` at both
+	// call sites, and it travels with the state so `place` can append the lane
+	// record in the SAME statement that writes the histogram tally.
+	account      common.Address
 	hfWad        *big.Int // Aave; nil when infinite
 	hfNum, hfDen *big.Int // Debt Manager; the exact rational
 	infinite     bool
@@ -258,21 +403,42 @@ func newRunMeasure() *runMeasure {
 	}
 }
 
-// bucket places one account's comparator state into THIS side's histogram,
-// through bucketIndexOf — the same law, not a second copy of it. An account
-// with no comparator is counted REFUSED here rather than dropped, exactly as
-// /v1/book's histogram does with a computed row carrying no health factor.
-func (m *runMeasure) bucket(engine string, st *runAccountState) {
-	if st.infinite {
+// place assigns one position row its LANE and writes the histogram tally in the
+// SAME statement, through bucketIndexOf — the same law, not a second copy of it.
+// The tally and the lane record come from one call, so no code path can
+// increment one without appending the other, and a matrix that disagreed with
+// its own histogram would require this function to write two different numbers.
+//
+// The −1 arm no longer folds into `m.refused`. It is UNREACHABLE by
+// construction, and folding an impossible state into the unmeasured lane would
+// give that lane two meanings: a MEASURED row's debt would sit behind a null and
+// the per-side debt reconciliation would break.
+func (m *runMeasure) place(engine string, st *runAccountState) error {
+	lane := laneInfinite
+	if !st.infinite {
+		idx := bucketIndexOf(engine, st.hfWad, st.hfNum, st.hfDen)
+		if idx < 0 {
+			// UNREACHABLE by construction: ComputeAaveHealth sets
+			// HealthFactorWad exactly when it clears IsInfinite, and
+			// ComputeDMHealth sets the rational exactly when borrowings > 0 —
+			// TestMeasuredStatesAlwaysCarryAComparator stands on both. If this
+			// ever fires, the engine has grown a measured state with no
+			// comparator and it needs its OWN lane and its OWN histogram tally.
+			return fmt.Errorf("%s: account %s was measured but carries no comparator, "+
+				"so it belongs in no bucket and in no existing lane; the histogram and the "+
+				"transition matrix both need a new tally before this row can be served",
+				engine, st.account.Hex())
+		}
+		lane = idx
+	}
+	switch lane {
+	case laneInfinite:
 		m.infinite++
-		return
+	default:
+		m.buckets[lane]++
 	}
-	idx := bucketIndexOf(engine, st.hfWad, st.hfNum, st.hfDen)
-	if idx < 0 {
-		m.refused++
-		return
-	}
-	m.buckets[idx]++
+	m.lanes = append(m.lanes, runLaneEntry{account: st.account, lane: lane, debtUSD: st.debtUSD})
+	return nil
 }
 
 // addCollateral folds one holding into this side's per-asset breakdown, keyed by
@@ -303,10 +469,19 @@ func (m *runMeasure) wire(engine string, s *server) wireRunBookAggregate {
 		Buckets:       make([]wireHistogramBucket, 0, len(histogramEdges)),
 		InfiniteCount: m.infinite,
 		RefusedCount:  m.refused,
+		// The `refused_count` clause states what that tally ACTUALLY holds. It
+		// used to read "positions carrying no comparator", which is false twice
+		// over: no MEASURED row on either engine can lack a comparator (`place`
+		// refuses one outright), and the rows this count does hold are the ones
+		// this run measured on NEITHER side — predominantly riskd's own
+		// refusals, which live in `coverage.refused_in_batch` and NOT in
+		// `coverage.excluded`. `hf_transitions` states the same population as
+		// its last lane and splits it by cause.
 		Note: histNote + " This is ONE SIDE of the shock over the positions in the run, " +
 			"in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. " +
-			"`infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator — " +
-			"both are counted here rather than dropped, so the buckets plus these two account for the whole run.",
+			"`infinite_count` is accounts with no debt and `refused_count` is the positions this run measured on NEITHER side — " +
+			"both are counted here rather than dropped, so the buckets plus these two account for the whole run. " +
+			"`hf_transitions` states that same population as its last lane and splits it by cause.",
 	}
 	// The edges are walked in the SAME order and built by the SAME edgeWad as
 	// /v1/book's, so an edge that moves moves in both places at once.
@@ -415,18 +590,49 @@ func (s *server) handleRunBook(w http.ResponseWriter, r *http.Request) {
 	var run []runPos
 	var notCovered []string
 	seenEngine := map[string]bool{}
-	// refusedByEngine counts positions on a COVERED engine that this layer could
-	// not rebuild. They carry no numbers to shock and so reach no arithmetic —
-	// but they are real rows of the book, and the per-side histograms must count
-	// them as refused rather than let a distribution read as a complete census
-	// while they are silently missing from it. They are also, unchanged, in
-	// `coverage.excluded`.
-	refusedByEngine := map[string]int{}
+	// unmeasuredByEngine records the positions on a COVERED engine that reached
+	// NO arithmetic in this run. They carry no numbers to shock — but they are
+	// real rows of the book, and the per-side histograms must count them rather
+	// than let a distribution read as a complete census while they are silently
+	// missing from it.
+	//
+	// The record is per engine and it SPLITS BY CAUSE, because the two causes
+	// land on two DIFFERENT coverage surfaces (§ classifyUnmeasured) and a
+	// per-engine count that named the wrong one would point a reader at a
+	// surface that does not hold its rows. It is the ONLY carrier of that split:
+	// the lane records below are cause-blind by design.
+	unmeasuredByEngine := map[string]*runUnmeasured{}
+	unmeasuredFor := func(engine string) *runUnmeasured {
+		u := unmeasuredByEngine[engine]
+		if u == nil {
+			u = &runUnmeasured{}
+			unmeasuredByEngine[engine] = u
+		}
+		return u
+	}
 	for _, p := range v.Positions {
 		if p.input == nil {
 			if covers(sc.Engines, p.Engine) {
-				refusedByEngine[p.Engine]++
+				acct := common.BytesToAddress(p.Account)
+				cause, err := classifyUnmeasured(p.Engine, acct, p.Status, p.reconstructionErr)
+				if err != nil {
+					// THE HANDLER'S OWN REFUSAL FORM: write and return. There is
+					// no error to return from here.
+					writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
+					return
+				}
+				u := unmeasuredFor(p.Engine)
+				u.accounts = append(u.accounts, acct)
+				if cause == unmeasuredRefusedInBatch {
+					u.refusedInBatch++
+				} else {
+					u.excludedByThisLayer++
+				}
 			}
+			// The ordinary skip for a row that reached no arithmetic. The refusal
+			// above has already left the handler, so this is reached only on the
+			// two live causes and on a row whose engine this scenario does not
+			// cover.
 			continue
 		}
 		if !covers(sc.Engines, p.Engine) {
@@ -574,13 +780,27 @@ func (s *server) handleRunBook(w http.ResponseWriter, r *http.Request) {
 		if ea == nil {
 			ea = newRunMeasure()
 		}
-		// The unrebuildable rows are refused on BOTH sides: the shock does not
-		// make a position rebuildable, and a histogram that counted them on one
-		// side only would move rows between the two distributions for a reason
-		// that has nothing to do with the scenario.
-		if n := refusedByEngine[engine]; n > 0 {
-			eb.refused += n
-			ea.refused += n
+		// The unmeasured rows are refused on BOTH sides: the shock does not make
+		// a position rebuildable, and a histogram that counted them on one side
+		// only would move rows between the two distributions for a reason that
+		// has nothing to do with the scenario. The paired lane entries are what
+		// put them in the matrix's (N+1, N+1) cell, and their nil `debtUSD` is
+		// what makes that cell's two debts null rather than "0".
+		if u := unmeasuredByEngine[engine]; u != nil {
+			for _, acct := range u.accounts {
+				eb.refused++
+				ea.refused++
+				eb.lanes = append(eb.lanes, runLaneEntry{account: acct, lane: laneUnmeasured})
+				ea.lanes = append(ea.lanes, runLaneEntry{account: acct, lane: laneUnmeasured})
+			}
+		}
+		transitions, err := runBookTransitions(engine, eb, ea, dec, unmeasuredByEngine[engine])
+		if err != nil {
+			// A defect in this layer or a violation of a database constraint,
+			// never a property of the data. It never degrades to a matrix with
+			// wrong margins.
+			writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
+			return
 		}
 		movers, moversTotal := runBookMovers(engine, eb, ea)
 		we := wireRunBookEngine{
@@ -588,6 +808,7 @@ func (s *server) handleRunBook(w http.ResponseWriter, r *http.Request) {
 			UsdDecimals:           dec,
 			Before:                eb.wire(engine, s),
 			After:                 ea.wire(engine, s),
+			HFTransitions:         transitions,
 			NewlyEligibleAccounts: ea.eligibleAccounts - eb.eligibleAccounts,
 			EligibleDebtDeltaUSD:  new(big.Int).Sub(ea.eligibleDebt, eb.eligibleDebt).String(),
 			BadDebtDeltaUSD:       new(big.Int).Sub(ea.badDebt, eb.badDebt).String(),
@@ -663,13 +884,16 @@ func (s *server) measureRunBook(book []risk.PositionInput) (map[string]*runMeasu
 			m.totalDebt.Add(m.totalDebt, orZeroBigInt(h.TotalDebtBase))
 
 			st := &runAccountState{
+				account:  h.Account,
 				hfWad:    h.HealthFactorWad,
 				infinite: h.IsInfinite,
 				eligible: h.Liquidatable(),
 				debtUSD:  orZeroBigInt(h.TotalDebtBase),
 			}
 			m.states[h.Account] = st
-			m.bucket(risk.AaveEngine, st)
+			if err := m.place(risk.AaveEngine, st); err != nil {
+				return nil, err
+			}
 
 			for _, rv := range h.Reserves {
 				if rv.LiveCollateral == nil || rv.LiveCollateral.Sign() <= 0 {
@@ -700,6 +924,7 @@ func (s *server) measureRunBook(book []risk.PositionInput) (map[string]*runMeasu
 			m.totalDebt.Add(m.totalDebt, orZeroBigInt(h.Borrowings))
 
 			st := &runAccountState{
+				account:  h.Account,
 				infinite: h.IsInfinite,
 				eligible: h.Liquidatable,
 				debtUSD:  orZeroBigInt(h.Borrowings),
@@ -708,13 +933,26 @@ func (s *server) measureRunBook(book []risk.PositionInput) (map[string]*runMeasu
 				st.hfNum, st.hfDen = h.HealthFactor.Num, h.HealthFactor.Den
 			}
 			m.states[h.Account] = st
-			m.bucket(risk.DMEngine, st)
+			if err := m.place(risk.DMEngine, st); err != nil {
+				return nil, err
+			}
 
 			for _, cv := range h.Collateral {
 				// ComputeDMHealth REFUSES a nonzero leg it cannot price, so a
 				// leg that reached here with a balance is priced and counted.
 				m.addCollateral(cv.Asset, cv.Decimals, runCollateralCounted, cv.Amount, cv.ValueUSD)
 			}
+		default:
+			// THE ENGINE ARM THAT DOES NOT EXIST. Without this, a third engine's
+			// position entered `run`, `beforeInputs` and therefore
+			// `coverage.in_book` while producing no account count, no tally and
+			// no lane entry: it would be in ZERO cells while every margin still
+			// "partitioned exactly". It is unconstructible with today's committed
+			// scenarios, and a named 500 is what forces the conversation instead
+			// of hiding the omission.
+			return nil, fmt.Errorf("run-book measure has no arm for engine %q: the scenario covers it "+
+				"and its rows are in the run, but nothing here counts them, so every distribution "+
+				"this response serves would silently omit them", pos.Engine)
 		}
 	}
 	if len(book) == 0 {

@@ -88,6 +88,7 @@ import {
   LabRunBookHistogramPair,
   LabRunBookMovers,
 } from "./LabRunBookDetail";
+import { LabRunBookTransition } from "./LabRunBookTransition";
 import styles from "./lab.module.css";
 
 // ---------------------------------------------------------------------------
@@ -212,6 +213,7 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
           that holds no book still shows nothing. Each is templated in its own
           file and keeps its own seven slots. */}
       <LabRunBookHistogramPair engine={engine} />
+      <LabRunBookTransition engine={engine} />
       <LabRunBookMovers engine={engine} />
       <LabRunBookCollateral engine={engine} />
       {engine.market_realization !== null && (

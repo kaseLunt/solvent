@@ -161,8 +161,32 @@ export const SEALED_FIELD_NAMES = [
  */
 export const HEURISTIC_CHAIN_NAMES = ["result", "lookup", "verdict", "outcome"] as const;
 
+/**
+ * The `number | null` fields that carry the WITHHELD-STATEMENT hazard, and the
+ * only members of that class the docs lint matches (contract 1.7.0).
+ *
+ * `hf_transitions.held_rows` and `.lane_changed_rows` are null when
+ * `measured_rows` is 0 — THIS RUN MEASURED NO ROW ON THIS ENGINE — and 0 when
+ * every measured row changed lane (or none did). `!t.held_rows` reads those two
+ * statements as one branch, which is the same falsiness class `deficit_paired`
+ * and `became_eligible` are sealed for, one type over.
+ *
+ * ONLY THESE TWO REACH THE REGEX, and the separation is deliberate. The full
+ * `number | null` INVENTORY is 28 names wide and is closed by the compiler in
+ * `NULLABLE_COUNT_FIELD_NAMES` below; feeding all 28 into the lint would drag in
+ * `age_seconds` and `decimals`, which match no alternative in today's
+ * vocabulary and are legitimately-falsy quantities — a zero age and a zero
+ * decimal count are ordinary values, and `!x` on them is not a withheld
+ * statement. Overloading one regex with two hazard classes makes both weaker.
+ */
+export const HAZARDOUS_COUNT_NAMES = ["held_rows", "lane_changed_rows"] as const;
+
 /** The whole hazard vocabulary the docs lint matches — ONE const, no hand-list elsewhere. */
-export const HAZARDOUS_NAMES = [...SEALED_FIELD_NAMES, ...HEURISTIC_CHAIN_NAMES] as const;
+export const HAZARDOUS_NAMES = [
+  ...SEALED_FIELD_NAMES,
+  ...HAZARDOUS_COUNT_NAMES,
+  ...HEURISTIC_CHAIN_NAMES,
+] as const;
 
 /** The suspect-chain matcher, built from the vocabulary above — never rebuilt by hand. */
 const suspect = new RegExp(HAZARDOUS_NAMES.join("|"), "iu");
@@ -301,6 +325,140 @@ const everyListedFieldIsSealed: [ListedFieldName] extends [SealedClassFieldName]
   ? true
   : "SEALED_FIELD_NAMES names a field the contract no longer seals — prune the docs lint's vocabulary" = true;
 
+// ---------------------------------------------------------------------------
+// THE SECOND, PARALLEL LAW: the `number | null` class (contract 1.7.0).
+// ---------------------------------------------------------------------------
+//
+// `hf_transitions.held_rows` and `.lane_changed_rows` are `number | null` and
+// carry the same falsiness hazard the boolean class is sealed for. The sweep
+// above cannot see them: its leaf test is `boolean | null`.
+//
+// WIDENING THAT SWEEP IN PLACE DOES NOT COMPILE, and the reason is worth stating
+// so nobody tries it again. `src/generated/schema.ts` already carries 26 other
+// distinct `number | null` field names, so `everySealedFieldIsListed` would fail
+// on all of them at once; sealing all 28 into `HAZARDOUS_NAMES` would then drag
+// `age_seconds` and `decimals` into the docs-lint regex for the first time, and
+// those are legitimately-falsy quantities rather than withheld statements.
+//
+// So the INVENTORY (closed by the compiler, over the whole class) is separated
+// from the HAZARD VOCABULARY (curated, feeding the regex). This half is the
+// inventory.
+
+/**
+ * Keys at ANY depth under `T` whose value type is exactly `number | null`.
+ *
+ * IDENTICAL RECURSION to `DeepNullableBooleanKeys`, INCLUDING THE INNER GUARD,
+ * which is load-bearing and not a stylistic echo. `[Required<T>[K]] extends
+ * [number | null]` alone also matches a PLAIN `number`, and the generated schema
+ * carries 94 distinct field names declared somewhere as plain `number` — 85 of
+ * which appear nowhere as `number | null`. A guardless leaf would therefore
+ * yield an inventory of 111 names, `NULLABLE_COUNT_FIELD_NAMES` would fail its
+ * `everyNullableCountFieldIsListed` direction against it, and `npm run verify`
+ * would die at typecheck: the exact failure this section exists to forbid,
+ * reproduced by its own remedy.
+ */
+type DeepNullableNumberKeys<T, Budget extends readonly unknown[]> = T extends readonly (infer E)[]
+  ? Budget extends readonly [unknown, ...infer Rest]
+    ? DeepNullableNumberKeys<E, Rest>
+    : SweepBudgetExhausted
+  : T extends object
+    ? Budget extends readonly [unknown, ...infer Rest]
+      ? {
+          [K in keyof T]-?:
+            | ([Required<T>[K]] extends [number | null]
+                ? [null] extends [Required<T>[K]]
+                  ? K
+                  : never
+                : never)
+            | DeepNullableNumberKeys<Required<T>[K], Rest>;
+        }[keyof T]
+      : SweepBudgetExhausted
+    : never;
+
+/** Every `number | null` field reachable ANYWHERE under ANY named schema. */
+type DeepSchemaNumberSweep<Budget extends readonly unknown[]> = {
+  [S in keyof components["schemas"]]: DeepNullableNumberKeys<components["schemas"][S], Budget>;
+}[keyof components["schemas"]];
+
+type WireNullableCountFields = DeepSchemaNumberSweep<SweepBudget>;
+
+/**
+ * The whole `number | null` inventory, named so each one is CONSIDERED rather
+ * than merely permitted. Any future field of this class fails compilation until
+ * it is added here and a decision is made about whether it also belongs in
+ * `HAZARDOUS_COUNT_NAMES`.
+ *
+ * Most of these are ordinary optional quantities whose null means "not
+ * applicable on this row" and whose zero is an ordinary value. The two at the
+ * end are the withheld-statement pair, and they are the only two the lint
+ * matches.
+ */
+export const NULLABLE_COUNT_FIELD_NAMES = [
+  "accounts",
+  "age_seconds",
+  "amount_decimals",
+  "anchor_block",
+  "block_number",
+  "collateral_index_block",
+  "covered_from_block",
+  "current_acked_epoch",
+  "current_batch_id",
+  "current_last_block",
+  "current_max_epoch",
+  "debt_decimals",
+  "debt_index_block",
+  "decimals",
+  "eligible_positions",
+  "from_block",
+  "highest_quarantined_block",
+  "insolvent_positions",
+  "liquidatable_positions",
+  "observed_max_gap_seconds",
+  "since_block",
+  "step",
+  "step_seconds",
+  "tested_budget_seconds",
+  "to_block",
+  "total_positions",
+  // Contract 1.7.0, and the two this class was extended for.
+  "held_rows",
+  "lane_changed_rows",
+] as const;
+
+type ListedCountFieldName = (typeof NULLABLE_COUNT_FIELD_NAMES)[number];
+
+// Tuple-wrapped for the same reason as the pair above: one missing member must
+// fail the whole assignment rather than widen it.
+const everyNullableCountFieldIsListed: [WireNullableCountFields] extends [ListedCountFieldName]
+  ? true
+  : "the contract grew a `number | null` field NULLABLE_COUNT_FIELD_NAMES does not list — add it, and decide whether it also belongs in HAZARDOUS_COUNT_NAMES" = true;
+const everyListedCountFieldIsNullable: [ListedCountFieldName] extends [WireNullableCountFields]
+  ? true
+  : "NULLABLE_COUNT_FIELD_NAMES names a field the contract no longer serves as `number | null` — prune it" = true;
+
+// The same two probes, on the same two budgets. Probing only the boolean sweep
+// would cover half the class: the run-book chain (RunBookResponse -> engines[]
+// -> RunBookEngine -> RunBookTransitions -> outflows[] -> RunBookTransitionOutflow
+// -> cells[] -> RunBookTransitionCell) is exactly 8 levels and TIES the margin
+// probe, so the probe is now saturated by two chains instead of one.
+const numberSweepBudgetCoversTheContract: [
+  Extract<WireNullableCountFields, SweepBudgetExhausted>,
+] extends [never]
+  ? true
+  : "the nullable-number sweep exhausted SweepBudget before the contract's leaves — grow SweepBudget in test/readme-sync.test.ts" = true;
+const numberSweepBudgetHasMargin: [
+  Extract<DeepSchemaNumberSweep<MarginProbeBudget>, SweepBudgetExhausted>,
+] extends [never]
+  ? true
+  : "the generated contract now nests deeper than the 8 structural levels the margin probe assumes — grow MarginProbeBudget (and keep SweepBudget comfortably above it) in test/readme-sync.test.ts" = true;
+
+/** Every hazardous COUNT name must be inside the inventory that closes the class. */
+const everyHazardousCountNameIsInTheInventory: [
+  (typeof HAZARDOUS_COUNT_NAMES)[number],
+] extends [ListedCountFieldName]
+  ? true
+  : "HAZARDOUS_COUNT_NAMES names a field outside the `number | null` inventory — the lint would police a field the compiler does not track" = true;
+
 /**
  * The docs lint. Regex-level, deliberately narrow — see the header comment
  * for its honest scope. Returns the offending snippets.
@@ -435,9 +593,43 @@ describe("the README's fenced TypeScript is compiled documentation", () => {
     expect(sweepBudgetCoversTheContract).toBe(true);
     expect(sweepBudgetHasMargin).toBe(true);
     // And the vocabulary actually reaches the regex: every name — sealed
-    // field or chain heuristic — triggers the lint on a minimal chain.
+    // field, hazardous count or chain heuristic — triggers the lint on a
+    // minimal chain.
     for (const name of HAZARDOUS_NAMES) {
       expect(falsinessViolations(`if (!x.${name}) render();`), name).toHaveLength(1);
     }
+  });
+
+  it("the `number | null` inventory is closed, and only the withheld-statement pair is linted", () => {
+    // THE PARALLEL LAW (contract 1.7.0). The boolean sweep above is typed to
+    // `boolean | null` and structurally cannot see `held_rows` /
+    // `lane_changed_rows`, which carry the same falsiness hazard one type over.
+    // Widening it in place does not compile — 26 other `number | null` fields
+    // would fail the coverage direction at once — so the class gets its own
+    // sweep, with the INVENTORY closed by the compiler and the HAZARD
+    // VOCABULARY curated separately.
+    expect(everyNullableCountFieldIsListed).toBe(true);
+    expect(everyListedCountFieldIsNullable).toBe(true);
+    expect(numberSweepBudgetCoversTheContract).toBe(true);
+    expect(numberSweepBudgetHasMargin).toBe(true);
+    expect(everyHazardousCountNameIsInTheInventory).toBe(true);
+    expect(NULLABLE_COUNT_FIELD_NAMES).toHaveLength(28);
+
+    // Only the two withheld-statement fields reach the regex. `age_seconds` and
+    // `decimals` are in the inventory and must NOT be linted: a zero age and a
+    // zero decimal count are ordinary values, and folding them in would give
+    // one regex two hazard classes and make both weaker.
+    for (const name of HAZARDOUS_COUNT_NAMES) {
+      expect(falsinessViolations(`if (!t.${name}) render();`), name).toHaveLength(1);
+    }
+    for (const name of ["age_seconds", "decimals", "step_seconds", "total_positions"] as const) {
+      expect(NULLABLE_COUNT_FIELD_NAMES).toContain(name);
+      expect(falsinessViolations(`if (!x.${name}) render();`), name).toHaveLength(0);
+    }
+    // `liquidatable_positions` IS matched, and not as a new harm: `liquidatable`
+    // is already a member of SEALED_FIELD_NAMES and the match is a substring
+    // test, so today's lint already flags it. Naming that here keeps the
+    // justification for the split accurate.
+    expect(falsinessViolations("if (!x.liquidatable_positions) render();")).toHaveLength(1);
   });
 });

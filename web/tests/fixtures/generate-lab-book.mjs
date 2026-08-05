@@ -1524,8 +1524,9 @@ const FROZEN_ENGINE_SERIALIZATION = {
       "`< 1.00` is the eligible set and exactly 1.00 is healthy. This is ONE SIDE of the shock " +
       "over the positions in the run, in the SAME buckets /v1/book's histogram serves; the " +
       "after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt " +
-      "and `refused_count` is positions carrying no comparator — both are counted here rather " +
-      "than dropped, so the buckets plus these two account for the whole run.",
+      "and `refused_count` is the positions this run measured on NEITHER side — both are counted " +
+      "here rather than dropped, so the buckets plus these two account for the whole run. " +
+      "`hf_transitions` states that same population as its last lane and splits it by cause.",
   },
   debt_manager: {
     usd_decimals: 6,
@@ -1536,8 +1537,9 @@ const FROZEN_ENGINE_SERIALIZATION = {
       "disclosure only — take eligibility from `liquidatable_positions`. This is ONE SIDE of " +
       "the shock over the positions in the run, in the SAME buckets /v1/book's histogram " +
       "serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts " +
-      "with no debt and `refused_count` is positions carrying no comparator — both are counted " +
-      "here rather than dropped, so the buckets plus these two account for the whole run.",
+      "with no debt and `refused_count` is the positions this run measured on NEITHER side — " +
+      "both are counted here rather than dropped, so the buckets plus these two account for the " +
+      "whole run. `hf_transitions` states that same population as its last lane and splits it by cause.",
   },
 };
 
@@ -3677,6 +3679,33 @@ const RESPONSE_DERIVED_LEAVES = new Map([
     path,
     "checkDerivation: every modelled account dropped where the server's own test drops it",
   ]),
+
+  // CONTRACT 1.7.0 — the transition matrix. Every leaf is derived from the same
+  // per-row model the two histograms are, and `checkTransitions` re-proves the
+  // whole subtree against those histograms on EVERY body, carried or derived.
+  ["engines[].hf_transitions.comparator", "checkTransitions: the engine's own comparator, read off the histogram beside it"],
+  ["engines[].hf_transitions.wad_scale", "checkTransitions: the histogram's own scale, read twice"],
+  ["engines[].hf_transitions.lanes[].index", "checkTransitions: positional — lane i IS index i"],
+  ["engines[].hf_transitions.lanes[].kind", "checkTransitions: the closed vocabulary, bucket lanes first"],
+  ["engines[].hf_transitions.lanes[].label", "checkTransitions: byte-identical to the histogram's own bucket label"],
+  ["engines[].hf_transitions.lanes[].lower_wad", "checkTransitions: the histogram's own edge"],
+  ["engines[].hf_transitions.lanes[].upper_wad", "checkTransitions: the histogram's own edge"],
+  ["engines[].hf_transitions.outflows[].from", "checkTransitions: positional — outflow i IS lane i"],
+  ["engines[].hf_transitions.outflows[].cells[]", "checkTransitions: SPARSE — an absent cell is a knowable zero the dense margins make complete"],
+  ["engines[].hf_transitions.outflows[].cells[].to", "checkTransitions: unique and ascending within an outflow"],
+  ["engines[].hf_transitions.outflows[].cells[].rows", "checkTransitions: at least 1, and the cells sum to both margins"],
+  ["engines[].hf_transitions.outflows[].cells[].debt_before_usd", "checkTransitions: the per-side sum, null exactly on the unmeasured cell"],
+  ["engines[].hf_transitions.outflows[].cells[].debt_after_usd", "checkTransitions: the same, on the after side"],
+  ["engines[].hf_transitions.from_rows[]", "checkTransitions: IS the before histogram, lane for lane"],
+  ["engines[].hf_transitions.to_rows[]", "checkTransitions: IS the after histogram, lane for lane"],
+  ["engines[].hf_transitions.total_rows", "checkTransitions: measured plus unmeasured, and the sum of every cell"],
+  ["engines[].hf_transitions.measured_rows", "checkTransitions: IS before.accounts and after.accounts"],
+  ["engines[].hf_transitions.unmeasured_rows", "checkTransitions: IS the histogram's refused_count"],
+  ["engines[].hf_transitions.unmeasured_refused_in_batch_rows", "checkTransitions: the part coverage.refused_in_batch holds"],
+  ["engines[].hf_transitions.unmeasured_excluded_by_this_layer_rows", "checkTransitions: the part coverage.excluded[] holds, counted from that array"],
+  ["engines[].hf_transitions.held_rows", "checkTransitions: the diagonal over lanes 0..N, NULL when nothing was measured"],
+  ["engines[].hf_transitions.lane_changed_rows", "checkTransitions: the off-diagonal, NULL under the same condition"],
+  ["engines[].hf_transitions.note", "checkTransitions: the server's own sentence, carried with its engine"],
 ]);
 
 /**
@@ -3879,6 +3908,193 @@ const checkCompleteness = (
   }
 };
 
+/**
+ * CONTRACT 1.7.0 — the transition matrix re-proved against the two histograms
+ * it sits between, on EVERY body this file writes: derived ones and carried
+ * ones alike.
+ *
+ * The margins ARE those histograms, so this is not a spot check on the numbers
+ * one function happened to compose — it is the law that makes a carried matrix
+ * beside a transformed book a generation failure rather than a fixture that
+ * renders a Sankey whose ribbons do not sum to the bars printed next to them.
+ */
+const checkTransitions = (label, engine, coverage) => {
+  const t = engine.hf_transitions;
+  if (t === undefined || t === null) {
+    fail(`${label} serves no hf_transitions — contract 1.7.0 requires one per engine`);
+  }
+  const laneCount = t.lanes.length;
+  const buckets = engine.before.hf_histogram.buckets;
+  if (laneCount !== buckets.length + 2) {
+    fail(
+      `${label} serves ${String(laneCount)} lanes over ${String(buckets.length)} buckets — the ` +
+        `vocabulary is the buckets PLUS the two tallies that sit beside them, and nothing else`,
+    );
+  }
+  // THE LANES ARE THE HISTOGRAM'S OWN BUCKETS, byte for byte.
+  for (const [index, bucket] of buckets.entries()) {
+    const lane = t.lanes[index];
+    for (const [field, want, got] of [
+      ["index", index, lane.index],
+      ["kind", "bucket", lane.kind],
+      ["label", bucket.label, lane.label],
+      ["lower_wad", bucket.lower_wad, lane.lower_wad],
+      ["upper_wad", bucket.upper_wad, lane.upper_wad],
+    ]) {
+      if (String(want) !== String(got)) {
+        fail(
+          `${label} lane ${String(index)} ${field} is ${leafShown(got)} but the histogram bucket ` +
+            `beside it says ${leafShown(want)} — the lanes ARE the buckets, not a second edge table`,
+        );
+      }
+    }
+  }
+  const infiniteLane = buckets.length;
+  const unmeasuredLane = buckets.length + 1;
+  if (t.lanes[infiniteLane].kind !== "infinite" || t.lanes[unmeasuredLane].kind !== "unmeasured") {
+    fail(`${label} does not end its lane vocabulary in the infinite and unmeasured tallies`);
+  }
+
+  // THE MARGINS ARE THE TWO HISTOGRAMS, and both are the cells' own sums.
+  const tallies = (histogram) => [
+    ...histogram.buckets.map((bucket) => bucket.count),
+    histogram.infinite_count,
+    histogram.refused_count,
+  ];
+  const fromRows = Array.from({ length: laneCount }, () => 0);
+  const toRows = Array.from({ length: laneCount }, () => 0);
+  let total = 0;
+  let held = 0;
+  let changed = 0;
+  let debtBefore = 0n;
+  let debtAfter = 0n;
+  if (t.outflows.length !== laneCount) {
+    fail(`${label} serves ${String(t.outflows.length)} outflows over ${String(laneCount)} lanes — outflows are DENSE`);
+  }
+  for (const [from, outflow] of t.outflows.entries()) {
+    if (outflow.from !== from) {
+      fail(`${label} outflow ${String(from)} says from = ${String(outflow.from)} — the array is positional`);
+    }
+    let previous = -1;
+    for (const cell of outflow.cells) {
+      if (cell.rows < 1) {
+        fail(`${label} cell (${String(from)},${String(cell.to)}) holds ${String(cell.rows)} rows — an empty cell is ABSENT`);
+      }
+      if (cell.to <= previous) {
+        fail(`${label} outflow ${String(from)} does not ascend strictly by \`to\``);
+      }
+      previous = cell.to;
+      fromRows[from] += cell.rows;
+      toRows[cell.to] += cell.rows;
+      total += cell.rows;
+      const unmeasuredCell = from === unmeasuredLane && cell.to === unmeasuredLane;
+      if (unmeasuredCell !== (cell.debt_before_usd === null)) {
+        fail(
+          `${label} cell (${String(from)},${String(cell.to)}) serves debt_before_usd ` +
+            `${leafShown(cell.debt_before_usd)} — a null is the UNKNOWABLE this run measured ` +
+            `nothing for, and it belongs to the unmeasured cell and to no other`,
+        );
+      }
+      if (unmeasuredCell !== (cell.debt_after_usd === null)) {
+        fail(`${label} cell (${String(from)},${String(cell.to)}) disagrees with itself about which side is knowable`);
+      }
+      if (!unmeasuredCell) {
+        debtBefore += BigInt(cell.debt_before_usd);
+        debtAfter += BigInt(cell.debt_after_usd);
+      }
+      if (from === unmeasuredLane) {
+        continue;
+      }
+      if (from === cell.to) {
+        held += cell.rows;
+      } else {
+        changed += cell.rows;
+      }
+    }
+  }
+  for (const [side, margin, sums] of [
+    ["from_rows", t.from_rows, fromRows],
+    ["to_rows", t.to_rows, toRows],
+  ]) {
+    const histogram = side === "from_rows" ? engine.before.hf_histogram : engine.after.hf_histogram;
+    const want = tallies(histogram);
+    for (let lane = 0; lane < laneCount; lane += 1) {
+      if (margin[lane] !== sums[lane]) {
+        fail(
+          `${label} ${side}[${String(lane)}] is ${String(margin[lane])} but its cells sum to ` +
+            `${String(sums[lane])} — a margin is the cells' own sum or it is a second story`,
+        );
+      }
+      if (margin[lane] !== want[lane]) {
+        fail(
+          `${label} ${side}[${String(lane)}] is ${String(margin[lane])} but the histogram beside ` +
+            `it tallies ${String(want[lane])} — the margins ARE the two histograms, lane for lane`,
+        );
+      }
+    }
+  }
+  const checks = [
+    ["total_rows against the cells", t.total_rows, total],
+    ["measured_rows against before.accounts", t.measured_rows, engine.before.accounts],
+    ["measured_rows against after.accounts", t.measured_rows, engine.after.accounts],
+    ["unmeasured_rows against refused_count", t.unmeasured_rows, engine.before.hf_histogram.refused_count],
+    ["total_rows against measured + unmeasured", t.total_rows, t.measured_rows + t.unmeasured_rows],
+    [
+      "the cause split against the population it splits",
+      t.unmeasured_rows,
+      t.unmeasured_refused_in_batch_rows + t.unmeasured_excluded_by_this_layer_rows,
+    ],
+    [
+      "unmeasured_excluded_by_this_layer_rows against coverage.excluded[]",
+      t.unmeasured_excluded_by_this_layer_rows,
+      coverage.excluded.filter((entry) => entry.engine === engine.engine).length,
+    ],
+  ];
+  for (const [what, stated, derived] of checks) {
+    if (stated !== derived) {
+      fail(`${label} hf_transitions: ${what} — states ${String(stated)}, derives ${String(derived)}`);
+    }
+  }
+  // NULL, NEVER ZERO, over a book this run never measured.
+  if (t.measured_rows === 0) {
+    if (t.held_rows !== null || t.lane_changed_rows !== null) {
+      fail(
+        `${label} measured no row yet states held_rows ${leafShown(t.held_rows)} and ` +
+          `lane_changed_rows ${leafShown(t.lane_changed_rows)} — a zero there claims a ` +
+          `measurement nobody made`,
+      );
+    }
+  } else {
+    if (t.held_rows !== held || t.lane_changed_rows !== changed) {
+      fail(
+        `${label} states held/changed ${String(t.held_rows)}/${String(t.lane_changed_rows)} but ` +
+          `its own cells give ${String(held)}/${String(changed)}`,
+      );
+    }
+    if (t.held_rows + t.lane_changed_rows + t.unmeasured_rows !== t.total_rows) {
+      fail(`${label} movement partition does not cover the matrix`);
+    }
+  }
+  // DEBT RECONCILES PER SIDE, against the engine's own served totals.
+  for (const [side, sum] of [
+    ["before", debtBefore],
+    ["after", debtAfter],
+  ]) {
+    if (sum !== BigInt(engine[side].total_debt_usd)) {
+      fail(
+        `${label} ${side}-side cell debts sum to ${String(sum)} but the engine serves ` +
+          `total_debt_usd ${engine[side].total_debt_usd} — the cells decompose that total exactly`,
+      );
+    }
+  }
+  if (t.comparator !== engine.before.hf_histogram.comparator) {
+    fail(`${label} hf_transitions.comparator disagrees with the histogram beside it`);
+  }
+  if (t.wad_scale !== engine.before.hf_histogram.wad_scale) {
+    fail(`${label} hf_transitions.wad_scale disagrees with the histogram beside it`);
+  }
+};
+
 const checkResponse = (name, response, declared) => {
   checkPropagation(name, response, declared);
   for (const side of ["before", "after"]) {
@@ -3996,6 +4212,16 @@ const checkResponse = (name, response, declared) => {
   // answer — whether the numbers are THE RIGHT NUMBERS. The derivation was
   // composed from the frozen sources before this body was read.
   checkDerivation(name, response, declared?.derivation);
+
+  // CONTRACT 1.7.0 — THE MATRIX AGAINST THE TWO HISTOGRAMS IT SITS BETWEEN.
+  // It runs AFTER the second pen for the same reason every reading below does:
+  // it compares one disclosure against ANOTHER disclosure, so wherever the
+  // derivation composes either side the derivation is the stronger statement
+  // and owns the refusal. What is left here is the case the derivation cannot
+  // see — a matrix whose margins do not sum to the bars printed beside them.
+  for (const engine of response.engines) {
+    checkTransitions(`${name} ${engine.engine}`, engine, response.coverage);
+  }
 
   // ===== THE READINGS THE DERIVATION CANNOT MAKE (Wave W-BS-H) ==============
   //
@@ -4403,6 +4629,141 @@ const histogramForRationals = (histogram, rationals) => {
   };
 };
 
+/**
+ * CONTRACT 1.7.0 — the transition matrix, DERIVED from the same per-row model
+ * the two histograms beside it are derived from.
+ *
+ * The matrix is a JOINT distribution and its two margins ARE those histograms,
+ * so it cannot ride a transformed body verbatim: a fixture whose Debt Manager
+ * gains an account would carry a matrix over a book two rows smaller than the
+ * bars printed beside it. It is built here from the SAME [num, den] rationals
+ * `histogramForRationals` places, paired per row, exactly as the server pairs
+ * the two sides of one position row.
+ *
+ *   rows        one entry per MEASURED position row:
+ *               { before: [num, den], after: [num, den], debtBefore, debtAfter }
+ *   unmeasured  the rows this run measured on NEITHER side, split by cause —
+ *               the same population `hf_histogram.refused_count` carries.
+ *
+ * `lanes`, `comparator`, `wad_scale` and `note` are the example's own, carried:
+ * the lane vocabulary IS the histogram's bucket table (which this file already
+ * freezes edge by edge) and the note is the server's own sentence, which varies
+ * only with the engine's decimals and with a book nobody measured — neither of
+ * which any body here changes.
+ */
+/**
+ * The unmeasured population's CAUSE SPLIT for ONE engine, READ OFF THE COVERAGE
+ * BLOCK rather than assumed.
+ *
+ * The two causes land on two different coverage surfaces and the contract's own
+ * counts point at them by name, so the split has to be derived from the surface
+ * that actually holds the rows: `coverage.excluded[]` is per row and carries an
+ * `engine`, and everything else in that population is riskd's own refusal,
+ * counted book-wide by `coverage.refused_in_batch`.
+ */
+const unmeasuredSplitFor = (coverage, engineName, refusedCount) => {
+  const excludedByThisLayer = coverage.excluded.filter(
+    (entry) => entry.engine === engineName,
+  ).length;
+  if (excludedByThisLayer > refusedCount) {
+    fail(
+      `${engineName} lists ${String(excludedByThisLayer)} rows in coverage.excluded but its ` +
+        `histogram counts only ${String(refusedCount)} unmeasured — a cause split cannot exceed ` +
+        `the population it splits`,
+    );
+  }
+  return { refusedInBatch: refusedCount - excludedByThisLayer, excludedByThisLayer };
+};
+
+const transitionsFor = (template, histogram, rows, unmeasured) => {
+  const laneCount = template.lanes.length;
+  const unmeasuredLane = template.lanes.findIndex((lane) => lane.kind === "unmeasured");
+  if (unmeasuredLane !== laneCount - 1) {
+    fail("the transition lane vocabulary does not end in the `unmeasured` lane");
+  }
+  const laneOf = (num, den) => {
+    const label = bucketLabelForRational(histogram, num, den);
+    const index = template.lanes.findIndex(
+      (lane) => lane.kind === "bucket" && lane.label === label,
+    );
+    if (index < 0) {
+      fail(`the transition lane vocabulary has no bucket lane labelled ${JSON.stringify(label)}`);
+    }
+    return index;
+  };
+
+  const cells = new Map();
+  const bump = (from, to, debtBefore, debtAfter) => {
+    const key = `${String(from)}|${String(to)}`;
+    const cell = cells.get(key) ?? { from, to, rows: 0, debtBefore: null, debtAfter: null };
+    cell.rows += 1;
+    if (debtBefore !== null) {
+      cell.debtBefore = (cell.debtBefore ?? 0n) + debtBefore;
+    }
+    if (debtAfter !== null) {
+      cell.debtAfter = (cell.debtAfter ?? 0n) + debtAfter;
+    }
+    cells.set(key, cell);
+  };
+  for (const row of rows) {
+    bump(
+      laneOf(row.before[0], row.before[1]),
+      laneOf(row.after[0], row.after[1]),
+      row.debtBefore,
+      row.debtAfter,
+    );
+  }
+  const unmeasuredRows = unmeasured.refusedInBatch + unmeasured.excludedByThisLayer;
+  for (let i = 0; i < unmeasuredRows; i += 1) {
+    // NULL debts on both sides: this run computed nothing for these rows, and a
+    // "0" would claim a measurement nobody made.
+    bump(unmeasuredLane, unmeasuredLane, null, null);
+  }
+
+  const fromRows = Array.from({ length: laneCount }, () => 0);
+  const toRows = Array.from({ length: laneCount }, () => 0);
+  let held = 0;
+  let changed = 0;
+  for (const cell of cells.values()) {
+    fromRows[cell.from] += cell.rows;
+    toRows[cell.to] += cell.rows;
+    if (cell.from === unmeasuredLane) {
+      continue;
+    }
+    if (cell.from === cell.to) {
+      held += cell.rows;
+    } else {
+      changed += cell.rows;
+    }
+  }
+  const measuredRows = rows.length;
+  return {
+    ...template,
+    from_rows: fromRows,
+    to_rows: toRows,
+    outflows: Array.from({ length: laneCount }, (_, from) => ({
+      from,
+      cells: [...cells.values()]
+        .filter((cell) => cell.from === from)
+        .sort((a, b) => a.to - b.to)
+        .map((cell) => ({
+          to: cell.to,
+          rows: cell.rows,
+          debt_before_usd: cell.debtBefore === null ? null : cell.debtBefore.toString(),
+          debt_after_usd: cell.debtAfter === null ? null : cell.debtAfter.toString(),
+        })),
+    })),
+    total_rows: measuredRows + unmeasuredRows,
+    measured_rows: measuredRows,
+    unmeasured_rows: unmeasuredRows,
+    unmeasured_refused_in_batch_rows: unmeasured.refusedInBatch,
+    unmeasured_excluded_by_this_layer_rows: unmeasured.excludedByThisLayer,
+    // NULL, never 0, over a book this run never measured.
+    held_rows: measuredRows === 0 ? null : held,
+    lane_changed_rows: measuredRows === 0 ? null : changed,
+  };
+};
+
 /** A ONE-ACCOUNT histogram, rebuilt so the census sits where the rational lands. */
 const histogramForOneRational = (histogram, num, den) => {
   if (measured(histogram) !== 1 || histogram.infinite_count !== 0) {
@@ -4484,10 +4845,41 @@ if (AAVE_HF_AFTER >= AAVE_HF_BEFORE) {
   );
 }
 
+// This body's OWN coverage, hoisted above the engines so each engine's
+// unmeasured CAUSE SPLIT is read off the coverage block a reader will actually
+// see rather than off the example's.
+const ETH_COVERAGE = {
+  ...runBookExample.coverage,
+  batch_positions: runBookExample.coverage.batch_positions + DM_INJECTED_ACCOUNTS,
+  in_book: runBookExample.coverage.in_book + DM_INJECTED_ACCOUNTS,
+};
+
 const ethAaveEngine = {
   ...aaveExample,
   before: aaveBefore,
   after: aaveAfter,
+  // CONTRACT 1.7.0. One measured row, paired across the shock from the SAME
+  // committed rationals the two histograms above are placed by, plus the
+  // unmeasured tail the example's own refusal census carries.
+  hf_transitions: transitionsFor(
+    aaveExample.hf_transitions,
+    aaveBefore.hf_histogram,
+    [
+      {
+        before: [
+          BigInt(aaveResult.before.health_factor_num),
+          BigInt(aaveResult.before.health_factor_den),
+        ],
+        after: [
+          BigInt(aaveResult.after.health_factor_num),
+          BigInt(aaveResult.after.health_factor_den),
+        ],
+        debtBefore: BigInt(aaveResult.before.debt_usd),
+        debtAfter: BigInt(aaveResult.after.debt_usd),
+      },
+    ],
+    unmeasuredSplitFor(ETH_COVERAGE, AAVE_ENGINE, aaveBefore.hf_histogram.refused_count),
+  ),
   newly_eligible_accounts: aaveAfter.eligible_accounts - aaveBefore.eligible_accounts,
   eligible_debt_delta_usd: (
     BigInt(aaveAfter.eligible_debt_usd) - BigInt(aaveBefore.eligible_debt_usd)
@@ -4713,11 +5105,7 @@ const ethRunBook = {
     ...runBookExample.batch,
     position_count: runBookExample.batch.position_count + DM_INJECTED_ACCOUNTS,
   },
-  coverage: {
-    ...runBookExample.coverage,
-    batch_positions: runBookExample.coverage.batch_positions + DM_INJECTED_ACCOUNTS,
-    in_book: runBookExample.coverage.in_book + DM_INJECTED_ACCOUNTS,
-  },
+  coverage: ETH_COVERAGE,
   engines: runBookExample.engines.map((engine) => {
     if (engine.engine === AAVE_ENGINE) {
       return ethAaveEngine;
@@ -4803,6 +5191,17 @@ const ethRunBook = {
             [DM_HELD_MAXBORROW, DM_HELD_DEBT],
           ]),
         },
+        // THE SAME THREE ACCOUNTS, IN A FIXED ORDER, so the transition matrix
+        // can pair the two sides ROW BY ROW — the pairing the server does, and
+        // the only way a joint distribution is derived rather than guessed.
+        // Their debts are USD-NORMALIZED on this engine and no scenario
+        // re-prices them, so each row's two debt figures are equal here by
+        // construction rather than by coincidence.
+        rows: [
+          { rational: [baselineMaxBorrow, baselineDebt], debt: baselineDebt },
+          { rational: [flipMaxBorrow, DM_DELTA], debt: DM_DELTA },
+          { rational: [DM_HELD_MAXBORROW, DM_HELD_DEBT], debt: DM_HELD_DEBT },
+        ],
       };
     };
     const beforeSide = dmSide("before");
@@ -4829,6 +5228,20 @@ const ethRunBook = {
       ...engine,
       before,
       after,
+      // CONTRACT 1.7.0, paired row by row over the SAME three rationals the two
+      // histograms above are placed by. A matrix carried verbatim from the
+      // example would describe a book two rows smaller than the bars beside it.
+      hf_transitions: transitionsFor(
+        engine.hf_transitions,
+        before.hf_histogram,
+        beforeSide.rows.map((row, index) => ({
+          before: row.rational,
+          after: afterSide.rows[index].rational,
+          debtBefore: row.debt,
+          debtAfter: afterSide.rows[index].debt,
+        })),
+        unmeasuredSplitFor(ETH_COVERAGE, engine.engine, before.hf_histogram.refused_count),
+      ),
       market_realization: null,
       // Recomputed FROM before/after, never stated independently.
       newly_eligible_accounts: after.eligible_accounts - before.eligible_accounts,
@@ -6876,6 +7289,14 @@ const withCollidingCollateral = (countedAmount, countedValue, notCountedAmount) 
   if (exampleCounted === undefined) {
     fail("the example's aave side carries no counted collateral entry");
   }
+  // Aave's own health-factor rational at the restated collateral — the SAME
+  // pair `collidingHistogram` places the census by, kept here so the transition
+  // matrix is placed by it too rather than carried from a book this body no
+  // longer serves.
+  const collidingRational = (aggregate) => [
+    BigInt(countedValue) * AAVE_LT_BPS,
+    BigInt(aggregate.total_debt_usd) * BPS,
+  ];
   const side = (aggregate) => {
     const counted = aggregate.collateral_by_asset.find((entry) => entry.value_usd !== null);
     if (counted === undefined) {
@@ -6915,10 +7336,36 @@ const withCollidingCollateral = (countedAmount, countedValue, notCountedAmount) 
     response: {
       ...runBookExample,
       engines: runBookExample.engines.map((engine) => {
-        const rebuilt =
-          engine.engine === "aave_v3_etherfi"
-            ? { ...engine, before: side(engine.before), after: side(engine.after) }
-            : engine;
+        let rebuilt = engine;
+        if (engine.engine === "aave_v3_etherfi") {
+          const before = side(engine.before);
+          const after = side(engine.after);
+          rebuilt = {
+            ...engine,
+            before,
+            after,
+            // The census moved, so the JOINT moves with it: one measured row,
+            // placed on each side by the same rational the histogram beside it
+            // is placed by, plus the example's own unmeasured tail.
+            hf_transitions: transitionsFor(
+              engine.hf_transitions,
+              before.hf_histogram,
+              [
+                {
+                  before: collidingRational(engine.before),
+                  after: collidingRational(engine.after),
+                  debtBefore: BigInt(before.total_debt_usd),
+                  debtAfter: BigInt(after.total_debt_usd),
+                },
+              ],
+              unmeasuredSplitFor(
+                runBookExample.coverage,
+                engine.engine,
+                before.hf_histogram.refused_count,
+              ),
+            ),
+          };
+        }
         // The realization block is composed AFTER the book is restated, over the
         // book this body actually serves.
         return {

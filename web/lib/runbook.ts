@@ -1,24 +1,30 @@
 // `POST /v1/scenarios/{id}/run-book` — a thin, typed caller with a SEALED
 // outcome union, built for a route the deployment may not serve yet.
 //
-// # Why this file exists (and why it is temporary)
+// # Why this file exists
 //
-// `@solvent/client` v0.1.0 exposes the six original routes; the run-book route
-// entered the contract with C1 but its server (and therefore its client
-// method) lands LATER, through its own full adversarial review train — the
-// book-wide aggregation is correctness-critical (plan AMENDMENT 1, item F).
-// The Scenario Lab still has to make the REAL request, so that the day the
-// endpoint ships, book mode starts working with no UI change — and until
-// then, the deployment's 404 renders as a first-class honest state
-// ("not yet served"), never a spinner and never fake data.
+// CORRECTED at contract 1.7.0. This preamble used to say the run-book route's
+// client method "lands LATER" and to close "Replace with
+// `client.runBookScenario()` when the client grows it." The client GREW IT:
+// `SolventClient.runBookScenario(id, signal?)` is shipped
+// (`packages/client-ts/src/client.ts`), refuses an off-pattern id locally, and
+// is published on `dist/client.d.ts`. A stale "until then" standing beside a
+// shipped method is the same defect class this repo's contract waves exist to
+// remove, one file over.
 //
-// The only-data-path law is kept as far as the contract allows: the response
-// is typed by the client's OWN generated `RunBookResponse`, projections are
-// refined through the client's `refineProjection` (no nullable-boolean
-// verdict reaches a component), errors are read through the contract's
-// `ErrorBody` envelope, and this module is the single place in `web/` that
-// touches a `/v1` route outside `SolventClient`. Replace with
-// `client.runBookScenario()` when the client grows it.
+// What this module still does that the method does not, and why it therefore
+// still exists: it SEALS the outcome into a union, so a deployment that does
+// not serve the route yet renders as a first-class "not yet served" rather than
+// as an error, never a spinner and never fake data; and it refines projections
+// through the client's `refineProjection` before any component sees them, so no
+// nullable-boolean verdict reaches the UI. Re-homing that union on top of the
+// real method is a `web/` refactor with its own test surface and no bearing on
+// the contract; it is deliberately NOT this wave's work.
+//
+// The only-data-path law is kept as far as the contract allows: the response is
+// typed by the client's OWN generated `RunBookResponse`, errors are read through
+// the contract's `ErrorBody` envelope, and this module is the single place in
+// `web/` that touches a `/v1` route outside `SolventClient`.
 
 import {
   refineProjection,
@@ -30,6 +36,15 @@ import {
 export type RunBookResponse = components["schemas"]["RunBookResponse"];
 export type RunBookEngine = components["schemas"]["RunBookEngine"];
 export type RunBookAggregate = components["schemas"]["RunBookAggregate"];
+
+// Contract 1.7.0 — the transition matrix. `RunBookEngine` widens through the
+// regenerated schema, so `LabRunBookEngine` carries `hf_transitions` with no
+// change to the override above; these aliases exist so the Lab's own modules
+// can name the parts without reaching into `components` a second time.
+export type RunBookTransitions = components["schemas"]["RunBookTransitions"];
+export type RunBookTransitionLane = components["schemas"]["RunBookTransitionLane"];
+export type RunBookTransitionOutflow = components["schemas"]["RunBookTransitionOutflow"];
+export type RunBookTransitionCell = components["schemas"]["RunBookTransitionCell"];
 
 /** A run-book engine with its projection refined (sealed verdicts only). */
 export type LabRunBookEngine = Omit<RunBookEngine, "projection"> & {

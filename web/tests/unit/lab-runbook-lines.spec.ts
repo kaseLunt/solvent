@@ -1,25 +1,43 @@
-// Wave W-BS-A — the run-book detail's COMPUTED reading lines (contract 1.6.0).
+// The run-book detail's COMPUTED reading lines (Wave W-BS-A at contract 1.6.0,
+// CHANGED at contract 1.7.0 by Wave W-TM).
 //
 // Laws under test:
 //   - every sentence is DERIVED from the served response: mutate the input and
 //     the words change. No count and no money amount is hardcoded in
 //     `labRunBookLines.ts`;
+//   - THE CROSSINGS ARE SERVED AND ARE DERIVED FROM THE MATRIX'S CELLS. The
+//     1.6.0 sentence carried an IMPOSSIBILITY CAVEAT — "this response serves
+//     the two populations, not the crossings between them" — whose central
+//     claim was true then and is false now. `hf_transitions` is the joint
+//     distribution, and a stale impossibility caveat printed beside a served
+//     gross count is the very defect that caveat existed to prevent. The law
+//     below is therefore RETIRED and replaced, not reworded;
+//   - the NET is kept beside the gross, never replaced by it: on an offsetting
+//     book they are different numbers, and that difference is the whole reason
+//     this surface exists;
+//   - `lane_changed_rows` is never described as a 1.00-crossing count, because
+//     it counts every LANE change including moves that never touch that edge;
 //   - the top-20-of-N disclosure NAMES both numbers whenever they differ, and
 //     never claims a truncation that did not happen — a cap the reader cannot
 //     see is a silent cap;
 //   - an unpriced holding is described as UNKNOWABLE, never summed into a
 //     dollar figure and never described as zero;
 //   - the Debt Manager's sub-1.00 region is called a DISCLOSURE, because its
-//     buckets are the exact rational and its trigger is the strict boolean;
-//   - refused rows are named in the same breath as the shift, because a shift
-//     measured over a book with rows missing from it is a shift over a
-//     different book;
+//     buckets are the exact rational and its trigger is the strict boolean —
+//     serving the joint changes nothing about that;
+//   - unmeasured rows are named in the same breath as the shift, and the
+//     sentence now says WHERE they sit (the matrix's last lane) instead of
+//     claiming they sit nowhere;
 //   - a side that measured NOBODY says so rather than reporting a zero shift.
 //
 // Fixture mutations below are DERIVED NEGATIVES, each documented at its site.
 
 import { expect, test } from "@playwright/test";
-import type { LabRunBookEngine, RunBookAggregate } from "../../lib/runbook";
+import type {
+  LabRunBookEngine,
+  RunBookAggregate,
+  RunBookTransitions,
+} from "../../lib/runbook";
 import {
   belowOneCount,
   collateralDisclosure,
@@ -66,6 +84,121 @@ function histogramWith(
   };
 }
 
+/**
+ * ONE OCCUPIED CELL of a test's own matrix: `[from lane, to lane, rows]`.
+ */
+type Cell = [number, number, number];
+
+/**
+ * A matrix built on the fixture's own TEMPLATE with this test's own cells —
+ * exactly as `histogramWith` builds a histogram.
+ *
+ * The two MARGINS are DERIVED FROM THE CELLS rather than stated beside them, so
+ * a test can never write a matrix that contradicts itself; `engineWith` then
+ * builds the two histograms FROM those margins, so the matrix and the bars are
+ * one statement read twice. That is the same weld the server makes, and it is
+ * what makes `readTransitions` accept these bodies for the right reason.
+ */
+function transitionsWith(
+  template: RunBookTransitions,
+  cells: readonly Cell[],
+  unmeasured = 0,
+): RunBookTransitions {
+  const laneCount = template.lanes.length;
+  const unmeasuredLane = laneCount - 1;
+  const all: Cell[] = unmeasured === 0 ? [...cells] : [...cells, [unmeasuredLane, unmeasuredLane, unmeasured]];
+
+  const fromRows = new Array<number>(laneCount).fill(0);
+  const toRows = new Array<number>(laneCount).fill(0);
+  let held = 0;
+  let changed = 0;
+  let measured = 0;
+  for (const [from, to, rows] of all) {
+    fromRows[from] = (fromRows[from] ?? 0) + rows;
+    toRows[to] = (toRows[to] ?? 0) + rows;
+    if (from === unmeasuredLane) continue;
+    measured += rows;
+    if (from === to) held += rows;
+    else changed += rows;
+  }
+  return {
+    ...template,
+    from_rows: fromRows,
+    to_rows: toRows,
+    outflows: Array.from({ length: laneCount }, (_, from) => ({
+      from,
+      cells: all
+        .filter(([cellFrom]) => cellFrom === from)
+        .sort((a, b) => a[1] - b[1])
+        .map(([, to, rows]) => ({
+          to,
+          rows,
+          // A measured cell's debt is KNOWABLE; the unmeasured cell's is not,
+          // and the two representations are never interchanged.
+          debt_before_usd: from === unmeasuredLane ? null : "0",
+          debt_after_usd: from === unmeasuredLane ? null : "0",
+        })),
+    })),
+    total_rows: measured + unmeasured,
+    measured_rows: measured,
+    unmeasured_rows: unmeasured,
+    unmeasured_refused_in_batch_rows: unmeasured,
+    unmeasured_excluded_by_this_layer_rows: 0,
+    held_rows: measured === 0 ? null : held,
+    lane_changed_rows: measured === 0 ? null : changed,
+  };
+}
+
+/** A histogram whose three tallies ARE one margin of the matrix beside it. */
+function histogramFromMargin(
+  template: RunBookAggregate,
+  comparator: "hf_wad" | "hf_num/hf_den",
+  margin: readonly number[],
+): RunBookAggregate["hf_histogram"] {
+  const buckets = template.hf_histogram.buckets.length;
+  return {
+    ...template.hf_histogram,
+    comparator,
+    wad_scale: WAD,
+    buckets: template.hf_histogram.buckets.map((bucket, index) => ({
+      ...bucket,
+      count: margin[index] ?? 0,
+    })),
+    infinite_count: margin[buckets] ?? 0,
+    refused_count: margin[buckets + 1] ?? 0,
+  };
+}
+
+/**
+ * A whole engine stated as its JOINT, with the two marginals derived from it.
+ *
+ * Stating the joint is the point: the 1.6.0 tests stated two marginals because
+ * that was all the wire carried, and every offsetting book was invisible to
+ * them by construction.
+ */
+function engineWith(
+  comparator: "hf_wad" | "hf_num/hf_den",
+  cells: readonly Cell[],
+  unmeasured = 0,
+): LabRunBookEngine {
+  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const t = transitionsWith(dm.hf_transitions, cells, unmeasured);
+  return {
+    ...dm,
+    hf_transitions: { ...t, comparator },
+    before: {
+      ...dm.before,
+      accounts: t.measured_rows,
+      hf_histogram: histogramFromMargin(dm.before, comparator, t.from_rows),
+    },
+    after: {
+      ...dm.after,
+      accounts: t.measured_rows,
+      hf_histogram: histogramFromMargin(dm.after, comparator, t.to_rows),
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The eligible-region derivation
 // ---------------------------------------------------------------------------
@@ -104,136 +237,198 @@ test("measuredCount adds the no-debt accounts and NOT the refused ones", () => {
 // ---------------------------------------------------------------------------
 
 test("the shift line names the NET population change, computed from both sides", () => {
-  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
-  const engine: LabRunBookEngine = {
-    ...dm,
-    before: {
-      ...dm.before,
-      accounts: 10,
-      hf_histogram: histogramWith(dm.before, "hf_wad", { "< 0.90": 1, "1.10 – 1.25": 9 }),
-    },
-    after: {
-      ...dm.after,
-      accounts: 10,
-      hf_histogram: histogramWith(dm.after, "hf_wad", { "< 0.90": 4, "1.10 – 1.25": 6 }),
-    },
-  };
+  // Three rows fall into the region from band 4 and nothing leaves it.
+  const engine = engineWith("hf_wad", [
+    [0, 0, 1],
+    [4, 0, 3],
+    [4, 4, 6],
+  ]);
   const line = histogramShiftReadingLine(engine);
   // The arithmetic is on the page, derived from both sides.
-  expect(line).toContain("1 of 10 measured accounts sat below 1.00 before the shock, 4 after");
+  expect(line).toContain("1 of 10 measured rows sat below 1.00 before the shock, 4 after");
   expect(line).toContain("the below-1.00 population grew by 3");
-  // Nothing was refused, so no refused clause is invented.
+  // Nothing was unmeasured, so no refusal clause is invented.
   expect(line).not.toContain("counted refused");
 });
 
-test("THE NET CAVEAT: the sentence never claims accounts CROSSED, in either direction", () => {
-  // The wire serves two POPULATIONS. Their difference is a net figure, and an
-  // account that fell below 1.00 while another rose above it cancels in it —
-  // so a sentence calling the difference a count of accounts that crossed
-  // claims a measurement this response does not carry.
-  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
-  const engine: LabRunBookEngine = {
-    ...dm,
-    before: { ...dm.before, hf_histogram: histogramWith(dm.before, "hf_wad", { "< 0.90": 1, ">= 2.00": 9 }) },
-    after: { ...dm.after, hf_histogram: histogramWith(dm.after, "hf_wad", { "< 0.90": 4, ">= 2.00": 6 }) },
-  };
+test("THE CROSSINGS ARE SERVED, and they are DERIVED FROM THE CELLS", () => {
+  // THIS TEST REPLACES "THE NET CAVEAT" (contract 1.6.0), and the replacement
+  // is not a rewording. That law required the sentence to state that a gross
+  // crossing count was UNAVAILABLE — "this response serves the two populations,
+  // not the crossings between them" — and required it to withhold the very
+  // vocabulary `hf_transitions` now licenses. Every one of its five assertions
+  // was a claim about what the response CANNOT carry, and the response carries
+  // it. So the negatives INVERT: the sentence must no longer say the count is
+  // unavailable.
+  //
+  // The book is §5.3's committed mixed-direction shape, stated as its JOINT:
+  // two rows fall through 1.00, one rises past it, so the below-1.00 marginal
+  // moves by ONE while THREE rows change lane. Two marginals cannot tell that
+  // book from a book where one row fell and nothing else moved.
+  const engine = engineWith("hf_wad", [
+    [4, 0, 1], // A: 1.20 -> 0.84
+    [3, 0, 1], // B: 1.08 -> 0.756
+    [0, 3, 1], // C: 0.74375 -> 1.0625
+  ]);
+  const t = engine.hf_transitions;
+
+  // FOUR DISTINCT NUMBERS ABOUT THE SAME THREE ROWS. Each is asserted
+  // INDEPENDENTLY, and the third is NOT computed from the first two:
+  // `entries + exits === lane_changed_rows` holds on this book only because no
+  // measured row here changes lane without crossing the boundary, which is a
+  // coincidence of the fixture and not a law.
+  const region = (margin: readonly number[]) => (margin[0] ?? 0) + (margin[1] ?? 0);
+  expect(region(t.to_rows) - region(t.from_rows)).toBe(1);
+  expect(t.lane_changed_rows).toBe(3);
+  expect(t.held_rows).toBe(0);
+
   const line = histogramShiftReadingLine(engine);
-  expect(line).toContain("That is a NET figure");
-  expect(line).toContain("serves the two populations, not the crossings between them");
-  expect(line).toContain("accounts may have moved in BOTH directions");
-  expect(line).toContain("no gross crossing count is claimed here");
-  // The words that made the OLD sentence a net figure dressed as a gross one.
-  expect(line).not.toContain("crossed into that region");
-  expect(line).not.toContain("left that region");
-  expect(line).not.toContain("accounts that moved");
+  // (1) THE NET, still stated.
+  expect(line).toContain("the below-1.00 population grew by 1");
+  // (2) THE GROSS, now stated beside it: 2 in, 1 out.
+  expect(line).toContain("The crossings behind that figure are served");
+  expect(line).toContain("2 rows moved INTO the region");
+  expect(line).toContain("1 row moved OUT of it");
+  expect(line).toContain("the net is what is left after they cancel");
+  // (3) THE RETIRED CLAIMS. Every one of these was REQUIRED by the 1.6.0 law
+  // and is now false.
+  expect(line).not.toContain("no gross crossing count is claimed here");
+  expect(line).not.toContain("serves the two populations, not the crossings between them");
+  expect(line).not.toContain("That is a NET figure");
+  // (4) AND `lane_changed_rows` IS NOT PRINTED AS THE CROSSING COUNT. It is 3
+  // on this book while the crossings are 2 and 1; a sentence that printed it
+  // where the crossing pair belongs would say "3 rows moved INTO".
+  expect(line).not.toContain("3 rows moved INTO");
+  expect(line).not.toContain("3 rows moved OUT");
 });
 
-test("an unchanged population says so, and still carries the net caveat", () => {
-  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
-  const engine: LabRunBookEngine = {
-    ...dm,
-    before: { ...dm.before, hf_histogram: histogramWith(dm.before, "hf_wad", { "< 0.90": 2, ">= 2.00": 8 }) },
-    after: { ...dm.after, hf_histogram: histogramWith(dm.after, "hf_wad", { "< 0.90": 2, ">= 2.00": 8 }) },
-  };
+test("an unchanged population is now a STATABLE fact: one entry and one exit", () => {
+  // THE CASE THAT GAINS THE MOST. Under 1.6.0 this was the shape the caveat
+  // existed to warn about: two rows swap sides and the difference is zero, and
+  // nothing on the wire could reveal either move. The joint reveals both.
+  const engine = engineWith("hf_wad", [
+    [0, 5, 1], // one row leaves the region
+    [5, 0, 1], // one row enters it
+    [0, 0, 1],
+    [5, 5, 7],
+  ]);
   const line = histogramShiftReadingLine(engine);
   expect(line).toContain("the below-1.00 population did not change");
-  // AND THAT IS THE CASE THE CAVEAT MATTERS MOST IN: two accounts could have
-  // swapped sides and the difference would still be zero.
-  expect(line).toContain("accounts may have moved in BOTH directions");
+  // AND THE TWO OFFSETTING MOVES ARE NAMED, which is exactly what the caveat
+  // used to say was impossible.
+  expect(line).toContain("1 row moved INTO the region");
+  expect(line).toContain("1 row moved OUT of it");
+  expect(engine.hf_transitions.lane_changed_rows).toBe(2);
+  expect(line).not.toContain("no gross crossing count is claimed here");
   expect(line).not.toContain("Nothing crossed");
 });
 
 test("a shift the other way is named SHRANK, never a negative count", () => {
-  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
-  const engine: LabRunBookEngine = {
-    ...dm,
-    before: { ...dm.before, hf_histogram: histogramWith(dm.before, "hf_wad", { "< 0.90": 6, ">= 2.00": 4 }) },
-    after: { ...dm.after, hf_histogram: histogramWith(dm.after, "hf_wad", { "< 0.90": 2, ">= 2.00": 8 }) },
-  };
+  const engine = engineWith("hf_wad", [
+    [0, 7, 4],
+    [0, 0, 2],
+    [7, 7, 4],
+  ]);
   const line = histogramShiftReadingLine(engine);
   expect(line).toContain("the below-1.00 population shrank by 4");
-  expect(line).toContain("6 of 10 measured accounts sat below 1.00 before the shock, 2 after");
+  expect(line).toContain("6 of 10 measured rows sat below 1.00 before the shock, 2 after");
+  expect(line).toContain("4 rows moved OUT of it");
+  expect(line).toContain("0 rows moved INTO the region");
   expect(line).not.toContain("-4");
   expect(line).not.toContain("−4");
 });
 
 test("the Debt Manager's region is called a DISCLOSURE, never its trigger", () => {
-  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
-  const engine: LabRunBookEngine = {
-    ...dm,
-    before: {
-      ...dm.before,
-      hf_histogram: histogramWith(dm.before, "hf_num/hf_den", { "< 0.90": 1, "1.10 – 1.25": 1 }),
-    },
-    after: {
-      ...dm.after,
-      hf_histogram: histogramWith(dm.after, "hf_num/hf_den", { "< 0.90": 2 }),
-    },
-  };
+  // UNCHANGED at 1.7.0, deliberately. Serving the joint is a statement about
+  // FLOW; it says nothing about what the comparator means, so the Debt
+  // Manager's clause is exactly the sentence it was.
+  const engine = engineWith("hf_num/hf_den", [
+    [0, 0, 1],
+    [4, 0, 1],
+  ]);
   const line = histogramShiftReadingLine(engine);
   expect(line).toContain("Below 1.00 is the borrow-headroom ratio");
   expect(line).toContain("a DISCLOSURE rather than this engine's trigger");
   // And the Aave sentence must NOT claim a disclosure — the comparator IS the
   // engine's own liquidation test there.
-  const wadLine = histogramShiftReadingLine({
-    ...engine,
-    before: { ...engine.before, hf_histogram: { ...engine.before.hf_histogram, comparator: "hf_wad" } },
-    after: { ...engine.after, hf_histogram: { ...engine.after.hf_histogram, comparator: "hf_wad" } },
-  });
+  const wadLine = histogramShiftReadingLine(
+    engineWith("hf_wad", [
+      [0, 0, 1],
+      [4, 0, 1],
+    ]),
+  );
   expect(wadLine).toContain("Below 1.00 is where this engine may liquidate");
   expect(wadLine).not.toContain("DISCLOSURE");
 });
 
-test("REFUSED ROWS ARE NAMED in the same breath as the shift", () => {
-  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
-  const engine: LabRunBookEngine = {
-    ...dm,
-    before: { ...dm.before, hf_histogram: histogramWith(dm.before, "hf_wad", { "< 0.90": 1 }, { refused: 2 }) },
-    after: { ...dm.after, hf_histogram: histogramWith(dm.after, "hf_wad", { "< 0.90": 1 }, { refused: 2 }) },
-  };
+test("UNMEASURED ROWS ARE NAMED in the same breath, and the sentence says WHERE they sit", () => {
+  // CHANGED at 1.7.0. The naming obligation is unchanged and still load-bearing:
+  // a shift measured over a book with rows missing from it is a shift over a
+  // different book. What changed is the second half of the old clause. It read
+  // "and sit in neither distribution", which is now FALSE: those rows sit in
+  // the matrix's last lane, which IS a position in the joint distribution, with
+  // both margins carrying them and the cause split beside them.
+  const engine = engineWith("hf_wad", [[0, 0, 1]], 2);
   const line = histogramShiftReadingLine(engine);
-  expect(line).toContain("2 more rows are counted refused and sit in neither distribution");
+  expect(line).toContain("2 more rows are counted refused");
+  expect(line).toContain(`they sit in the matrix's "not measured" lane`);
+  expect(line).toContain("inside both margins and outside every measured count above");
+  // THE RETIRED HALF. The rows have somewhere to be now.
+  expect(line).not.toContain("sit in neither distribution");
+  // And they really are in both margins, which is what licenses the sentence.
+  expect(engine.hf_transitions.from_rows[9]).toBe(2);
+  expect(engine.hf_transitions.to_rows[9]).toBe(2);
+
   // The singular is a real sentence, not "1 rows".
-  const one = histogramShiftReadingLine({
-    ...engine,
-    after: { ...engine.after, hf_histogram: { ...engine.after.hf_histogram, refused_count: 1 } },
-  });
+  const one = histogramShiftReadingLine(engineWith("hf_wad", [[0, 0, 1]], 1));
   expect(one).toContain("1 more row is counted refused");
+  expect(one).toContain(`it sits in the matrix's "not measured" lane`);
 });
 
 test("a side that measured NOBODY says so rather than reporting a zero shift", () => {
-  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
-  const engine: LabRunBookEngine = {
-    ...dm,
-    before: { ...dm.before, hf_histogram: histogramWith(dm.before, "hf_wad", {}, { refused: 4 }) },
-    after: { ...dm.after, hf_histogram: histogramWith(dm.after, "hf_wad", {}, { refused: 4 }) },
-  };
+  const engine = engineWith("hf_wad", [], 4);
   const line = histogramShiftReadingLine(engine);
   expect(line).toContain("measured no account on this engine, so there is no shift to read");
-  // The zero that would have been a lie is absent.
-  expect(line).not.toContain("0 of 0 accounts");
+  // The zero that would have been a lie is absent — on the sentence AND on the
+  // wire, where both movement counts are NULL rather than 0.
+  expect(line).not.toContain("0 of 0");
+  expect(line).not.toContain("moved INTO the region");
+  expect(engine.hf_transitions.held_rows).toBeNull();
+  expect(engine.hf_transitions.lane_changed_rows).toBeNull();
   // And the four rows nobody could measure are STILL named.
   expect(line).toContain("4 more rows are counted refused");
+});
+
+test("A MATRIX THIS BODY CONTRADICTS IS NOT READ, and the sentence says the crossings are withheld", () => {
+  // The body can arrive from an older or a broken deployment. Rendering a
+  // crossing count derived from a matrix whose margins do not match the bars
+  // printed beside it is a wrong answer that looks computed, so the sentence
+  // falls back to the NET — which is still a difference of two bars on the page
+  // — and states that the gross was withheld.
+  const honest = engineWith("hf_wad", [
+    [4, 0, 1],
+    [3, 0, 1],
+    [0, 3, 1],
+  ]);
+  const broken: LabRunBookEngine = {
+    ...honest,
+    after: {
+      ...honest.after,
+      hf_histogram: {
+        ...honest.after.hf_histogram,
+        buckets: honest.after.hf_histogram.buckets.map((bucket, index) =>
+          index === 0 ? { ...bucket, count: bucket.count + 5 } : bucket,
+        ),
+      },
+    },
+  };
+  const line = histogramShiftReadingLine(broken);
+  expect(line).toContain("The gross crossings are NOT stated here");
+  expect(line).toContain("disagrees with the two distributions beside it");
+  expect(line).not.toContain("moved INTO the region");
+  // The honest body still gets its crossings, so this is not a law that
+  // refuses everything.
+  expect(histogramShiftReadingLine(honest)).toContain("2 rows moved INTO the region");
 });
 
 // ---------------------------------------------------------------------------

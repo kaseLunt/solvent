@@ -116,23 +116,33 @@ func TestRunBookHistogramBucketLawIsOneImplementation(t *testing.T) {
 }
 
 // TestRunBookHistogramCountsWhatItCannotBucket is the anti-drop law. A side
-// whose buckets silently omitted the rows it could not place would publish a
-// distribution over a book smaller than the one it claims to describe.
+// whose buckets silently omitted rows would publish a distribution over a book
+// smaller than the one it claims to describe.
+//
+// CHANGED at contract 1.7.0, and the rewrite is not a weakening. This test used
+// to call `m.bucket(AaveEngine, &runAccountState{hfWad: nil})` and assert the
+// row was counted REFUSED — pinning a behavior on a state the handler cannot
+// construct. `ComputeAaveHealth` sets `HealthFactorWad` exactly when it clears
+// `IsInfinite` and `ComputeDMHealth` sets its rational exactly when borrowings
+// are positive (TestMeasuredStatesAlwaysCarryAComparator), so that arm was dead
+// code, and folding it into `refused` gave the unmeasured lane two meanings.
+// The test now has two halves: the TALLY half keeps the census law, and the
+// REFUSAL half pins what the impossible state actually does.
 func TestRunBookHistogramCountsWhatItCannotBucket(t *testing.T) {
 	s := fxServer(t)
 	m := newRunMeasure()
 
-	// One bucketable account, one with no debt, one carrying no comparator.
-	m.bucket(risk.AaveEngine, &runAccountState{hfWad: bi("1080000000000000000")})
-	m.bucket(risk.AaveEngine, &runAccountState{infinite: true})
-	m.bucket(risk.AaveEngine, &runAccountState{hfWad: nil})
-	// Plus the rows this layer could not rebuild at all, folded in by the
-	// handler exactly as it folds them onto both sides.
-	m.refused += 2
+	// One bucketable account and one with no debt — both placed through the one
+	// statement that writes the tally and the lane record together.
+	require.NoError(t, m.place(risk.AaveEngine, &runAccountState{account: acct(1), hfWad: bi("1080000000000000000")}))
+	require.NoError(t, m.place(risk.AaveEngine, &runAccountState{account: acct(2), infinite: true}))
+	// Plus the rows this run measured on NEITHER side, folded in by the handler
+	// exactly as it folds them onto both sides.
+	m.refused += 3
 
 	agg := m.wire(risk.AaveEngine, s)
 	require.Equal(t, 1, agg.HFHistogram.InfiniteCount, "a no-debt account is INFINITE, never a bucket and never a zero")
-	require.Equal(t, 3, agg.HFHistogram.RefusedCount, "every row that could not be bucketed must be counted refused")
+	require.Equal(t, 3, agg.HFHistogram.RefusedCount, "every unmeasured row must still be counted")
 
 	bucketed := 0
 	for _, b := range agg.HFHistogram.Buckets {
@@ -143,7 +153,15 @@ func TestRunBookHistogramCountsWhatItCannotBucket(t *testing.T) {
 	require.Equal(t, 5, bucketed+agg.HFHistogram.InfiniteCount+agg.HFHistogram.RefusedCount,
 		"buckets + infinite + refused must be the whole run, or rows vanished")
 	require.Contains(t, agg.HFHistogram.Note, "counted here rather than dropped")
+	// The corrected clause (contract 1.7.0, §9.2): `refused_count` is the rows
+	// this run measured on NEITHER side, not "positions carrying no comparator".
+	require.Contains(t, agg.HFHistogram.Note, "the positions this run measured on NEITHER side")
+	require.NotContains(t, agg.HFHistogram.Note, "positions carrying no comparator",
+		"the 1.6.0 clause was false twice over and must not survive the correction")
 }
+
+// The REFUSAL half of this law lives beside the matrix it protects, in
+// p5_runbook_transition_test.go: TestRunBookMeasureRefusesAMeasuredRowItCannotBucket.
 
 // ---------------------------------------------------------------------------
 // B2 — the movers

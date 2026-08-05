@@ -103,17 +103,27 @@ test("the computed reading line names the SHIFT, derived from the two sides", as
   // this scenario, and the generator's law-11 witness had to become an account
   // of its own rather than a second holding on the flipping one. The book is the
   // example's account plus two injected ones.
+  //
+  // CHANGED at contract 1.7.0: the denominator is now the SERVER's
+  // `measured_rows` and the noun is ROWS, because that is the unit the count is
+  // in. The number is the same 3 and its arithmetic is the same arithmetic.
   await expect(reading).toContainText(
-    "1 of 3 measured accounts sat below 1.00 before the shock, 2 after",
+    "1 of 3 measured rows sat below 1.00 before the shock, 2 after",
   );
   await expect(reading).toContainText("the below-1.00 population grew by 1");
-  // AND IT SAYS WHAT KIND OF NUMBER THAT IS. Two populations subtracted is a
-  // NET figure; the wire serves no crossing count and the sentence must not
-  // imply one.
-  await expect(reading).toContainText("That is a NET figure");
-  await expect(reading).toContainText("accounts may have moved in BOTH directions");
-  await expect(reading).not.toContainText("crossed into that region");
-  // Its buckets are a DISCLOSURE, never dressed as the engine's trigger.
+  // AND IT SAYS WHAT KIND OF NUMBER THAT IS — which at 1.7.0 is a stronger
+  // statement than it was. The 1.6.0 sentence carried an IMPOSSIBILITY CAVEAT
+  // ("That is a NET figure ... no gross crossing count is claimed here")
+  // because two histograms could not produce the crossings. `hf_transitions`
+  // produces them, so the caveat is RETIRED and the gross split is printed
+  // beside the net: one row into the region, none out of it.
+  await expect(reading).toContainText("The crossings behind that figure are served");
+  await expect(reading).toContainText("1 row moved INTO the region");
+  await expect(reading).toContainText("0 rows moved OUT of it");
+  await expect(reading).not.toContainText("no gross crossing count is claimed here");
+  await expect(reading).not.toContainText("That is a NET figure");
+  // Its buckets are a DISCLOSURE, never dressed as the engine's trigger — and
+  // serving the joint changes nothing about that.
   await expect(reading).toContainText("a DISCLOSURE rather than this engine's trigger");
 });
 
@@ -130,7 +140,9 @@ test("the served book RECONCILES with itself: coverage, accounts, and the money"
   // THREE accounts measured on this engine since Wave W-EX-A — the contract
   // example's own plus the two this generator injects (the one that flips, and
   // the one carrying the held-flat holding law 11 is proved against).
-  await expect(dm.getByTestId("runbook-hist-reading")).toContainText("of 3 measured accounts");
+  // "rows" since contract 1.7.0: the denominator is the server's own
+  // `measured_rows`, which is the unit `coverage.batch_positions` is in.
+  await expect(dm.getByTestId("runbook-hist-reading")).toContainText("of 3 measured rows");
 
   // The itemization the reading line sums is the WHOLE collateral of the side,
   // every injected holding included. $6,600 = the example's $4,000 of weETH plus

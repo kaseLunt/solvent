@@ -130,6 +130,13 @@ export type RunBookAggregate = Schemas["RunBookAggregate"];
 export type RunBookHistogram = Schemas["RunBookHistogram"];
 export type RunBookCollateralAsset = Schemas["RunBookCollateralAsset"];
 export type RunBookMover = Schemas["RunBookMover"];
+// Contract 1.7.0 addition: the BEFORE-to-AFTER flow of each engine's position
+// rows. The two histograms above cannot produce it — two marginals do not
+// determine a joint — and its margins ARE those two histograms, lane for lane.
+export type RunBookTransitions = Schemas["RunBookTransitions"];
+export type RunBookTransitionLane = Schemas["RunBookTransitionLane"];
+export type RunBookTransitionOutflow = Schemas["RunBookTransitionOutflow"];
+export type RunBookTransitionCell = Schemas["RunBookTransitionCell"];
 
 // --- Observatory rollup series ----------------------------------------------
 
@@ -195,6 +202,29 @@ const EVENT_AMOUNT_UNIT_SET = {
 } as const satisfies Record<EventAmountUnit, true>;
 export const EVENT_AMOUNT_UNITS = Object.keys(EVENT_AMOUNT_UNIT_SET) as readonly EventAmountUnit[];
 
+/**
+ * `hf_transitions.lanes[].kind` — the closed lane vocabulary (contract 1.7.0).
+ *
+ * It is an INDEXED ACCESS on the generated schema type rather than a hand-written
+ * union, because `RunBookTransitionLane.kind` is an INLINE enum on that schema
+ * and not a named component: the `Schemas["EventAmountUnit"]` form used above is
+ * unavailable here, and the indexed access is what makes this alias track the
+ * contract instead of restating it.
+ */
+export type TransitionLaneKind = RunBookTransitionLane["kind"];
+
+/**
+ * The `Record` weld, exactly as `EVENT_AMOUNT_UNIT_SET` does it: total BOTH ways
+ * against the generated union. A lane kind the contract adds breaks this compile
+ * on a missing key, and one it drops breaks it on an excess key.
+ */
+const TRANSITION_LANE_KIND_SET = {
+  bucket: true,
+  infinite: true,
+  unmeasured: true,
+} as const satisfies Record<TransitionLaneKind, true>;
+export const TRANSITION_LANE_KINDS = Object.keys(TRANSITION_LANE_KIND_SET) as readonly TransitionLaneKind[];
+
 /** `hf_histogram.engines[].comparator` — the quantity the buckets are computed on. */
 export const HISTOGRAM_COMPARATORS = ["hf_wad", "hf_num/hf_den"] as const;
 export type HistogramComparator = (typeof HISTOGRAM_COMPARATORS)[number];
@@ -237,7 +267,7 @@ export type HeartbeatGrade = (typeof HEARTBEAT_GRADES)[number];
 export const SEIZURE_MODEL = "pro-rata-over-counted-collateral" as const;
 
 /** `info.version` of the contract this client was generated from. */
-export const CONTRACT_VERSION = "1.6.0" as const;
+export const CONTRACT_VERSION = "1.7.0" as const;
 
 /** WAD (1e18) — the scale health factors and grid factors are published at. */
 export const WAD = 10n ** 18n;
