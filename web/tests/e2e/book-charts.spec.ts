@@ -204,7 +204,9 @@ test("waterfall: percent labels, unshocked census, exact micro-strings, verbatim
   // count on one line, never a two-line label/sub pair that clips.
   await expect(dm).toContainText("×1.00 · unshocked · 1 acct");
   await expect(dm).toContainText("×0.90 · −10% · 1 acct");
-  await expect(dm).toContainText("unshocked bad debt · 1 insolvent");
+  // Residual ticks lead with the exact ×factor too (Codex r55): the percent
+  // truncates, so a percent-only residual collides across close legal rungs.
+  await expect(dm).toContainText("×1.00 · unshocked bad debt · 1 insolvent");
   await expect(dm).toContainText("$239.603961"); // exact, never rounded
 
   // W-VR defect 8, the left-clip guard: every tick is ONE <text> node whose
@@ -212,7 +214,8 @@ test("waterfall: percent labels, unshocked census, exact micro-strings, verbatim
   // A left-clipped label ("lvent · all dust") or a lost "×0.90 ·" prefix
   // fails the regex; a bbox poking past x=0 fails the geometry check.
   const FLOW_TICK = /^×\d+\.\d{2,} · (unshocked|−\d+(\.\d+)?%) · \d{1,3}(,\d{3})* acct$/u;
-  const RESIDUAL_TICK = /^(unshocked|−\d+(\.\d+)?%) bad debt · \d{1,3}(,\d{3})* insolvent$/u;
+  const RESIDUAL_TICK =
+    /^×\d+\.\d{2,} · (unshocked|−\d+(\.\d+)?%) bad debt · \d{1,3}(,\d{3})* insolvent$/u;
   for (const engine of ["debt_manager", "aave_v3_etherfi"]) {
     const ticks = await page
       .getByTestId(`book-waterfall-${engine}`)
@@ -486,6 +489,13 @@ test("the auto walk: live progress, completed header, and ONE drawing (the Densi
     "1 of 1 plotted accounts have less than 10% of their borrowing capacity left, " +
       "carrying Σ debt 6,000 of the 6,000 mapped here.",
   );
+
+  // Codex r55: the COMPOSED panel never frames the plotted Σ as the book's.
+  // The function-level negative alone cannot catch a dek or aria label that
+  // reintroduces "the book's" beside the "mapped here" answer.
+  const composedPanel = await page.getByTestId("book-risk-map").textContent();
+  expect(composedPanel).not.toContain("the book's");
+  await expect(page.getByTestId("risk-map-dek")).toContainText("Where plotted debt sits");
 
   // RM-15 / AC-26: the coverage line renders on EVERY render, outside every
   // <details>, in the spec's own grammar.

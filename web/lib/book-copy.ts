@@ -9,8 +9,12 @@
  * there is no longer a scatter and a dek that describes a dead register is a
  * lie with good intentions.
  */
+// "plotted debt", never "the book's debt" (Codex r55): the map excludes the
+// source-filtered rows, so its Σ is NOT the on-book Σ the summary cards carry.
+// A dek that says "the book's" beside an ANSWER that says "mapped here" hands
+// the reader two contradictory totals under one name.
 export const RISK_MAP_DEK =
-  "Where the book's debt sits by headroom: the share of borrowing capacity each account has " +
+  "Where plotted debt sits by headroom: the share of borrowing capacity each account has " +
   "left before liquidation. Rows are headroom bands, columns are debt size, and the right " +
   "margin carries each band's exact Σ debt. A band holding few accounts can still carry more " +
   "debt than a crowded one.";

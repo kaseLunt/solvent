@@ -371,7 +371,7 @@ export function BookRiskMap({
             {/* ---- SLOT 4: VISUAL — direct labels and axis ticks only ---- */}
             <DensityMap
               result={binned}
-              label={`full-book risk map for ${engine}: debt (usd, log) vs headroom band, binned`}
+              label={`plotted-book risk map for ${engine}: debt (usd, log) vs headroom band, binned`}
               methodId={methodId}
               detailsId={forensicsId}
               selected={selected}

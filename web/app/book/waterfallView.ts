@@ -113,9 +113,13 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
     // "0.000000" is still zero, and a floored zero would fabricate a crit
     // residual bar for bad debt that does not exist (design ruling 1).
     if (/[1-9]/.test(at.cumulative_bad_debt_usd)) {
+      // The residual label LEADS with the exact ×factor, like its flow rung
+      // (Codex r55): the displayed percent truncates to one fraction digit,
+      // so legal neighbouring rungs (×0.9999, ×0.9998) share a percent and a
+      // percent-only label would render two indistinguishable ticks.
       steps.push({
         label:
-          `${percent} bad debt · ` +
+          `${times} · ${percent} bad debt · ` +
           `${groupDecimalString(String(at.insolvent_if_liquidated_accounts))} insolvent`,
         value: geometry(at.cumulative_bad_debt_usd, at.usd_decimals),
         display: usd(at.cumulative_bad_debt_usd, at.usd_decimals),
@@ -136,11 +140,20 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
 // in the method register, naming every qualifying rung.
 // ---------------------------------------------------------------------------
 
-/** The rungs whose counted classes are provably all dust, per class. */
+/**
+ * The rungs whose counted classes are provably all dust, per class.
+ *
+ * A rung's NAME carries its exact ×factor, never the percent alone (Codex
+ * r55): the displayed percent truncates to one fraction digit, so two legal
+ * grid points (×0.9999 and ×0.9998, both "−0.1%") would collapse into one
+ * name and the disclosure could pin the all-dust fact on the wrong rung. The
+ * factor label is derived from the wire's own exact rational, so it is a
+ * stable identity; the percent rides along in parentheses for readability.
+ */
 export interface WaterfallDustRungs {
-  /** Percent labels of flow rungs ("unshocked", "−10%", …). */
+  /** Rung names of flow rungs ("unshocked", "×0.90 (−10%)", …). */
   eligible: string[];
-  /** Percent labels of bad-debt rungs whose insolvent class is all dust. */
+  /** Rung names of bad-debt rungs whose insolvent class is all dust. */
   badDebt: string[];
 }
 
@@ -150,20 +163,23 @@ export function waterfallAllDustRungs(waterfall: Waterfall, engine: string): Wat
   for (const point of waterfall.points) {
     const at = point.engines.find((candidate) => candidate.engine === engine);
     if (at === undefined) continue;
-    const percent =
-      point.index === 0 ? "unshocked" : gridPercentLabel(point.factor, waterfall.grid_scale);
+    const name =
+      point.index === 0
+        ? "unshocked"
+        : `${factorTimesLabel(point.factor, waterfall.grid_scale)} ` +
+          `(${gridPercentLabel(point.factor, waterfall.grid_scale)})`;
     if (
       at.cumulative_eligible_accounts > 0 &&
       sumProvablyDust(at.cumulative_debt_eligible_usd, at.usd_decimals)
     ) {
-      rungs.eligible.push(percent);
+      rungs.eligible.push(name);
     }
     if (
       /[1-9]/.test(at.cumulative_bad_debt_usd) &&
       at.insolvent_if_liquidated_accounts > 0 &&
       sumProvablyDust(at.cumulative_bad_debt_usd, at.usd_decimals)
     ) {
-      rungs.badDebt.push(percent);
+      rungs.badDebt.push(name);
     }
   }
   return rungs;

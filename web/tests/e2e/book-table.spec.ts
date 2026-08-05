@@ -670,7 +670,7 @@ test("the risk map wears ONE axis vocabulary: debt (usd, log), $-prefixed — an
   ).toHaveCount(0);
   await expect(
     page.getByRole("img", {
-      name: "full-book risk map for aave_v3_etherfi: debt (usd, log) vs headroom band, binned",
+      name: "plotted-book risk map for aave_v3_etherfi: debt (usd, log) vs headroom band, binned",
     }),
   ).toBeVisible();
   await expect(map).toContainText("debt (usd, log)");

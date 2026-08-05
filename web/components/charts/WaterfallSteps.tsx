@@ -147,7 +147,10 @@ export function WaterfallSteps({ steps, width = 560, rowHeight = 34, label }: Wa
         const w = barW(step.value);
         const barX = margin.left + indentOf(step.kind);
         return (
-          <g key={step.label}>
+          // Keyed by position+kind, never by label (Codex r55): two legal
+          // neighbouring rungs can render equal display labels, and equal
+          // React keys silently drop one of them.
+          <g key={`${step.kind}-${String(index)}`}>
             <text
               className={styles.stepLabel}
               data-testid="waterfall-tick"

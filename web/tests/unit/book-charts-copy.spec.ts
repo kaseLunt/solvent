@@ -74,12 +74,15 @@ function fixtureWaterfall(): Waterfall {
 
 /**
  * W-VR defect 8 — THE TICK VOCABULARY, AS REGEXES. Every label is single
- * line: "×0.90 · −10% · 47 acct" / "×1.00 · unshocked · 48 acct" for flows,
- * "−10% bad debt · 48 insolvent" for residuals. Counts take grouped
- * thousands; "all dust" never rides a tick label.
+ * line and LEADS with its exact ×factor: "×0.90 · −10% · 47 acct" for flows,
+ * "×0.90 · −10% bad debt · 48 insolvent" for residuals (Codex r55: the
+ * percent truncates to one fraction digit, so a percent-only residual label
+ * collides across legal neighbouring rungs). Counts take grouped thousands;
+ * "all dust" never rides a tick label.
  */
 const FLOW_TICK = /^×\d+\.\d{2,} · (unshocked|−\d+(\.\d+)?%) · \d{1,3}(,\d{3})* acct$/u;
-const RESIDUAL_TICK = /^(unshocked|−\d+(\.\d+)?%) bad debt · \d{1,3}(,\d{3})* insolvent$/u;
+const RESIDUAL_TICK =
+  /^×\d+\.\d{2,} · (unshocked|−\d+(\.\d+)?%) bad debt · \d{1,3}(,\d{3})* insolvent$/u;
 
 test.describe("waterfall step grammar (§18, single-line ticks per W-VR)", () => {
   test("factor labels pad to two fraction digits: ×0.90, ×1.00", () => {
@@ -106,7 +109,7 @@ test.describe("waterfall step grammar (§18, single-line ticks per W-VR)", () =>
       kind: "flow",
     });
     expect(steps[1]).toMatchObject({
-      label: "unshocked bad debt · 1 insolvent",
+      label: "×1.00 · unshocked bad debt · 1 insolvent",
       display: "$239.603961", // the exact micro-string, never rounded
       kind: "residual",
     });
@@ -117,7 +120,7 @@ test.describe("waterfall step grammar (§18, single-line ticks per W-VR)", () =>
       kind: "flow",
     });
     expect(steps[3]).toMatchObject({
-      label: "−10% bad debt · 1 insolvent",
+      label: "×0.90 · −10% bad debt · 1 insolvent",
       display: "$635.643565",
       kind: "residual",
     });
@@ -160,7 +163,7 @@ test.describe("waterfall step grammar (§18, single-line ticks per W-VR)", () =>
     });
     // Bad debt is "0" through −20%: NO residual steps exist for those points.
     expect(steps.filter((step) => step.kind === "residual")[0]).toMatchObject({
-      label: "−30% bad debt · 1 insolvent",
+      label: "×0.70 · −30% bad debt · 1 insolvent",
       display: "$666.66666667",
     });
     // The fixture's classes are not dust, so the disclosure line is NULL —
@@ -205,7 +208,7 @@ test.describe("waterfall step grammar (§18, single-line ticks per W-VR)", () =>
       display: "$9.999999", // exact, never rounded
     });
     expect(steps[1]).toMatchObject({
-      label: "unshocked bad debt · 2 insolvent",
+      label: "×1.00 · unshocked bad debt · 2 insolvent",
       display: "$0.000005", // the exact micro-string still prints
     });
     // The tick labels carry NO dust qualifier…
@@ -219,6 +222,60 @@ test.describe("waterfall step grammar (§18, single-line ticks per W-VR)", () =>
     expect(waterfallAllDustLine(waterfallAllDustRungs(waterfall, "debt_manager"))).toBe(
       "all dust: every eligible account at unshocked is dust-sized (Σ eligible debt < $10); " +
         "every insolvent account at unshocked bad debt is dust-sized (Σ bad debt < $10).",
+    );
+  });
+
+  test("rung identity survives percent truncation: ×0.9999 and ×0.9998 never collide (Codex r55)", () => {
+    // Both factors truncate to the SAME displayed percent (−0.1%), which is a
+    // legal grid (strictly descending interior factors). Identity therefore
+    // rides the exact ×factor: labels stay distinct, and the dust disclosure
+    // names the factor so the fact can never attach to the wrong rung.
+    const engineAt = (eligibleUsd: string, badUsd: string, insolvent: number) => ({
+      engine: "debt_manager",
+      usd_decimals: 6,
+      newly_eligible_accounts: 0,
+      cumulative_eligible_accounts: 1,
+      cumulative_debt_eligible_usd: eligibleUsd,
+      cumulative_collateral_at_risk_usd: "0",
+      insolvent_if_liquidated_accounts: insolvent,
+      cumulative_bad_debt_usd: badUsd,
+    });
+    const waterfall: Waterfall = {
+      scenario_id: "t",
+      scenario_version: "v1",
+      axis: "eth_usd",
+      grid_scale: "1000000000000000000",
+      points: [
+        { index: 0, factor: "1000000000000000000", engines: [engineAt("50000000", "0", 0)] },
+        // ×0.9999 → −0.1% displayed; eligible Σ $9.999999 is provably dust.
+        { index: 1, factor: "999900000000000000", engines: [engineAt("9999999", "3", 1)] },
+        // ×0.9998 → the SAME −0.1% displayed; NOT dust ($50).
+        { index: 2, factor: "999800000000000000", engines: [engineAt("50000000", "5", 1)] },
+      ],
+      held_flat: [],
+      eligibility_note: "",
+      monotonicity: { ok: true },
+      at_risk_note: "",
+      excluded_engines: [],
+    };
+    const steps = buildWaterfallSteps(waterfall, "debt_manager");
+    const labels = steps.map((step) => step.label);
+    // Every label is unique even though the two projections share a percent.
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels).toContain("×0.9999 · −0.1% · 1 acct");
+    expect(labels).toContain("×0.9998 · −0.1% · 1 acct");
+    expect(labels).toContain("×0.9999 · −0.1% bad debt · 1 insolvent");
+    expect(labels).toContain("×0.9998 · −0.1% bad debt · 1 insolvent");
+    // The disclosure pins the fact to ×0.9999 ALONE, by factor, not percent.
+    expect(waterfallAllDustRungs(waterfall, "debt_manager")).toEqual({
+      eligible: ["×0.9999 (−0.1%)"],
+      badDebt: ["×0.9999 (−0.1%)", "×0.9998 (−0.1%)"],
+    });
+    const line = waterfallAllDustLine(waterfallAllDustRungs(waterfall, "debt_manager"));
+    expect(line).toBe(
+      "all dust: every eligible account at ×0.9999 (−0.1%) is dust-sized " +
+        "(Σ eligible debt < $10); every insolvent account at ×0.9999 (−0.1%), " +
+        "×0.9998 (−0.1%) bad debt is dust-sized (Σ bad debt < $10).",
     );
   });
 
