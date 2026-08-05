@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -200,16 +202,103 @@ func TestSetRunShockReachNoteIsTheArmsOwn(t *testing.T) {
 		"the no-mark-moved sentence is the one that names the transform, and it is the one the declared hold must not borrow")
 }
 
+// srHeldTotalRe matches arm 5's LEADING TOTAL — the "all N held mark(s)" a
+// composed sentence states before naming its causes. It is a regexp rather than
+// a substring because the law is about the NUMBER, and a substring check for one
+// spelling of it cannot fail on a different wrong number.
+var srHeldTotalRe = regexp.MustCompile(`all (\d+) held mark\(s\)`)
+
+// srRequireCauseClauseNamesExactly is the composition law BOTH halves of the
+// arm-5 cause check answer to — the pure table below and the served-body sweep
+// in p5_runbook_set_reach_db_test.go.
+//
+// It states two things over one sentence:
+//
+//	(1) NAMES EXACTLY. Every cause whose count is nonzero is named, and no cause
+//	    whose count is zero is named. A sentence that named a cause holding
+//	    nothing is a true zero under a false cause, which is the defect this
+//	    whole component exists to refuse.
+//	(2) THE TOTAL IS THE SUM. Any "all N held mark(s)" the sentence leads with
+//	    must be transform + arithmetic + declared. Round 53's composer read only
+//	    two of the three counts, so a book holding one mark by a transform and one
+//	    at a declared identity factor served "all 1 held mark(s)" and then printed
+//	    the true 1/1 split one sentence later, in the same response.
+//
+// The markers are UPPERCASE on purpose: every sentence in this component
+// mentions a pricing transform or the arithmetic in passing, in lower case
+// ("No pricing transform pinned any of them"), and only the sentence that
+// ATTRIBUTES a cause shouts it.
+func srRequireCauseClauseNamesExactly(t *testing.T, where, note string, transform, arithmetic, declared int) {
+	t.Helper()
+	nonzero := 0
+	for _, n := range []int{transform, arithmetic, declared} {
+		if n > 0 {
+			nonzero++
+		}
+	}
+	require.Positive(t, nonzero,
+		"%s: `no_mark_moved` over applied rows attributes at least one held mark to a cause", where)
+
+	for _, c := range []struct {
+		marker string
+		phrase string
+		n      int
+		what   string
+	}{
+		{"PRICING TRANSFORM",
+			strconv.Itoa(transform) + " mark(s) were pinned by a PRICING TRANSFORM", transform,
+			"a pricing transform"},
+		{"EXACT-INTEGER ARITHMETIC",
+			strconv.Itoa(arithmetic) + " came back unchanged from EXACT-INTEGER ARITHMETIC", arithmetic,
+			"exact-integer arithmetic"},
+		{"DEFINITION",
+			strconv.Itoa(declared) + " mark(s) were held at the identity factor this scenario DECLARED", declared,
+			"an identity factor this scenario declared"},
+	} {
+		if c.n == 0 {
+			require.NotContains(t, note, c.marker,
+				"%s holds NO mark by %s and its sentence names that cause anyway — a true zero under a false cause",
+				where, c.what)
+			continue
+		}
+		require.Contains(t, note, c.marker,
+			"%s holds %d mark(s) by %s and its sentence does not name that cause at all", where, c.n, c.what)
+		if nonzero > 1 {
+			require.Contains(t, note, c.phrase,
+				"%s holds marks by %d causes, so each named cause must carry ITS OWN count (%d by %s) rather than one "+
+					"number standing for the whole held set", where, nonzero, c.n, c.what)
+		}
+	}
+
+	// THE SUM LAW.
+	sum := transform + arithmetic + declared
+	if nonzero > 1 {
+		require.Regexp(t, srHeldTotalRe, note,
+			"%s composes %d causes and states no total, so nothing in the sentence can be checked against the sum of "+
+				"the counts served beside it", where, nonzero)
+	}
+	for _, m := range srHeldTotalRe.FindAllStringSubmatch(note, -1) {
+		require.Equal(t, strconv.Itoa(sum), m[1],
+			"%s says \"all %s held mark(s)\" while its own counts hold %d (%d by a transform, %d by arithmetic, %d at a "+
+				"declared identity factor) — the sentence contradicts the numbers served in the same object",
+			where, m[1], sum, transform, arithmetic, declared)
+	}
+}
+
 // TestSetRunNoMarkMovedNamesTheCauseItsCountsShow pins arm 5's sentence to the
-// COUNTS THE SAME RESPONSE SERVES, in every composition those counts admit.
+// COUNTS THE SAME RESPONSE SERVES, in EVERY composition those counts admit —
+// three pure causes, three pairs and the triple, seven in all.
 //
 // The arm's condition is "rows were applied and none of them moved", which says
-// nothing about why. Its sentence used to assert one fixed cause — the pricing
+// nothing about why. Its sentence first asserted one fixed cause — the pricing
 // transforms — while `setRunHeldCause` was busy classifying a third cause,
 // `arithmetic`, for a mark that came back unchanged from `MulDivFloor` with no
-// snap and no cap. On such a book the served sentence blamed the oracle for a
-// hold the oracle had no part in: the same true-zero-under-a-false-cause defect
-// this component exists to refuse, one arm further down.
+// snap and no cap. The repair for THAT read two counts and still ignored
+// `marks_held_by_declared_factor`, so a scenario declaring one identity shock
+// and one sized-but-snapped shock served "all 1 held mark(s)" over a book that
+// held two, with the accurate 1/1 split printed one sentence later. Both
+// versions are the same defect: a true zero under a false cause, one arm below
+// the arm this component was built for.
 func TestSetRunNoMarkMovedNamesTheCauseItsCountsShow(t *testing.T) {
 	sc := risk.Scenario{ID: "x", Version: "v1", PathAssumption: "no move is asserted"}
 	note := func(r wireSetRunShockReach) string {
@@ -217,81 +306,150 @@ func TestSetRunNoMarkMovedNamesTheCauseItsCountsShow(t *testing.T) {
 	}
 	rows := func(n int) []wireAppliedShock { return make([]wireAppliedShock, n) }
 
-	// Every case is a real partition of its own applied set: moved 0, and the
-	// three cause counts summing to len(applied_shocks) exactly as
-	// `setRunShockReach` refuses to serve anything else.
-	transformOnly := wireSetRunShockReach{
-		DeclaredShocks: 3, AppliedShocks: rows(4), MarksHeldByTransform: 4,
-	}
-	arithmeticOnly := wireSetRunShockReach{
-		DeclaredShocks: 1, AppliedShocks: rows(2), MarksHeldByArithmetic: 2,
-	}
-	mixed := wireSetRunShockReach{
-		DeclaredShocks: 2, AppliedShocks: rows(5), MarksHeldByTransform: 3, MarksHeldByArithmetic: 2,
-	}
-	// The fourth composition, and it is REACHABLE rather than defensive: a
-	// scenario declaring one sized shock and one identity shock, over a book
-	// pricing only the marks the identity shock describes, is not arm 3 (not
-	// every declared shock is at identity) and lands here with every hold at its
-	// declared factor.
-	declaredOnly := wireSetRunShockReach{
-		DeclaredShocks: 2, AppliedShocks: rows(3), MarksHeldByDeclaredFactor: 3,
+	// ALL SEVEN COMPOSITIONS. Every one is a real partition of its own applied
+	// set: moved 0, and the three cause counts summing to len(applied_shocks)
+	// exactly as `setRunShockReach` refuses to serve anything else. The counts
+	// differ between cases on purpose, so a substring row below cannot be
+	// satisfied by another case's number.
+	cases := []struct {
+		name                            string
+		why                             string
+		r                               wireSetRunShockReach
+		transform, arithmetic, declared int
+	}{
+		{
+			name: "transform only",
+			why:  "stable_depeg_0995_in_band over the committed four-row control",
+			r: wireSetRunShockReach{
+				DeclaredShocks: 3, AppliedShocks: rows(4), MarksHeldByTransform: 4,
+			},
+			transform: 4,
+		},
+		{
+			name: "arithmetic only",
+			why:  "one sized shock whose floor lands on the integer the mark started from",
+			r: wireSetRunShockReach{
+				DeclaredShocks: 1, AppliedShocks: rows(2), MarksHeldByArithmetic: 2,
+			},
+			arithmetic: 2,
+		},
+		{
+			// REACHABLE rather than defensive: a scenario declaring one sized shock
+			// and one identity shock, over a book pricing only the marks the
+			// identity shock describes, is not arm 3 (not every declared shock is at
+			// identity) and lands here with every hold at its declared factor.
+			name: "declared factor only",
+			why:  "a sized shock the book's marks do not answer to, beside an identity shock that reaches them",
+			r: wireSetRunShockReach{
+				DeclaredShocks: 2, AppliedShocks: rows(3), MarksHeldByDeclaredFactor: 3,
+			},
+			declared: 3,
+		},
+		{
+			name: "transform and arithmetic",
+			why:  "a snapped stable beside a dust mark the floor returns unchanged",
+			r: wireSetRunShockReach{
+				DeclaredShocks: 2, AppliedShocks: rows(5), MarksHeldByTransform: 3, MarksHeldByArithmetic: 2,
+			},
+			transform: 3, arithmetic: 2,
+		},
+		{
+			// THE ROUND-53 FINDING, stated as facts. One identity shock and one
+			// sized-but-snapped shock: two held marks, two DIFFERENT causes, and a
+			// composer reading only two of the three counts publishes "all 1".
+			name: "transform and declared factor",
+			why:  "one identity shock (a declared hold) beside one sized shock the snap band pinned",
+			r: wireSetRunShockReach{
+				DeclaredShocks: 2, AppliedShocks: rows(3), MarksHeldByTransform: 2, MarksHeldByDeclaredFactor: 1,
+			},
+			transform: 2, declared: 1,
+		},
+		{
+			name: "arithmetic and declared factor",
+			why:  "one identity shock beside one sized shock the floor returns unchanged",
+			r: wireSetRunShockReach{
+				DeclaredShocks: 2, AppliedShocks: rows(4), MarksHeldByArithmetic: 3, MarksHeldByDeclaredFactor: 1,
+			},
+			arithmetic: 3, declared: 1,
+		},
+		{
+			name: "all three causes",
+			why:  "a snapped stable, a dust mark the floor returns unchanged, and an identity shock",
+			r: wireSetRunShockReach{
+				DeclaredShocks: 3, AppliedShocks: rows(6),
+				MarksHeldByTransform: 3, MarksHeldByArithmetic: 2, MarksHeldByDeclaredFactor: 1,
+			},
+			transform: 3, arithmetic: 2, declared: 1,
+		},
 	}
 
-	t.Run("transform only", func(t *testing.T) {
-		n := note(transformOnly)
-		require.Contains(t, n, "PRICING TRANSFORMS")
-		require.Contains(t, n, "stable snap")
-		require.Contains(t, n, "snapped stable BASE",
+	// THE PARTITION IS A PRECONDITION OF THE TABLE, not a hope: a case whose
+	// counts did not close would be testing a body `setRunShockReach` refuses to
+	// serve, and the law would then be about nothing.
+	for _, tc := range cases {
+		require.Equal(t, tc.r.AppliedRows(), tc.transform+tc.arithmetic+tc.declared,
+			"%s: %s — the three cause counts must account for every applied row under this arm", tc.name, tc.why)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srRequireCauseClauseNamesExactly(t, tc.name, note(tc.r), tc.transform, tc.arithmetic, tc.declared)
+		})
+	}
+
+	// THE SENTENCES THAT ARE NOT COMPOSED FROM A SHARED TEMPLATE, pinned by the
+	// phrases their readers rely on.
+	t.Run("the three pure causes keep their own phrasing", func(t *testing.T) {
+		pure := note(cases[0].r)
+		require.Contains(t, pure, "PRICING TRANSFORMS' doing")
+		require.Contains(t, pure, "stable snap")
+		require.Contains(t, pure, "snapped stable BASE",
 			"naming the stable snap ALONE is the sentence that is false on the fourth row of the committed control")
-		require.Contains(t, n, "not the book's")
-		require.Contains(t, n, "4", "the sentence carries the count it is derived from")
-		require.NotContains(t, n, "EXACT-INTEGER ARITHMETIC",
-			"no mark was held by arithmetic on this book and the sentence must not claim one was")
+		require.Contains(t, pure, "not the book's")
+		require.Contains(t, pure, "all 4 held mark(s)")
+
+		pure = note(cases[1].r)
+		require.Contains(t, pure, "EXACT-INTEGER ARITHMETIC's doing")
+		require.Contains(t, pure, "No pricing transform pinned any of them")
+		require.Contains(t, pure, "all 2 held mark(s)")
+
+		pure = note(cases[2].r)
+		require.Contains(t, pure, "DEFINITION's doing")
+		require.Contains(t, pure, "the scenario also declares a sized shock the book's marks did not answer to")
 	})
 
-	t.Run("arithmetic only", func(t *testing.T) {
-		n := note(arithmeticOnly)
-		require.Contains(t, n, "EXACT-INTEGER ARITHMETIC")
-		require.Contains(t, n, "No pricing transform pinned any of them")
-		require.NotContains(t, n, "PRICING TRANSFORM",
-			"THE REGRESSION: every mark here was returned unchanged by exact-integer arithmetic, and a sentence naming "+
-				"the pricing transforms as the cause blames the oracle for a hold the oracle had no part in")
+	t.Run("a composed sentence counts its causes and states the sum", func(t *testing.T) {
+		require.Contains(t, note(cases[3].r), "TWO causes")
+		require.Contains(t, note(cases[3].r), "all 5 held mark(s)")
+		require.Contains(t, note(cases[4].r), "TWO causes")
+		require.Contains(t, note(cases[5].r), "TWO causes")
+		require.Contains(t, note(cases[6].r), "THREE causes")
+		require.Contains(t, note(cases[6].r), "all 6 held mark(s)")
+
+		// THE REGRESSION, SPELLED OUT. A composer reading only the transform and
+		// arithmetic counts serves the transform-only sentence here, whose total is
+		// 2 over a book that held 3.
+		mixedDeclared := note(cases[4].r)
+		require.NotContains(t, mixedDeclared, "all 2 held mark(s)",
+			"the transform count is 2 and the held total is 3; a sentence leading with the transform count alone "+
+				"contradicts the `marks_held_by_declared_factor` served beside it")
+		require.Contains(t, mixedDeclared, "Of the held marks: 2 pinned by a pricing transform",
+			"and the split clause one sentence later is what makes the contradiction visible in the same response")
+		require.Contains(t, mixedDeclared, "1 held at the identity factor this scenario declared for them.")
 	})
 
-	t.Run("both causes", func(t *testing.T) {
-		n := note(mixed)
-		require.Contains(t, n, "PRICING TRANSFORM")
-		require.Contains(t, n, "EXACT-INTEGER ARITHMETIC")
-		require.Contains(t, n, "3 mark(s) were pinned")
-		require.Contains(t, n, "2 came back unchanged",
-			"a mixed book gets BOTH counts, so a reader can tell which marks belong to which cause instead of being "+
-				"handed one cause for five marks")
-		require.Contains(t, n, "TWO causes")
-	})
-
-	t.Run("neither: every hold is at a declared identity factor", func(t *testing.T) {
-		n := note(declaredOnly)
-		require.Contains(t, n, "DEFINITION's doing")
-		require.NotContains(t, n, "PRICING TRANSFORM")
-		require.NotContains(t, n, "EXACT-INTEGER ARITHMETIC")
-	})
-
-	// AND THE FOUR ARE GENUINELY DIFFERENT SENTENCES. A composition that
+	// AND THE SEVEN ARE GENUINELY DIFFERENT SENTENCES. A composition that
 	// collapsed to one string would satisfy the substring rows above the moment
 	// the fixed sentence happened to contain every phrase.
 	seen := map[string]string{}
-	for name, r := range map[string]wireSetRunShockReach{
-		"transform_only": transformOnly, "arithmetic_only": arithmeticOnly,
-		"mixed": mixed, "declared_only": declaredOnly,
-	} {
-		n := note(r)
+	for _, tc := range cases {
+		n := note(tc.r)
 		for other, prev := range seen {
-			require.NotEqual(t, prev, n, "compositions %q and %q serve the SAME sentence", other, name)
+			require.NotEqual(t, prev, n, "compositions %q and %q serve the SAME sentence", other, tc.name)
 		}
-		seen[name] = n
+		seen[tc.name] = n
 	}
-	require.Len(t, seen, 4)
+	require.Len(t, seen, 7, "the three cause counts admit seven compositions and each gets its own sentence")
 }
 
 // TestDecodeSetRunRequestRequiresTheBodyToEnd is the EOF law at the decoder,

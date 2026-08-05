@@ -212,42 +212,88 @@ func setRunShockReachNote(arm string, sc risk.Scenario, r wireSetRunShockReach) 
 // and never from a fixed sentence.
 //
 // The arm's condition is `AppliedRows > 0 && MarksMoved == 0`, which says
-// nothing about WHY. The cause partition underneath it admits three terms, and
-// `setRunHeldCause` classifies a mark that came back unchanged from
-// `MulDivFloor` with no snap and no cap as `arithmetic` — a hold the pricing
-// transforms had no part in. A sentence that always blamed the transforms was
-// therefore false on every book whose holds are arithmetic, which is the same
-// defect this whole component exists for (a true zero under a false cause),
-// only one arm further down.
+// nothing about WHY. The cause partition underneath it admits THREE terms, and
+// the clause is composed from ALL THREE COUNTS:
 //
-// So the clause is composed: transform-only, arithmetic-only, both, or neither.
-// The fourth is reachable and is not a contradiction — a scenario declaring one
-// sized shock and one identity shock, over a book that prices only the marks the
-// identity shock describes, lands here with every hold at its declared factor.
+//	transform        the Debt Manager's stable snap band, a snapped stable BASE
+//	                 or a bound price cap pinned the mark — the ORACLE PATH's
+//	                 doing, and a property of no position.
+//	arithmetic       `MulDivFloor` returned the mark unchanged with no snap and
+//	                 no cap anywhere near it — nothing the oracle did.
+//	declared_factor  this scenario's OWN 1/1 shock held the mark. Arm 3 takes the
+//	                 scenario whose shocks are ALL at identity, so a declared hold
+//	                 reaching arm 5 means the scenario ALSO declares a sized
+//	                 shock: a legal, reachable shape rather than a contradiction.
+//
+// All SEVEN compositions of those counts are reachable — three pure, three
+// pairs, and the triple — and each gets its own sentence.
+//
+// TWO DEFECTS ARE FIXED HERE AND BOTH ARE THE SAME DEFECT. A sentence that
+// always blamed the transforms was false on every book whose holds are
+// arithmetic. A sentence composed from only the transform and arithmetic counts
+// was worse: on the one-identity-shock-plus-one-snapped-shock book it read "all
+// 1 held mark(s)" over a book that held TWO, and `heldSplitClause` printed the
+// true 1/1 split one sentence later — the response contradicting ITSELF about
+// its own counts, under an arm whose whole job is to refuse a true zero under a
+// false cause.
+//
+// THE TOTAL IS THE SUM. Wherever a sentence below says "all N held mark(s)", N
+// is `transform + arithmetic + declared`, so the figure the prose leads with can
+// never disagree with the three counts served beside it.
 func noMarkMovedCauseClause(r wireSetRunShockReach) string {
 	transform, arithmetic := r.MarksHeldByTransform, r.MarksHeldByArithmetic
-	transformTerm := strconv.Itoa(transform) + " mark(s) were pinned by a PRICING TRANSFORM (the Debt Manager's stable " +
-		"snap band, a snapped stable BASE, or a bound price cap, each of them a property of the oracle path rather than " +
-		"of any position)"
-	arithmeticTerm := strconv.Itoa(arithmetic) + " came back unchanged from EXACT-INTEGER ARITHMETIC (the floor of " +
-		"before x factor_num / factor_den landed on the integer it started from, and no pricing transform touched them)"
+	declared := r.MarksHeldByDeclaredFactor
+	held := transform + arithmetic + declared
 	switch {
-	case transform > 0 && arithmetic == 0:
-		return "This zero is the PRICING TRANSFORMS' doing, not the book's: all " + strconv.Itoa(transform) +
+	case held == 0:
+		// UNREACHABLE ON A SERVED BODY, and stated rather than assumed.
+		// `setRunShockReach` refuses any response whose four counts do not
+		// partition `applied_shocks`, and this arm's own condition is
+		// `AppliedRows > 0 && MarksMoved == 0`, so the three cause counts sum to at
+		// least one. A clause that named a cause here would be inventing one.
+		return "No held mark on this book is attributed to any cause: the three `marks_held_by_*` counts are all zero, " +
+			"and this sentence names no cause rather than inventing one."
+	case transform > 0 && arithmetic == 0 && declared == 0:
+		return "This zero is the PRICING TRANSFORMS' doing, not the book's: all " + strconv.Itoa(held) +
 			" held mark(s) were pinned by the Debt Manager's stable snap band, by a snapped stable BASE, or by a bound " +
 			"price cap, each of them a property of the oracle path rather than of any position."
-	case transform == 0 && arithmetic > 0:
+	case arithmetic > 0 && transform == 0 && declared == 0:
 		return "This zero is EXACT-INTEGER ARITHMETIC's doing, not the oracle's and not the book's: all " +
-			strconv.Itoa(arithmetic) + " held mark(s) came back at the value they started at because the floor of " +
+			strconv.Itoa(held) + " held mark(s) came back at the value they started at because the floor of " +
 			"before x factor_num / factor_den landed on the integer it started from. No pricing transform pinned any of " +
 			"them, so this sentence claims nothing about a snap or a cap."
-	case transform > 0 && arithmetic > 0:
-		return "This zero has TWO causes on this book and neither of them is the book's sensitivity: " + transformTerm +
-			", and " + arithmeticTerm + "."
+	case declared > 0 && transform == 0 && arithmetic == 0:
+		return "This zero is the DEFINITION's doing on the marks that were applied: no held mark was pinned by a pricing " +
+			"transform and none came back unchanged from arithmetic, so each was held at an identity factor this scenario " +
+			"declared for it while the scenario also declares a sized shock the book's marks did not answer to."
 	}
-	return "This zero is the DEFINITION's doing on the marks that were applied: no held mark was pinned by a pricing " +
-		"transform and none came back unchanged from arithmetic, so each was held at an identity factor this scenario " +
-		"declared for it while the scenario also declares a sized shock the book's marks did not answer to."
+
+	// TWO OR THREE CAUSES. Every nonzero term is named WITH ITS OWN COUNT and the
+	// zero terms are omitted, so a reader is never shown a cause that held
+	// nothing, and the leading total is the SUM rather than one term of it.
+	var parts []string
+	if transform > 0 {
+		parts = append(parts, strconv.Itoa(transform)+" mark(s) were pinned by a PRICING TRANSFORM (the Debt Manager's "+
+			"stable snap band, a snapped stable BASE, or a bound price cap, each of them a property of the oracle path "+
+			"rather than of any position)")
+	}
+	if arithmetic > 0 {
+		parts = append(parts, strconv.Itoa(arithmetic)+" came back unchanged from EXACT-INTEGER ARITHMETIC (the floor of "+
+			"before x factor_num / factor_den landed on the integer it started from, and no pricing transform touched them)")
+	}
+	if declared > 0 {
+		parts = append(parts, strconv.Itoa(declared)+" mark(s) were held at the identity factor this scenario DECLARED "+
+			"for them (the DEFINITION's own disclosed decision to hold those marks, which neither the oracle path nor "+
+			"the arithmetic had any part in)")
+	}
+	lead := "This zero has TWO causes on this book and neither of them is the book's sensitivity: "
+	if len(parts) == 3 {
+		lead = "This zero has THREE causes on this book and none of them is the book's sensitivity: "
+	}
+	return lead + strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1] +
+		". That is all " + strconv.Itoa(held) + " held mark(s) on this book: the three `marks_held_by_*` counts beside " +
+		"this partition the held marks, so every one of them is counted under exactly one cause and the total above is " +
+		"their sum."
 }
 
 // heldSplitClause prints ONLY the nonzero cause terms, so a reader is never

@@ -5,7 +5,6 @@ package main
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -133,6 +132,212 @@ func newSetRunHoldCauseFixture(t *testing.T) *apiFixture {
 		OutOfModel:     []string{"seeded fixture for the arithmetic-only hold-cause composition"},
 	})
 	return f
+}
+
+// ---------------------------------------------------------------------------
+// The declared-hold-inside-arm-5 book: a hold arm 3 does NOT take
+// ---------------------------------------------------------------------------
+
+const (
+	srDeclaredAndTransformScenario = "sr_declared_and_transform_hold"
+	srAllThreeHoldScenario         = "sr_all_three_hold_causes"
+)
+
+// srIdentityHoldRow is a plain propagation row — no snap, no base, no cap — so
+// the ONLY thing that can hold the mark it describes is the identity factor the
+// scenario declares for it. A row carrying a transform flag would leave the
+// cause ambiguous to a reader even though `setRunHeldCause` orders it, and this
+// fixture's whole point is a cause that is unarguable from the book.
+func srIdentityHoldRow(asset common.Address, symbol string) risk.AssetResponse {
+	return risk.AssetResponse{
+		Asset: asset.Hex(), ChainID: fxOPChain, Symbol: symbol,
+		RespondsTo: []risk.AxisRef{srAxis(risk.AxisAssetUSD, asset)},
+	}
+}
+
+// srSnappedStableRow is the committed in-band control's shape for one stable:
+// `stable_snap`, which pins floor(1000000 × 995/1000) = 995000 back to 1000000
+// — a TRANSFORM hold on a par-marked mark.
+func srSnappedStableRow(asset common.Address, symbol string) risk.AssetResponse {
+	return risk.AssetResponse{
+		Asset: asset.Hex(), ChainID: fxOPChain, Symbol: symbol,
+		RespondsTo: []risk.AxisRef{srAxis(risk.AxisStableUSD, asset)},
+		StableSnap: true,
+	}
+}
+
+// newSetRunDeclaredHoldFixture is the round-53 book: arm 5 reached with a hold
+// at a DECLARED IDENTITY FACTOR beside holds the definition had no part in.
+//
+// # Why this is reachable, and why no committed scenario produces it
+//
+// Arm 3 claims the scenario whose shocks are ALL at the identity factor, so a
+// declared hold can only reach arm 5 in company: the scenario must ALSO declare
+// a sized shock. Both seeded definitions below do exactly that, and both
+// validate through `risk.Scenario.Validate` exactly as a committed file must.
+//
+//	sr_declared_and_transform_hold  USDC at 995/1000 under `stable_snap` (pinned
+//	                                back to par — a TRANSFORM hold) beside DUST
+//	                                at the identity factor 1/1 (a DECLARED hold).
+//	                                Two held marks, two causes, and a composer
+//	                                reading only the transform and arithmetic
+//	                                counts publishes "all 1 held mark(s)".
+//	sr_all_three_hold_causes        the same two plus USDT at 1/1, so all THREE
+//	                                cause counts are nonzero in one response.
+//
+// The book is its own fixture rather than an addition to
+// `newSetRunHoldCauseFixture`, so the two scenarios seeded there keep the exact
+// applied sets their laws pin.
+func newSetRunDeclaredHoldFixture(t *testing.T) *apiFixture {
+	t.Helper()
+	f := newBareAPIFixture(t)
+	f.seedP5Events(t)
+	f.seedSubstrate(t)
+	f.seedP5ParamHistory(t)
+	dm := srDMWithPrices(
+		srDMPrice(fxAcctDM, srUSDCOp, fxOPChain, "1000000"),
+		srDMPrice(fxAcctDM, srDustOp, fxOPChain, "500"),
+		srDMPrice(fxAcctDM, srUSDTOp, fxOPChain, "1000000"),
+	)
+	f.srSeed(t, srBatchWrite("set-run-declared-hold-1",
+		fxAavePosition(), fxAaveRefused(), dm, fxDMRefused()))
+	f.seedP5Headers(t)
+	f.startServerWithFeeds(t, fxP5Feeds())
+	f.srv.evidence = p5EvidenceStatics(t)
+
+	f.srInject(t, risk.Scenario{
+		ID: srDeclaredAndTransformScenario, Version: "v1",
+		Label: "seeded: one mark held at a declared identity factor, one pinned by a transform", Description: "seeded fixture",
+		PathAssumption: "seeded fixture: one sized shock and one identity shock, and the two marks they reach are both " +
+			"held — for two DIFFERENT reasons, only one of which is the oracle path's",
+		Engines: []string{risk.DMEngine},
+		Shocks: []risk.Shock{
+			{Axis: risk.AxisStableUSD, Asset: srUSDCOp.Hex(), FactorNum: 995, FactorDen: 1000},
+			// THE DECLARED HOLD, and it is what keeps this out of arm 3: the
+			// scenario's shocks are not ALL at identity.
+			{Axis: risk.AxisAssetUSD, Asset: srDustOp.Hex(), FactorNum: 1, FactorDen: 1},
+		},
+		Propagation: []risk.AssetResponse{
+			srSnappedStableRow(srUSDCOp, "USDC"),
+			srIdentityHoldRow(srDustOp, "DUST"),
+		},
+		OutOfModel: []string{"seeded fixture for the declared-factor-plus-transform hold-cause composition"},
+	})
+	f.srInject(t, risk.Scenario{
+		ID: srAllThreeHoldScenario, Version: "v1",
+		Label: "seeded: all three hold causes on one book", Description: "seeded fixture",
+		PathAssumption: "seeded fixture: three marks, three DIFFERENT reasons for coming back at the value they started at",
+		Engines:        []string{risk.DMEngine},
+		Shocks: []risk.Shock{
+			{Axis: risk.AxisStableUSD, Asset: srUSDCOp.Hex(), FactorNum: 995, FactorDen: 1000},
+			srArithmeticHoldShock(),
+			{Axis: risk.AxisAssetUSD, Asset: srUSDTOp.Hex(), FactorNum: 1, FactorDen: 1},
+		},
+		Propagation: []risk.AssetResponse{
+			srSnappedStableRow(srUSDCOp, "USDC"),
+			srArithmeticHoldRow(),
+			srIdentityHoldRow(srUSDTOp, "USDT"),
+		},
+		OutOfModel: []string{"seeded fixture for the three-cause hold composition"},
+	})
+	return f
+}
+
+// TestSetRunNoMarkMovedNamesADeclaredHoldBesideTheOtherCauses is the round-53
+// regression ON A SERVED BODY.
+//
+// A composer reading only `marks_held_by_transform` and
+// `marks_held_by_arithmetic` serves the transform-only sentence here — "all 1
+// held mark(s) were pinned by the Debt Manager's stable snap band" — over a book
+// that held TWO, and `heldSplitClause` then prints the accurate 1/1 split in the
+// same object. The response contradicts itself about its own counts, under the
+// one arm whose entire job is to refuse a true zero published under a false
+// cause.
+func TestSetRunNoMarkMovedNamesADeclaredHoldBesideTheOtherCauses(t *testing.T) {
+	f := newSetRunDeclaredHoldFixture(t)
+	results := srResults(t, f.srRun(t, http.StatusOK, srDeclaredAndTransformScenario, srAllThreeHoldScenario))
+
+	t.Run("a declared hold beside a transform hold: both causes, both counts", func(t *testing.T) {
+		reach := asMap(t, results[srDeclaredAndTransformScenario]["shock_reach"])
+
+		// (a) THE ARM, and it is NOT arm 3 — the scenario declares two shocks and
+		// only one of them is at the identity factor.
+		require.Equal(t, reachNoMarkMoved, reach["reach"])
+		require.Equal(t, 2, intOf(t, reach["declared_shocks"]))
+		require.Equal(t, 1, intOf(t, reach["declared_shocks_at_identity"]),
+			"one identity shock out of two: arm 3 requires ALL of them, which is what makes this hold arrive HERE")
+
+		// (b) THE BOOK: two applied rows, neither moved, held for two different
+		// reasons, and the causes are readable off the rows themselves.
+		require.Equal(t, 2, len(asList(t, reach["applied_shocks"])))
+		require.Equal(t, 0, intOf(t, reach["marks_moved"]))
+		require.Equal(t, 1, intOf(t, reach["marks_held_by_transform"]), "USDC, snapped back to par by the band")
+		require.Equal(t, 1, intOf(t, reach["marks_held_by_declared_factor"]), "DUST, held at the 1/1 this scenario declared")
+		require.Equal(t, 0, intOf(t, reach["marks_held_by_arithmetic"]))
+		for _, a := range asList(t, reach["applied_shocks"]) {
+			m := asMap(t, a)
+			require.Equal(t, m["before"], m["after"])
+			if strings.EqualFold(m["asset"].(string), srDustOp.Hex()) {
+				require.Equal(t, m["factor_num"], m["factor_den"], "the declared hold is the identity factor on the wire")
+				require.False(t, m["snapped"].(bool))
+				require.False(t, m["base_snapped"].(bool))
+				require.False(t, m["cap_bound"].(bool),
+					"no transform flag is set on this row at all, so nothing but the DECLARED FACTOR can be its cause")
+				continue
+			}
+			require.True(t, m["snapped"].(bool), "the stable is the one the band pinned")
+		}
+
+		// (c) THE SENTENCE NAMES BOTH CAUSES WITH BOTH COUNTS, and its total is
+		// the sum rather than one term of it.
+		note := reach["note"].(string)
+		require.Contains(t, note, "TWO causes")
+		require.Contains(t, note, "1 mark(s) were pinned by a PRICING TRANSFORM")
+		require.Contains(t, note, "1 mark(s) were held at the identity factor this scenario DECLARED")
+		require.Contains(t, note, "all 2 held mark(s)")
+		require.NotContains(t, note, "EXACT-INTEGER ARITHMETIC",
+			"no mark on this book came back unchanged from the arithmetic and the sentence must not claim one did")
+
+		// (d) THE REGRESSION, EXACTLY. The two-count composer serves the
+		// transform-only sentence, whose leading total is the transform count.
+		require.NotContains(t, note, "all 1 held mark(s)",
+			"THE ROUND-53 DEFECT: `marks_held_by_transform` is 1 and the held total is 2, so a sentence leading with "+
+				"\"all 1 held mark(s)\" is contradicted by `marks_held_by_declared_factor` in the same object")
+		require.NotContains(t, note, "PRICING TRANSFORMS' doing, not the book's",
+			"the transform-only sentence claims the whole zero for the oracle path; half of this zero is the "+
+				"DEFINITION's own disclosed decision")
+
+		// (e) AND THE SPLIT CLAUSE ONE SENTENCE LATER AGREES WITH IT. This is
+		// where the old response contradicted itself, so the agreement is
+		// asserted rather than assumed.
+		require.Contains(t, note, "Of the held marks: 1 pinned by a pricing transform "+
+			"(a stable snap, a snapped base or a bound cap), 1 held at the identity factor this scenario declared for them.")
+
+		srRequireCauseClauseNamesExactly(t, srDeclaredAndTransformScenario, note, 1, 0, 1)
+	})
+
+	t.Run("all three causes on one book", func(t *testing.T) {
+		reach := asMap(t, results[srAllThreeHoldScenario]["shock_reach"])
+		require.Equal(t, reachNoMarkMoved, reach["reach"])
+		require.Equal(t, 3, len(asList(t, reach["applied_shocks"])))
+		require.Equal(t, 0, intOf(t, reach["marks_moved"]))
+		require.Equal(t, 1, intOf(t, reach["marks_held_by_transform"]))
+		require.Equal(t, 1, intOf(t, reach["marks_held_by_arithmetic"]))
+		require.Equal(t, 1, intOf(t, reach["marks_held_by_declared_factor"]))
+
+		note := reach["note"].(string)
+		require.Contains(t, note, "THREE causes")
+		require.Contains(t, note, "all 3 held mark(s)")
+		srRequireCauseClauseNamesExactly(t, srAllThreeHoldScenario, note, 1, 1, 1)
+	})
+
+	// AND THE TWO COMPOSITIONS SERVE DIFFERENT SENTENCES, over one book and one
+	// arm. A composer blind to the third count serves the SAME transform-only
+	// string for both.
+	require.NotEqual(t,
+		asMap(t, results[srDeclaredAndTransformScenario]["shock_reach"])["note"],
+		asMap(t, results[srAllThreeHoldScenario]["shock_reach"])["note"],
+		"two arm-5 results whose cause counts differ served the same sentence")
 }
 
 // TestSetRunNoMarkMovedNamesTheCauseOnAServedBody is the DB corroboration for
@@ -371,6 +576,13 @@ func TestSetRunShockReachDisclosesASnappedControlAndADeclaredHold(t *testing.T) 
 			// already right.
 			{"hold causes", newSetRunHoldCauseFixture,
 				[]string{srMixedHoldScenario, srArithmeticHoldScenario}},
+			// And the two books whose holds include one the DEFINITION declared.
+			// Without them the sweep never sees a nonzero
+			// `marks_held_by_declared_factor` under arm 5 — which is how a rule
+			// REQUIRING that count to be zero here stood for two rounds while the
+			// composer quietly ignored it.
+			{"declared holds", newSetRunDeclaredHoldFixture,
+				[]string{srDeclaredAndTransformScenario, srAllThreeHoldScenario}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				f := tc.f(t)
@@ -413,37 +625,26 @@ func TestSetRunShockReachDisclosesASnappedControlAndADeclaredHold(t *testing.T) 
 					// AND THE CAUSE MUST BE CONSISTENT WITH THE COUNTS.
 					switch arm {
 					case reachNoMarkMoved:
-						require.Zero(t, intOf(t, reach["marks_held_by_declared_factor"]),
-							"%s publishes `no_mark_moved` while attributing a hold to the DECLARED FACTOR — that hold "+
-								"belongs to arm 3 and this arm's sentence blames the oracle for it", id)
+						// THE SENTENCE MUST NAME EXACTLY THE CAUSES ITS COUNTS
+						// SHOW, in whatever composition this book produced.
+						//
+						// This sweep first required `no_mark_moved` to hold NO
+						// mark at its declared factor, which is not a property
+						// of the arm at all: arm 3 takes the scenario whose
+						// shocks are ALL at identity, so a scenario declaring
+						// one identity shock beside one sized shock reaches arm
+						// 5 with a declared hold in hand. The old rule was a
+						// fixture-shaped assumption dressed as a law, and while
+						// it stood the composer was free to read two of the
+						// three counts and publish a total that contradicted the
+						// third one object away.
 						transform := intOf(t, reach["marks_held_by_transform"])
 						arithmetic := intOf(t, reach["marks_held_by_arithmetic"])
-						require.Positive(t, transform+arithmetic,
-							"%s publishes `no_mark_moved` and attributes no mark to a transform or to arithmetic", id)
-
-						// AND THE SENTENCE MUST BE THE ONE THOSE COUNTS SUPPORT.
-						// The arm's note used to assert ONE cause — the pricing
-						// transforms — over counts free to say otherwise, which
-						// is a true zero under a false cause: the exact defect
-						// this whole component exists to refuse, one arm down.
-						note := reach["note"].(string)
-						switch {
-						case transform > 0 && arithmetic == 0:
-							require.Contains(t, note, "PRICING TRANSFORMS", id)
-							require.Contains(t, note, strconv.Itoa(transform), id)
-							require.NotContains(t, note, "EXACT-INTEGER ARITHMETIC",
-								"%s holds no mark by arithmetic and its sentence names arithmetic as a cause", id)
-						case transform == 0 && arithmetic > 0:
-							require.Contains(t, note, "EXACT-INTEGER ARITHMETIC", id)
-							require.Contains(t, note, strconv.Itoa(arithmetic), id)
-							require.NotContains(t, note, "PRICING TRANSFORM",
-								"%s holds every mark by exact-integer arithmetic and its sentence blames the PRICING "+
-									"TRANSFORMS, which touched none of them", id)
-						default:
-							require.Contains(t, note, "PRICING TRANSFORM", id)
-							require.Contains(t, note, "EXACT-INTEGER ARITHMETIC",
-								"%s holds marks by BOTH causes and its sentence names only one of them", id)
-						}
+						declared := intOf(t, reach["marks_held_by_declared_factor"])
+						require.Equal(t, len(asList(t, reach["applied_shocks"])), transform+arithmetic+declared,
+							"%s publishes `no_mark_moved`, so every applied row is a HELD row and the three cause counts "+
+								"must account for all of them", id)
+						srRequireCauseClauseNamesExactly(t, id, reach["note"].(string), transform, arithmetic, declared)
 					case reachAllShocksDeclaredAtIdentity:
 						require.Equal(t, len(asList(t, reach["applied_shocks"])),
 							intOf(t, reach["marks_held_by_declared_factor"]),
