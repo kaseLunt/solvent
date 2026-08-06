@@ -254,6 +254,48 @@ export function buildHistorySeries(
   };
 }
 
+/**
+ * The newest PLOTTED point's direct label (Wave W-OBS-B). ONE-SOURCE LAW,
+ * both arms:
+ *
+ *   - when the last entry with finite geometry IS the newest witnessed batch
+ *     on the axis, `directLabel` is `entry.display` VERBATIM — the exact
+ *     string the meta line's "newest:" readout cites;
+ *   - when it is NOT (the newest witnessed batch is a refused / withheld /
+ *     no-row / ∞ gap), `directLabel` is that SAME string plus a
+ *     "(batch {id})" qualifier naming which batch the figure belongs to.
+ *     The meta line shows the gap's own register for the newest batch, and
+ *     the chart must never print an older number unqualified beside it.
+ *
+ * Composed HERE, pure, so the component never re-derives it. Null when
+ * nothing plots.
+ */
+export interface NewestPlottedLabel {
+  /** The last entry with finite geometry — where the sparkline's label sits. */
+  entry: HistorySeriesEntry;
+  /** True exactly when that entry IS the newest witnessed batch on the axis. */
+  atNewestBatch: boolean;
+  /** `entry.display` verbatim, or `entry.display` + " (batch {id})". */
+  directLabel: string;
+}
+
+export function newestPlottedLabel(series: HistorySeries): NewestPlottedLabel | null {
+  for (let i = series.entries.length - 1; i >= 0; i -= 1) {
+    const entry = series.entries[i];
+    if (entry !== undefined && entry.value !== null) {
+      const atNewestBatch = i === series.entries.length - 1;
+      return {
+        entry,
+        atNewestBatch,
+        directLabel: atNewestBatch
+          ? entry.display
+          : `${entry.display} (batch ${String(entry.batchId)})`,
+      };
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // WAVE R1 ITEM 11 — the history panel's COPY LAYER.
 //

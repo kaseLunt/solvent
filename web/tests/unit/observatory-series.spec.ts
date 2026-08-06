@@ -199,6 +199,64 @@ test("W-OBS: the newest captured point carries the summary card's exact figure",
     displayMetric(point, "debt_usd", OBSERVATORY_SERIES_AAVE.usd_decimals),
   );
   expect(newest.label).toBe("$619.186008");
+
+  // W-OBS-B plain arm: the last plotted point IS the newest axis entry, so
+  // the direct label is the card's string VERBATIM — an always-qualify
+  // mutant would smear "(last captured ...)" onto the newest row itself.
+  expect(newest.atNewestBucket).toBe(true);
+  expect(newest.directLabel).toBe(newest.label);
+});
+
+test("W-OBS-B qualified arm: a direct label older than the axis head states WHICH row it is", () => {
+  // The verbatim DM example: the newest axis entry (09:00) is WITHHELD, so
+  // the last plotted point is the OLDER 08:00 row. The direct label is the
+  // card register's exact string PLUS the "(last captured {bucket})"
+  // qualifier — the chart may not print an older number unqualified while
+  // the newest card shows the withheld dash. Kills the unqualified-print
+  // mutant (directLabel === label here) and the retyped-value mutant (the
+  // qualified arm must START with the exact card string).
+  const axis = buildBucketAxis(OBSERVATORY_SERIES_DM);
+  const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_DM, "debt_usd");
+  const newest = seriesNewestPoint(axis, OBSERVATORY_SERIES_DM, "debt_usd", debt);
+  if (newest === null) throw new Error("the DM debt series must have a newest point");
+
+  expect(newest.index).toBe(0);
+  expect(newest.atNewestBucket).toBe(false);
+  expect(newest.label).toBe("$309.593004");
+  expect(newest.directLabel).toBe(`${newest.label} (last captured 2026-07-29T08:00:00Z)`);
+  expect(newest.directLabel).toBe("$309.593004 (last captured 2026-07-29T08:00:00Z)");
+  // The qualifier's hour is the plotted entry's own bucketStart — the same
+  // UTC string the panel head's as-of line prints.
+  expect(axis.entries[0]?.bucketStart).toBe("2026-07-29T08:00:00Z");
+});
+
+test("W-OBS-B: a null metric on the newest SERVED bucket also qualifies the older label", () => {
+  // The qualifier keys on "last plotted vs newest axis entry", not on
+  // withheld specifically: a captured newest bucket whose accounts metric is
+  // null still forces the accounts chart's direct label onto an older row,
+  // and that label must say so. Kills a mutant that qualifies only withheld
+  // buckets.
+  const nullNewest = {
+    ...OBSERVATORY_SERIES_DM,
+    points: [
+      DM_CAPTURED,
+      { ...DM_CAPTURED, bucket_start: "2026-07-29T09:00:00Z", accounts: null },
+    ],
+  };
+  const axis = buildBucketAxis(nullNewest);
+  const accounts = buildMetricSeries(axis, nullNewest, "accounts");
+  const newest = seriesNewestPoint(axis, nullNewest, "accounts", accounts);
+  if (newest === null) throw new Error("the accounts series must have a newest point");
+  expect(newest.atNewestBucket).toBe(false);
+  expect(newest.directLabel).toBe("3 (last captured 2026-07-29T08:00:00Z)");
+
+  // The debt chart of the SAME response keeps the plain arm: its newest
+  // bucket plots, so no qualifier — the two metrics are judged separately.
+  const debt = buildMetricSeries(axis, nullNewest, "debt_usd");
+  const newestDebt = seriesNewestPoint(axis, nullNewest, "debt_usd", debt);
+  if (newestDebt === null) throw new Error("the debt series must have a newest point");
+  expect(newestDebt.atNewestBucket).toBe(true);
+  expect(newestDebt.directLabel).toBe(newestDebt.label);
 });
 
 test("W-OBS: max/newest are null when nothing plots — no label is ever invented", () => {

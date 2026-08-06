@@ -15,9 +15,20 @@
 //   - every point carries provenance (bucket as-of, watermark block, rate
 //     as-ofs) surfaced in the bucket-record detail;
 //   - a WITHHELD bucket stays visible with its named refusal; NULL totals
-//     render as em dashes, never 0.
+//     render as em dashes, never 0;
+//   - W-OBS-B: the direct-label expectations are COMPUTED in this file from
+//     the same fixture bytes the route mock serves, through the unit-tested
+//     pure helpers (lib/observatory-series) — never pinned as literals a
+//     hardcoding component could coincidentally match.
 
 import { expect, test, type Page, type Route } from "@playwright/test";
+import {
+  buildBucketAxis,
+  buildMetricSeries,
+  seriesMaxPoint,
+  seriesNewestPoint,
+} from "../../lib/observatory-series";
+import { EM_DASH } from "../../lib/format";
 import {
   OBSERVATORY_DEGRADED,
   OBSERVATORY_SERIES_AAVE,
@@ -282,33 +293,105 @@ test("W-OBS: y-max, x extents, selected time and the newest figure are direct la
 
   const debtChart = page.getByTestId("observatory-chart-debt_usd");
 
+  // EVERY expectation below is COMPUTED from the fixture bytes the route
+  // mock serves, through the unit-tested pure helpers — a component that
+  // hardcodes any of these strings fails the moment the fixture moves.
+  const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+  const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_AAVE, "debt_usd");
+  const maxPoint = seriesMaxPoint(axis, OBSERVATORY_SERIES_AAVE, "debt_usd", debt);
+  const newestPoint = seriesNewestPoint(axis, OBSERVATORY_SERIES_AAVE, "debt_usd", debt);
+  if (maxPoint === null || newestPoint === null) {
+    throw new Error("fixture invariant: the aave debt series plots a max and a newest point");
+  }
+  // Fixture invariants the laws below lean on: the max is NOT the last
+  // plotted point (so BOTH direct labels render), and the newest plotted
+  // point IS the newest axis entry (the plain, unqualified arm).
+  expect(maxPoint.index).not.toBe(newestPoint.index);
+  expect(newestPoint.atNewestBucket).toBe(true);
+  expect(newestPoint.directLabel).toBe(newestPoint.label);
+
   // The drawn y-max wears the max point's exact ledger string (the same
   // displayMetric output the cards use) — derived, never retyped.
-  await expect(debtChart.getByTestId("obs-ymax-label")).toHaveText("$928.779012");
+  await expect(debtChart.getByTestId("obs-ymax-label")).toHaveText(maxPoint.label);
 
   // The x-axis states the window's extent bucket hours, in the head's own
-  // UTC format.
-  await expect(debtChart.getByTestId("obs-x-start")).toHaveText("2026-07-29T06:00:00Z");
-  await expect(debtChart.getByTestId("obs-x-end")).toHaveText("2026-07-29T10:00:00Z");
+  // UTC format — the axis' own first and last entries.
+  const oldestEntry = axis.entries[0];
+  const newestEntry = axis.entries[axis.entries.length - 1];
+  if (oldestEntry === undefined || newestEntry === undefined) {
+    throw new Error("fixture invariant: the axis carries entries");
+  }
+  await expect(debtChart.getByTestId("obs-x-start")).toHaveText(oldestEntry.bucketStart);
+  await expect(debtChart.getByTestId("obs-x-end")).toHaveText(newestEntry.bucketStart);
 
   // Default selection is the newest wire bucket, whose hour the x-end extent
   // already states — the selected strip stays EMPTY rather than printing the
   // same string twice on two stacked axis rows.
-  await expect(debtChart.getByTestId("obs-x-end")).toHaveText("2026-07-29T10:00:00Z");
   await expect(debtChart.getByTestId("obs-x-selected")).toHaveCount(0);
 
   // The newest captured point prints EXACTLY the summary card's figure —
   // one source, asserted against the card's own strip.
-  const chartFigure = await debtChart.getByTestId("obs-newest-value").textContent();
-  expect(chartFigure).toBe("$619.186008");
-  await expect(page.getByTestId("observatory-newest")).toContainText(chartFigure ?? "NEVER");
+  await expect(debtChart.getByTestId("obs-newest-value")).toHaveText(newestPoint.directLabel);
+  await expect(page.getByTestId("observatory-newest")).toContainText(newestPoint.label);
 
-  // Selecting an older bucket moves the selected-time axis label with it.
+  // Selecting an older bucket moves the selected-time axis label with it —
+  // the first plotted point's own bucket hour, from the same axis bytes.
+  const firstPlottedIndex = debt.values.findIndex((v) => v !== null);
+  const firstPlotted = axis.entries[firstPlottedIndex];
+  if (firstPlotted === undefined) {
+    throw new Error("fixture invariant: the debt series plots a first point");
+  }
   await debtChart.locator('[data-testid="obs-point"]').first().click();
-  await expect(debtChart.getByTestId("obs-x-selected")).toHaveText("2026-07-29T06:00:00Z");
+  await expect(debtChart.getByTestId("obs-x-selected")).toHaveText(firstPlotted.bucketStart);
 
   // A dense window (4 captured points) renders NO sparse STATE line.
   await expect(page.getByTestId("observatory-sparse-debt_usd")).toHaveCount(0);
+});
+
+test("W-OBS-B: the DM chart qualifies its older direct label while the card keeps the dash", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  await openObservatory(page);
+  await page.getByTestId("observatory-engine-debt_manager").click();
+
+  // Computed from the SAME fixture bytes the route mock serves: the newest
+  // axis entry is WITHHELD, so the last plotted point is the older captured
+  // bucket, and its direct label must carry the "(last captured ...)"
+  // qualifier composed in the pure layer.
+  const axis = buildBucketAxis(OBSERVATORY_SERIES_DM);
+  const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_DM, "debt_usd");
+  const newestPoint = seriesNewestPoint(axis, OBSERVATORY_SERIES_DM, "debt_usd", debt);
+  const maxPoint = seriesMaxPoint(axis, OBSERVATORY_SERIES_DM, "debt_usd", debt);
+  if (newestPoint === null || maxPoint === null) {
+    throw new Error("fixture invariant: the DM debt series plots a point");
+  }
+  // Fixture invariants: the newest bucket is withheld (the qualified arm),
+  // and the single plotted point is both the drawn max and the newest.
+  expect(newestPoint.atNewestBucket).toBe(false);
+  expect(maxPoint.index).toBe(newestPoint.index);
+  expect(newestPoint.directLabel).toBe(
+    `${newestPoint.label} (last captured ${axis.entries[newestPoint.index]?.bucketStart ?? "NEVER"})`,
+  );
+
+  const debtChart = page.getByTestId("observatory-chart-debt_usd");
+
+  // ONE STORY, two surfaces (Codex r62 law): the chart's direct label names
+  // the older row it belongs to...
+  await expect(debtChart.getByTestId("obs-newest-value")).toHaveText(newestPoint.directLabel);
+
+  // ...while the newest summary card keeps the withheld register — the em
+  // dash and the named refusal, never the older figure presented as newest.
+  const newest = page.getByTestId("observatory-newest");
+  await expect(newest).toContainText(EM_DASH);
+  await expect(newest).toContainText("REFUSED · FLAG_CUSTODY_UNPROVEN");
+  await expect(newest).not.toContainText(newestPoint.label);
+
+  // ONE POINT, ONE LABEL (fix 4a): the drawn max IS the last plotted point,
+  // so the y-max label is omitted — the qualified newest label is the only
+  // direct label on this chart (it is the same source string).
+  await expect(debtChart.getByTestId("obs-ymax-label")).toHaveCount(0);
+  await expect(debtChart.getByTestId("obs-newest-value")).toHaveCount(1);
 });
 
 test("W-OBS: a sparse window states itself BEFORE the visual — computed, threshold <= 1", async ({

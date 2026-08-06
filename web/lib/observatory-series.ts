@@ -300,21 +300,55 @@ export function seriesMaxPoint(
 }
 
 /**
+ * `seriesNewestPoint`'s result: the last plotted point, plus the direct
+ * label the chart prints at it (Wave W-OBS-B). ONE-SOURCE LAW, both arms:
+ *
+ *   - when the last plotted point IS the newest axis entry, `directLabel`
+ *     is `label` VERBATIM — the summary card's exact string;
+ *   - when it is NOT (the newest bucket is withheld, or carries this metric
+ *     as null), `directLabel` is that SAME string plus a
+ *     "(last captured {bucket})" qualifier naming which row the figure
+ *     belongs to. The card above shows the newest bucket's dash/refusal,
+ *     and the chart must never print an older number unqualified beside it.
+ *
+ * The qualifier's bucket hour is the entry's own `bucketStart`, the same
+ * UTC string the panel head's "as of bucket ..." line prints.
+ */
+export interface SeriesNewestPoint extends SeriesLabelledPoint {
+  /** True exactly when the last plotted point IS the newest axis entry. */
+  atNewestBucket: boolean;
+  /** The chart's direct label: `label` verbatim, or `label` + the qualifier. */
+  directLabel: string;
+}
+
+/**
  * The NEWEST captured point of one metric series (the last finite value on
  * the axis), with its display string — the same figure the newest-bucket
  * summary card carries when the newest wire bucket is captured, from the
- * same formatter over the same wire row. Null when nothing plots.
+ * same formatter over the same wire row — and the direct label the chart
+ * prints (see `SeriesNewestPoint`: qualified whenever the last plotted
+ * point is not the newest axis entry). Null when nothing plots.
  */
 export function seriesNewestPoint(
   axis: BucketAxis,
   response: ObservatorySeriesResponse,
   metric: BucketMetric,
   series: BucketMetricSeries,
-): SeriesLabelledPoint | null {
+): SeriesNewestPoint | null {
   for (let index = series.values.length - 1; index >= 0; index -= 1) {
     const value = series.values[index];
     if (value !== null && value !== undefined && Number.isFinite(value)) {
-      return labelledPointAt(axis, response, metric, index, value);
+      const point = labelledPointAt(axis, response, metric, index, value);
+      const entry = axis.entries[index];
+      if (point === null || entry === undefined) return null;
+      const atNewestBucket = index === series.values.length - 1;
+      return {
+        ...point,
+        atNewestBucket,
+        directLabel: atNewestBucket
+          ? point.label
+          : `${point.label} (last captured ${entry.bucketStart})`,
+      };
     }
   }
   return null;

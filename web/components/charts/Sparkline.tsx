@@ -1,3 +1,4 @@
+import { sparklineNewestLabelPlacement } from "@/lib/sparkline-scale";
 import styles from "./charts.module.css";
 
 export interface SparklineProps {
@@ -54,7 +55,9 @@ export interface SparklineProps {
   /**
    * Direct value label at the newest PLOTTED point — the same computed
    * display string the panel head cites (one source), so the picture answers
-   * without a hover.
+   * without a hover. When the last plotted batch is NOT the newest witnessed
+   * batch, the caller's pure layer appends a "(batch {id})" qualifier to that
+   * string BEFORE it arrives here; this component never re-derives it.
    */
   newestLabel?: string;
 }
@@ -130,6 +133,28 @@ export function Sparkline({
     }
   }
   const lastValue = lastIndex >= 0 ? values[lastIndex] : null;
+
+  // Where the newest-value label prints: the PURE placement rule
+  // (lib/sparkline-scale) — the historical above-else-below baseline, plus
+  // the Wave W-OBS-B collision law: within 12px of the reference label's
+  // baseline the newest label displaces a full row to the far side, so a
+  // flat-at-1.0 series shows two readable labels instead of one smudge.
+  // `referenceLabelY` mirrors the reference label's own y expression below.
+  const newestPlacement =
+    lastIndex >= 0 && lastValue !== null && lastValue !== undefined
+      ? sparklineNewestLabelPlacement({
+          pointX: x(lastIndex),
+          pointY: y(lastValue),
+          midX: plotLeft + (width - plotLeft - pad) / 2,
+          height,
+          referenceLabelY:
+            referenceValue !== undefined &&
+            Number.isFinite(referenceValue) &&
+            referenceLabel !== undefined
+              ? Math.max(8, y(referenceValue) - 3)
+              : undefined,
+        })
+      : undefined;
 
   return (
     <svg
@@ -243,18 +268,17 @@ export function Sparkline({
       {endDot && lastValue !== null && lastValue !== undefined && lastIndex >= 0 && (
         <circle className={styles.endDot} cx={x(lastIndex)} cy={y(lastValue)} r={2.2} />
       )}
-      {newestLabel !== undefined && lastValue !== null && lastValue !== undefined && lastIndex >= 0 && (
-        // The newest plotted value, printed AT its point — the same computed
-        // string the head's meta line carries (one source, never retyped).
+      {newestLabel !== undefined && newestPlacement !== undefined && (
+        // The newest plotted value, printed AT its point — the caller's
+        // computed string, qualifier included when the caller composed one
+        // (one source, never retyped here). Position comes from the PURE
+        // placement rule above; only pixels float in this component.
         <text
           className={styles.valueLabel}
           data-testid="sparkline-newest-value"
-          x={x(lastIndex) > plotLeft + (width - plotLeft - pad) / 2 ? x(lastIndex) - 6 : x(lastIndex) + 6}
-          // Above the point when there is headroom; BELOW it when the point
-          // rides the top of the padded domain — the old clamp parked the
-          // label straight onto the line there.
-          y={y(lastValue) - 6 >= 12 ? y(lastValue) - 6 : Math.min(height - 6, y(lastValue) + 14)}
-          textAnchor={x(lastIndex) > plotLeft + (width - plotLeft - pad) / 2 ? "end" : "start"}
+          x={newestPlacement.anchorEnd ? x(lastIndex) - 6 : x(lastIndex) + 6}
+          y={newestPlacement.y}
+          textAnchor={newestPlacement.anchorEnd ? "end" : "start"}
         >
           {newestLabel}
         </text>

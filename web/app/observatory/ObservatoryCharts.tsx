@@ -15,7 +15,11 @@
 //   - the x-axis states its extent bucket hours (the head's own UTC format)
 //     and the selected bucket's hour while a selection exists;
 //   - the newest captured point prints the summary card's exact figure
-//     (seriesNewestPoint — one source, never retyped);
+//     (seriesNewestPoint — one source, never retyped). Wave W-OBS-B: when
+//     the last plotted point is NOT the newest axis entry, that figure
+//     arrives with its "(last captured {bucket})" qualifier composed in the
+//     pure layer — the chart never prints an older number unqualified while
+//     the card above shows the newest bucket's dash;
 //   - a window where one or zero captured points plot states that BEFORE the
 //     visual (sparseCaptureLine, template rule R6), in the absent/withheld
 //     register — computed, never static.
@@ -112,7 +116,19 @@ export function ObservatoryCharts({
                   label={`${METRIC_LABELS[metric]} for ${response.engine} across rollup buckets`}
                   selectedIndex={selectedIndex}
                   onSelect={onSelect}
-                  yMaxLabel={maxPoint !== null && maxPoint.value > 0 ? maxPoint.label : undefined}
+                  yMaxLabel={
+                    // One point, one label (Wave W-OBS-B): when the drawn
+                    // max IS the last plotted point and the newest-value
+                    // label renders, the y-max label is omitted — the newest
+                    // label is the SAME source string (plus its qualifier
+                    // when one applies), and two prints of it would sit on
+                    // top of each other.
+                    maxPoint !== null &&
+                    maxPoint.value > 0 &&
+                    (newestPoint === null || maxPoint.index !== newestPoint.index)
+                      ? maxPoint.label
+                      : undefined
+                  }
                   xStartLabel={oldestEntry?.bucketStart}
                   xEndLabel={
                     axis.entries.length > 1 && newestEntry !== undefined
@@ -129,7 +145,7 @@ export function ObservatoryCharts({
                       : undefined
                   }
                   charPx={chPx}
-                  newestValueLabel={newestPoint?.label}
+                  newestValueLabel={newestPoint?.directLabel}
                 />
               </div>
             </div>

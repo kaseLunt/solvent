@@ -15,7 +15,11 @@
 //     the events example; as-ofs from the batch watermarks / params example).
 //     The only non-example literals are the DM price input's value/age, chosen
 //     to satisfy the contract's own consistency (fresh ⇔ age < budget) and
-//     commented inline.
+//     commented inline;
+//   - the W-OBS-B history variants (HISTORY_QUALIFIED, HISTORY_FLAT) are
+//     COMPOSED from the history example: point shapes verbatim, with only
+//     batch ids and HF wads (num/den kept consistent) changed — documented
+//     at each variant.
 //
 // Addresses (all from the examples):
 //   found      0xAAaA000000000000000000000000000000000001
@@ -382,6 +386,147 @@ export const HISTORY: Schemas["AddressHistoryResponse"] = {
   lookup_complete_note: LOOKUP_NOTE,
   notes: [
     "retention bounds this history: batches outside the retention window are gone from this surface, and their absence is stated by `limit`, never rendered as a flat line.",
+  ],
+};
+
+/**
+ * HISTORY variant for the qualified-label laws (Wave W-OBS-B), COMPOSED from
+ * the verbatim example:
+ *
+ *   - batch 3 (new): the example's batch-1 REFUSED point moved to the NEWEST
+ *     batch, with the vantage batch advanced to 3;
+ *   - batch 2: the example's computed 1.08 point, verbatim;
+ *   - batch 1 (new): a computed point at a DISTINCT lower HF (wad 1.02e18;
+ *     num/den kept consistent at 6120/6000e12), same shape as the example's
+ *     computed point.
+ *
+ * The series therefore has TWO finite points with DISTINCT values and the
+ * newest witnessed batch NOT the last finite one: the chart's direct label
+ * must print batch 2's figure WITH its "(batch 2)" qualifier while the meta
+ * line's newest readout carries the refusal register — and a
+ * newest-vs-oldest scan mutant prints 1.02 instead of 1.08.
+ */
+export const HISTORY_QUALIFIED: Schemas["AddressHistoryResponse"] = {
+  ...HISTORY,
+  batch: { ...HISTORY.batch, id: 3 },
+  engines: [
+    {
+      engine: "aave_v3_etherfi",
+      value_decimals: 8,
+      points: [
+        {
+          batch_id: 3,
+          computed_at: "2026-07-29T10:00:00Z",
+          balances_block: 25635618,
+          sweep_block: 0,
+          status: "refused",
+          refusal: {
+            code: "G1",
+            detail: "weETH/aaveoracle price input missing at compute time",
+            note: "a refused batch is a POINT in this history, not a gap: the position existed and could not honestly be valued.",
+          },
+          health_factor: null,
+          liquidatable: null,
+          total_collateral_base: null,
+          total_debt_base: null,
+        },
+        {
+          batch_id: 2,
+          computed_at: "2026-07-29T09:52:00Z",
+          balances_block: 25635580,
+          sweep_block: 0,
+          status: "computed",
+          refusal: null,
+          health_factor: {
+            wad: "1080000000000000000",
+            num: "6480000000000000",
+            den: "6000000000000000",
+            infinite: false,
+            note: "compare against 1e18 ON THE WAD.",
+          },
+          liquidatable: null,
+          total_collateral_base: "800000000000",
+          total_debt_base: "600000000000",
+        },
+        {
+          batch_id: 1,
+          computed_at: "2026-07-29T09:45:00Z",
+          balances_block: 25635540,
+          sweep_block: 0,
+          status: "computed",
+          refusal: null,
+          health_factor: {
+            wad: "1020000000000000000",
+            num: "6120000000000000",
+            den: "6000000000000000",
+            infinite: false,
+            note: "compare against 1e18 ON THE WAD.",
+          },
+          liquidatable: null,
+          total_collateral_base: "800000000000",
+          total_debt_base: "600000000000",
+        },
+      ],
+      withheld_batch_ids: [],
+      note: "points are persisted rows from retained batches, newest first; nothing is recomputed for this response.",
+    },
+  ],
+};
+
+/**
+ * HISTORY variant for the flat-at-1.0 label-collision law (Wave W-OBS-B),
+ * COMPOSED from the verbatim example: both points computed at EXACTLY the
+ * reference boundary (wad 1e18; num/den kept consistent at 6000/6000e12), so
+ * the newest-value label and the "1.0" reference label resolve onto the same
+ * row and the deterministic displacement rule must separate them.
+ */
+export const HISTORY_FLAT: Schemas["AddressHistoryResponse"] = {
+  ...HISTORY,
+  engines: [
+    {
+      engine: "aave_v3_etherfi",
+      value_decimals: 8,
+      points: [
+        {
+          batch_id: 2,
+          computed_at: "2026-07-29T10:00:00Z",
+          balances_block: 25635618,
+          sweep_block: 0,
+          status: "computed",
+          refusal: null,
+          health_factor: {
+            wad: "1000000000000000000",
+            num: "6000000000000000",
+            den: "6000000000000000",
+            infinite: false,
+            note: "compare against 1e18 ON THE WAD.",
+          },
+          liquidatable: null,
+          total_collateral_base: "800000000000",
+          total_debt_base: "600000000000",
+        },
+        {
+          batch_id: 1,
+          computed_at: "2026-07-29T09:45:00Z",
+          balances_block: 25635540,
+          sweep_block: 0,
+          status: "computed",
+          refusal: null,
+          health_factor: {
+            wad: "1000000000000000000",
+            num: "6000000000000000",
+            den: "6000000000000000",
+            infinite: false,
+            note: "compare against 1e18 ON THE WAD.",
+          },
+          liquidatable: null,
+          total_collateral_base: "800000000000",
+          total_debt_base: "600000000000",
+        },
+      ],
+      withheld_batch_ids: [],
+      note: "points are persisted rows from retained batches, newest first; nothing is recomputed for this response.",
+    },
   ],
 };
 

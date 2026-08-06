@@ -68,6 +68,11 @@ export interface ObservatorySeriesChartProps {
   /**
    * Direct value at the NEWEST captured point: the same `displayMetric`
    * string the summary card above carries — one source, never retyped.
+   * When the last plotted point is NOT the newest axis entry (the newest
+   * bucket is withheld or carries this metric as null), the caller's pure
+   * layer (`seriesNewestPoint(...).directLabel`) appends a
+   * "(last captured {bucket})" qualifier to that string BEFORE it arrives
+   * here; this component never re-derives it.
    */
   newestValueLabel?: string;
 }

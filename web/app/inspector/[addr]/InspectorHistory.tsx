@@ -34,11 +34,14 @@
 //   - the drawn y-domain comes from the PURE paddedSparklineDomain rule
 //     (lib/sparkline-scale — 4% padding around [min, max], the 1.0 line
 //     always inside, a flat series never pinned to an edge), and both bounds
-//     are labelled through the EXISTING HF truncation register (hfAxisLabel
-//     wraps truncateToDisplay — no new formatter);
+//     are labelled OUTWARD (Wave W-OBS-B: hfAxisMinLabel floors, hfAxisMaxLabel
+//     ceils — the printed range always CONTAINS the drawn domain; same
+//     register formatter, no new one);
 //   - the x-axis states its extent batch ids, and the newest plotted point
 //     prints the SAME display string the meta line's "newest:" cites (one
-//     source: HistorySeriesEntry.display);
+//     source: newestPlottedLabel over HistorySeriesEntry.display — with its
+//     "(batch {id})" qualifier composed pure whenever the newest witnessed
+//     batch is a gap, so an older figure never prints unqualified);
 //   - everything kept: gaps break the line, the 1.0 dashed line stays a
 //     disclosure (never a verdict), hover reasons stay, and the never-present
 //     absence line renders exactly as before.
@@ -58,11 +61,12 @@ import {
   HISTORY_DOCTRINE_SUMMARY,
   historyMetaLine,
   knownBatchAxis,
+  newestPlottedLabel,
   tallyHistory,
 } from "@/lib/history-series";
 import { renderLookupOutcome } from "@/lib/format";
 import type { AddressHistoryEngine, HistoryLookup } from "@/lib/inspector-data";
-import { hfAxisLabel, paddedSparklineDomain } from "@/lib/sparkline-scale";
+import { hfAxisMaxLabel, hfAxisMinLabel, paddedSparklineDomain } from "@/lib/sparkline-scale";
 import { useMeasuredWidth, useMonoCharWidth } from "@/lib/useMeasuredWidth";
 import styles from "../inspector.module.css";
 
@@ -194,28 +198,25 @@ function EngineHistoryCard({
 
   // The drawn y-domain: the PURE padded rule (lib/sparkline-scale), with the
   // 1.0 disclosure line always inside it. Both bound labels derive from the
-  // SAME domain object the geometry uses, through the existing HF truncation
-  // register — one source, no second formatter.
+  // SAME domain object the geometry uses — OUTWARD-directed (the min floors,
+  // the max ceils: the printed range always contains the drawn domain),
+  // rendered through the existing register formatter, no second one.
   const domain = paddedSparklineDomain(series.values, HF_REFERENCE_VALUE);
-  const yMinLabel = hfAxisLabel(domain.min);
-  const yMaxLabel = hfAxisLabel(domain.max);
+  const yMinLabel = hfAxisMinLabel(domain.min);
+  const yMaxLabel = hfAxisMaxLabel(domain.max);
   const yGutterPx = Math.ceil(Math.max(yMinLabel.length, yMaxLabel.length) * chPx) + 10;
 
   const oldest = series.entries.length > 0 ? series.entries[0] : undefined;
   const newestWitnessed =
     series.entries.length > 1 ? series.entries[series.entries.length - 1] : undefined;
 
-  // The newest PLOTTED point's display — the same string the meta line's
-  // "newest:" cites when the newest witnessed batch plots (one source:
-  // HistorySeriesEntry.display, composed once in lib/history-series).
-  let newestPlottedDisplay: string | undefined;
-  for (let i = series.entries.length - 1; i >= 0; i -= 1) {
-    const entry = series.entries[i];
-    if (entry !== undefined && entry.value !== null) {
-      newestPlottedDisplay = entry.display;
-      break;
-    }
-  }
+  // The newest PLOTTED point's direct label, composed PURE in
+  // lib/history-series (Wave W-OBS-B): the meta line's exact display string
+  // when the newest witnessed batch plots, and that same string plus its
+  // "(batch {id})" qualifier when the newest witnessed batch is a gap — the
+  // chart never prints an older figure unqualified beside a meta line whose
+  // "newest:" readout shows the gap's own register.
+  const newestPlotted = newestPlottedLabel(series);
 
   // Engine-conditional reference semantics (design ruling 6): 1.0 IS
   // the aave engine's own boundary (wad strictly < 1e18), but the DM
@@ -275,7 +276,7 @@ function EngineHistoryCard({
                 }
               : undefined
           }
-          newestLabel={newestPlottedDisplay}
+          newestLabel={newestPlotted?.directLabel}
         />
       </div>
       <div className={styles.historyLegend}>
