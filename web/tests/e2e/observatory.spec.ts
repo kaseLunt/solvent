@@ -27,6 +27,9 @@ import {
   buildMetricSeries,
   seriesMaxPoint,
   seriesNewestPoint,
+  gridReadingLine,
+  observatoryTakeaway,
+  pointDetailTakeaway,
 } from "../../lib/observatory-series";
 import { EM_DASH } from "../../lib/format";
 import {
@@ -87,19 +90,24 @@ test("resting render: one engine's series, exact values, as-of stated, notes and
   await expect(newest).toContainText("$619.186008");
   await expect(newest).toContainText("$825.581344");
 
-  // Four charts, each stating its own as-of (bucket + watermark, not served_at).
+  // W-3L: four charts, the as-of stated ONCE above the grid (bucket +
+  // watermark, not served_at) — it was four identical per-chart statements.
   for (const metric of ["debt_usd", "collateral_usd", "accounts", "liquidatable_positions"]) {
-    const panel = page.getByTestId(`observatory-chart-${metric}`);
-    await expect(panel).toBeVisible();
-    await expect(panel).toContainText("as of bucket 2026-07-29T10:00:00Z");
-    await expect(panel).toContainText("block 25,635,900");
+    await expect(page.getByTestId(`observatory-chart-${metric}`)).toBeVisible();
   }
+  const gridAsOf = page.getByTestId("observatory-grid-asof");
+  await expect(gridAsOf).toContainText("as of bucket 2026-07-29T10:00:00Z");
+  await expect(gridAsOf).toContainText("block 25,635,900");
 
-  // The response's own notes render; the stampline pins the record.
+  // The response's own notes render behind their counted disclosure (W-3L);
+  // the stampline pins the record — the gap tally inline (warn), the neutral
+  // pins behind the counted evidence summary.
+  await page.getByTestId("observatory-notes").locator("summary").click();
   await expect(page.getByTestId("observatory-notes")).toContainText(
     "a withheld bucket carries NULL totals",
   );
   await expect(page.getByText("4 captured · 0 withheld · 1 absent")).toBeVisible();
+  await page.getByTestId("stampline-evidence-summary").click();
   await expect(page.getByText("native hourly buckets · every captured bucket served verbatim")).toBeVisible();
 
   // No DM values leak into the aave view (engines never combined).
@@ -152,7 +160,7 @@ test("an ABSENT bucket renders an honest named gap — never an interpolated lin
   await debtChart.locator('[data-testid="obs-gap-hit"]').first().click();
   const detail = page.getByTestId("observatory-point-detail");
   await expect(detail).toHaveAttribute("data-kind", "absent");
-  await expect(detail).toContainText("NO COMPLETE BATCH");
+  await expect(detail).toContainText("ABSENT · no complete batch in this bucket");
   await expect(detail).toContainText("never renders as zero");
 });
 
@@ -418,4 +426,130 @@ test("W-OBS: a sparse window states itself BEFORE the visual — computed, thres
   await page.getByTestId("observatory-engine-aave_v3_etherfi").click();
   await expect(page.getByTestId("observatory-chart-debt_usd")).toBeVisible();
   await expect(page.getByTestId("observatory-sparse-debt_usd")).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------------------
+// W-3L — the three-layer conversion, on the rendered page. Expected strings
+// are FIXTURE-COMPOSED through the same pure helpers the unit laws pin
+// independently — the surface must render them verbatim (the weld), state
+// the as-of ONCE, and keep every hazard outside the expandables.
+// ---------------------------------------------------------------------------
+
+test("W-3L: the takeaway welds to the fixture — numbers, bucket, gap tally, one string", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  await openObservatory(page);
+  const aaveAxis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+  await expect(page.getByTestId("observatory-takeaway")).toHaveText(
+    observatoryTakeaway(OBSERVATORY_SERIES_AAVE, aaveAxis),
+  );
+
+  // The refused arm, live: switching to the DM view must state the
+  // withholding — never the previous bucket's numbers.
+  await page.getByTestId("observatory-engine-debt_manager").click();
+  const dmAxis = buildBucketAxis(OBSERVATORY_SERIES_DM);
+  await expect(page.getByTestId("observatory-takeaway")).toHaveText(
+    observatoryTakeaway(OBSERVATORY_SERIES_DM, dmAxis),
+  );
+  await expect(page.getByTestId("observatory-takeaway")).toContainText("withheld");
+});
+
+test("W-3L: the as-of is stated ONCE above the grid, and the reading line welds", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  await openObservatory(page);
+  const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+  const newest = axis.entries[axis.newestPointIndex]?.point;
+  if (newest === null || newest === undefined) throw new Error("fixture lost its newest point");
+
+  // Exactly one as-of-with-watermark statement on the whole surface — it was
+  // four. (The takeaway's own "as of bucket" carries no watermark clause and
+  // is deliberately outside this needle.)
+  const asOf = `as of bucket ${newest.bucket_start} · watermark block`;
+  await expect(page.getByTestId("observatory-grid-asof")).toContainText(
+    `as of bucket ${newest.bucket_start}`,
+  );
+  await expect(page.locator(`text=${asOf}`)).toHaveCount(1);
+
+  await expect(page.getByTestId("observatory-grid-reading")).toHaveText(
+    gridReadingLine(OBSERVATORY_SERIES_AAVE, axis),
+  );
+});
+
+test("W-3L: the legend keeps the product triple visible; the drawing notes are forensic", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  await openObservatory(page);
+  // The hazards stay in the visible method line (inventory: these ARE the
+  // product): never-interpolates, absent, withheld-null-never-0.
+  const legend = page.getByTestId("observatory-legend");
+  await expect(legend).toContainText("the line never interpolates across a gap");
+  await expect(legend).toContainText("no complete batch in this bucket");
+  await expect(legend).toContainText("totals are null and never 0");
+  // The two drawing notes sit behind a counted disclosure, closed by default.
+  const forensics = page.getByTestId("observatory-legend-forensics");
+  await expect(forensics.locator("summary")).toHaveText("2 drawing notes");
+  await expect(forensics.getByText("zero floor drawn")).not.toBeVisible();
+  await forensics.locator("summary").click();
+  await expect(forensics.getByText("zero floor drawn")).toBeVisible();
+  await expect(forensics.getByText("click any bucket for its full record")).toBeVisible();
+});
+
+test("W-3L: notes ride a COUNTED disclosure — lawful because the tally moved into the takeaway", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  await openObservatory(page);
+  const notes = page.getByTestId("observatory-notes");
+  await expect(notes.locator("summary")).toHaveText("1 response note(s) from the service");
+  const noteText = OBSERVATORY_SERIES_AAVE.notes[0] ?? "";
+  await expect(notes.getByText(noteText)).not.toBeVisible();
+  await notes.locator("summary").click();
+  await expect(notes.getByText(noteText)).toBeVisible();
+});
+
+test("W-3L: the bucket record's takeaway welds, provenance is counted-forensic, hazards stay out", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  await openObservatory(page);
+  const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+  const entry = axis.entries[axis.newestPointIndex];
+  if (entry === undefined) throw new Error("fixture lost its newest entry");
+
+  const detail = page.getByTestId("observatory-point-detail");
+  await expect(page.getByTestId("observatory-point-takeaway")).toHaveText(
+    pointDetailTakeaway(entry),
+  );
+
+  // The record's ANSWER stays visible without a click...
+  await expect(detail.getByText("debt (usd)")).toBeVisible();
+  await expect(detail.getByText("liquidatable positions")).toBeVisible();
+  // ...while pure provenance is closed by default, counted in its summary.
+  const forensics = page.getByTestId("observatory-point-forensics");
+  await expect(forensics.locator("summary")).toContainText("provenance row(s)");
+  await expect(page.getByTestId("observatory-point-mkey")).not.toBeVisible();
+  await forensics.locator("summary").click();
+  await expect(page.getByTestId("observatory-point-mkey")).toBeVisible();
+  await expect(page.getByTestId("observatory-point-batch")).toBeVisible();
+  // This fixture carries no hazard (no unacked epochs, sweep recorded), so
+  // the reorg and sweep rows live INSIDE the expandable — and are now open.
+  await expect(page.getByTestId("observatory-point-epochs")).toBeVisible();
+  await expect(page.getByTestId("observatory-point-sweep")).toBeVisible();
+});
+
+test("W-3L: a WITHHELD record keeps its refusal and null-never-zero clauses OUTSIDE the expandable", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  await openObservatory(page);
+  await page.getByTestId("observatory-engine-debt_manager").click();
+  const detail = page.getByTestId("observatory-point-detail");
+  await expect(detail).toHaveAttribute("data-kind", "withheld");
+  // The withholding is the takeaway AND the visible state row — no click.
+  await expect(page.getByTestId("observatory-point-takeaway")).toContainText("withheld");
+  await expect(detail.getByText("null because the book was withheld and never zero").first()).toBeVisible();
 });

@@ -34,6 +34,7 @@ import type { ObservatorySeriesResponse } from "@/lib/observatory-data";
 import { useMonoCharWidth } from "@/lib/useMeasuredWidth";
 import {
   buildMetricSeries,
+  gridReadingLine,
   METRIC_LABELS,
   seriesMaxPoint,
   seriesNewestPoint,
@@ -83,6 +84,15 @@ export function ObservatoryCharts({
       <span className={chart.chProbe} ref={probeRef} aria-hidden>
         0000000000
       </span>
+      {/* W-3L: the as-of stated ONCE above the grid (it was four identical
+          per-chart statements), and the grid's computed reading line — the
+          exact ledger strings, one source (gridReadingLine). */}
+      <p className={styles.gridAsOf} data-testid="observatory-grid-asof">
+        {asOf}
+      </p>
+      <p className={styles.gridReading} data-testid="observatory-grid-reading">
+        {gridReadingLine(response, axis)}
+      </p>
       <div className={styles.chartGrid}>
         {METRICS.map((metric) => {
           const series = buildMetricSeries(axis, response, metric);
@@ -99,7 +109,6 @@ export function ObservatoryCharts({
               <div className={styles.panelHead}>
                 <span>{METRIC_LABELS[metric]}</span>
                 <EngineChip engine={response.engine} />
-                <span className={styles.asOf}>{asOf}</span>
               </div>
               {sparse !== null && (
                 <div className={styles.stateLine} data-testid={`observatory-sparse-${metric}`}>
@@ -166,9 +175,16 @@ export function ObservatoryCharts({
           <i className={styles.legendSwatchWarn} aria-hidden />
           withheld bucket · the book was refused, so totals are null and never 0
         </span>
-        <span className="dim">zero floor drawn · the scale never crops it away</span>
-        <span className="dim">click any bucket for its full record</span>
       </div>
+      {/* W-3L: the captured/absent/withheld triple above IS the product and
+          stays visible; these two are drawing mechanics — forensic. */}
+      <details className={styles.legendForensics} data-testid="observatory-legend-forensics">
+        <summary>2 drawing notes</summary>
+        <div className={styles.legend}>
+          <span className="dim">zero floor drawn · the scale never crops it away</span>
+          <span className="dim">click any bucket for its full record</span>
+        </div>
+      </details>
     </>
   );
 }

@@ -395,3 +395,97 @@ export function sparseCaptureLine(series: BucketMetricSeries): string | null {
   }
   return parts.join(" · ");
 }
+
+// ---------------------------------------------------------------------------
+// W-3L — the Observatory's computed reading lines. One source each; the
+// components render these verbatim and never retype a number.
+// ---------------------------------------------------------------------------
+
+/**
+ * The surface takeaway: the newest wire-backed bucket's answer PLUS the
+ * window's gap tally. The withheld and absent counts ride the takeaway by
+ * law (inventory hazard): an hour with no complete batch is an unknowable,
+ * and a takeaway that omits it invites reading the series as continuous.
+ * A refused newest bucket states the withholding — never the previous
+ * bucket's numbers.
+ */
+export function observatoryTakeaway(
+  response: ObservatorySeriesResponse,
+  axis: BucketAxis,
+): string {
+  const total = axis.entries.length;
+  const gaps: string[] = [];
+  if (axis.absentCount > 0) {
+    gaps.push(
+      `${String(axis.absentCount)} of the ${String(total)} bucket(s) in this window have no complete batch`,
+    );
+  }
+  if (axis.withheldCount > 0) {
+    gaps.push(`${String(axis.withheldCount)} bucket(s) withheld`);
+  }
+  const gapClause = gaps.length > 0 ? `; ${gaps.join(", ")}` : "";
+  const newest =
+    axis.newestPointIndex >= 0 ? (axis.entries[axis.newestPointIndex]?.point ?? null) : null;
+  if (newest === null) {
+    return `no bucket in this window is backed by a wire row${gapClause}.`;
+  }
+  if (newest.refused) {
+    return (
+      `newest bucket ${newest.bucket_start} withheld (${newest.refusal_code ?? "unnamed"}) — ` +
+      `no numbers served for it${gapClause}.`
+    );
+  }
+  const accounts = newest.accounts === null ? EM_DASH : String(newest.accounts);
+  return (
+    `debt ${displayMetric(newest, "debt_usd", response.usd_decimals)} across ${accounts} ` +
+    `account(s) as of bucket ${newest.bucket_start}${gapClause}.`
+  );
+}
+
+/**
+ * The grid's reading line: movement between the FIRST and LAST captured
+ * buckets in the window, in the exact ledger strings (displayMetric — never
+ * a recomputed percentage). Refusals and absences are the takeaway's job;
+ * this line reads only what was captured.
+ */
+export function gridReadingLine(
+  response: ObservatorySeriesResponse,
+  axis: BucketAxis,
+): string {
+  const captured = axis.entries.filter(
+    (entry) => entry.point !== null && !entry.point.refused,
+  );
+  const first = captured[0]?.point;
+  const last = captured[captured.length - 1]?.point;
+  if (first === undefined || first === null || last === undefined || last === null) {
+    return "no captured bucket in this window — there is no movement to read.";
+  }
+  if (captured.length === 1) {
+    return `only one captured bucket in this window (${first.bucket_start}) — no movement to state.`;
+  }
+  const usd = response.usd_decimals;
+  const counts = (value: number | null) => (value === null ? EM_DASH : String(value));
+  return (
+    `between captured buckets ${first.bucket_start} and ${last.bucket_start}: ` +
+    `debt ${displayMetric(first, "debt_usd", usd)} → ${displayMetric(last, "debt_usd", usd)}, ` +
+    `accounts ${counts(first.accounts)} → ${counts(last.accounts)}, ` +
+    `liquidatable ${counts(first.liquidatable_positions)} → ${counts(last.liquidatable_positions)}.`
+  );
+}
+
+/**
+ * The bucket record's one-line state — the takeaway of the forensic panel.
+ * ABSENT and WITHHELD arms are hazards and never soften.
+ */
+export function pointDetailTakeaway(entry: BucketEntry): string {
+  if (entry.point === null) {
+    return `ABSENT · no complete batch in this bucket (${entry.bucketStart}).`;
+  }
+  if (entry.point.refused) {
+    return (
+      `withheld (${entry.point.refusal_code ?? "unnamed"}) at ${entry.point.bucket_start} — ` +
+      `the engine's whole book was refused at capture time; no numbers served.`
+    );
+  }
+  return `captured at ${entry.point.bucket_start} · watermark block ${formatBlock(entry.point.last_block)}.`;
+}

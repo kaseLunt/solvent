@@ -669,7 +669,7 @@ test("(10) the adjudicated intros render, and the endpoint lines are demoted", a
   await expect(page.locator("main")).toContainText(
     "How each engine's book has moved, hour by hour, in a record that outlives batch " +
       "retention. An hour with no complete batch renders as a hole, which is never smoothed " +
-      "over and never drawn as a zero.",
+      "over and never drawn as a zero; one engine per view, never combined onto one axis.",
   );
 
   await page.goto("/feed");

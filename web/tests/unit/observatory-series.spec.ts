@@ -15,9 +15,12 @@ import {
   NATIVE_BUCKET_SECONDS,
   seriesMaxPoint,
   seriesNewestPoint,
+  gridReadingLine,
+  observatoryTakeaway,
+  pointDetailTakeaway,
   sparseCaptureLine,
 } from "../../lib/observatory-series";
-import { EM_DASH } from "../../lib/format";
+import { EM_DASH, formatBlock } from "../../lib/format";
 import { OBSERVATORY_SERIES_AAVE, OBSERVATORY_SERIES_DM } from "../fixtures/observatory";
 
 const DM_CAPTURED = OBSERVATORY_SERIES_DM.points.find((point) => !point.refused);
@@ -303,4 +306,101 @@ test("W-OBS: the sparse STATE line appears exactly when one or fewer captured po
   expect(sparseCaptureLine(buildMetricSeries(nullAxis, nullAccounts, "accounts"))).toBe(
     "0 captured buckets plot in this window · 1 served bucket carries a null value (null is not zero)",
   );
+});
+
+// ---------------------------------------------------------------------------
+// W-3L — the computed reading lines. Expectations are FIXTURE-COMPOSED (the
+// same fields, composed independently), never the helper echoed back.
+// ---------------------------------------------------------------------------
+
+test.describe("W-3L — observatoryTakeaway", () => {
+  test("newest captured: the bucket's own numbers plus the gap tally, full string", () => {
+    const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+    const newest = axis.entries[axis.newestPointIndex]?.point;
+    if (newest === null || newest === undefined || newest.refused) {
+      throw new Error("fixture invariant: the aave newest bucket is captured");
+    }
+    const gaps: string[] = [];
+    if (axis.absentCount > 0) {
+      gaps.push(
+        `${String(axis.absentCount)} of the ${String(axis.entries.length)} bucket(s) in this window have no complete batch`,
+      );
+    }
+    if (axis.withheldCount > 0) gaps.push(`${String(axis.withheldCount)} bucket(s) withheld`);
+    const gapClause = gaps.length > 0 ? `; ${gaps.join(", ")}` : "";
+    expect(observatoryTakeaway(OBSERVATORY_SERIES_AAVE, axis)).toBe(
+      `debt ${displayMetric(newest, "debt_usd", OBSERVATORY_SERIES_AAVE.usd_decimals)} across ` +
+        `${String(newest.accounts)} account(s) as of bucket ${newest.bucket_start}${gapClause}.`,
+    );
+    // The exact ledger figure, anchored — a retyped or re-scaled number fails.
+    expect(observatoryTakeaway(OBSERVATORY_SERIES_AAVE, axis)).toContain("$619.186008");
+  });
+
+  test("newest REFUSED: the takeaway states the withholding — the captured bucket's numbers never leak", () => {
+    const axis = buildBucketAxis(OBSERVATORY_SERIES_DM);
+    const line = observatoryTakeaway(OBSERVATORY_SERIES_DM, axis);
+    expect(line).toBe(
+      `newest bucket ${DM_WITHHELD.bucket_start} withheld (${DM_WITHHELD.refusal_code ?? "unnamed"}) — ` +
+        `no numbers served for it; 1 bucket(s) withheld.`,
+    );
+    expect(line).not.toContain(
+      displayMetric(DM_CAPTURED, "debt_usd", OBSERVATORY_SERIES_DM.usd_decimals),
+    );
+  });
+});
+
+test.describe("W-3L — gridReadingLine", () => {
+  test("movement between first and last CAPTURED buckets, in the exact ledger strings", () => {
+    const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+    const captured = axis.entries.filter(
+      (entry) => entry.point !== null && !entry.point.refused,
+    );
+    const first = captured[0]?.point;
+    const last = captured[captured.length - 1]?.point;
+    if (first === null || first === undefined || last === null || last === undefined) {
+      throw new Error("fixture invariant: aave carries captured buckets");
+    }
+    expect(captured.length).toBeGreaterThan(1);
+    const usd = OBSERVATORY_SERIES_AAVE.usd_decimals;
+    expect(gridReadingLine(OBSERVATORY_SERIES_AAVE, axis)).toBe(
+      `between captured buckets ${first.bucket_start} and ${last.bucket_start}: ` +
+        `debt ${displayMetric(first, "debt_usd", usd)} → ${displayMetric(last, "debt_usd", usd)}, ` +
+        `accounts ${String(first.accounts)} → ${String(last.accounts)}, ` +
+        `liquidatable ${String(first.liquidatable_positions)} → ${String(last.liquidatable_positions)}.`,
+    );
+  });
+
+  test("one captured bucket: no movement is stated, and no refused number stands in", () => {
+    const axis = buildBucketAxis(OBSERVATORY_SERIES_DM);
+    expect(gridReadingLine(OBSERVATORY_SERIES_DM, axis)).toBe(
+      `only one captured bucket in this window (${DM_CAPTURED.bucket_start}) — no movement to state.`,
+    );
+  });
+});
+
+test.describe("W-3L — pointDetailTakeaway", () => {
+  test("captured / withheld / absent arms, each in its own register", () => {
+    const aaveAxis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+    const capturedEntry = aaveAxis.entries[aaveAxis.newestPointIndex];
+    if (capturedEntry === undefined || capturedEntry.point === null) {
+      throw new Error("fixture invariant: aave newest entry is wire-backed");
+    }
+    expect(pointDetailTakeaway(capturedEntry)).toBe(
+      `captured at ${capturedEntry.point.bucket_start} · watermark block ${formatBlock(capturedEntry.point.last_block)}.`,
+    );
+
+    const dmAxis = buildBucketAxis(OBSERVATORY_SERIES_DM);
+    const withheldEntry = dmAxis.entries[1];
+    if (withheldEntry === undefined || withheldEntry.kind !== "withheld") {
+      throw new Error("fixture invariant: the DM newest entry is withheld");
+    }
+    expect(pointDetailTakeaway(withheldEntry)).toBe(
+      `withheld (${DM_WITHHELD.refusal_code ?? "unnamed"}) at ${DM_WITHHELD.bucket_start} — ` +
+        `the engine's whole book was refused at capture time; no numbers served.`,
+    );
+
+    expect(
+      pointDetailTakeaway({ bucketStart: "2026-07-29T07:00:00Z", kind: "absent", point: null }),
+    ).toBe("ABSENT · no complete batch in this bucket (2026-07-29T07:00:00Z).");
+  });
 });

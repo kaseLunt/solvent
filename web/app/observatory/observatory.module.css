@@ -325,3 +325,56 @@
 .notes li::before {
   content: "· ";
 }
+
+/* ---- W-3L: computed takeaway + counted notes disclosure ---- */
+
+.takeaway {
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 72ch;
+  margin: 0 0 12px;
+}
+
+.notesDisclosure {
+  margin-top: 10px;
+}
+
+.notesDisclosure summary {
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.gridReading {
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 72ch;
+  margin: 0 0 8px;
+}
+
+.gridAsOf {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+  margin: 0 0 8px;
+}
+
+.legendForensics {
+  margin-top: 6px;
+}
+
+.legendForensics summary {
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.detailForensics {
+  margin-top: 10px;
+}
+
+.detailForensics summary {
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}

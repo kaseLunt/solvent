@@ -40,6 +40,7 @@ import {
   describeStride,
   displayMetric,
   METRIC_LABELS,
+  observatoryTakeaway,
   type BucketAxis,
 } from "@/lib/observatory-series";
 import { ObservatoryCharts } from "./ObservatoryCharts";
@@ -60,10 +61,11 @@ export function ObservatorySurface() {
       {/* Wave R1 items 6 + 10: no numbered eyebrow; the adjudicated intro. */}
       <div className={styles.head}>
         <h1>Observatory</h1>
+        {/* W-3L: the ONE method line — hole doctrine + never-combined, merged. */}
         <p>
           How each engine&apos;s book has moved, hour by hour, in a record that outlives batch
           retention. An hour with no complete batch renders as a hole, which is never smoothed
-          over and never drawn as a zero.
+          over and never drawn as a zero; one engine per view, never combined onto one axis.
         </p>
       </div>
 
@@ -83,9 +85,7 @@ export function ObservatorySurface() {
             {candidate}
           </button>
         ))}
-        <span className={styles.controlNote}>
-          one engine per view · engines are never combined onto one axis
-        </span>
+
       </div>
 
       {/* Keyed by engine: switching engines REMOUNTS the view, so state resets
@@ -202,6 +202,13 @@ function ObservatoryBody({
 
   return (
     <>
+      {/* W-3L: the computed takeaway — the newest wire-backed bucket's answer
+          plus the window's gap tally (withheld/absent ride it by law). One
+          source: observatoryTakeaway, rendered verbatim. */}
+      <p className={styles.takeaway} data-testid="observatory-takeaway">
+        {observatoryTakeaway(response, axis)}
+      </p>
+
       {newest !== null && (
         <section data-testid="observatory-newest">
           <div className={styles.newestCaption}>
@@ -273,16 +280,27 @@ function ObservatoryBody({
         <ObservatoryPointDetail entry={selectedEntry} response={response} />
       )}
 
+      {/* W-3L: notes behind a COUNTED disclosure (the LabHeldFlat pattern) —
+          lawful because the bucket tally the notes used to carry alone is
+          promoted into the takeaway above. */}
       {response.notes.length > 0 && (
-        <ul className={styles.notes} data-testid="observatory-notes">
-          {response.notes.map((note) => (
-            <li key={note}>{note}</li>
-          ))}
-        </ul>
+        <details className={styles.notesDisclosure} data-testid="observatory-notes">
+          <summary>
+            {String(response.notes.length)} response note(s) from the service
+          </summary>
+          <ul className={styles.notes}>
+            {response.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </details>
       )}
 
-      <Stampline>
-        <StampItem label="engine" value={<EngineChip engine={response.engine} />} />
+      {/* W-3L: the shared keepOpen split. Engine identity and the bucket
+          tally stay inline (the tally is warn-toned whenever a gap exists);
+          the neutral pins collapse behind a counted summary. */}
+      <Stampline collapse>
+        <StampItem label="engine" value={<EngineChip engine={response.engine} />} keepOpen />
         <StampItem label="served" value={response.served_at} tone="dim" />
         <StampItem
           label="buckets"

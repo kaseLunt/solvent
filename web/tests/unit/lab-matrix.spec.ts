@@ -4291,8 +4291,11 @@ test.describe("g1 — the set-run aside rides every non-cold header", () => {
   test("the aside rides the frontier clause too — the header's LAST clause, whatever composed before it", () => {
     // KILLS: an aside appended before frontierClause, which would split the
     // frontier off the batch story it qualifies.
+    // The frontier (#3) differs from the cohort's anchor (#2), so the clause
+    // carries its never-read-as-one-number qualifier — the pin asserts the
+    // clause's HEAD and lets the qualifier be the frontier arm's own.
     const line = batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), 3, true);
-    expect(line).toContain("The loss frontier above reads batch #3.");
+    expect(line).toContain("The loss frontier above reads batch #3");
     expect(line.endsWith(MATRIX_SET_RUN_ASIDE)).toBe(true);
   });
 
