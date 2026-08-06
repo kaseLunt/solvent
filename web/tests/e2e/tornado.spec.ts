@@ -1158,10 +1158,20 @@ test("r57 item 3 — an older non-ok single-run phase survives a newer 200 set w
   await expect(weethRow.locator('[data-cell-state="definition-changed"]').first()).toBeVisible();
   await expect(batchLine).toContainText("1 run(s) were ASKED under a committed definition");
 
+  // g1 — before any set run, a content-bearing header carries no set-run
+  // aside: there is no tornado answer to point at yet.
+  await expect(batchLine).not.toContainText("A set run has ALSO been issued");
+
   // 4. The set covers weeth and settles 200.
   await pick(page, VARIANT_IDS);
   await page.getByTestId("tornado-run").click();
   await expect(page.getByTestId("tornado-header")).toBeVisible();
+
+  // g1 — the residue's cure, on the rendered page: the matrix has single-run
+  // content AND a set run now exists, so the header's aside says where the
+  // set's answer lives and what "not run" speaks for.
+  await expect(batchLine).toContainText("A set run has ALSO been issued this session");
+  await expect(batchLine).toContainText("speaks only of single-scenario runs");
 
   // THE LAW: the weeth row still holds its ORIGINAL v1-stamped failure. Its
   // cells still read DEFINITION CHANGED in the ASKED-under register, and the

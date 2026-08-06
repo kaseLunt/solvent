@@ -50,6 +50,8 @@ import {
   listedPhases,
   matrixColumns,
   MATRIX_NO_RUN_LINE,
+  MATRIX_SET_RUN_ASIDE,
+  MATRIX_SET_RUN_ONLY_LINE,
   observedAnchorBatch,
   rerunFailedBanner,
   resolveBatchCohort,
@@ -4263,4 +4265,47 @@ test("R17/1 — ONE PROVENANCE, STILL: every surface's account is the same settl
       expect(cohort.definitionChangedAttemptScenarioIds, what).toEqual([DEPEG.id]);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// W-TN report residue g1 — the set-run disclosure beyond the cold empty state.
+// R57 item 3 swapped the COLD header's sentence; every content-bearing arm
+// stayed silent, so a set-covered scenario's "not run" cell read as "never run
+// this session" the moment any single run existed beside it.
+// ---------------------------------------------------------------------------
+
+test.describe("g1 — the set-run aside rides every non-cold header", () => {
+  test("with single-run content and a set run, the header carries the aside exactly once, after the batch story", () => {
+    // KILLS: a header that composes the aside nowhere (the residue itself)
+    // or into the middle of the cohort sentence (the batch story must stay
+    // contiguous — the aside is an ASIDE).
+    const line = batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), null, true);
+    expect(line.endsWith(MATRIX_SET_RUN_ASIDE)).toBe(true);
+    expect(line.indexOf(MATRIX_SET_RUN_ASIDE)).toBe(line.lastIndexOf(MATRIX_SET_RUN_ASIDE));
+    expect(line.startsWith("results shown together were measured at batch #2.")).toBe(true);
+    // The aside's own vocabulary: the pointer and the definition of "not run".
+    expect(MATRIX_SET_RUN_ASIDE).toContain("tornado surface below");
+    expect(MATRIX_SET_RUN_ASIDE).toContain("speaks only of single-scenario runs");
+  });
+
+  test("the aside rides the frontier clause too — the header's LAST clause, whatever composed before it", () => {
+    // KILLS: an aside appended before frontierClause, which would split the
+    // frontier off the batch story it qualifies.
+    const line = batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), 3, true);
+    expect(line).toContain("The loss frontier above reads batch #3.");
+    expect(line.endsWith(MATRIX_SET_RUN_ASIDE)).toBe(true);
+  });
+
+  test("absent without a set run; never stacked onto the cold arm's own sentence", () => {
+    // KILLS: an unconditional append (a session with no set run must not
+    // point at a tornado answer that does not exist), and a cold-arm double
+    // disclosure (MATRIX_SET_RUN_ONLY_LINE already IS the set-run story).
+    expect(batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), null, false)).not.toContain(
+      "set run",
+    );
+    expect(batchHeaderLine(resolveBatchCohort(new Map()), null, true)).toBe(
+      MATRIX_SET_RUN_ONLY_LINE,
+    );
+    expect(MATRIX_SET_RUN_ONLY_LINE).not.toContain(MATRIX_SET_RUN_ASIDE);
+  });
 });

@@ -1692,6 +1692,20 @@ export const MATRIX_SET_RUN_ONLY_LINE =
   "this session: what it produced is on the tornado surface below, never in these cells, " +
   "which speak only for single-scenario runs.";
 
+/**
+ * W-TN report residue g1 — R57 item 3 cured only the COLD header. With
+ * single-run content displayed, a set-covered scenario's cell still read
+ * "not run" and nothing on the surface said a set run exists whose answer
+ * lives elsewhere — the same half-lie, one arm over. This aside rides every
+ * NON-cold header once a set run has been issued this session: same register
+ * as the cold line, the same pointer at the surface that holds the answer,
+ * and it defines what "not run" speaks for. Leading space, clause-style.
+ */
+export const MATRIX_SET_RUN_ASIDE =
+  " A set run has ALSO been issued this session: what it produced is on the tornado " +
+  "surface below, never in these cells, and “not run” here speaks only of " +
+  "single-scenario runs.";
+
 /** "batch #1" / "batches #1 and #3" / "batches #1, #3 and #4". */
 function batchWords(ids: readonly number[]): string {
   const unique = [...new Set(ids)]
@@ -1802,6 +1816,21 @@ function firstResultPendingClause(cohort: BatchCohort): string {
  * In both, no displayed result was measured at the watermark, and the header
  * must not say one was.
  */
+/**
+ * No single-scenario run has ever touched this table: nothing attempted, no
+ * definition-changed residue, no anchor. The ONE arm whose header sentence
+ * already carries the whole set-run story (MATRIX_SET_RUN_ONLY_LINE) — held
+ * as a named predicate so the aside in `batchHeaderLine` and the arm in
+ * `cohortClause` cannot drift apart and double- or zero-speak the set run.
+ */
+function isColdCohort(cohort: BatchCohort): boolean {
+  return (
+    cohort.attemptedScenarioIds.length === 0 &&
+    cohort.definitionChangedAttemptScenarioIds.length === 0 &&
+    cohort.anchorBatchId === null
+  );
+}
+
 function cohortClause(cohort: BatchCohort, hasSetRun: boolean): string {
   // R10 finding 1: "no run" is decided by what was ASKED, never by the absence
   // of a batch. The anchor check rides along so a caller-supplied floor with no
@@ -1815,11 +1844,7 @@ function cohortClause(cohort: BatchCohort, hasSetRun: boolean): string {
   // R57 item 3: after a SET run this arm must stop claiming "no run has been
   // issued yet" — a set run leaves no phase behind (its answer lives on the
   // tornado surface), so the caller passes the fact this map cannot carry.
-  if (
-    cohort.attemptedScenarioIds.length === 0 &&
-    cohort.definitionChangedAttemptScenarioIds.length === 0 &&
-    cohort.anchorBatchId === null
-  ) {
+  if (isColdCohort(cohort)) {
     return hasSetRun ? MATRIX_SET_RUN_ONLY_LINE : MATRIX_NO_RUN_LINE;
   }
   if (cohort.anchorBatchId === null) return firstResultPendingClause(cohort);
@@ -2072,7 +2097,11 @@ export function batchHeaderLine(
     allHoleClause(cohort) +
     contradictedClause(cohort) +
     definitionChangedClause(cohort) +
-    frontierClause(cohort, frontierBatchId)
+    frontierClause(cohort, frontierBatchId) +
+    // g1: the cold arm's sentence already IS the set-run story; every other
+    // arm gets the aside, or a set-covered cell's "not run" reads as "never
+    // run this session" — the R57 item 3 lie, one arm over.
+    (hasSetRun && !isColdCohort(cohort) ? MATRIX_SET_RUN_ASIDE : "")
   );
 }
 
