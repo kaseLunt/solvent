@@ -785,70 +785,133 @@ test.describe("r57 item 8 — the drawn count counts RECTS; measured zero gets i
   });
 });
 
-test.describe("r57 item 12b / r58 item 7 — the cause figures come from the cause counts, never a reach total", () => {
-  // The de-confounded split, mirroring the regenerated fixture: 14 applied
-  // rows, 1 moved, causes 7/4/2, flag census 3/3/3. Every cause differs from
-  // every other cause and from every non-cause figure (applied length 14,
-  // moved 1, declared 1, flags 3/3/3, flag sums 6/6/6/9).
+test.describe("r57 item 12b / r58 item 7 / r60-C — the cause figures come from the cause counts, never any other wire figure", () => {
+  // The de-confounded split, mirroring the regenerated fixture: 17 applied
+  // rows, 1 moved, causes 7/4/5, flag census 3/3/3 — and the RESULT-level
+  // figures r60-C added to the enumeration: positions_answered 2, one engine
+  // row whose accounts is 2, one declared shock, one covered engine. Every
+  // cause differs from every other cause and from every non-cause figure on
+  // the whole result (applied length 17, moved 1, declared 1, flags 3/3/3,
+  // flag sums 6/6/6/9, positions_answered 2, accounts 2, usd_decimals 6).
   const splitReach = {
     ...cellResult().shock_reach,
     reach: "some_marks_held",
-    applied_shocks: Array.from({ length: 14 }, () => ({})),
+    applied_shocks: Array.from({ length: 17 }, () => ({})),
     marks_moved: 1,
     marks_held_by_transform: 7,
     marks_held_by_declared_factor: 4,
-    marks_held_by_arithmetic: 2,
+    marks_held_by_arithmetic: 5,
     marks_snapped: 3,
     marks_base_snapped: 3,
     marks_cap_bound: 3,
   };
+  // The FULL result mirror, carrying the committed bytes' own result-level
+  // figures (run-book-set.no-denominator.json, ethfi_minus_50) so the
+  // distinctness law below covers the same enumeration the committed-bytes
+  // law in tests/e2e/tornado.spec.ts and the generator's refusal cover.
+  const splitResult = cellResult({
+    shocks: [{}],
+    shock_reach: splitReach,
+    engines: [
+      cellEngine({
+        accounts: 2,
+        before_eligible_accounts: 0,
+        after_eligible_accounts: 1,
+        eligible_accounts_delta: 1,
+        flipped_to_eligible: 1,
+        refused_in_batch_positions: 1,
+        unrebuildable_positions: 0,
+      } as Partial<SetRunEngineSummary>),
+    ],
+    positions_answered: 2,
+    positions_withheld: 0,
+  } as unknown as Partial<SetRunScenarioResult>);
 
   test("the asymmetric split prints exactly its three cause figures", () => {
     // KILLS: a renderer sourcing the cause sentence from len(applied_shocks)
-    // (14), marks_moved (1), declared_shocks (1), the flag census (3/3/3) or
-    // any flag sum (6/6/6/9): every confound differs from every cause figure
-    // printed, so the wrong source prints a wrong number here.
-    const split = cellResult({
-      shock_reach: splitReach,
-    } as unknown as Partial<SetRunScenarioResult>);
-    expect(heldCauseSentence(split)).toBe(
+    // (17), marks_moved (1), declared_shocks (1), the flag census (3/3/3),
+    // any flag sum (6/6/6/9), positions_answered (2) or the engine row's
+    // accounts (2): every confound differs from every cause figure printed,
+    // so the wrong source prints a wrong number here.
+    expect(heldCauseSentence(splitResult)).toBe(
       "Of the held marks: 7 pinned by the stable snap, a snapped base or a bound cap, " +
         "4 held at the factor this scenario declared for them, " +
-        "2 unchanged by exact-integer arithmetic.",
+        "5 unchanged by exact-integer arithmetic.",
     );
-    expect(heldCauseSentence(split)).not.toContain("14");
-    expect(heldCauseSentence(split)).not.toContain("3");
-    expect(heldCauseSentence(split)).not.toContain("9");
-    expect(heldCauseSentence(split)).not.toContain("6");
-    expect(heldCauseSentence(split)).not.toContain("1 ");
-    expect(heldCauseSentence(split)).not.toMatch(/\d+ of \d+ snapped/);
+    expect(heldCauseSentence(splitResult)).not.toContain("17");
+    expect(heldCauseSentence(splitResult)).not.toContain("14");
+    expect(heldCauseSentence(splitResult)).not.toContain("3");
+    expect(heldCauseSentence(splitResult)).not.toContain("9");
+    expect(heldCauseSentence(splitResult)).not.toContain("6");
+    expect(heldCauseSentence(splitResult)).not.toContain("2");
+    expect(heldCauseSentence(splitResult)).not.toContain("1 ");
+    expect(heldCauseSentence(splitResult)).not.toMatch(/\d+ of \d+ snapped/);
   });
 
-  test("r58 item 7 — the law itself asserts pairwise distinctness, so a re-confounded edit fails HERE", () => {
+  test("r58 item 7 / r60-C — the law itself asserts pairwise distinctness over the FULL mirror, so a re-confounded edit fails HERE", () => {
     // KILLS: a future edit that quietly re-confounds a cause with a non-cause
     // (r58's escape was declared-factor == marks_snapped and arithmetic ==
-    // marks_moved): the figures this law pins must stay pairwise distinct or
-    // this assertion goes red before any rendering is even consulted.
-    const causes = [
-      splitReach.marks_held_by_transform,
-      splitReach.marks_held_by_declared_factor,
-      splitReach.marks_held_by_arithmetic,
+    // marks_moved; r60's was arithmetic == positions_answered ==
+    // engines[0].accounts, all at 2): the figures this law pins must stay
+    // pairwise distinct or this assertion goes red before any rendering is
+    // even consulted. The enumeration mirrors the committed-bytes law in
+    // tests/e2e/tornado.spec.ts and the generator's nonCauseFiguresOf.
+    const engine = splitResult.engines[0];
+    if (engine === undefined) throw new Error("the mirror lost its engine row");
+    const causes: [string, number][] = [
+      ["marks_held_by_transform", splitReach.marks_held_by_transform],
+      ["marks_held_by_declared_factor", splitReach.marks_held_by_declared_factor],
+      ["marks_held_by_arithmetic", splitReach.marks_held_by_arithmetic],
     ];
-    expect(new Set(causes).size).toBe(3);
-    const nonCauses = [
-      splitReach.marks_snapped,
-      splitReach.marks_base_snapped,
-      splitReach.marks_cap_bound,
-      splitReach.marks_moved,
-      splitReach.applied_shocks.length,
-      splitReach.declared_shocks,
-      splitReach.marks_snapped + splitReach.marks_base_snapped,
-      splitReach.marks_snapped + splitReach.marks_cap_bound,
-      splitReach.marks_base_snapped + splitReach.marks_cap_bound,
-      splitReach.marks_snapped + splitReach.marks_base_snapped + splitReach.marks_cap_bound,
+    expect(new Set(causes.map(([, value]) => value)).size).toBe(3);
+    const nonCauses: [string, number][] = [
+      // SetRunShockReach (rev2 §2.5).
+      ["marks_snapped", splitReach.marks_snapped],
+      ["marks_base_snapped", splitReach.marks_base_snapped],
+      ["marks_cap_bound", splitReach.marks_cap_bound],
+      ["marks_moved", splitReach.marks_moved],
+      ["applied_shocks.length", splitReach.applied_shocks.length],
+      ["declared_shocks", splitReach.declared_shocks],
+      ["declared_shocks_at_identity", splitReach.declared_shocks_at_identity],
+      ["held_flat_marks", splitReach.held_flat_marks],
+      ["held_flat_assets.length", splitReach.held_flat_assets.length],
+      ["marks_snapped+marks_base_snapped", splitReach.marks_snapped + splitReach.marks_base_snapped],
+      ["marks_snapped+marks_cap_bound", splitReach.marks_snapped + splitReach.marks_cap_bound],
+      ["marks_base_snapped+marks_cap_bound", splitReach.marks_base_snapped + splitReach.marks_cap_bound],
+      ["flag_sum", splitReach.marks_snapped + splitReach.marks_base_snapped + splitReach.marks_cap_bound],
+      // SetRunScenarioResult (rev2 §2.4) — the r60-C additions.
+      ["shocks.length", splitResult.shocks.length],
+      ["covered_engines.length", splitResult.covered_engines.length],
+      ["withheld_engines.length", splitResult.withheld_engines.length],
+      ["unmeasurable_engines.length", splitResult.unmeasurable_engines.length],
+      ["engines.length", splitResult.engines.length],
+      ["positions_answered", splitResult.positions_answered],
+      ["positions_withheld", splitResult.positions_withheld],
+      // SetRunEngineSummary (rev2 §2.6). A null figure is ABSENT, never a
+      // zero, and registers nothing.
+      ["engines[0].usd_decimals", engine.usd_decimals],
+      ["engines[0].accounts", engine.accounts],
+      ["engines[0].infinite_accounts", engine.infinite_accounts],
+      ["engines[0].movement_excluded_accounts", engine.movement_excluded_accounts],
+      ["engines[0].refused_in_batch_positions", engine.refused_in_batch_positions],
+      ["engines[0].unrebuildable_positions", engine.unrebuildable_positions],
+      ["engines[0].before_eligible_accounts", engine.before_eligible_accounts],
+      ["engines[0].after_eligible_accounts", engine.after_eligible_accounts],
+      ["engines[0].eligible_accounts_delta", engine.eligible_accounts_delta],
     ];
-    for (const cause of causes) {
-      expect(nonCauses, `cause figure ${String(cause)} is impersonated by a non-cause figure`).not.toContain(cause);
+    if (engine.flipped_to_eligible !== null) {
+      nonCauses.push(["engines[0].flipped_to_eligible", engine.flipped_to_eligible]);
+    }
+    if (engine.hf_dropped_accounts !== null) {
+      nonCauses.push(["engines[0].hf_dropped_accounts", engine.hf_dropped_accounts]);
+    }
+    for (const [causeName, causeValue] of causes) {
+      for (const [nonCauseName, nonCauseValue] of nonCauses) {
+        expect(
+          nonCauseValue,
+          `${causeName} (${String(causeValue)}) is impersonated by ${nonCauseName}`,
+        ).not.toBe(causeValue);
+      }
     }
   });
 });

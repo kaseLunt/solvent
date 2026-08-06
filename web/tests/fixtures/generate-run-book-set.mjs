@@ -93,17 +93,26 @@
 //         null, because null is "not stated", never false.
 //       ethfi_minus_50 — reshaped from `every_mark_moved` to `some_marks_held`
 //         with a DE-CONFOUNDED cause split (r57 item 12b, hardened by r58
-//         item 7): 14 applied rows, 1 moved, 7 held by a transform, 4 held at
-//         the declared factor (two of them snapped at 1/1, the §2.5
-//         partition-order case), 2 held by exact-integer arithmetic. ALL THREE
-//         cause figures (7/4/2) differ pairwise from each other AND from every
-//         non-cause figure a renderer could source instead: applied length
-//         (14), marks_moved (1), declared_shocks (1), the flag census (snapped
-//         3, base 3, cap 3), and every sum of those flags (6, 6, 6, 9). The
+//         item 7, completed by r60-C): 17 applied rows, 1 moved, 7 held by a
+//         transform, 4 held at the declared factor (two of them snapped at
+//         1/1, the §2.5 partition-order case), 5 held by exact-integer
+//         arithmetic. ALL THREE cause figures (7/4/5) differ pairwise from
+//         each other AND from EVERY non-cause figure on the result wire shape
+//         a renderer could source instead — not just the reach's own totals
+//         (applied length 17, marks_moved 1, declared_shocks 1, the flag
+//         census 3/3/3 and every sum of those flags 6/6/6/9) but every
+//         integer count and array length on SetRunScenarioResult (rev2 §2.4:
+//         positions_answered 2, positions_withheld 0, the four
+//         partition-array lengths, the declared shock list) and on its
+//         SetRunEngineSummary rows (rev2 §2.6: accounts 2 and its sibling
+//         counts, usd_decimals, the nested block figures when present). The
 //         r58 confound was declared-factor == marks_snapped and arithmetic ==
-//         marks_moved; the check below refuses generation if any such pair
-//         ever collides again. The bar still draws: partly reached is a real
-//         bar with a stated qualification.
+//         marks_moved; the r60 confound was arithmetic == positions_answered
+//         == engines[0].accounts, all at 2, because r58/r59 enumerated only
+//         the reach. The check below enumerates the FULL shape, refuses
+//         generation if any such pair ever collides again, and SELF-TESTS
+//         that refusal against the r60 shape on every run. The bar still
+//         draws: partly reached is a real bar with a stated qualification.
 //
 //  5. run-book-set.scenarios.json — the committed listing scenarios.json
 //     EXTENDED with the two definitions the contract's own 200 example
@@ -322,9 +331,11 @@ if (pristineAaveRow === undefined || pristineDmRow === undefined) {
 
 // The (chain 10) asset pool the committed scenarios themselves shock and hold
 // flat, reused so every applied row names an address the committed set names.
-// Extended for r58 item 7 (the 14-row de-confounded cause split needs 13
-// distinct held marks); every added address is still read out of the committed
-// scenario definition files under internal/risk/scenarios/, never invented.
+// Extended for r58 item 7 (13 distinct held marks) and again for r60-C (the
+// 17-row de-confounded cause split needs 16); every added address is still
+// read out of the committed scenario definition files under
+// internal/risk/scenarios/, never invented (the last three are
+// dm_composition_census.json's own chain-10 book).
 const OP_ASSETS = [
   "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
   "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
@@ -339,6 +350,9 @@ const OP_ASSETS = [
   "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
   "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e",
   "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC",
+  "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+  "0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a",
+  "0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898",
 ];
 const appliedRow = (asset, factorNum, factorDen, before, after, flags = {}) => ({
   after,
@@ -377,10 +391,17 @@ const ethfiApplied = [
   appliedRow(OP_ASSETS[8], 1, 1, "3000000", "3000000", { snapped: true }),
   appliedRow(OP_ASSETS[9], 1, 1, "4000000", "4000000"),
   appliedRow(OP_ASSETS[10], 1, 1, "2500000", "2500000"),
-  // 13..14 — held by EXACT-INTEGER ARITHMETIC: non-identity factors, no flags,
-  // floor(500 × 1000001/1000000) = 500 and floor(700 × 1000001/1000000) = 700.
+  // 13..17 — held by EXACT-INTEGER ARITHMETIC: non-identity factors, no flags,
+  // floor(n × 1000001/1000000) = n for every n below 1000000 — 500, 700, 300,
+  // 900 and 1100 all come back at themselves. Five rows (grown from two by
+  // r60-C) so the arithmetic cause figure is 5, pairwise distinct from the
+  // other causes AND from positions_answered / engines[0].accounts (both 2),
+  // the counts the r58/r59 enumerations omitted and r60 collided with.
   appliedRow(OP_ASSETS[11], 1000001, 1000000, "500", "500"),
   appliedRow(OP_ASSETS[12], 1000001, 1000000, "700", "700"),
+  appliedRow(OP_ASSETS[13], 1000001, 1000000, "300", "300"),
+  appliedRow(OP_ASSETS[14], 1000001, 1000000, "900", "900"),
+  appliedRow(OP_ASSETS[15], 1000001, 1000000, "1100", "1100"),
 ];
 const ethfiReach = {
   declared_shocks: ethfiDefinition.shocks.length,
@@ -390,16 +411,16 @@ const ethfiReach = {
   marks_moved: 1,
   marks_held_by_declared_factor: 4,
   marks_held_by_transform: 7,
-  marks_held_by_arithmetic: 2,
+  marks_held_by_arithmetic: 5,
   marks_snapped: 3,
   marks_base_snapped: 3,
   marks_cap_bound: 3,
   held_flat_marks: 0,
   held_flat_assets: [],
   note:
-    "PARTLY REACHED: 1 of the 14 marks this scenario's matrix describes moved. Of the held " +
+    "PARTLY REACHED: 1 of the 17 marks this scenario's matrix describes moved. Of the held " +
     "marks: 7 pinned by a pricing transform, 4 held at the factor the definition declared, " +
-    "2 unchanged by exact-integer arithmetic. The counts are a partition; the flag census " +
+    "5 unchanged by exact-integer arithmetic. The counts are a partition; the flag census " +
     "(3 snapped, 3 base-snapped, 3 cap-bound) attributes no cause.",
 };
 
@@ -478,55 +499,142 @@ const ethfiResult = {
   if (moved + byDeclared + byTransform + byArithmetic !== rows.length) {
     fail("variant: ethfi's cause split is not a partition of its applied rows");
   }
-  // r57 item 12b, hardened by r58 item 7 — the de-confound covers ALL THREE
-  // cause figures, not just the transform count. Each cause must differ from
-  // each other cause AND from every non-cause figure a renderer could source
-  // instead: the flag census, its sums, marks_moved, the applied length and
-  // the declared count. r58's escape was declared-factor == marks_snapped and
-  // arithmetic == marks_moved; any such pair stops generation here.
+  // r57 item 12b, hardened by r58 item 7, COMPLETED by r60-C — the de-confound
+  // covers ALL THREE cause figures against the FULL RESULT WIRE SHAPE, not
+  // just the reach's own totals. Each cause must differ from each other cause
+  // AND from every non-cause integer count or array length anywhere on this
+  // result: SetRunShockReach's totals, flag census and flag sums (rev2 §2.5),
+  // SetRunScenarioResult's own counts (rev2 §2.4 — positions_answered,
+  // positions_withheld, the four partition-array lengths, the declared shock
+  // list, each absence's counts) and every SetRunEngineSummary integer (rev2
+  // §2.6 — usd_decimals, accounts, infinite / movement-excluded / refused /
+  // unrebuildable, the eligibility trio, flipped_to_eligible,
+  // hf_dropped_accounts, plus the nested block figures when present). r58's
+  // escape was declared-factor == marks_snapped and arithmetic == marks_moved;
+  // r60's escape was arithmetic == positions_answered == engines[0].accounts,
+  // all at 2, because r58/r59 enumerated only the reach. A NEW INTEGER OR
+  // ARRAY FIELD ON ANY OF THE THREE SCHEMAS (api/openapi.yaml:
+  // SetRunScenarioResult, SetRunShockReach, SetRunEngineSummary) MUST BE
+  // REGISTERED HERE and in the committed-bytes law in
+  // tests/e2e/tornado.spec.ts (the r60-C test) in the same diff.
   const flagSum = census.marks_snapped + census.marks_base_snapped + census.marks_cap_bound;
-  const causes = {
-    marks_held_by_transform: byTransform,
-    marks_held_by_declared_factor: byDeclared,
-    marks_held_by_arithmetic: byArithmetic,
-  };
-  const nonCauses = {
-    marks_snapped: census.marks_snapped,
-    marks_base_snapped: census.marks_base_snapped,
-    marks_cap_bound: census.marks_cap_bound,
-    marks_moved: moved,
-    applied_length: rows.length,
-    declared_shocks: ethfiReach.declared_shocks,
-    // r59-C — the wire's OTHER adjacent counts, omitted by r58's enumeration:
-    // a renderer sourcing a cause from any of these must also go red.
-    declared_shocks_at_identity: ethfiReach.declared_shocks_at_identity,
-    held_flat_marks: ethfiReach.held_flat_marks,
-    held_flat_assets_length: ethfiReach.held_flat_assets.length,
-    "marks_snapped+marks_base_snapped": census.marks_snapped + census.marks_base_snapped,
-    "marks_snapped+marks_cap_bound": census.marks_snapped + census.marks_cap_bound,
-    "marks_base_snapped+marks_cap_bound": census.marks_base_snapped + census.marks_cap_bound,
-    flag_sum: flagSum,
-  };
-  const causeEntries = Object.entries(causes);
-  for (let i = 0; i < causeEntries.length; i += 1) {
-    for (let j = i + 1; j < causeEntries.length; j += 1) {
-      if (causeEntries[i][1] === causeEntries[j][1]) {
-        fail(
-          `variant: ${causeEntries[i][0]} and ${causeEntries[j][0]} are confounded at ` +
-            `${causeEntries[i][1]}; a renderer swapping the two would print the right number`,
-        );
+  const nonCauseFiguresOf = (result) => {
+    const reach = result.shock_reach;
+    const figures = {
+      // SetRunShockReach (rev2 §2.5) — the reach's own totals, census, sums.
+      marks_snapped: reach.marks_snapped,
+      marks_base_snapped: reach.marks_base_snapped,
+      marks_cap_bound: reach.marks_cap_bound,
+      marks_moved: reach.marks_moved,
+      applied_length: reach.applied_shocks.length,
+      declared_shocks: reach.declared_shocks,
+      declared_shocks_at_identity: reach.declared_shocks_at_identity,
+      held_flat_marks: reach.held_flat_marks,
+      held_flat_assets_length: reach.held_flat_assets.length,
+      "marks_snapped+marks_base_snapped": reach.marks_snapped + reach.marks_base_snapped,
+      "marks_snapped+marks_cap_bound": reach.marks_snapped + reach.marks_cap_bound,
+      "marks_base_snapped+marks_cap_bound": reach.marks_base_snapped + reach.marks_cap_bound,
+      flag_sum: reach.marks_snapped + reach.marks_base_snapped + reach.marks_cap_bound,
+      // SetRunScenarioResult (rev2 §2.4) — r60-C: the result's own counts and
+      // array lengths, the figures the r58/r59 enumerations omitted.
+      shocks_length: result.shocks.length,
+      covered_engines_length: result.covered_engines.length,
+      withheld_engines_length: result.withheld_engines.length,
+      unmeasurable_engines_length: result.unmeasurable_engines.length,
+      engines_length: result.engines.length,
+      positions_answered: result.positions_answered,
+      positions_withheld: result.positions_withheld,
+    };
+    result.unmeasurable_engines.forEach((absence, i) => {
+      figures[`unmeasurable_engines[${i}].counts.positions_in_batch`] =
+        absence.counts.positions_in_batch;
+      figures[`unmeasurable_engines[${i}].counts.refused_in_batch`] =
+        absence.counts.refused_in_batch;
+      figures[`unmeasurable_engines[${i}].counts.unrebuildable`] = absence.counts.unrebuildable;
+    });
+    result.engines.forEach((row, i) => {
+      // Every §2.6 integer. A null (hf_dropped_accounts on the DM,
+      // flipped_to_eligible on Aave) is an ABSENT figure, never a zero, and
+      // registers nothing.
+      const register = (name, value) => {
+        if (value !== null && value !== undefined) figures[`engines[${i}].${name}`] = value;
+      };
+      register("usd_decimals", row.usd_decimals);
+      register("accounts", row.accounts);
+      register("infinite_accounts", row.infinite_accounts);
+      register("movement_excluded_accounts", row.movement_excluded_accounts);
+      register("refused_in_batch_positions", row.refused_in_batch_positions);
+      register("unrebuildable_positions", row.unrebuildable_positions);
+      register("before_eligible_accounts", row.before_eligible_accounts);
+      register("after_eligible_accounts", row.after_eligible_accounts);
+      register("eligible_accounts_delta", row.eligible_accounts_delta);
+      register("flipped_to_eligible", row.flipped_to_eligible);
+      register("hf_dropped_accounts", row.hf_dropped_accounts);
+      if (row.market_realization !== null && row.market_realization !== undefined) {
+        register("market_realization.usd_decimals", row.market_realization.usd_decimals);
       }
+      if (row.projection !== null && row.projection !== undefined) {
+        register("projection.annual_delta_bps", row.projection.annual_delta_bps);
+        register("projection.apy_observed_at_block", row.projection.apy_observed_at_block);
+        register("projection.horizons_length", row.projection.horizons.length);
+        row.projection.horizons.forEach((horizonRow, j) => {
+          register(`projection.horizons[${j}].horizon_seconds`, horizonRow.horizon_seconds);
+        });
+      }
+    });
+    return figures;
+  };
+  const causeConfoundsOf = (result) => {
+    const reach = result.shock_reach;
+    const causeEntries = Object.entries({
+      marks_held_by_transform: reach.marks_held_by_transform,
+      marks_held_by_declared_factor: reach.marks_held_by_declared_factor,
+      marks_held_by_arithmetic: reach.marks_held_by_arithmetic,
+    });
+    const violations = [];
+    for (let i = 0; i < causeEntries.length; i += 1) {
+      for (let j = i + 1; j < causeEntries.length; j += 1) {
+        if (causeEntries[i][1] === causeEntries[j][1]) {
+          violations.push(
+            `${causeEntries[i][0]} and ${causeEntries[j][0]} are confounded at ` +
+              `${causeEntries[i][1]}; a renderer swapping the two would print the right number`,
+          );
+        }
+      }
+    }
+    for (const [causeName, causeValue] of causeEntries) {
+      for (const [nonCauseName, nonCauseValue] of Object.entries(nonCauseFiguresOf(result))) {
+        if (causeValue === nonCauseValue) {
+          violations.push(
+            `${causeName} (${causeValue}) is confounded with ${nonCauseName}; a renderer ` +
+              "sourcing the wrong figure would print the right number and this fixture " +
+              "could not catch it",
+          );
+        }
+      }
+    }
+    return violations;
+  };
+  // PERMANENT SELF-TEST — the refusal must FIRE on the exact r60-C escape
+  // shape: marks_held_by_arithmetic back at 2, equal to positions_answered
+  // AND engines[0].accounts, naming both sources. A checker that goes quiet
+  // on the shape this enumeration exists to refuse is itself refused, at
+  // every generation.
+  {
+    const confounded = structuredClone(ethfiResult);
+    confounded.shock_reach.marks_held_by_arithmetic = 2;
+    const caught = causeConfoundsOf(confounded).join("\n");
+    if (!caught.includes("positions_answered") || !caught.includes("engines[0].accounts")) {
+      fail(
+        "self-test: the anti-confound refusal no longer fires on the r60-C shape " +
+          "(marks_held_by_arithmetic == positions_answered == engines[0].accounts == 2); " +
+          "the refusal is dead, so nothing is generated",
+      );
     }
   }
-  for (const [causeName, causeValue] of causeEntries) {
-    for (const [nonCauseName, nonCauseValue] of Object.entries(nonCauses)) {
-      if (causeValue === nonCauseValue) {
-        fail(
-          `variant: ${causeName} (${causeValue}) is confounded with ${nonCauseName}; a renderer ` +
-            "sourcing the wrong figure would print the right number and this fixture could not catch it",
-        );
-      }
-    }
+  const confounds = causeConfoundsOf(ethfiResult);
+  if (confounds.length > 0) {
+    fail(`variant:\n  ${confounds.join("\n  ")}`);
   }
   if (rows.length === moved || rows.length === flagSum) {
     fail("variant: the applied length is confounded with another reach total");

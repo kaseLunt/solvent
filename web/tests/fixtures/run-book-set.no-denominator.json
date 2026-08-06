@@ -649,18 +649,54 @@
             "factor_num": "1000001",
             "snapped": false,
             "source": "priceproviderv2"
+          },
+          {
+            "after": "300",
+            "asset": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+            "base_snapped": false,
+            "before": "300",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1000000",
+            "factor_num": "1000001",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "900",
+            "asset": "0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a",
+            "base_snapped": false,
+            "before": "900",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1000000",
+            "factor_num": "1000001",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "1100",
+            "asset": "0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898",
+            "base_snapped": false,
+            "before": "1100",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1000000",
+            "factor_num": "1000001",
+            "snapped": false,
+            "source": "priceproviderv2"
           }
         ],
         "marks_moved": 1,
         "marks_held_by_declared_factor": 4,
         "marks_held_by_transform": 7,
-        "marks_held_by_arithmetic": 2,
+        "marks_held_by_arithmetic": 5,
         "marks_snapped": 3,
         "marks_base_snapped": 3,
         "marks_cap_bound": 3,
         "held_flat_marks": 0,
         "held_flat_assets": [],
-        "note": "PARTLY REACHED: 1 of the 14 marks this scenario's matrix describes moved. Of the held marks: 7 pinned by a pricing transform, 4 held at the factor the definition declared, 2 unchanged by exact-integer arithmetic. The counts are a partition; the flag census (3 snapped, 3 base-snapped, 3 cap-bound) attributes no cause."
+        "note": "PARTLY REACHED: 1 of the 17 marks this scenario's matrix describes moved. Of the held marks: 7 pinned by a pricing transform, 4 held at the factor the definition declared, 5 unchanged by exact-integer arithmetic. The counts are a partition; the flag census (3 snapped, 3 base-snapped, 3 cap-bound) attributes no cause."
       },
       "covered_engines": [
         "debt_manager"
