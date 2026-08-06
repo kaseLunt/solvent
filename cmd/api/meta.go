@@ -478,9 +478,11 @@ const (
 // These are COMMITTED FACTS OF THAT RECORD, not measurements this binary can take:
 // the B3 empirical scan lives in `cmd/reconcile` and writes an ARTIFACT rather
 // than a database table, so a serving path can only republish what the record
-// says. What it must not do is round the record up. Three of these budgets are
-// KNOWN-REFUTED — the scan measured gaps of 170,712s (FRAX), 248,460s (USDC) and
-// 604,896s (PYUSD) against a tested budget of 90,000s — and grading them
+// says. What it must not do is round the record up. Three of these budgets were
+// EMPIRICALLY CORRECTED after refutation — the scan measured gaps of 170,712s
+// (FRAX), 248,460s (USDC) and 604,896s (PYUSD) against the retired 90,000s
+// budget, and 09d496e landed the corrections the grades below are judged
+// against — and grading any scanned budget
 // `published-not-verified` would tell an operator the evidence is outstanding when
 // the evidence is in and it is negative. That is the silent-cap anti-canon with a
 // friendlier label.

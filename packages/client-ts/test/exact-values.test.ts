@@ -671,16 +671,22 @@ describe("/v1/meta serves the full posture", () => {
     expect(meta.sweep_never_refusals_in_batch).toBe(PINNED.meta.sweepNeverRefusalsInBatch);
   });
 
-  it("grades heartbeat provenance honestly: one verified, one not", async () => {
+  it("grades heartbeat provenance honestly: a qualifier and a corrected empirical budget (Codex r66)", async () => {
     const meta = await client.meta();
     expect(meta.heartbeat_provenance).toHaveLength(2);
-    const verified = byKey(meta.heartbeat_provenance, "proxy", PINNED.meta.heartbeat.verifiedProxy);
-    expect(verified.provenance_grade).toBe("verified");
-    expect(verified.heartbeat_seconds).toBe(PINNED.meta.heartbeat.verifiedSeconds);
-    expect(verified.grace_seconds).toBe(PINNED.meta.heartbeat.verifiedGrace);
-    const unverified = byKey(meta.heartbeat_provenance, "proxy", PINNED.meta.heartbeat.unverifiedProxy);
-    expect(unverified.provenance_grade).toBe("published-not-verified");
-    expect(unverified.basis).toContain("NOT independently confirmed");
+    const qualified = byKey(meta.heartbeat_provenance, "proxy", PINNED.meta.heartbeat.qualifiedProxy);
+    expect(qualified.provenance_grade).toBe("empirical-historical-with-qualifier");
+    expect(qualified.heartbeat_seconds).toBe(PINNED.meta.heartbeat.qualifiedSeconds);
+    expect(qualified.grace_seconds).toBe(PINNED.meta.heartbeat.qualifiedGrace);
+    expect(qualified.observed_max_gap_seconds).toBe(PINNED.meta.heartbeat.qualifiedGap);
+    expect(qualified.budget_refuted).toBe(false);
+    const empirical = byKey(meta.heartbeat_provenance, "proxy", PINNED.meta.heartbeat.empiricalProxy);
+    expect(empirical.provenance_grade).toBe("empirical-historical");
+    expect(empirical.heartbeat_seconds).toBe(PINNED.meta.heartbeat.empiricalSeconds);
+    expect(empirical.grace_seconds).toBe(PINNED.meta.heartbeat.empiricalGrace);
+    expect(empirical.observed_max_gap_seconds).toBe(PINNED.meta.heartbeat.empiricalGap);
+    expect(empirical.budget_refuted).toBe(false);
+    expect(empirical.basis).toContain("retired published budget");
   });
 
   it("publishes the deployment's constants, with the ceiling at twice the budget", async () => {

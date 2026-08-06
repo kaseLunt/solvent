@@ -2916,24 +2916,24 @@ export const meta = {
       "aggregator": "0x00c7A37B03690fb9f41b5C5AF8131735C7275446",
       "heartbeat_seconds": 3600,
       "grace_seconds": 1800,
-      "provenance_grade": "verified",
-      "observed_max_gap_seconds": null,
-      "tested_budget_seconds": null,
+      "provenance_grade": "empirical-historical-with-qualifier",
+      "observed_max_gap_seconds": 3732,
+      "tested_budget_seconds": 5400,
       "budget_refuted": false,
-      "basis": "deployed code observed consuming this exact proxy with a 3600-second heartbeat (constructor evidence at 0x641169f048ee8de8b3037c9d9c840060fe03e463); recon/derivation-notes.md heartbeat-provenance table"
+      "basis": "B3 empirical scan: measured maximum publication gap 3732s EXCEEDS the published 3600s heartbeat and survives only inside the declared 1800s operator grace (tested budget 5400s), a QUALIFIER and not a pass. Never verified: a complete ledger's max gap is exact HISTORY and cannot certify the future."
     },
     {
       "chain_id": 1,
       "symbol": "USDC",
       "proxy": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
       "aggregator": "0x789190466E21a8b78b8027866CBBDc151542A26C",
-      "heartbeat_seconds": 86400,
-      "grace_seconds": 3600,
-      "provenance_grade": "published-not-verified",
-      "observed_max_gap_seconds": null,
-      "tested_budget_seconds": null,
+      "heartbeat_seconds": 259200,
+      "grace_seconds": 43200,
+      "provenance_grade": "empirical-historical",
+      "observed_max_gap_seconds": 248460,
+      "tested_budget_seconds": 302400,
       "budget_refuted": false,
-      "basis": "the published Chainlink mainnet heartbeat for this feed; NOT independently confirmed from bytecode or from a consumer's constructor by this repo (recon/derivation-notes.md heartbeat-provenance table)"
+      "basis": "B3 empirical scan against the ACTIVE budget: the measured maximum publication gap 248460s sits within 302400s (259200s heartbeat + 43200s grace), the correction 09d496e landed after this same ledger REFUTED the retired published budget of 90000s. The retired budget stays refuted as history. Never verified: a complete ledger's max gap is exact HISTORY and cannot certify the future."
     }
   ],
   "constants": {
@@ -3130,24 +3130,24 @@ export const metaNoBatch = {
       "aggregator": "0x00c7A37B03690fb9f41b5C5AF8131735C7275446",
       "heartbeat_seconds": 3600,
       "grace_seconds": 1800,
-      "provenance_grade": "verified",
-      "observed_max_gap_seconds": null,
-      "tested_budget_seconds": null,
+      "provenance_grade": "empirical-historical-with-qualifier",
+      "observed_max_gap_seconds": 3732,
+      "tested_budget_seconds": 5400,
       "budget_refuted": false,
-      "basis": "deployed code observed consuming this exact proxy with a 3600-second heartbeat (constructor evidence at 0x641169f048ee8de8b3037c9d9c840060fe03e463); recon/derivation-notes.md heartbeat-provenance table"
+      "basis": "B3 empirical scan: measured maximum publication gap 3732s EXCEEDS the published 3600s heartbeat and survives only inside the declared 1800s operator grace (tested budget 5400s), a QUALIFIER and not a pass. Never verified: a complete ledger's max gap is exact HISTORY and cannot certify the future."
     },
     {
       "chain_id": 1,
       "symbol": "USDC",
       "proxy": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
       "aggregator": "0x789190466E21a8b78b8027866CBBDc151542A26C",
-      "heartbeat_seconds": 86400,
-      "grace_seconds": 3600,
-      "provenance_grade": "published-not-verified",
-      "observed_max_gap_seconds": null,
-      "tested_budget_seconds": null,
+      "heartbeat_seconds": 259200,
+      "grace_seconds": 43200,
+      "provenance_grade": "empirical-historical",
+      "observed_max_gap_seconds": 248460,
+      "tested_budget_seconds": 302400,
       "budget_refuted": false,
-      "basis": "the published Chainlink mainnet heartbeat for this feed; NOT independently confirmed from bytecode or from a consumer's constructor by this repo (recon/derivation-notes.md heartbeat-provenance table)"
+      "basis": "B3 empirical scan against the ACTIVE budget: the measured maximum publication gap 248460s sits within 302400s (259200s heartbeat + 43200s grace), the correction 09d496e landed after this same ledger REFUTED the retired published budget of 90000s. The retired budget stays refuted as history. Never verified: a complete ledger's max gap is exact HISTORY and cannot certify the future."
     }
   ],
   "constants": {

@@ -873,10 +873,10 @@ func TestMetaServesTheFullPosture(t *testing.T) {
 	require.EqualValues(t, 1, num(t, sweeps, "success"))
 	require.EqualValues(t, 1, num(t, body, "sweep_never_refusals_in_batch"))
 
-	// HEARTBEAT PROVENANCE — the three grades, each with the evidence behind it.
+	// HEARTBEAT PROVENANCE — the grades, each with the evidence behind it.
 	//
-	// A KNOWN-REFUTED budget must NOT be reported as merely awaiting confirmation:
-	// the measurement is in and it is negative, and grading it `published-not-verified`
+	// A SCANNED budget must NOT be reported as merely awaiting confirmation:
+	// the measurement is in, and grading it `published-not-verified`
 	// would overstate provenance while quietly keeping the friendlier published
 	// number (the silent-cap anti-canon with a nicer label).
 	hb := arr(t, body, "heartbeat_provenance")

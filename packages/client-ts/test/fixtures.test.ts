@@ -170,3 +170,58 @@ describe("the fixture is not an empty book", () => {
     expect(BigInt(dm?.current_bad_debt_usd ?? "0")).toBeGreaterThan(0n);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Codex r66: the meta fixtures feed the Developers page's PUBLIC /v1/meta
+// sample, so their heartbeat story must obey the same coherence the server's
+// own seeded law binds — the pre-fix fixtures showed weETH as `verified` (a
+// grade no feed can hold) and USDC as unjudged on the retired budget while
+// the live 1.8.0 wire served the corrected grades: wrong provenance data
+// surfaced to an honest developer under a "200 response" heading.
+// ---------------------------------------------------------------------------
+
+describe("the meta fixtures' heartbeat provenance is coherent (Codex r66)", () => {
+  const bodies = [fixtures.meta, fixtures.metaNoBatch] as const;
+
+  it("every scanned row's verdict agrees with its own served arithmetic", () => {
+    for (const body of bodies) {
+      for (const row of body.heartbeat_provenance) {
+        if (row.observed_max_gap_seconds === null) {
+          expect(row.provenance_grade).toBe("published-not-verified");
+          expect(row.tested_budget_seconds).toBeNull();
+          expect(row.budget_refuted).toBe(false);
+          continue;
+        }
+        const gap = row.observed_max_gap_seconds;
+        const tested = row.tested_budget_seconds ?? Number.NaN;
+        expect(tested).toBe(row.heartbeat_seconds + row.grace_seconds);
+        expect(row.budget_refuted).toBe(gap > tested);
+        if (row.provenance_grade === "empirical-historical") {
+          expect(gap).toBeLessThanOrEqual(row.heartbeat_seconds);
+        }
+        if (row.provenance_grade === "empirical-historical-with-qualifier") {
+          expect(gap).toBeGreaterThan(row.heartbeat_seconds);
+          expect(gap).toBeLessThanOrEqual(tested);
+        }
+      }
+    }
+  });
+
+  it("no fixture row wears `verified` — the repo's own law says no feed can hold it", () => {
+    for (const body of bodies) {
+      for (const row of body.heartbeat_provenance) {
+        expect(row.provenance_grade).not.toBe("verified");
+      }
+    }
+  });
+
+  it("the sample's USDC row carries the ACTIVE corrected budget, never the retired one", () => {
+    for (const body of bodies) {
+      const usdc = body.heartbeat_provenance.find((row) => row.symbol === "USDC");
+      expect(usdc?.heartbeat_seconds).toBe(259200);
+      expect(usdc?.grace_seconds).toBe(43200);
+      expect(usdc?.provenance_grade).toBe("empirical-historical");
+      expect(usdc?.basis).toContain("09d496e");
+    }
+  });
+});

@@ -280,10 +280,18 @@ export const PINNED = {
     sweepNeverRefusalsInBatch: 1,
     rateIndexValue: "1023456789012345678901234567", // fxRateIndexValue
     heartbeat: {
-      verifiedProxy: "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419", // fxProxyVerified
-      verifiedSeconds: 3600,
-      verifiedGrace: 1800,
-      unverifiedProxy: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6", // fxProxyUnverified
+      // Codex r66: the sample carries the ACTIVE story - weETH's qualifier
+      // (3,732s measured gap over the 3,600s heartbeat, inside 1,800s grace)
+      // and USDC's corrected empirical-historical budget (09d496e). No row
+      // wears `verified`: the repo's own law says no feed can hold it.
+      qualifiedProxy: "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+      qualifiedSeconds: 3600,
+      qualifiedGrace: 1800,
+      qualifiedGap: 3732,
+      empiricalProxy: "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
+      empiricalSeconds: 259200,
+      empiricalGrace: 43200,
+      empiricalGap: 248460,
     },
     constants: {
       confirmationBlocks: 5,
