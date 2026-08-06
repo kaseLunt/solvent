@@ -138,6 +138,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkClocks } from "./clock-law.mjs";
+import { causeConfoundsOf } from "./confound-law.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..", "..");
@@ -499,122 +500,18 @@ const ethfiResult = {
   if (moved + byDeclared + byTransform + byArithmetic !== rows.length) {
     fail("variant: ethfi's cause split is not a partition of its applied rows");
   }
-  // r57 item 12b, hardened by r58 item 7, COMPLETED by r60-C — the de-confound
-  // covers ALL THREE cause figures against the FULL RESULT WIRE SHAPE, not
-  // just the reach's own totals. Each cause must differ from each other cause
-  // AND from every non-cause integer count or array length anywhere on this
-  // result: SetRunShockReach's totals, flag census and flag sums (rev2 §2.5),
-  // SetRunScenarioResult's own counts (rev2 §2.4 — positions_answered,
-  // positions_withheld, the four partition-array lengths, the declared shock
-  // list, each absence's counts) and every SetRunEngineSummary integer (rev2
-  // §2.6 — usd_decimals, accounts, infinite / movement-excluded / refused /
-  // unrebuildable, the eligibility trio, flipped_to_eligible,
-  // hf_dropped_accounts, plus the nested block figures when present). r58's
-  // escape was declared-factor == marks_snapped and arithmetic == marks_moved;
-  // r60's escape was arithmetic == positions_answered == engines[0].accounts,
-  // all at 2, because r58/r59 enumerated only the reach. A NEW INTEGER OR
-  // ARRAY FIELD ON ANY OF THE THREE SCHEMAS (api/openapi.yaml:
-  // SetRunScenarioResult, SetRunShockReach, SetRunEngineSummary) MUST BE
-  // REGISTERED HERE and in the committed-bytes law in
-  // tests/e2e/tornado.spec.ts (the r60-C test) in the same diff.
+  // r57 item 12b, hardened by r58 item 7, COMPLETED by r60-C, WELDED by the
+  // three-mirror consolidation — the de-confound covers ALL THREE cause
+  // figures against the FULL RESULT WIRE SHAPE. The enumeration itself lives
+  // ONCE in ./confound-law.mjs (this refusal, the committed-bytes law in
+  // tests/e2e/tornado.spec.ts and the renderer mirror in
+  // tests/unit/tornado-lines.spec.ts all import it); a new integer or array
+  // field on any of the three schemas is registered THERE, in one diff.
+  // r58's escape was declared-factor == marks_snapped and arithmetic ==
+  // marks_moved; r60's escape was arithmetic == positions_answered ==
+  // engines[0].accounts, all at 2, because r58/r59 enumerated only the reach
+  // — in every hand-mirrored copy at once, which is why the copies are gone.
   const flagSum = census.marks_snapped + census.marks_base_snapped + census.marks_cap_bound;
-  const nonCauseFiguresOf = (result) => {
-    const reach = result.shock_reach;
-    const figures = {
-      // SetRunShockReach (rev2 §2.5) — the reach's own totals, census, sums.
-      marks_snapped: reach.marks_snapped,
-      marks_base_snapped: reach.marks_base_snapped,
-      marks_cap_bound: reach.marks_cap_bound,
-      marks_moved: reach.marks_moved,
-      applied_length: reach.applied_shocks.length,
-      declared_shocks: reach.declared_shocks,
-      declared_shocks_at_identity: reach.declared_shocks_at_identity,
-      held_flat_marks: reach.held_flat_marks,
-      held_flat_assets_length: reach.held_flat_assets.length,
-      "marks_snapped+marks_base_snapped": reach.marks_snapped + reach.marks_base_snapped,
-      "marks_snapped+marks_cap_bound": reach.marks_snapped + reach.marks_cap_bound,
-      "marks_base_snapped+marks_cap_bound": reach.marks_base_snapped + reach.marks_cap_bound,
-      flag_sum: reach.marks_snapped + reach.marks_base_snapped + reach.marks_cap_bound,
-      // SetRunScenarioResult (rev2 §2.4) — r60-C: the result's own counts and
-      // array lengths, the figures the r58/r59 enumerations omitted.
-      shocks_length: result.shocks.length,
-      covered_engines_length: result.covered_engines.length,
-      withheld_engines_length: result.withheld_engines.length,
-      unmeasurable_engines_length: result.unmeasurable_engines.length,
-      engines_length: result.engines.length,
-      positions_answered: result.positions_answered,
-      positions_withheld: result.positions_withheld,
-    };
-    result.unmeasurable_engines.forEach((absence, i) => {
-      figures[`unmeasurable_engines[${i}].counts.positions_in_batch`] =
-        absence.counts.positions_in_batch;
-      figures[`unmeasurable_engines[${i}].counts.refused_in_batch`] =
-        absence.counts.refused_in_batch;
-      figures[`unmeasurable_engines[${i}].counts.unrebuildable`] = absence.counts.unrebuildable;
-    });
-    result.engines.forEach((row, i) => {
-      // Every §2.6 integer. A null (hf_dropped_accounts on the DM,
-      // flipped_to_eligible on Aave) is an ABSENT figure, never a zero, and
-      // registers nothing.
-      const register = (name, value) => {
-        if (value !== null && value !== undefined) figures[`engines[${i}].${name}`] = value;
-      };
-      register("usd_decimals", row.usd_decimals);
-      register("accounts", row.accounts);
-      register("infinite_accounts", row.infinite_accounts);
-      register("movement_excluded_accounts", row.movement_excluded_accounts);
-      register("refused_in_batch_positions", row.refused_in_batch_positions);
-      register("unrebuildable_positions", row.unrebuildable_positions);
-      register("before_eligible_accounts", row.before_eligible_accounts);
-      register("after_eligible_accounts", row.after_eligible_accounts);
-      register("eligible_accounts_delta", row.eligible_accounts_delta);
-      register("flipped_to_eligible", row.flipped_to_eligible);
-      register("hf_dropped_accounts", row.hf_dropped_accounts);
-      if (row.market_realization !== null && row.market_realization !== undefined) {
-        register("market_realization.usd_decimals", row.market_realization.usd_decimals);
-      }
-      if (row.projection !== null && row.projection !== undefined) {
-        register("projection.annual_delta_bps", row.projection.annual_delta_bps);
-        register("projection.apy_observed_at_block", row.projection.apy_observed_at_block);
-        register("projection.horizons_length", row.projection.horizons.length);
-        row.projection.horizons.forEach((horizonRow, j) => {
-          register(`projection.horizons[${j}].horizon_seconds`, horizonRow.horizon_seconds);
-        });
-      }
-    });
-    return figures;
-  };
-  const causeConfoundsOf = (result) => {
-    const reach = result.shock_reach;
-    const causeEntries = Object.entries({
-      marks_held_by_transform: reach.marks_held_by_transform,
-      marks_held_by_declared_factor: reach.marks_held_by_declared_factor,
-      marks_held_by_arithmetic: reach.marks_held_by_arithmetic,
-    });
-    const violations = [];
-    for (let i = 0; i < causeEntries.length; i += 1) {
-      for (let j = i + 1; j < causeEntries.length; j += 1) {
-        if (causeEntries[i][1] === causeEntries[j][1]) {
-          violations.push(
-            `${causeEntries[i][0]} and ${causeEntries[j][0]} are confounded at ` +
-              `${causeEntries[i][1]}; a renderer swapping the two would print the right number`,
-          );
-        }
-      }
-    }
-    for (const [causeName, causeValue] of causeEntries) {
-      for (const [nonCauseName, nonCauseValue] of Object.entries(nonCauseFiguresOf(result))) {
-        if (causeValue === nonCauseValue) {
-          violations.push(
-            `${causeName} (${causeValue}) is confounded with ${nonCauseName}; a renderer ` +
-              "sourcing the wrong figure would print the right number and this fixture " +
-              "could not catch it",
-          );
-        }
-      }
-    }
-    return violations;
-  };
   // PERMANENT SELF-TEST — the refusal must FIRE on the exact r60-C escape
   // shape: marks_held_by_arithmetic back at 2, equal to positions_answered
   // AND engines[0].accounts, naming both sources. A checker that goes quiet

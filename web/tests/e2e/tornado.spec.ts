@@ -613,150 +613,38 @@ test("ordering, sign, the REAL axis side, NO DENOMINATOR, the cause split and th
   }
 });
 
-test("r58 item 7 / r60-C — the committed fixture's cause figures are impersonated by NO other figure on the result", () => {
+test("r58 item 7 / r60-C — the committed fixture's cause figures are impersonated by NO other figure on the result", async () => {
   // KILLS: a fixture edit that re-confounds a cause figure with ANY integer
   // count or array length on the result wire shape without going through the
   // generator's own refusal. The r58 escape was declared-factor ==
   // marks_snapped at 2 and arithmetic == marks_moved at 1; the r60 escape was
   // arithmetic == positions_answered == engines[0].accounts, all at 2 —
   // counts the r58/r59 enumerations omitted because they stopped at the
-  // reach. This law reads the committed bytes the suite actually serves and
-  // enumerates the FULL shape: SetRunShockReach (rev2 §2.5),
-  // SetRunScenarioResult's own counts (rev2 §2.4) and every
-  // SetRunEngineSummary integer (rev2 §2.6), each entry NAMED so a collision
-  // failure names its source. A NEW INTEGER OR ARRAY FIELD ON ANY OF THE
-  // THREE SCHEMAS (api/openapi.yaml) MUST BE REGISTERED HERE and in the
-  // generator's refusal (generate-run-book-set.mjs, nonCauseFiguresOf) in the
-  // same diff.
+  // reach, IN EVERY HAND-MIRRORED COPY AT ONCE. The enumeration now lives
+  // once in tests/fixtures/confound-law.mjs — the module the generator's
+  // refusal and the unit renderer mirror import — and this law runs it over
+  // the committed bytes the suite actually serves. The YIELD IS PINNED: a
+  // walk that quietly stopped enumerating would otherwise pass on whatever
+  // remained — the r58/r60 silence back, with a module for a fixture.
+  const law = (await import(new URL("../fixtures/confound-law.mjs", import.meta.url).href)) as {
+    causeEntriesOf: (reach: unknown) => [string, number][];
+    nonCauseFiguresOf: (result: unknown) => [string, number][];
+    causeConfoundsOf: (result: unknown) => string[];
+  };
   const body = JSON.parse(fixture("run-book-set.no-denominator.json")) as {
-    results: {
-      scenario_id: string;
-      shocks: unknown[];
-      shock_reach: {
-        applied_shocks: unknown[];
-        declared_shocks: number;
-        declared_shocks_at_identity: number;
-        held_flat_marks: number;
-        held_flat_assets: unknown[];
-        marks_moved: number;
-        marks_held_by_declared_factor: number;
-        marks_held_by_transform: number;
-        marks_held_by_arithmetic: number;
-        marks_snapped: number;
-        marks_base_snapped: number;
-        marks_cap_bound: number;
-      };
-      covered_engines: unknown[];
-      withheld_engines: unknown[];
-      unmeasurable_engines: {
-        counts: { positions_in_batch: number; refused_in_batch: number; unrebuildable: number };
-      }[];
-      engines: {
-        usd_decimals: number;
-        accounts: number;
-        infinite_accounts: number;
-        movement_excluded_accounts: number;
-        refused_in_batch_positions: number;
-        unrebuildable_positions: number;
-        before_eligible_accounts: number;
-        after_eligible_accounts: number;
-        eligible_accounts_delta: number;
-        flipped_to_eligible: number | null;
-        hf_dropped_accounts: number | null;
-        market_realization: { usd_decimals: number } | null;
-        projection: {
-          annual_delta_bps: number;
-          apy_observed_at_block: number;
-          horizons: { horizon_seconds: number }[];
-        } | null;
-      }[];
-      positions_answered: number;
-      positions_withheld: number;
-    }[];
+    results: { scenario_id: string; shock_reach: unknown }[];
   };
   const result = body.results.find((candidate) => candidate.scenario_id === "ethfi_minus_50");
   if (result === undefined) throw new Error("the fixture lost its ethfi_minus_50 result");
-  const reach = result.shock_reach;
-  const causes: [string, number][] = [
-    ["marks_held_by_transform", reach.marks_held_by_transform],
-    ["marks_held_by_declared_factor", reach.marks_held_by_declared_factor],
-    ["marks_held_by_arithmetic", reach.marks_held_by_arithmetic],
-  ];
-  // Pairwise distinct from EACH OTHER ...
-  expect(new Set(causes.map(([, value]) => value)).size).toBe(3);
-  // ... and from EVERY non-cause figure a renderer could source instead.
-  const nonCauses: [string, number][] = [
-    // SetRunShockReach (rev2 §2.5) — the reach's totals, census and sums.
-    ["marks_snapped", reach.marks_snapped],
-    ["marks_base_snapped", reach.marks_base_snapped],
-    ["marks_cap_bound", reach.marks_cap_bound],
-    ["marks_moved", reach.marks_moved],
-    ["applied_shocks.length", reach.applied_shocks.length],
-    ["declared_shocks", reach.declared_shocks],
-    ["declared_shocks_at_identity", reach.declared_shocks_at_identity],
-    ["held_flat_marks", reach.held_flat_marks],
-    ["held_flat_assets.length", reach.held_flat_assets.length],
-    ["marks_snapped+marks_base_snapped", reach.marks_snapped + reach.marks_base_snapped],
-    ["marks_snapped+marks_cap_bound", reach.marks_snapped + reach.marks_cap_bound],
-    ["marks_base_snapped+marks_cap_bound", reach.marks_base_snapped + reach.marks_cap_bound],
-    ["flag_sum", reach.marks_snapped + reach.marks_base_snapped + reach.marks_cap_bound],
-    // SetRunScenarioResult (rev2 §2.4) — r60-C: the result's own counts and
-    // array lengths, the figures the r58/r59 enumerations omitted.
-    ["shocks.length", result.shocks.length],
-    ["covered_engines.length", result.covered_engines.length],
-    ["withheld_engines.length", result.withheld_engines.length],
-    ["unmeasurable_engines.length", result.unmeasurable_engines.length],
-    ["engines.length", result.engines.length],
-    ["positions_answered", result.positions_answered],
-    ["positions_withheld", result.positions_withheld],
-  ];
-  result.unmeasurable_engines.forEach((absence, i) => {
-    nonCauses.push(
-      [`unmeasurable_engines[${i}].counts.positions_in_batch`, absence.counts.positions_in_batch],
-      [`unmeasurable_engines[${i}].counts.refused_in_batch`, absence.counts.refused_in_batch],
-      [`unmeasurable_engines[${i}].counts.unrebuildable`, absence.counts.unrebuildable],
-    );
-  });
-  result.engines.forEach((row, i) => {
-    // Every §2.6 integer. A null (hf_dropped_accounts on the DM,
-    // flipped_to_eligible on Aave) is an ABSENT figure, never a zero, and
-    // registers nothing.
-    const register = (name: string, value: number | null | undefined) => {
-      if (value !== null && value !== undefined) nonCauses.push([`engines[${i}].${name}`, value]);
-    };
-    register("usd_decimals", row.usd_decimals);
-    register("accounts", row.accounts);
-    register("infinite_accounts", row.infinite_accounts);
-    register("movement_excluded_accounts", row.movement_excluded_accounts);
-    register("refused_in_batch_positions", row.refused_in_batch_positions);
-    register("unrebuildable_positions", row.unrebuildable_positions);
-    register("before_eligible_accounts", row.before_eligible_accounts);
-    register("after_eligible_accounts", row.after_eligible_accounts);
-    register("eligible_accounts_delta", row.eligible_accounts_delta);
-    register("flipped_to_eligible", row.flipped_to_eligible);
-    register("hf_dropped_accounts", row.hf_dropped_accounts);
-    if (row.market_realization !== null) {
-      register("market_realization.usd_decimals", row.market_realization.usd_decimals);
-    }
-    if (row.projection !== null) {
-      register("projection.annual_delta_bps", row.projection.annual_delta_bps);
-      register("projection.apy_observed_at_block", row.projection.apy_observed_at_block);
-      register("projection.horizons.length", row.projection.horizons.length);
-      row.projection.horizons.forEach((horizonRow, j) => {
-        register(`projection.horizons[${j}].horizon_seconds`, horizonRow.horizon_seconds);
-      });
-    }
-  });
-  for (const [causeName, causeValue] of causes) {
-    for (const [nonCauseName, nonCauseValue] of nonCauses) {
-      expect(
-        nonCauseValue,
-        `${causeName} (${String(causeValue)}) is impersonated by ${nonCauseName}`,
-      ).not.toBe(causeValue);
-    }
-  }
+  // Every cause pairwise distinct from each other cause AND from every
+  // non-cause figure a renderer could source instead.
+  expect(law.causeConfoundsOf(result)).toEqual([]);
+  // The enumeration's yield on these bytes: 30 figures, every name unique.
+  const figures = law.nonCauseFiguresOf(result);
+  expect(figures).toHaveLength(30);
+  expect(new Set(figures.map(([name]) => name)).size).toBe(30);
   // The figures the rendering laws above pin are exactly these.
-  expect(causes.map(([, value]) => value)).toEqual([7, 4, 5]);
+  expect(law.causeEntriesOf(result.shock_reach).map(([, value]) => value)).toEqual([7, 4, 5]);
 });
 
 test("r57 item 7 — a floored bar is flagged on the rect and disclosed by the computed sentence", async ({

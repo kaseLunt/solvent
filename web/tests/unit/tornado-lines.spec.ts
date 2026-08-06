@@ -848,71 +848,40 @@ test.describe("r57 item 12b / r58 item 7 / r60-C — the cause figures come from
     expect(heldCauseSentence(splitResult)).not.toMatch(/\d+ of \d+ snapped/);
   });
 
-  test("r58 item 7 / r60-C — the law itself asserts pairwise distinctness over the FULL mirror, so a re-confounded edit fails HERE", () => {
+  const confoundLaw = async () =>
+    (await import(new URL("../fixtures/confound-law.mjs", import.meta.url).href)) as {
+      causeEntriesOf: (reach: unknown) => [string, number][];
+      nonCauseFiguresOf: (result: unknown) => [string, number][];
+      causeConfoundsOf: (result: unknown) => string[];
+    };
+
+  test("r58 item 7 / r60-C — the welded law finds no confound on the mirror, so a re-confounded edit fails HERE", async () => {
     // KILLS: a future edit that quietly re-confounds a cause with a non-cause
     // (r58's escape was declared-factor == marks_snapped and arithmetic ==
     // marks_moved; r60's was arithmetic == positions_answered ==
-    // engines[0].accounts, all at 2): the figures this law pins must stay
-    // pairwise distinct or this assertion goes red before any rendering is
-    // even consulted. The enumeration mirrors the committed-bytes law in
-    // tests/e2e/tornado.spec.ts and the generator's nonCauseFiguresOf.
-    const engine = splitResult.engines[0];
-    if (engine === undefined) throw new Error("the mirror lost its engine row");
-    const causes: [string, number][] = [
-      ["marks_held_by_transform", splitReach.marks_held_by_transform],
-      ["marks_held_by_declared_factor", splitReach.marks_held_by_declared_factor],
-      ["marks_held_by_arithmetic", splitReach.marks_held_by_arithmetic],
-    ];
-    expect(new Set(causes.map(([, value]) => value)).size).toBe(3);
-    const nonCauses: [string, number][] = [
-      // SetRunShockReach (rev2 §2.5).
-      ["marks_snapped", splitReach.marks_snapped],
-      ["marks_base_snapped", splitReach.marks_base_snapped],
-      ["marks_cap_bound", splitReach.marks_cap_bound],
-      ["marks_moved", splitReach.marks_moved],
-      ["applied_shocks.length", splitReach.applied_shocks.length],
-      ["declared_shocks", splitReach.declared_shocks],
-      ["declared_shocks_at_identity", splitReach.declared_shocks_at_identity],
-      ["held_flat_marks", splitReach.held_flat_marks],
-      ["held_flat_assets.length", splitReach.held_flat_assets.length],
-      ["marks_snapped+marks_base_snapped", splitReach.marks_snapped + splitReach.marks_base_snapped],
-      ["marks_snapped+marks_cap_bound", splitReach.marks_snapped + splitReach.marks_cap_bound],
-      ["marks_base_snapped+marks_cap_bound", splitReach.marks_base_snapped + splitReach.marks_cap_bound],
-      ["flag_sum", splitReach.marks_snapped + splitReach.marks_base_snapped + splitReach.marks_cap_bound],
-      // SetRunScenarioResult (rev2 §2.4) — the r60-C additions.
-      ["shocks.length", splitResult.shocks.length],
-      ["covered_engines.length", splitResult.covered_engines.length],
-      ["withheld_engines.length", splitResult.withheld_engines.length],
-      ["unmeasurable_engines.length", splitResult.unmeasurable_engines.length],
-      ["engines.length", splitResult.engines.length],
-      ["positions_answered", splitResult.positions_answered],
-      ["positions_withheld", splitResult.positions_withheld],
-      // SetRunEngineSummary (rev2 §2.6). A null figure is ABSENT, never a
-      // zero, and registers nothing.
-      ["engines[0].usd_decimals", engine.usd_decimals],
-      ["engines[0].accounts", engine.accounts],
-      ["engines[0].infinite_accounts", engine.infinite_accounts],
-      ["engines[0].movement_excluded_accounts", engine.movement_excluded_accounts],
-      ["engines[0].refused_in_batch_positions", engine.refused_in_batch_positions],
-      ["engines[0].unrebuildable_positions", engine.unrebuildable_positions],
-      ["engines[0].before_eligible_accounts", engine.before_eligible_accounts],
-      ["engines[0].after_eligible_accounts", engine.after_eligible_accounts],
-      ["engines[0].eligible_accounts_delta", engine.eligible_accounts_delta],
-    ];
-    if (engine.flipped_to_eligible !== null) {
-      nonCauses.push(["engines[0].flipped_to_eligible", engine.flipped_to_eligible]);
-    }
-    if (engine.hf_dropped_accounts !== null) {
-      nonCauses.push(["engines[0].hf_dropped_accounts", engine.hf_dropped_accounts]);
-    }
-    for (const [causeName, causeValue] of causes) {
-      for (const [nonCauseName, nonCauseValue] of nonCauses) {
-        expect(
-          nonCauseValue,
-          `${causeName} (${String(causeValue)}) is impersonated by ${nonCauseName}`,
-        ).not.toBe(causeValue);
-      }
-    }
+    // engines[0].accounts, all at 2). The enumeration is the SAME module the
+    // generator's refusal and the committed-bytes law in
+    // tests/e2e/tornado.spec.ts run (tests/fixtures/confound-law.mjs) — not a
+    // third hand copy that can forget a figure the other two learned, which
+    // is how both historical escapes lived in every mirror at once.
+    const law = await confoundLaw();
+    expect(law.causeConfoundsOf(splitResult)).toEqual([]);
+    expect(law.causeEntriesOf(splitResult.shock_reach).map(([, value]) => value)).toEqual([
+      7, 4, 5,
+    ]);
+  });
+
+  test("the r60 escape, re-injected: the welded law still fires, naming both impersonators", async () => {
+    // The module's mutation proof in unit land, twinning the generator's
+    // at-every-generation self-test: marks_held_by_arithmetic back at 2 must
+    // collide with positions_answered AND engines[0].accounts BY NAME. A law
+    // that goes quiet on the shape it exists to refuse is itself refused.
+    const law = await confoundLaw();
+    const confounded = structuredClone(splitResult) as typeof splitResult;
+    (confounded.shock_reach as { marks_held_by_arithmetic: number }).marks_held_by_arithmetic = 2;
+    const caught = law.causeConfoundsOf(confounded).join("\n");
+    expect(caught).toContain("positions_answered");
+    expect(caught).toContain("engines[0].accounts");
   });
 });
 
