@@ -159,7 +159,11 @@ func TestNewFeedDeriverRefusesStreamWithoutOwnThreshold(t *testing.T) {
 // B3 FIXTURE PIN: every configured stream's threshold is its OWN heartbeat plus
 // its OWN grace, read from the real registry. The ETH/USD stream behind the weETH
 // adapter is the one Codex evidenced at a 3600-second heartbeat, and it must be
-// far tighter than the 26h global bound it replaces.
+// far tighter than the 26h global bound it replaces. The three stables carry the
+// B3 EMPIRICAL budgets (commit 09d496e): the published 24h heartbeats were
+// falsified by the feeds' own event ledgers (max gaps FRAX 170,712s /
+// USDC 248,460s / PYUSD 604,896s vs the old 90,000s budget), so the registry
+// now declares the observed bounds with explicit operator margins.
 func TestFeedDeriverPerFeedThresholds(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakeFeedChain{head: testFeedHead}
@@ -167,15 +171,18 @@ func TestFeedDeriverPerFeedThresholds(t *testing.T) {
 
 	require.Equal(t, map[string]time.Duration{
 		"weETH": 90 * time.Minute, // ETH/USD: 3600s heartbeat + 1800s grace
-		"USDC":  25 * time.Hour,   // 86400s heartbeat + 3600s grace
-		"PYUSD": 25 * time.Hour,
-		"FRAX":  25 * time.Hour,
+		"USDC":  84 * time.Hour,   // 259200s heartbeat + 43200s grace (B3 empirical, 09d496e)
+		"PYUSD": 192 * time.Hour,  // 604800s (validator 7-day cap) + 86400s grace
+		"FRAX":  60 * time.Hour,   // 172800s heartbeat + 43200s grace
 	}, f.Thresholds())
 
-	const retiredGlobalBound = 26 * time.Hour
+	// The loosest lawful budget is PYUSD's 192h (its heartbeat is pinned at the
+	// validator's 7-day cap, 09d496e); anything beyond that has no evidence
+	// behind it, in any registry state.
+	const empiricalCeiling = 192 * time.Hour
 	for symbol, got := range f.Thresholds() {
-		require.LessOrEqual(t, got, retiredGlobalBound,
-			"%s: no feed may be judged more loosely than the retired global bound", symbol)
+		require.LessOrEqual(t, got, empiricalCeiling,
+			"%s: no feed may be judged more loosely than the loosest B3-evidenced bound", symbol)
 	}
 	require.Less(t, f.Thresholds()["weETH"], 2*time.Hour,
 		"the ETH/USD stream's 3600s contractual heartbeat must actually bind")
@@ -340,10 +347,11 @@ func TestFeedDeriverRewindRehydratesRatherThanClearingFreshness(t *testing.T) {
 	ch := &fakeFeedChain{head: testFeedHead, callResp: proxyResponder(t, identityProxies(t))}
 	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 
-	// Durable history: USDC's newest surviving answer is 30h old and sits BELOW
-	// the rewind target, so it survives the rewind.
+	// Durable history: USDC's newest surviving answer is 90h old (past its 84h
+	// B3 threshold, 09d496e) and sits BELOW the rewind target, so it survives
+	// the rewind.
 	st.logs = []store.RawLog{
-		answerUpdatedLog(testFeedStart+10, 0, aggUSDC, big.NewInt(99_990_000), 1, clk.unix(-30*time.Hour)),
+		answerUpdatedLog(testFeedStart+10, 0, aggUSDC, big.NewInt(99_990_000), 1, clk.unix(-90*time.Hour)),
 	}
 	st.cursor, st.cursorFound = testFeedFrontier, true
 	st.unacked = true
@@ -358,8 +366,8 @@ func TestFeedDeriverRewindRehydratesRatherThanClearingFreshness(t *testing.T) {
 		"a re-derivable writer passes no verified floor: the walker re-ingests its input")
 
 	require.True(t, f.hydrated, "freshness was re-read from durable logs, not cleared")
-	require.Equal(t, clk.now().Add(-30*time.Hour).UTC(), f.lastUsable[aggUSDC],
-		"the surviving 30h-old answer is what USDC is measured from")
+	require.Equal(t, clk.now().Add(-90*time.Hour).UTC(), f.lastUsable[aggUSDC],
+		"the surviving 90h-old answer is what USDC is measured from")
 	require.False(t, f.lastLive, "the live verdict must be re-earned after a rewind")
 
 	// Once the deriver is live again, USDC is stale on the spot — no fresh
@@ -380,10 +388,10 @@ func TestFeedDeriverHydratesPreexistingStaleFeedOnRestart(t *testing.T) {
 	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 
 	// A caught-up cursor: this process will derive NOTHING. USDC last published
-	// 30h ago (past its 25h threshold); weETH published a minute ago.
+	// 90h ago (past its 84h threshold, 09d496e); weETH published a minute ago.
 	st.cursor, st.cursorFound = testFeedFrontier, true
 	st.logs = []store.RawLog{
-		answerUpdatedLog(testFeedStart+10, 0, aggUSDC, big.NewInt(99_990_000), 1, clk.unix(-30*time.Hour)),
+		answerUpdatedLog(testFeedStart+10, 0, aggUSDC, big.NewInt(99_990_000), 1, clk.unix(-90*time.Hour)),
 		answerUpdatedLog(testFeedStart+20, 0, aggWeETH, big.NewInt(340_000_000_000), 2, clk.unix(-time.Minute)),
 	}
 
@@ -402,15 +410,15 @@ func TestFeedDeriverHydratesPreexistingStaleFeedOnRestart(t *testing.T) {
 }
 
 // B3 IN ACTION: the same 90-minute gap is STALE for the 3600s-heartbeat ETH/USD
-// stream and FRESH for the 86400s-heartbeat stablecoin streams. One global bound
-// could not express both.
+// stream and FRESH for the deviation-quiet stables (B3 empirical budgets,
+// 09d496e). One global bound could not express both.
 func TestFeedDeriverPerFeedThresholdsDecideIndependently(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakeFeedChain{head: testFeedHead, callResp: proxyResponder(t, identityProxies(t))}
 	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 
 	st.cursor, st.cursorFound = testFeedFrontier, true
-	gap := 100 * time.Minute // > weETH's 90m, far below the stables' 25h
+	gap := 100 * time.Minute // > weETH's 90m, far below the stables' 60h+ bounds
 	st.logs = []store.RawLog{
 		answerUpdatedLog(testFeedStart+10, 0, aggWeETH, big.NewInt(340_000_000_000), 1, clk.unix(-gap)),
 		answerUpdatedLog(testFeedStart+11, 0, aggUSDC, big.NewInt(99_990_000), 2, clk.unix(-gap)),
@@ -424,7 +432,7 @@ func TestFeedDeriverPerFeedThresholdsDecideIndependently(t *testing.T) {
 	healthy, reason := f.Health()
 	require.False(t, healthy)
 	require.Contains(t, reason, "weETH", "the 1h-heartbeat stream is stale after 100 minutes")
-	require.NotContains(t, reason, "USDC", "a 24h-heartbeat stream is not")
+	require.NotContains(t, reason, "USDC", "a 72h-heartbeat stream is not")
 	require.NotContains(t, reason, "PYUSD")
 	require.NotContains(t, reason, "FRAX")
 }
@@ -437,8 +445,9 @@ func TestFeedDeriverApplyErrorRollbackResetsStagedFreshness(t *testing.T) {
 	ch := &fakeFeedChain{head: testFeedHead, callResp: proxyResponder(t, identityProxies(t))}
 	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 
-	// Durable: one OLD answer, below the window this Step will derive.
-	old := answerUpdatedLog(testFeedStart-10, 0, aggUSDC, big.NewInt(99_000_000), 1, clk.unix(-30*time.Hour))
+	// Durable: one OLD answer (90h, past USDC's 84h threshold), below the
+	// window this Step will derive.
+	old := answerUpdatedLog(testFeedStart-10, 0, aggUSDC, big.NewInt(99_000_000), 1, clk.unix(-90*time.Hour))
 	fresh := answerUpdatedLog(testFeedStart+10, 0, aggUSDC, big.NewInt(99_990_000), 2, clk.unix(0))
 	st.logs = []store.RawLog{old, fresh}
 	st.cursor, st.cursorFound = testFeedStart-1, true
@@ -449,7 +458,7 @@ func TestFeedDeriverApplyErrorRollbackResetsStagedFreshness(t *testing.T) {
 	require.ErrorContains(t, err, "commit rolled back")
 
 	require.True(t, f.hydrated, "the reset re-hydrated from durable truth")
-	require.Equal(t, clk.now().Add(-30*time.Hour).UTC(), f.lastUsable[aggUSDC],
+	require.Equal(t, clk.now().Add(-90*time.Hour).UTC(), f.lastUsable[aggUSDC],
 		"the rolled-back window's fresh answer must NOT be retained in memory")
 	require.Equal(t, []uint64{testFeedStart - 1, testFeedStart - 1}, st.latestLogCalls,
 		"hydration runs at the unmoved durable cursor, before and after the failed apply")
@@ -457,7 +466,7 @@ func TestFeedDeriverApplyErrorRollbackResetsStagedFreshness(t *testing.T) {
 	// THE CONSEQUENCE the finding cared about. Persisted ingestion is stalled at
 	// the old cursor: the walker's frontier is there too and the chain head is
 	// right above it, so the deriver is caught up AND live, and it must now issue
-	// a verdict. Measured from durable truth, USDC's newest answer is 30h old and
+	// a verdict. Measured from durable truth, USDC's newest answer is 90h old and
 	// the stream is STALE. With the pre-fix in-memory mutation, lastUsable would
 	// hold the rolled-back window's fresh timestamp and this would report healthy.
 	for _, s := range feedStreams {
@@ -632,9 +641,9 @@ func TestFeedDeriverStaleAtLiveHeadWarnsAndReResolves(t *testing.T) {
 	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 	msgs := captureWarnings(t)
 
-	// USDC last published 30h ago (> its 25h threshold); weETH just now.
+	// USDC last published 90h ago (> its 84h threshold, 09d496e); weETH just now.
 	deriveToCaughtUp(t, f, st, clk, map[common.Address]time.Duration{
-		aggUSDC:  30 * time.Hour,
+		aggUSDC:  90 * time.Hour,
 		aggWeETH: 0,
 	}, testFeedStart, testFeedFrontier)
 
@@ -666,7 +675,7 @@ func TestFeedDeriverStalePhaseChangeNamesNewAggregator(t *testing.T) {
 	msgs := captureWarnings(t)
 
 	deriveToCaughtUp(t, f, st, clk, map[common.Address]time.Duration{
-		aggUSDC:  30 * time.Hour,
+		aggUSDC:  90 * time.Hour,
 		aggWeETH: 0,
 	}, testFeedStart, testFeedFrontier)
 
@@ -683,7 +692,7 @@ func TestFeedDeriverStaleResumeClearsHealth(t *testing.T) {
 	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 
 	deriveToCaughtUp(t, f, st, clk, map[common.Address]time.Duration{
-		aggUSDC:  30 * time.Hour,
+		aggUSDC:  90 * time.Hour,
 		aggWeETH: 0,
 	}, testFeedStart, testFeedFrontier)
 	healthy, _ := f.Health()
@@ -718,8 +727,8 @@ func TestFeedDeriverNeverPublishedTripsAfterThreshold(t *testing.T) {
 	healthy, _ := f.Health()
 	require.True(t, healthy, "within the grace window since going live, nothing is stale yet")
 
-	// Past weETH's 90-minute bound but inside the stables' 25h: only weETH trips,
-	// and it trips on ITS OWN clock.
+	// Past weETH's 90-minute bound but inside the stables' 60h-192h bounds
+	// (09d496e): only weETH trips, and it trips on ITS OWN clock.
 	clk.advance(2 * time.Hour)
 	_, err := f.Step(context.Background())
 	require.NoError(t, err)
@@ -728,7 +737,9 @@ func TestFeedDeriverNeverPublishedTripsAfterThreshold(t *testing.T) {
 	require.Contains(t, reason, "weETH")
 	require.NotContains(t, reason, "PYUSD")
 
-	clk.advance(26 * time.Hour)
+	// Past every stable's own bound — the loosest is PYUSD's 192h (604800s
+	// heartbeat at the validator's 7-day cap + 86400s margin, 09d496e).
+	clk.advance(200 * time.Hour)
 	_, err = f.Step(context.Background())
 	require.NoError(t, err)
 	_, reason = f.Health()
@@ -749,7 +760,8 @@ func TestFeedDeriverSkipsStreamsBelowTheirStartBlock(t *testing.T) {
 	f, clk := newTestFeed(t, st, ch, start, frontier)
 
 	deriveToCaughtUp(t, f, st, clk, map[common.Address]time.Duration{}, start, frontier)
-	clk.advance(27 * time.Hour)
+	// Past every stable's own bound (the loosest is PYUSD's 192h, 09d496e).
+	clk.advance(200 * time.Hour)
 	_, err := f.Step(context.Background())
 	require.NoError(t, err)
 
@@ -1076,11 +1088,11 @@ func TestFeedDeriverNonPositiveAnswerDoesNotRefreshFreshness(t *testing.T) {
 	ch := &fakeFeedChain{head: testFeedHead, callResp: proxyResponder(t, identityProxies(t))}
 	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 
-	// A good answer 30 hours ago (past USDC's 25h threshold), then zeros right up
-	// to the present. The stream looks perfectly alive.
+	// A good answer 90 hours ago (past USDC's 84h threshold, 09d496e), then
+	// zeros right up to the present. The stream looks perfectly alive.
 	st.cursor, st.cursorFound = testFeedStart-1, true
 	st.logs = []store.RawLog{
-		answerUpdatedLog(testFeedStart+1, 0, aggUSDC, big.NewInt(99_990_000), 1, clk.unix(-30*time.Hour)),
+		answerUpdatedLog(testFeedStart+1, 0, aggUSDC, big.NewInt(99_990_000), 1, clk.unix(-90*time.Hour)),
 		answerUpdatedLog(testFeedStart+2, 0, aggUSDC, big.NewInt(0), 2, clk.unix(-time.Minute)),
 	}
 	_, err := f.Step(context.Background())
@@ -1088,7 +1100,7 @@ func TestFeedDeriverNonPositiveAnswerDoesNotRefreshFreshness(t *testing.T) {
 	_, err = f.Step(context.Background()) // caught up: go live and evaluate
 	require.NoError(t, err)
 
-	require.Equal(t, clk.now().Add(-30*time.Hour).UTC(), f.lastUsable[aggUSDC],
+	require.Equal(t, clk.now().Add(-90*time.Hour).UTC(), f.lastUsable[aggUSDC],
 		"freshness stands at the last USABLE answer, not at the zero published a minute ago")
 	got := feedConditions(f)
 	require.Contains(t, got, ConditionFeedInvalidAnswer, "the unusable newest answer is named")

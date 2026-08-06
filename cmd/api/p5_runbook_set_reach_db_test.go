@@ -5,6 +5,7 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -681,6 +682,16 @@ func newSetRunCensusFixture(t *testing.T) *apiFixture {
 // TestSetRunShockReachArmsAreTotalAndOrdered exercises all SEVEN arms against
 // real books, and exercises the ORDER rather than assuming it.
 func TestSetRunShockReachArmsAreTotalAndOrdered(t *testing.T) {
+	// The seven-arm totality count below tallies across the DB-backed
+	// sub-tests, so the PARENT must share their gate: with no
+	// TEST_DATABASE_URL every sub-test dev-skips (apiTestDSN) and `seen`
+	// stays honestly empty — the require.Len would then be a false red about
+	// the ENVIRONMENT, not about the arms. Acceptance mode takes the other
+	// fork on purpose: apiTestDSN hard-fails there, so suite-green evidence
+	// can never come from this skip.
+	if os.Getenv("TEST_DATABASE_URL") == "" && os.Getenv("SOLVENT_ACCEPTANCE") != "1" {
+		t.Skip("TEST_DATABASE_URL not set; the seven arm sub-tests dev-skip without it (run `make db-up` and export it)")
+	}
 	seen := map[string]string{}
 	record := func(t *testing.T, arm, note string) {
 		t.Helper()

@@ -416,16 +416,21 @@ func TestLoadHealthAddr(t *testing.T) {
 
 // B3 FIXTURE PIN: every configured stream in the REAL registry declares its own
 // heartbeat and grace, and the resulting threshold is pinned here so a registry
-// edit that loosens a liquidation-facing bound fails in this test rather than in
+// edit that moves a liquidation-facing bound fails in this test rather than in
 // production.
 //
 // PROVENANCE, stated exactly (see recon/derivation-notes.md for the long form):
 // the ETH/USD heartbeat of 3600s is evidence-backed — Codex's round-1 review
 // independently observed deployed code consuming this exact proxy with a
 // 3600-second bound (constructor evidence 0x641169f048ee8de8b3037c9d9c840060fe03e463).
-// The three 86400s values are the PUBLISHED Chainlink mainnet heartbeats for those
-// feeds and were NOT independently verified from bytecode by this wave. The grace
-// values are this repo's operator margin, not contractual quantities.
+// The three stablecoin budgets are EMPIRICAL, not published: the B3 heartbeat
+// scan (Task 7 acceptance evidence, drift-report grade empirical-historical)
+// measured max publication gaps FRAX 170,712s / USDC 248,460s / PYUSD 604,896s
+// against the published 86400+3600=90,000s budgets — all three FALSIFIED — and
+// commit 09d496e raised the registry to the observed bounds with explicit
+// operator margins (PYUSD's heartbeat sits at the validator's 7-day cap; the
+// margin carries the excess). The grace values are this repo's operator margin,
+// not contractual quantities.
 func TestRealFeedRegistryStalenessThresholds(t *testing.T) {
 	feeds, err := LoadFeeds(filepath.Join("..", "..", "recon", "feeds.json"), testFeedChains)
 	require.NoError(t, err)
@@ -433,9 +438,9 @@ func TestRealFeedRegistryStalenessThresholds(t *testing.T) {
 	type bound struct{ heartbeat, grace, threshold time.Duration }
 	want := map[string]bound{
 		"weETH": {3600 * time.Second, 1800 * time.Second, 90 * time.Minute},
-		"USDC":  {86400 * time.Second, 3600 * time.Second, 25 * time.Hour},
-		"PYUSD": {86400 * time.Second, 3600 * time.Second, 25 * time.Hour},
-		"FRAX":  {86400 * time.Second, 3600 * time.Second, 25 * time.Hour},
+		"USDC":  {259200 * time.Second, 43200 * time.Second, 84 * time.Hour},
+		"PYUSD": {604800 * time.Second, 86400 * time.Second, 192 * time.Hour},
+		"FRAX":  {172800 * time.Second, 43200 * time.Second, 60 * time.Hour},
 	}
 	streams := feeds.StreamAssets(1)
 	require.Len(t, streams, 4)
@@ -445,9 +450,13 @@ func TestRealFeedRegistryStalenessThresholds(t *testing.T) {
 		require.Equal(t, w.heartbeat, a.Oracle.Heartbeat, "%s heartbeat", a.Symbol)
 		require.Equal(t, w.grace, a.Oracle.Grace, "%s grace", a.Symbol)
 		require.Equal(t, w.threshold, a.Oracle.StalenessThreshold(), "%s threshold", a.Symbol)
-		// No feed may be judged more loosely than the retired 26h global bound:
-		// the point of the change was to TIGHTEN, never to relax.
-		require.LessOrEqual(t, a.Oracle.StalenessThreshold(), 26*time.Hour, a.Symbol)
+		// The retired 26h global bound no longer caps the three stables — the
+		// B3 scan's own doctrine raised each refuted budget to its feed's
+		// OBSERVED bound (09d496e). What survives as law: a budget may never
+		// exceed PYUSD's 192h ceiling (the validator's 7-day cap plus its
+		// declared margin), and any loosening beyond the exact pins above
+		// demands new B3 evidence, not an edit.
+		require.LessOrEqual(t, a.Oracle.StalenessThreshold(), 192*time.Hour, a.Symbol)
 	}
 
 	// A poll oracle has no publication stream, so it declares no heartbeat and
