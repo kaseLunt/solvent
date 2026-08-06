@@ -933,6 +933,41 @@ test.describe("r58 item 4 — the mandatory block is judged PER ANSWERED ENGINE"
     expect(cell.sentence).not.toContain("ledger below is the answer");
   });
 
+  test("r59-B — ZERO answered engines is the no-answerable-engine state, never a contract defect", () => {
+    // KILLS: the zero-engines branch of the mandatory-block clause. The
+    // contract explicitly permits engines: [] (every covered engine withheld
+    // or unmeasurable, each named), and the server produces that state; a
+    // projection result in it was being labelled a "contract defect" over a
+    // perfectly legal body.
+    for (const reach of ["projection_no_spot_pass", "no_shocks_declared"] as const) {
+      const cell = tornadoCellState(
+        cellResult({
+          covered_engines: ["aave_v3_etherfi", "debt_manager"],
+          shock_reach: { ...cellResult().shock_reach, reach },
+          engines: [],
+          withheld_engines: ["aave_v3_etherfi"],
+          unmeasurable_engines: [
+            {
+              engine: "debt_manager",
+              reason: "no_positions_in_batch",
+              counts: { positions_in_batch: 0, refused_in_batch: 0, unrebuildable: 0 },
+              note: "no debt_manager position exists in this batch",
+            },
+          ],
+        }),
+        "v1",
+        LISTED_IDENTITY,
+        TWO_ENGINES,
+      );
+      expect(cell.state, reach).toBe("no-answerable-engine");
+      if (cell.state !== "no-answerable-engine") continue;
+      expect(cell.sentence).toContain("aave_v3_etherfi (withheld on this batch)");
+      expect(cell.sentence).toContain("debt_manager (no_positions_in_batch)");
+      expect(cell.sentence).toContain("an absence, never a zero");
+      expect(cell.sentence).not.toContain("contract defect");
+    }
+  });
+
   test("both engines carrying the projection block keeps the unqualified pointer, unchanged", () => {
     const cell = tornadoCellState(
       twoEngineResult("projection_no_spot_pass", { aave: true, dm: true }),

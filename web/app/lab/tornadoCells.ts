@@ -227,12 +227,11 @@ function mandatoryBlockClause(
   }
   const consequence =
     block === "projection" ? "there is no answer to point at" : "its information is absent";
-  if (result.engines.length === 0) {
-    return (
-      `No engine of this result carries the ${label} block the contract makes mandatory here, ` +
-      `so ${consequence}: that absence is a contract defect, never a zero.`
-    );
-  }
+  // PRECONDITION: at least one answered engine. `engines: []` is a LEGAL body
+  // (every covered engine withheld or unmeasurable, each named in absences) —
+  // the contract says so explicitly — and the caller routes it to the
+  // no-answerable-engine state BEFORE this clause is composed (Codex r59-B:
+  // calling that legal state a contract defect was itself the wrong answer).
   if (missing.length === 0) {
     return block === "projection"
       ? "The projection row in the ledger below is the answer."
@@ -318,6 +317,10 @@ export function tornadoCellState(
       // mandatory PER ANSWERED ENGINE: an engine that answered without its own
       // block is a contract defect named by engine, never covered for by a
       // sibling's block (`mandatoryBlockClause`).
+      // R59-B — `engines: []` is a legal body here too (every covered engine
+      // withheld or unmeasurable): the no-answerable-engine state names each
+      // absence; only an ANSWERED engine can owe its mandatory block.
+      if (result.engines.length === 0) return noAnswerableEngine(result);
       return {
         state: "projection-no-spot-pass",
         sentence:
@@ -332,6 +335,9 @@ export function tornadoCellState(
       // its own: nothing was ASKED FOR here, so nothing was swallowed and
       // nothing was declared held either. R58 item 4 — the block is mandatory
       // per answered engine, same law as the projection arm.
+      // R59-B — same law as the projection arm: a zero-answered-engine body
+      // is legal and speaks through its named absences, never as a defect.
+      if (result.engines.length === 0) return noAnswerableEngine(result);
       return {
         state: "no-shock-declared",
         sentence:

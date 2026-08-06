@@ -623,6 +623,9 @@ test("r58 item 7 — the committed fixture's cause figures are impersonated by N
       shock_reach: {
         applied_shocks: unknown[];
         declared_shocks: number;
+        declared_shocks_at_identity: number;
+        held_flat_marks: number;
+        held_flat_assets: unknown[];
         marks_moved: number;
         marks_held_by_declared_factor: number;
         marks_held_by_transform: number;
@@ -651,6 +654,12 @@ test("r58 item 7 — the committed fixture's cause figures are impersonated by N
     reach.marks_moved,
     reach.applied_shocks.length,
     reach.declared_shocks,
+    // r59-C — the adjacent counts r58's enumeration omitted: a fixture where
+    // any of these equals a cause figure could let a wrong-field renderer
+    // stay green, so the law forbids the collision at the committed bytes.
+    reach.declared_shocks_at_identity,
+    reach.held_flat_marks,
+    reach.held_flat_assets.length,
     reach.marks_snapped + reach.marks_base_snapped,
     reach.marks_snapped + reach.marks_cap_bound,
     reach.marks_base_snapped + reach.marks_cap_bound,
@@ -883,6 +892,51 @@ test("r58 item 2 — a dispatch during an in-flight set is refused: ONE POST, a 
   await expect(page.getByTestId("tornado-run-disabled-reason")).toHaveCount(0);
   await page.locator('[data-testid="tornado-pick"][data-scenario-id="eth_minus_30"]').check();
   await expect(page.getByTestId("tornado-run")).toBeEnabled();
+  expect(posts).toHaveLength(1);
+});
+
+test("r59-A — a listing id the wire pattern refuses settles as REFUSED LOCALLY and never strands the guard", async ({
+  page,
+}) => {
+  // KILLS: the stranded in-flight ref. The server accepts any nonblank
+  // committed id, so a listing can honestly publish "ETH_down"; the client
+  // pattern refuses to SEND it. Before this law, that refusal was a promise
+  // REJECTION with no handler: the page said a run was in flight forever and
+  // the set surface was permanently disabled. Now runBookSet resolves the
+  // refused-locally arm, the surface names it, priors restore, and a second
+  // dispatch works.
+  const posts: string[] = [];
+  await mockCold(page, () => {
+    const listing = JSON.parse(fixture("run-book-set.scenarios.json")) as {
+      scenarios: { id: string; label: string }[];
+    };
+    const donor = listing.scenarios[0];
+    if (donor === undefined) throw new Error("listing fixture lost its scenarios");
+    listing.scenarios.push({ ...donor, id: "ETH_down", label: "ETH down (uppercase id)" });
+    return JSON.stringify(listing);
+  });
+  await mockSetRun(page, SET_200, posts);
+
+  await page.goto("/lab");
+  await expect(page.getByTestId("lab-tornado")).toBeVisible();
+  await pick(page, ["ETH_down"]);
+  await page.getByTestId("tornado-run").click();
+
+  // The refusal is a SETTLEMENT with its own register sentence — nothing left
+  // the page, and the sentence says so.
+  const failure = page.getByTestId("tornado-set-failure");
+  await expect(failure).toContainText("REFUSED LOCALLY, NOTHING SENT");
+  await expect(failure).toContainText('"ETH_down" is not a committed-scenario id');
+  await expect(failure).toContainText("No request left this page");
+  expect(posts).toHaveLength(0);
+
+  // The guard released and the surface is alive: a valid pick dispatches.
+  await expect(page.getByTestId("tornado-run-disabled-reason")).toHaveCount(0);
+  await page.locator('[data-testid="tornado-pick"][data-scenario-id="ETH_down"]').uncheck();
+  await pick(page, EXAMPLE_IDS);
+  await expect(page.getByTestId("tornado-run")).toBeEnabled();
+  await page.getByTestId("tornado-run").click();
+  await expect(page.getByTestId("tornado-header")).toHaveText(EXAMPLE_HEADER);
   expect(posts).toHaveLength(1);
 });
 

@@ -377,6 +377,11 @@ export function setRunFailureReason(outcome: BodylessSetOutcome): string {
         `REFUSED (${String(outcome.status)}${outcome.code === "" ? "" : ` ${outcome.code}`}): ` +
         outcome.message
       );
+    case "refused-locally":
+      return (
+        `REFUSED LOCALLY, NOTHING SENT: ${outcome.message}. ` +
+        `No request left this page, so this says nothing about the book or the service.`
+      );
   }
 }
 
@@ -390,7 +395,15 @@ export function setRunFailureReason(outcome: BodylessSetOutcome): string {
  * because `RunBookOutcome`'s own rate-limited arm is the one that discards
  * messages and the busy arm exists precisely to keep its message.
  */
-export function setFailureAsRunBookOutcome(outcome: BodylessSetOutcome): RunBookOutcome {
+/**
+ * A DISPATCHED failure — the settlement of a request that actually left the
+ * page. `refused-locally` is excluded BY TYPE (r59-A): nothing was sent, so
+ * no row may absorb it as an attempt's outcome; the caller restores priors
+ * instead, exactly as a 200 does.
+ */
+export type DispatchedSetFailure = Exclude<BodylessSetOutcome, { kind: "refused-locally" }>;
+
+export function setFailureAsRunBookOutcome(outcome: DispatchedSetFailure): RunBookOutcome {
   switch (outcome.kind) {
     case "no-batch":
       return {

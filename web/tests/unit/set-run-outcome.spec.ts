@@ -32,6 +32,7 @@ import {
   setContradiction,
   tornadoCellState,
 } from "../../app/lab/tornadoCells";
+import { setRunFailureReason } from "../../app/lab/tornadoLines";
 import type {
   RunBookSetResponse,
   SetRunEngineSummary,
@@ -129,22 +130,40 @@ test.describe("the shape rules are enforced locally, before a request is spent",
     throw new Error("a request was sent for a body the contract already refuses");
   };
 
-  test("an empty set is refused, and the message says there is no implicit all", async () => {
-    await expect(runBookSet("http://x", [], { fetchImpl: neverCalled })).rejects.toThrow(/no implicit/);
+  // Codex r59-A — a local refusal RESOLVES to its own arm, it never rejects.
+  // The concrete failure the old throw produced: a listing that publishes an
+  // id the wire pattern refuses (the server accepts any nonblank committed
+  // id, e.g. "ETH_down") made runSet's un-handled rejection strand the
+  // in-flight guard at true, permanently disabling set dispatch while the
+  // page claimed a run was still in flight.
+  const refusedLocally = async (ids: readonly string[]): Promise<string> => {
+    const outcome = await runBookSet("http://x", ids, { fetchImpl: neverCalled });
+    expect(outcome.kind).toBe("refused-locally");
+    return outcome.kind === "refused-locally" ? outcome.message : "";
+  };
+
+  test("an empty set resolves refused-locally, and says there is no implicit all", async () => {
+    expect(await refusedLocally([])).toMatch(/no implicit/);
   });
 
-  test("over the cap is refused locally", async () => {
+  test("over the cap resolves refused-locally", async () => {
     const ids = Array.from({ length: MAX_SET_RUN_SCENARIOS + 1 }, (_, i) => `id_${String(i)}`);
-    await expect(runBookSet("http://x", ids, { fetchImpl: neverCalled })).rejects.toThrow(/cap of 24/);
+    expect(await refusedLocally(ids)).toMatch(/cap of 24/);
   });
 
-  test("a malformed id and a repeat are both refused locally", async () => {
-    await expect(runBookSet("http://x", ["NOT AN ID"], { fetchImpl: neverCalled })).rejects.toThrow(
-      /committed-scenario id/,
-    );
-    await expect(
-      runBookSet("http://x", ["eth_minus_10", "eth_minus_10"], { fetchImpl: neverCalled }),
-    ).rejects.toThrow(/a set is a set/);
+  test("a malformed id and a repeat both resolve refused-locally — NEVER a rejection", async () => {
+    expect(await refusedLocally(["ETH_down"])).toMatch(/committed-scenario id/);
+    expect(await refusedLocally(["eth_minus_10", "eth_minus_10"])).toMatch(/appears twice/);
+  });
+
+  test("refused-locally carries its own register sentence, naming that nothing was sent", () => {
+    const reason = setRunFailureReason({
+      kind: "refused-locally",
+      message: '"ETH_down" is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent',
+    });
+    expect(reason).toContain("REFUSED LOCALLY, NOTHING SENT");
+    expect(reason).toContain("ETH_down");
+    expect(reason).toContain("No request left this page");
   });
 
   test("an unreachable service is its own arm, never a failure about the book", async () => {

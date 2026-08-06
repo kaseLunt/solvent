@@ -1020,5 +1020,15 @@ function SettledView({
           {keptClause}
         </div>
       );
+    case "refused-locally":
+      // R59-A — nothing left the page: no keptClause (no settlement exists
+      // for any row to name) and every row was restored to what it held.
+      return (
+        <div className={styles.errorState} data-testid="tornado-set-failure">
+          <b>REFUSED LOCALLY, NOTHING SENT:</b> {outcome.message}. No request left this page, so
+          this says nothing about the book or the service, and every row above still shows exactly
+          what it held before the attempt.
+        </div>
+      );
   }
 }

@@ -1091,10 +1091,13 @@ function LabBookPanelInner() {
             const prior = previous.get(id);
             const held = prior?.kind === "running" ? prior.held : undefined;
             const attempt = attempts.get(id);
-            if (outcome.kind === "ok") {
+            if (outcome.kind === "ok" || outcome.kind === "refused-locally") {
               // R57 ITEM 3 — restore what the row held BEFORE the dispatch,
               // exactly. No restamp, no dropped rerunFailed record, and a row
               // that held nothing is TRUE idle, never a stamped one.
+              // R59-A — a LOCAL refusal restores the same way: nothing left
+              // the page, so no row may carry it as an attempt's outcome; the
+              // tornado surface alone names the refusal.
               const before = priors.get(id);
               next.set(id, restoredAfterSetSettle(before));
               continue;

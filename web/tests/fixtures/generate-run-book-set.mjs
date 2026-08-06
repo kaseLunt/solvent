@@ -497,6 +497,11 @@ const ethfiResult = {
     marks_moved: moved,
     applied_length: rows.length,
     declared_shocks: ethfiReach.declared_shocks,
+    // r59-C — the wire's OTHER adjacent counts, omitted by r58's enumeration:
+    // a renderer sourcing a cause from any of these must also go red.
+    declared_shocks_at_identity: ethfiReach.declared_shocks_at_identity,
+    held_flat_marks: ethfiReach.held_flat_marks,
+    held_flat_assets_length: ethfiReach.held_flat_assets.length,
     "marks_snapped+marks_base_snapped": census.marks_snapped + census.marks_base_snapped,
     "marks_snapped+marks_cap_bound": census.marks_snapped + census.marks_cap_bound,
     "marks_base_snapped+marks_cap_bound": census.marks_base_snapped + census.marks_cap_bound,

@@ -60,7 +60,16 @@ export type SetRunOutcome =
   | { kind: "no-batch"; message: string; retryAfterSeconds: number | null }
   | { kind: "rate-limited"; message: string; retryAfterSeconds: number | null }
   | { kind: "refused"; status: number; code: string; message: string }
-  | { kind: "unreachable"; message: string };
+  | { kind: "unreachable"; message: string }
+  /**
+   * Local shape validation refused the ids BEFORE any request was sent
+   * (Codex r59-A). An OUTCOME, never a rejection: a promise that can reject
+   * is a promise some caller eventually forgets to catch, and the concrete
+   * failure was exactly that — a stranded in-flight guard permanently
+   * disabling the set surface when a listing published an id the wire
+   * pattern refuses.
+   */
+  | { kind: "refused-locally"; message: string };
 
 type Envelope = { code?: unknown; message?: unknown; retry_after_seconds?: unknown };
 
@@ -172,7 +181,9 @@ export function classifySetRunRefusal(
  * filters against `GET /v1/scenarios` first and DISCLOSES what it filtered. This
  * function validates only the contract's own shape rules — the id pattern, the
  * per-request cap, non-emptiness and uniqueness — and refuses locally rather
- * than spending a request to be told.
+ * than spending a request to be told. A local refusal RESOLVES to the
+ * `refused-locally` arm; this function never rejects (r59-A: a rejection is
+ * how an in-flight guard gets stranded).
  */
 export async function runBookSet(
   baseUrl: string,
@@ -180,25 +191,32 @@ export async function runBookSet(
   options?: { signal?: AbortSignal; fetchImpl?: typeof fetch },
 ): Promise<SetRunOutcome> {
   if (scenarioIds.length === 0) {
-    throw new Error(
-      "runBookSet: name the ids to evaluate. There is no implicit \"all\": a request whose meaning changes when the " +
+    return {
+      kind: "refused-locally",
+      message:
+        'name the ids to evaluate. There is no implicit "all": a request whose meaning changes when the ' +
         "committed set grows is a request the caller cannot reason about",
-    );
+    };
   }
   if (scenarioIds.length > MAX_SET_RUN_SCENARIOS) {
-    throw new Error(
-      `runBookSet: ${String(scenarioIds.length)} ids exceeds the contract's cap of ${String(MAX_SET_RUN_SCENARIOS)}`,
-    );
+    return {
+      kind: "refused-locally",
+      message: `${String(scenarioIds.length)} ids exceeds the contract's cap of ${String(MAX_SET_RUN_SCENARIOS)}`,
+    };
   }
   const seen = new Set<string>();
   for (const id of scenarioIds) {
     if (!SCENARIO_ID_PATTERN.test(id)) {
-      throw new Error(
-        `runBookSet: ${JSON.stringify(id)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$): refusing to send it`,
-      );
+      return {
+        kind: "refused-locally",
+        message: `${JSON.stringify(id)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent`,
+      };
     }
     if (seen.has(id)) {
-      throw new Error(`runBookSet: ${JSON.stringify(id)} appears twice — a set is a set`);
+      return {
+        kind: "refused-locally",
+        message: `${JSON.stringify(id)} appears twice, and a set names each id once; nothing was sent`,
+      };
     }
     seen.add(id);
   }
