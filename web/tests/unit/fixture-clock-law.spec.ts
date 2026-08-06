@@ -223,9 +223,13 @@ const isBatchBearing = (node: unknown): boolean => {
 // DIFF — the walk finds trios the census does not name, and the census test
 // fails naming the file.
 //
-// Twenty-four of these carry a `batch` envelope and state two ages: the batch's
+// Twenty-one of these carry a `batch` envelope and state two ages: the batch's
 // own over `computed_at`, and the debt_manager sweep's over `max_updated_at`.
-// The twenty-fifth, `observatory-series-dm.json`, carries no batch at all — it
+// The three `book*` bodies state a THIRD: since contract 1.2.2 the
+// debt_manager `engines[]` row carries its own `sweep` stamp — the same
+// SweepStamp the batch envelope serves, travelling ON THE ROW — and its
+// `age_seconds` verifies against the same `served_at`.
+// `observatory-series-dm.json` carries no batch at all — it
 // is a series of points whose two sweeps each state an age. Which is the reason
 // the walk is over the DIRECTORY and not over "the batch-bearing files": the
 // clock-bearing set is strictly larger than the batch-bearing set, and always
@@ -240,9 +244,9 @@ const isBatchBearing = (node: unknown): boolean => {
 // which have NO clock guard. Before this spec nothing on any path had ever read
 // their ages.
 const CENSUS: Record<string, number> = {
-  "book-engine-refused.json": 2,
-  "book-monotonicity-violation.json": 2,
-  "book.json": 2,
+  "book-engine-refused.json": 3,
+  "book-monotonicity-violation.json": 3,
+  "book.json": 3,
   "feed-posture-snapshot.json": 2,
   "observatory-series-dm.json": 2,
   "positions-aave-page-1.json": 2,
@@ -275,8 +279,8 @@ const CENSUS: Record<string, number> = {
   "stress-unknowable.json": 2,
 };
 
-/** 28 files × 2 trios. Stated separately so a census edit cannot move it silently. */
-const CENSUS_TOTAL = 56;
+/** 25 files × 2 trios + the three book bodies × 3. Stated separately so a census edit cannot move it silently. */
+const CENSUS_TOTAL = 59;
 
 // --- the generators' own pins, read out of their source ---------------------
 //

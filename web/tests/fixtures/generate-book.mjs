@@ -49,6 +49,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// The fidelity spec (tests/unit/book-fixture-fidelity.spec.ts) re-runs this
+// generator into a scratch directory and compares against the committed files,
+// so stale outputs fail CI instead of drifting silently. Everything else
+// writes in place.
+const outDir = process.env.GENERATE_BOOK_OUT ?? here;
 const repoRoot = path.resolve(here, "..", "..", "..");
 const clientFixtures = path.join(repoRoot, "packages", "client-ts", "test", "fixtures");
 const contractPath = path.join(repoRoot, "api", "openapi.yaml");
@@ -56,7 +61,7 @@ const contractPath = path.join(repoRoot, "api", "openapi.yaml");
 const readClientFixture = (name) =>
   JSON.parse(readFileSync(path.join(clientFixtures, name), "utf8"));
 const emit = (name, value) => {
-  writeFileSync(path.join(here, name), `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  writeFileSync(path.join(outDir, name), `${JSON.stringify(value, null, 2)}\n`, "utf8");
   console.log(`wrote   ${name}`);
 };
 
@@ -69,7 +74,7 @@ const COPIES = [
   [path.join("errors", "bad-request.json"), "book-error-bad-request.json"],
 ];
 for (const [source, target] of COPIES) {
-  copyFileSync(path.join(clientFixtures, source), path.join(here, target));
+  copyFileSync(path.join(clientFixtures, source), path.join(outDir, target));
   console.log(`copied  ${source} -> ${target}`);
 }
 

@@ -76,6 +76,7 @@
       "refused_positions": 1,
       "flagged_positions": 1,
       "liquidatable_positions": 0,
+      "sweep": null,
       "refused": false,
       "refusal": null,
       "total_collateral": "800000000000",
@@ -102,6 +103,15 @@
       "refused_positions": 1,
       "flagged_positions": 0,
       "liquidatable_positions": 1,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-07-29T09:40:00Z",
+        "age_seconds": 1200,
+        "generation": 4,
+        "generation_open": false
+      },
       "refused": false,
       "refusal": null,
       "total_collateral": "4000000000",
