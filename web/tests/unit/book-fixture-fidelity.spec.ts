@@ -74,6 +74,27 @@ const OWNED = [/^book([.-].*)?\.json$/, /^positions-.*\.json$/, /^batch-.*\.json
 const RETIRED: string[] = [];
 
 /**
+ * Every output name this generator has EVER written — APPEND-ONLY, seeded
+ * with the full current manifest (r71). Names never leave. Ownership
+ * consults this exact history alongside the patterns, so NO edit — a rename
+ * (r70), a bare-name pattern gap (r69), or retiring a WHOLE FAMILY with its
+ * manifest entries and its now-empty pattern (r71's escape) — can abandon a
+ * committed file: the historical name stays owned forever, and the law
+ * below forces every new manifest entry to be appended here.
+ */
+const EVER_WRITTEN = [
+  "batch-superseded.json",
+  "book-engine-refused.json",
+  "book-error-bad-request.json",
+  "book-error-unavailable.json",
+  "book-monotonicity-violation.json",
+  "book.json",
+  "positions-aave-page-1.json",
+  "positions-aave-page-2.json",
+  "positions-dm-page-1.json",
+];
+
+/**
  * Parameterized over the manifest so rename scenarios are provable
  * synthetically (r69/r70): the law's teeth must be demonstrable against an
  * ALTERNATE manifest, not just the committed one.
@@ -82,10 +103,13 @@ const orphansOf = (
   listing: string[],
   manifest: string[] = MANIFEST,
   retired: string[] = RETIRED,
+  history: string[] = EVER_WRITTEN,
 ): string[] =>
   listing.filter(
     (name) =>
-      (OWNED.some((pattern) => pattern.test(name)) || retired.includes(name)) &&
+      (OWNED.some((pattern) => pattern.test(name)) ||
+        retired.includes(name) ||
+        history.includes(name)) &&
       !manifest.includes(name),
   );
 
@@ -169,7 +193,32 @@ test("r70 — a SINGLETON rename cannot discard ownership of the stale old name"
   expect(orphansOf(listing, [...MANIFEST], ["envelope-legacy.json"])).toEqual([
     "envelope-legacy.json",
   ]);
-  expect(orphansOf(listing, [...MANIFEST], [])).toEqual([]);
+  expect(orphansOf(listing, [...MANIFEST], [], [])).toEqual([]);
+});
+
+test("r71 — retiring a WHOLE FAMILY cannot abandon its committed files", () => {
+  // r71's escape: an honest editor retires every positions-* output, removes
+  // the manifest entries and the now-empty ownership pattern, but overlooks
+  // the three committed files — patterns claim nothing, self-coherence holds
+  // over the shrunken manifest, and the stale fixtures serve tests green.
+  // The exact historical census closes it: ownership by name, forever.
+  // 1. Every manifest entry is in the history (forces the append on add).
+  for (const name of MANIFEST) {
+    expect(EVER_WRITTEN.includes(name), `${name} must be appended to EVER_WRITTEN`).toBe(true);
+  }
+  // 2. The prescribed regression: positions family gone from the manifest
+  //    (patterns irrelevant — history alone must claim the leftover).
+  const sansPositions = MANIFEST.filter((name) => !name.startsWith("positions-"));
+  expect(orphansOf(["positions-dm-page-1.json", ...sansPositions], sansPositions)).toEqual([
+    "positions-dm-page-1.json",
+  ]);
+  // 3. The history branch is LOAD-BEARING, proven on a name no pattern
+  //    claims: with it in the history the leftover is named; with the
+  //    history emptied the same leftover escapes — the r71 world this
+  //    census exists to end.
+  const departed = "legacy-family-output.json";
+  expect(orphansOf([departed, ...MANIFEST], [...MANIFEST], [], [departed])).toEqual([departed]);
+  expect(orphansOf([departed, ...MANIFEST], [...MANIFEST], [], [])).toEqual([]);
 });
 
 test("the copies really are the client package's contract-validated bodies", () => {
