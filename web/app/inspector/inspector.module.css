@@ -544,3 +544,40 @@
   font-size: var(--fs-caption);
   color: var(--ink-3);
 }
+
+/* ---- W-3L: hoisted outcome takeaway + wire-note disclosure ---- */
+
+.outcomeTakeaway {
+  font-family: var(--mono);
+  font-size: var(--fs-body);
+  color: var(--ink);
+  max-width: 78ch;
+  margin: 0 0 4px;
+}
+
+.noteDisclosure {
+  margin-top: 8px;
+}
+
+.noteDisclosure summary {
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.historyTakeaway {
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 72ch;
+  margin: 4px 0 6px;
+}
+
+.extractDisclosure {
+  display: inline-block;
+}
+
+.extractDisclosure summary {
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}

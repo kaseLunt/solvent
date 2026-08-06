@@ -56,7 +56,7 @@ test("found: the position layout renders, with the stale price verdict visible",
   await mockApi(page, ADDRESS_FOUND);
   await page.goto(`/inspector/${FOUND_ADDR}`);
 
-  await expect(page.getByTestId("found-positive")).toBeVisible();
+  await expect(page.getByTestId("inspector-outcome")).toBeVisible();
   await expect(page.getByTestId("position-aave_v3_etherfi")).toBeVisible();
   await expect(page.getByTestId("position-debt_manager")).toBeVisible();
 
@@ -88,9 +88,11 @@ test("definitive none: the honest statement WITH lookup completeness shown", asy
   await mockApi(page, ADDRESS_NOT_FOUND);
   await page.goto(`/inspector/${NOT_FOUND_ADDR}`);
 
+  // W-3L: the definitive-negative SENTENCE lives in the head takeaway; the
+  // box below carries the entitlement (the method) and the wire note.
+  await expect(page.getByTestId("inspector-outcome")).toContainText("no position in this batch");
   const negative = page.getByTestId("found-negative");
   await expect(negative).toBeVisible();
-  await expect(negative).toContainText("no position in this batch");
   await expect(negative).toContainText("complete");
   await expect(negative).toContainText("withheld engines: none");
 
@@ -352,7 +354,7 @@ test("landing: an invalid address is an inline refusal and never navigates", asy
   await page.getByLabel("address to inspect").fill(FOUND_ADDR);
   await page.getByRole("button", { name: "Inspect" }).click();
   await expect(page).toHaveURL(new RegExp(`/inspector/${FOUND_ADDR}$`));
-  await expect(page.getByTestId("found-positive")).toBeVisible();
+  await expect(page.getByTestId("inspector-outcome")).toBeVisible();
 });
 
 test("an invalid [addr] path segment is refused inline — nothing is looked up", async ({ page }) => {
@@ -360,5 +362,5 @@ test("an invalid [addr] path segment is refused inline — nothing is looked up"
   await page.goto("/inspector/0xdeadbeef");
   await expect(page.getByTestId("address-refusal")).toBeVisible();
   await expect(page.getByTestId("address-refusal")).toContainText("REFUSED");
-  await expect(page.getByTestId("found-positive")).toHaveCount(0);
+  await expect(page.getByTestId("inspector-outcome")).toHaveCount(0);
 });

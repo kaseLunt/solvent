@@ -506,7 +506,7 @@ test("(2) the Inspector: same law, its own envelope — a failed repair, then a 
   // unavailable", because a failed BACKGROUND repair is not an answer about
   // this address.
   await expect(page.getByText("querying the newest servable batch…")).toHaveCount(0);
-  await expect(page.getByTestId("found-positive")).toBeVisible();
+  await expect(page.getByTestId("inspector-outcome")).toBeVisible();
 
   // THE FIRST BOUNDED RETRY LANDS, and the receipt it brings discharges the
   // unknown.

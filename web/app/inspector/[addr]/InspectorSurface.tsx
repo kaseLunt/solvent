@@ -23,7 +23,8 @@ import {
   type AddressLookup,
 } from "@solvent/client";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
-import { formatBlock, isAddress, renderLookupOutcome } from "@/lib/format";
+import { formatBlock, isAddress } from "@/lib/format";
+import { lookupTakeaway } from "@/lib/inspector-lines";
 import {
   batchFreshnessLine,
   batchFreshnessLineUnknown,
@@ -297,6 +298,15 @@ export function InspectorSurface({ addr }: { addr: string }) {
 
       {/* FRESHNESS (Wave R1 item 3): the same line the Book carries, from
           THIS lookup's own envelope — never a borrowed or implied as-of. */}
+      {/* W-3L: the outcome sentence, hoisted from FoundBlock to sit beside
+          the address (one source: lookupTakeaway). The freshness line below
+          it is the head's one-line method — THIS lookup's own envelope. */}
+      {addressState.status === "ready" && (
+        <p className={styles.outcomeTakeaway} data-testid="inspector-outcome">
+          {lookupTakeaway(addressState.lookup)}
+        </p>
+      )}
+
       {addressState.status === "ready" && (
         <p className={styles.freshness} data-testid="inspector-freshness">
           {age.unresolved
@@ -385,14 +395,15 @@ export function InspectorSurface({ addr }: { addr: string }) {
 
 /** The three-valued page-level statement (plus the floor disclosure on found). */
 function FoundBlock({ lookup }: { lookup: AddressLookup }) {
+  // W-3L: the outcome sentence lives in the surface head (lookupTakeaway,
+  // data-testid="inspector-outcome") — this block carries what remains:
+  // the hazard boxes (FLOOR, the unknowable's withheld list), each arm's
+  // one-line method, and the wire `note` behind a named disclosure. The
+  // three arms keep three visual registers by law.
   switch (lookup.outcome) {
     case "found":
       return (
         <>
-          <p className="mono dim" data-testid="found-positive">
-            outcome · {renderLookupOutcome("found")} · {String(lookup.response.positions.length)}{" "}
-            position(s) in batch {String(lookup.response.batch.id)}
-          </p>
           {!lookup.complete && (
             <div className={`${styles.stateCard} ${styles.stateRefused}`} data-testid="found-floor">
               <p className="mono">
@@ -407,20 +418,21 @@ function FoundBlock({ lookup }: { lookup: AddressLookup }) {
     case "not-found":
       return (
         <div className={styles.stateCard} data-testid="found-negative">
-          <h2>no position in this batch</h2>
           <p>
-            A definitive answer, and here is what entitles the service to it: the lookup was{" "}
+            Here is what entitles the service to the definitive answer above: the lookup was{" "}
             <b>complete</b>, so every engine was available to be asked in batch{" "}
             <span className="mono">{String(lookup.response.batch.id)}</span>, and none withheld its
             book (withheld engines: none).
           </p>
-          <p className="mono dim">{lookup.note}</p>
+          <details className={styles.noteDisclosure} data-testid="found-note">
+            <summary>the wire&apos;s own note</summary>
+            <p className="mono dim">{lookup.note}</p>
+          </details>
         </div>
       );
     case "unknowable":
       return (
         <div className={`${styles.stateCard} ${styles.stateRefused}`} data-testid="found-unknowable">
-          <h2>cannot be established</h2>
           <p>
             The answer to &quot;does this address hold a position?&quot; cannot be established:
             an engine&apos;s whole book is withheld in the newest servable batch. This is a
@@ -434,7 +446,10 @@ function FoundBlock({ lookup }: { lookup: AddressLookup }) {
               </li>
             ))}
           </ul>
-          <p className="mono dim">{lookup.note}</p>
+          <details className={styles.noteDisclosure} data-testid="found-note">
+            <summary>the wire&apos;s own note</summary>
+            <p className="mono dim">{lookup.note}</p>
+          </details>
         </div>
       );
   }

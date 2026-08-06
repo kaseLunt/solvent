@@ -12,7 +12,10 @@
 
 import { expect, test } from "@playwright/test";
 import {
+  allGapFrameText,
   buildHistorySeries,
+  historyTakeaway,
+  tallyHistory,
   displayHf,
   displayRatio,
   knownBatchAxis,
@@ -211,4 +214,42 @@ test("displayHf: exact trimmed wad; num/den marked approximate; ∞ verbatim", (
     displayHf({ wad: null, num: "6480000000000000", den: "6000000000000000", infinite: false, note }),
   ).toBe("≈1.0800");
   expect(displayHf({ wad: null, num: null, den: null, infinite: true, note })).toBe("∞");
+});
+
+// ---------------------------------------------------------------------------
+// W-3L — historyTakeaway: the per-engine takeaway in the entries' OWN display
+// strings. Expectations fixture-composed, never the helper echoed back.
+// ---------------------------------------------------------------------------
+
+test.describe("W-3L — historyTakeaway", () => {
+  test("movement between the first and last PLOTTED points, in their own display strings", () => {
+    // Two plotted points: the fixture computed point plus its re-pin at an
+    // older batch (the spec-local geometry helper).
+    const series = buildHistorySeries({ ...ENGINE, points: [computedAt(3), ...ENGINE.points] });
+    const plotted = series.entries.filter((entry) => entry.value !== null);
+    const first = plotted[0];
+    const last = plotted[plotted.length - 1];
+    if (first === undefined || last === undefined || plotted.length < 2) {
+      throw new Error("fixture invariant: at least two plotted points expected");
+    }
+    expect(historyTakeaway(series, "aave_v3_etherfi")).toBe(
+      `HF moved ${first.display} → ${last.display} across ${String(plotted.length)} of ` +
+        `${String(series.entries.length)} witnessed batches (batches ${String(first.batchId)} → ` +
+        `${String(last.batchId)}).`,
+    );
+  });
+
+  test("the DM arm names the DISCLOSURE ratio, never HF; the unknown arm claims nothing", () => {
+    const series = buildHistorySeries(ENGINE);
+    expect(historyTakeaway(series, "debt_manager").startsWith("disclosure ratio ")).toBe(true);
+    expect(historyTakeaway(series, "debt_manager")).not.toContain("HF");
+    expect(historyTakeaway(series, "engine_x").startsWith("plotted series ")).toBe(true);
+  });
+
+  test("nothing plotted: the all-gap frame text IS the takeaway — absence at movement's weight", () => {
+    const series = buildHistorySeries({ ...ENGINE, points: [], withheld_batch_ids: [1, 2] });
+    const tally = tallyHistory(series);
+    expect(tally.plotted).toBe(0);
+    expect(historyTakeaway(series, "aave_v3_etherfi")).toBe(allGapFrameText(tally));
+  });
 });

@@ -68,8 +68,8 @@ function LiquidationExtract({ event }: { event: ChainEvent }) {
       : renderNullableDecimal(detail.debt_repaid, {
           decimals: detail.debt_decimals ?? undefined,
         });
-  return (
-    <span className="mono dim">
+  const body = (
+    <span className="mono dim" data-testid="liquidation-extract">
       liquidator <AddressMono address={detail.liquidator} copy={false} /> · repaid {repaid} · seized{" "}
       {detail.seized.length === 0
         ? EM_DASH
@@ -81,12 +81,38 @@ function LiquidationExtract({ event }: { event: ChainEvent }) {
       · bonus {detail.realized_bonus_bps ?? EM_DASH}/{detail.configured_bonus_bps ?? EM_DASH} bps
     </span>
   );
+  // W-3L hazard fence (inventory 353): an extract carrying ANY em dash — an
+  // unestablished repaid amount, an empty or partly-unpriced seizure list, a
+  // missing bonus — stays VISIBLE. Only a fully-established breakdown may
+  // fold, and its summary counts what it holds.
+  const established =
+    detail.debt_repaid !== null &&
+    detail.seized.length > 0 &&
+    detail.seized.every((s) => s.amount !== null) &&
+    detail.realized_bonus_bps !== null &&
+    detail.configured_bonus_bps !== null;
+  if (!established) return body;
+  return (
+    <details className={styles.extractDisclosure} data-testid="liquidation-extract-fold">
+      <summary>seized / repaid / bonus breakdown ({String(detail.seized.length)} seizure(s))</summary>
+      {body}
+    </details>
+  );
 }
 
 export function InspectorActivity({ events, loading, error, hasMore, onLoadMore }: InspectorActivityProps) {
   return (
     <section data-testid="address-activity">
       <div className={styles.sectionHead}>Address activity · durable chain actions (this account)</div>
+
+      {/* W-3L: the section takeaway — the LOADED count, never a totality
+          claim while more rows exist behind the cursor. */}
+      {events.length > 0 && (
+        <p className={styles.historyTakeaway} data-testid="activity-takeaway">
+          {String(events.length)} custodied action(s) loaded for this account, newest first
+          {hasMore ? " · more exist behind the cursor" : ""}.
+        </p>
+      )}
 
       {events.length === 0 && !loading && error === null && (
         <p className="mono dim">no custodied chain actions for this account in the feed.</p>

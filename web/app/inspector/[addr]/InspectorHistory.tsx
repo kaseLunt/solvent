@@ -56,6 +56,7 @@ import {
   DM_DISCLOSURE_LINE,
   engineNeverPresent,
   engineNeverPresentLine,
+  historyTakeaway,
   HF_HISTORY_HEAD,
   HISTORY_DOCTRINE_LINE,
   HISTORY_DOCTRINE_SUMMARY,
@@ -153,7 +154,9 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
           return (
             <p
               key={engine.engine}
-              className={styles.historyAbsent}
+              // W-3L: the absence reads in the SAME takeaway register as a
+              // movement — never a dimmer weight (inventory 345).
+              className={styles.historyTakeaway}
               data-testid={`history-absent-${engine.engine}`}
             >
               <EngineChip engine={engine.engine} /> {engineNeverPresentLine(engine.engine)}
@@ -241,8 +244,15 @@ function EngineHistoryCard({
           {historyMetaLine(tally, series.newest, engine.engine, limit)}
         </span>
       </div>
-      {tally.plotted === 0 && (
-        <p className={styles.historyAllGap} data-testid={`history-all-gap-${engine.engine}`}>
+      {/* W-3L: the per-engine takeaway — movement (or the sole point) in the
+          entries' own display strings; the all-gap arm keeps its dedicated
+          testid and IS the takeaway when nothing plots (same weight). */}
+      {tally.plotted > 0 ? (
+        <p className={styles.historyTakeaway} data-testid={`history-takeaway-${engine.engine}`}>
+          {historyTakeaway(series, engine.engine)}
+        </p>
+      ) : (
+        <p className={styles.historyTakeaway} data-testid={`history-all-gap-${engine.engine}`}>
           {allGapFrameText(tally)}
         </p>
       )}

@@ -386,7 +386,7 @@ test("CLICKING a mover opens the Inspector's DYNAMIC route with that account on 
   await expect(heading).toContainText(truncateAddress(DM_MOVER_ACCOUNT));
   await expect(heading.locator(`[title="${DM_MOVER_ACCOUNT}"]`)).toBeVisible();
   // And it is the POSITION surface — the account the run measured, answered.
-  await expect(page.getByTestId("found-positive")).toBeVisible();
+  await expect(page.getByTestId("inspector-outcome")).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------

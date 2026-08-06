@@ -409,6 +409,40 @@ export function historyMetaLine(
   );
 }
 
+
+/**
+ * W-3L: the per-engine takeaway above each sparkline — movement between the
+ * FIRST and LAST plotted points, in the entries' own display strings. The DM
+ * arm names the DISCLOSURE ratio, never "HF" (the conflation the DM
+ * disclosure line exists to refuse); an engine outside the sealed set gets a
+ * no-claim label, not a borrowed one. With nothing plotted the all-gap frame
+ * text IS the takeaway — an absence and a movement read at the same weight.
+ */
+export function historyTakeaway(series: HistorySeries, engineName: string): string {
+  const plotted = series.entries.filter((entry) => entry.value !== null);
+  const tally = tallyHistory(series);
+  const first = plotted[0];
+  const last = plotted[plotted.length - 1];
+  if (first === undefined || last === undefined) return allGapFrameText(tally);
+  const label =
+    engineName === "aave_v3_etherfi"
+      ? "HF"
+      : engineName === "debt_manager"
+        ? "disclosure ratio"
+        : "plotted series";
+  if (plotted.length === 1) {
+    return (
+      `${label} ${first.display} at batch ${String(first.batchId)} — the only plotted point ` +
+      `of ${String(tally.witnessed)} witnessed batches.`
+    );
+  }
+  return (
+    `${label} moved ${first.display} → ${last.display} across ${String(tally.plotted)} of ` +
+    `${String(tally.witnessed)} witnessed batches (batches ${String(first.batchId)} → ` +
+    `${String(last.batchId)}).`
+  );
+}
+
 /**
  * The text rendered INSIDE the frame when the engine has history but none of
  * it plots — every witnessed batch is a gap. The breakdown is the point: a
