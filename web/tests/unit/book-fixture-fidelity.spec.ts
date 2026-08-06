@@ -57,11 +57,15 @@ const MANIFEST = [
  * and must never match). A committed file these claim that the manifest does
  * not carry is an orphan — a generator-owned fixture nothing regenerates.
  */
-const OWNED = [/^book[.-].*\.json$/, /^positions-.*\.json$/, /^batch-superseded\.json$/];
+const OWNED = [/^book([.-].*)?\.json$/, /^positions-.*\.json$/, /^batch-superseded\.json$/];
 
-/** Exported shape of the orphan law so its teeth are provable on synthetic listings. */
-const orphansOf = (listing: string[]): string[] =>
-  listing.filter((name) => OWNED.some((pattern) => pattern.test(name)) && !MANIFEST.includes(name));
+/**
+ * Parameterized over the manifest so the rename scenario is provable
+ * synthetically (r69): the law's teeth must be demonstrable against an
+ * ALTERNATE manifest, not just the committed one.
+ */
+const orphansOf = (listing: string[], manifest: string[] = MANIFEST): string[] =>
+  listing.filter((name) => OWNED.some((pattern) => pattern.test(name)) && !manifest.includes(name));
 
 test("a fresh generator run agrees with every committed output — the corpus is not stale", () => {
   const scratch = mkdtempSync(path.join(os.tmpdir(), "book-fixtures-"));
@@ -99,6 +103,26 @@ test("r68 — no orphaned generator-owned fixture survives a rename", () => {
     orphansOf(["book-old-shape.json", "run-book-set.json", "clock-law.mjs", "book.ts"]),
   ).toEqual(["book-old-shape.json"]);
   expect(orphansOf([...MANIFEST])).toEqual([]);
+});
+
+test("r69 — the ownership predicate covers the WHOLE manifest, bare book.json included", () => {
+  // r69's escape: /^book[.-].*\.json$/ consumed book.json's own dot and then
+  // demanded a second `.json`, so the single most-served fixture sat OUTSIDE
+  // its own orphan law — rename it in generator + manifest and the stale
+  // committed book.json would survive unexamined. Two closures:
+  // 1. Self-coherence — every manifest entry matches an ownership pattern,
+  //    so no future output can be manifest-listed yet orphan-blind.
+  for (const name of MANIFEST) {
+    expect(
+      OWNED.some((pattern) => pattern.test(name)),
+      `${name} is in the manifest but matches no ownership pattern — it could be orphaned invisibly`,
+    ).toBe(true);
+  }
+  // 2. The rename replayed, synthetically: the generator moves to
+  //    book-current.json, the old book.json stays committed — the law must
+  //    NAME the leftover under the alternate manifest.
+  const renamed = MANIFEST.map((name) => (name === "book.json" ? "book-current.json" : name));
+  expect(orphansOf(["book.json", ...renamed], renamed)).toEqual(["book.json"]);
 });
 
 test("the copies really are the client package's contract-validated bodies", () => {
