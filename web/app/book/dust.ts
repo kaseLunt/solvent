@@ -28,21 +28,23 @@ export type DustStep = (typeof DUST_STEPS)[number];
 /** A step that names a threshold — everything but "off". */
 export type ActiveDustStep = Exclude<DustStep, "off">;
 
-/** The table's default step (ruling part C, point 1): dust <1 ON by default. */
+/** The table's default step (ruling part C, point 1): dust <$1 ON by default. */
 export const DUST_DEFAULT_STEP: DustStep = "1";
 
-/** Chip labels: the filter hides rows BELOW the value, so the chip says so. */
+/**
+ * Chip labels: the filter hides rows BELOW the value, so the chip says so —
+ * WITH the unit the step is denominated in (W-FIX-WEB, closing the W-VR
+ * defect-7 register across the whole surface). Each active chip is composed
+ * from `dustStepUsdLabel`, the ONE formatter that owns the unit, so the chip
+ * row and the risk map's source-filter sentence can never disagree about
+ * what a step is a step of.
+ */
 export const DUST_CHIP_LABELS: Record<DustStep, string> = {
   off: "off",
-  "1": "<1",
-  "100": "<100",
-  "1k": "<1k",
+  "1": `<${dustStepUsdLabel("1")}`,
+  "100": `<${dustStepUsdLabel("100")}`,
+  "1k": `<${dustStepUsdLabel("1k")}`,
 };
-
-/** The step's prose amount ("below 1", "step (1k)") — the chip label sans "<". */
-export function dustStepAmount(step: ActiveDustStep): string {
-  return step;
-}
 
 /**
  * The step's USD display ("$1", "$100", "$1k") — the amount WITH the unit it
@@ -179,28 +181,33 @@ export function hiddenCountMismatch(aggregateBatchId: number, pagesBatchId: numb
 /**
  * The dust disclosure span (hidden > 0), bound form. The trailing separator
  * is part of the string — the "show" chipButton is appended by the caller.
+ *
+ * W-FIX-WEB: the threshold renders through `dustStepUsdLabel` ("below $1",
+ * never a bare "below 1" that reads as a count) — the function takes the STEP
+ * and composes the unit itself, so no caller can retype it.
  */
 export function dustDisclosureBound(
   hidden: number,
-  stepAmount: string,
+  step: ActiveDustStep,
   boundDisplay: string,
 ): string {
   return (
-    `hidden: ${String(hidden)} rows below ${stepAmount} · Σ debt ≤ ${boundDisplay} ` +
+    `hidden: ${String(hidden)} rows below ${dustStepUsdLabel(step)} · Σ debt ≤ ${boundDisplay} ` +
     `(bound: every hidden row is below the step) · `
   );
 }
 
 /**
  * The SHOULD upgrade at walk exhaustion: the bound is replaced by the exact
- * Σ — bookΣ − loadedΣ, same batch, bigint.
+ * Σ — bookΣ − loadedΣ, same batch, bigint. Same threshold register as the
+ * bound form: the step renders WITH its unit, from the one formatter.
  */
 export function dustDisclosureExact(
   hidden: number,
-  stepAmount: string,
+  step: ActiveDustStep,
   exactDisplay: string,
 ): string {
-  return `hidden: ${String(hidden)} rows below ${stepAmount} · Σ debt ${exactDisplay} exact · `;
+  return `hidden: ${String(hidden)} rows below ${dustStepUsdLabel(step)} · Σ debt ${exactDisplay} exact · `;
 }
 
 /**
@@ -221,7 +228,7 @@ export function emptyFilteredWalk(
   boundDisplay: string,
 ): string {
   return (
-    `no rows at or above the dust step (${dustStepAmount(step)}) · ${String(hidden)} rows ` +
+    `no rows at or above the dust step (${dustStepUsdLabel(step)}) · ${String(hidden)} rows ` +
     `below it are hidden by the filter and still counted · Σ debt ≤ ${boundDisplay} · ` +
     `set dust off to see them`
   );

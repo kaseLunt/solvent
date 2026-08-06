@@ -128,7 +128,7 @@ test("refused position rows are visible inline with their named reason", async (
   // aggregate, and the sort with its canonical direction glyph.
   // W-HR-A: the ranked column is Headroom now, so the footer names it.
   await expect(page.getByTestId("positions-accounting")).toHaveText(
-    "2 loaded of 2 qualifying (dust <1) · 0 hidden below step · 2 on book · sort headroom ▲",
+    "2 loaded of 2 qualifying (dust <$1) · 0 hidden below step · 2 on book · sort headroom ▲",
   );
 });
 

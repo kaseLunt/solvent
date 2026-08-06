@@ -46,21 +46,42 @@ export type TransitionReading =
   | { kind: "ok"; transitions: RunBookTransitions }
   | { kind: "contradictory"; reasons: string[] };
 
-/** The tally of one lane on one served histogram — the three-way rule. */
+/**
+ * The tally of one lane on one served histogram — keyed by the lane's KIND,
+ * never by its position (W-FIX-WEB).
+ *
+ * The old read was positional (lane < buckets → buckets[lane], then infinite,
+ * then unmeasured), which is the canonical ORDER of the vocabulary, not its
+ * IDENTITY: over a reordered vocabulary it read a neighbour's tally, and
+ * wherever two populations coincided the wrong read still balanced — a check
+ * that compares the wrong pairs is vacuous exactly when it looks satisfied.
+ *
+ * So the lane record itself decides: the infinite lane reads
+ * `infinite_count`, the unmeasured lane reads `refused_count`, and a bucket
+ * lane reads the bucket it IS — the contract states a bucket lane's label and
+ * edges are byte-identical to the histogram bucket it mirrors, so those bytes
+ * are the join. Null means this histogram serves no such tally; for a bucket
+ * lane the caller refuses on it, because a bucket lane the distribution does
+ * not serve is a vocabulary the two bodies do not share.
+ */
 function tallyAt(
   histogram: LabRunBookEngine["before"]["hf_histogram"],
-  lane: number,
-  buckets: number,
+  lane: RunBookTransitions["lanes"][number],
 ): number | null {
-  if (lane < buckets) {
-    const bucket = histogram.buckets[lane];
-    return bucket === undefined ? null : bucket.count;
-  }
-  if (lane === buckets) {
+  if (lane.kind === LANE_KIND_INFINITE) {
     return histogram.infinite_count;
   }
-  if (lane === buckets + 1) {
+  if (lane.kind === LANE_KIND_UNMEASURED) {
     return histogram.refused_count;
+  }
+  if (lane.kind === LANE_KIND_BUCKET) {
+    const bucket = histogram.buckets.find(
+      (candidate) =>
+        candidate.label === lane.label &&
+        candidate.lower_wad === lane.lower_wad &&
+        candidate.upper_wad === lane.upper_wad,
+    );
+    return bucket === undefined ? null : bucket.count;
   }
   return null;
 }
@@ -132,12 +153,15 @@ export function readTransitions(engine: LabRunBookEngine): TransitionReading {
     }
   }
   for (let lane = 0; lane < laneCount; lane += 1) {
+    const record = t.lanes[lane];
     for (const [name, margin, sums, histogram] of [
       ["before", t.from_rows, rowSums, engine.before.hf_histogram],
       ["after", t.to_rows, colSums, engine.after.hf_histogram],
     ] as const) {
       const stated = margin[lane];
-      const tally = tallyAt(histogram, lane, buckets);
+      // W-FIX-WEB: the tally is the LANE RECORD's, by kind — never the tally
+      // that happens to sit at this position in a canonically-ordered body.
+      const tally = record === undefined ? null : tallyAt(histogram, record);
       if (stated !== sums[lane]) {
         reasons.push(
           `the ${name} margin states ${String(stated)} rows in lane ${String(lane)} while its own ` +
@@ -148,6 +172,15 @@ export function readTransitions(engine: LabRunBookEngine): TransitionReading {
         reasons.push(
           `the ${name} margin states ${String(stated)} rows in lane ${String(lane)} while the ` +
             `${name} distribution beside it counts ${String(tally)}`,
+        );
+      }
+      // A bucket lane the distribution does not serve is not a skippable
+      // unknown: the vocabulary claims a band the histogram beside it never
+      // stated, so the two bodies cannot be about the same book.
+      if (tally === null && record !== undefined && record.kind === LANE_KIND_BUCKET) {
+        reasons.push(
+          `the matrix states lane ${String(lane)} (${record.label}) as a risk band the ` +
+            `${name} distribution beside it does not serve`,
         );
       }
     }

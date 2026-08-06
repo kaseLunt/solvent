@@ -135,7 +135,7 @@ function aaveUnfilteredPage() {
 // (1/2/3/5/14) — the default dust walk and its disclosure.
 // ---------------------------------------------------------------------------
 
-test("default dust <1: min_value composed from the engine's decimals; disclosure exact at exhaustion; show reveals", async ({
+test("default dust <$1: min_value composed from the engine's decimals; disclosure exact at exhaustion; show reveals", async ({
   page,
 }) => {
   const minValues: Array<string | null> = [];
@@ -150,7 +150,8 @@ test("default dust <1: min_value composed from the engine's decimals; disclosure
   });
   await openBook(page);
 
-  // The dust group: chip grammar, default <1 pressed, the title verbatim.
+  // The dust group: chip grammar, default <$1 pressed, the title verbatim.
+  // W-FIX-WEB: the chips carry the unit ("<$1"), from dustStepUsdLabel.
   const dustGroup = page.getByTestId("dust-group");
   await expect(dustGroup).toHaveAttribute(
     "title",
@@ -158,7 +159,7 @@ test("default dust <1: min_value composed from the engine's decimals; disclosure
       "unit. Hidden rows stay counted here and in every aggregate above; refused and " +
       "null-valued rows are never hidden",
   );
-  await expect(dustGroup.getByRole("button", { name: "<1", exact: true })).toHaveAttribute(
+  await expect(dustGroup.getByRole("button", { name: "<$1", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -175,13 +176,15 @@ test("default dust <1: min_value composed from the engine's decimals; disclosure
 
   // Footer accounting: loaded of qualifying, hidden, on book, sort + glyph.
   await expect(page.getByTestId(ACCOUNTING)).toHaveText(
-    "2 loaded of 2 qualifying (dust <1) · 1 hidden below step · 3 on book · sort headroom ▲",
+    "2 loaded of 2 qualifying (dust <$1) · 1 hidden below step · 3 on book · sort headroom ▲",
   );
 
   // The disclosure span at walk exhaustion: the EXACT Σ (bookΣ − loadedΣ =
   // 600000050000 − 600000000000 = 50000 → 0.0005), same batch, bigint.
+  // W-FIX-WEB: the threshold carries its unit ("below $1"), same source as
+  // the risk map's legend.
   const disclosure = page.getByTestId("dust-disclosure");
-  await expect(disclosure).toContainText("hidden: 1 rows below 1 · Σ debt 0.0005 exact");
+  await expect(disclosure).toContainText("hidden: 1 rows below $1 · Σ debt 0.0005 exact");
 
   // The liquidatable line: the aggregate's verdict count (crit tone) vs the
   // loaded rows — the hidden liquidatable dust row cannot vanish silently.
@@ -264,12 +267,13 @@ test("empty filtered walk: hidden rows are named as hidden, not absent — dust 
   await openBook(page);
 
   // The empty state names the hidden rows and the bound (2 × the step).
+  // W-FIX-WEB: the step carries its unit ("($1)"), from dustStepUsdLabel.
   await expect(page.getByText(/no rows at or above the dust step/)).toHaveText(
-    "no rows at or above the dust step (1) · 2 rows below it are hidden by the filter and " +
+    "no rows at or above the dust step ($1) · 2 rows below it are hidden by the filter and " +
       "still counted · Σ debt ≤ 2 · set dust off to see them",
   );
   await expect(page.getByTestId(ACCOUNTING)).toHaveText(
-    "0 loaded of 0 qualifying (dust <1) · 2 hidden below step · 2 on book · sort headroom ▲",
+    "0 loaded of 0 qualifying (dust <$1) · 2 hidden below step · 2 on book · sort headroom ▲",
   );
 
   // Setting dust off reveals the walk.
@@ -475,7 +479,7 @@ test("deep links round-trip: non-defaults kept, illegal combos normalized before
     "ascending",
   );
   await expect(
-    page.getByTestId("dust-group").getByRole("button", { name: "<1k", exact: true }),
+    page.getByTestId("dust-group").getByRole("button", { name: "<$1k", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   // W-HR-A: debt_manager IS the default engine now, so replaceState DROPS the
   // engine param — a default is not a state to mirror. The genuinely
@@ -636,7 +640,7 @@ test("batch mismatch: the hidden count refuses to blend two batches; the surface
   await page.goto("/book");
 
   await expect(page.getByTestId(ACCOUNTING)).toHaveText(
-    "2 loaded of 2 qualifying (dust <1) · hidden count — (aggregate from batch #2, pages " +
+    "2 loaded of 2 qualifying (dust <$1) · hidden count — (aggregate from batch #2, pages " +
       "from batch #1: counts from two batches are never blended) · — on book · sort " +
       "headroom ▲",
   );

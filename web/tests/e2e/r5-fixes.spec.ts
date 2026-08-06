@@ -167,7 +167,14 @@ test("(1) THE ROUND-12 DEFECT: a NEW receipt at the SAME age_seconds re-anchors"
   await page.clock.setSystemTime(new Date(T0.getTime() + 3_600_000));
   await dispatchResume(page);
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 1h 2m ago");
-  expect(bookCalls).toBe(2);
+  // W-FIX-WEB: polled, not asserted bare. The `1h 2m` render above is the
+  // LOCAL recompute's — it does not synchronize with the reconcile's re-fetch
+  // reaching this route handler, so a bare `toBe(2)` raced the request across
+  // the browser/harness boundary. The poll waits for the fetch itself; the
+  // exactly-two law (no burst, no extra fetch) is re-asserted at the end of
+  // the test, after every window in which a spurious call could have landed —
+  // the same idiom the two lifecycle tests below already use.
+  await expect.poll(() => bookCalls).toBe(2);
 
   // THE REPAIR LANDS. Batch #2 was computed two minutes ago; the wire says 130,
   // exactly what batch #1's envelope said an hour earlier.
@@ -186,6 +193,10 @@ test("(1) THE ROUND-12 DEFECT: a NEW receipt at the SAME age_seconds re-anchors"
   // receipt, not from the receipt it replaced.
   await page.clock.fastForward(60_000);
   await expect(line).toHaveText("batch #2 · computed 2026-07-29T10:58:05Z · 3m ago");
+  // EXACTLY two book fetches, start to finish: one cold load, one reconcile.
+  // Had the lifecycle burst re-fetched per event, or the repair re-fetched
+  // again, this total would have climbed by now.
+  expect(bookCalls).toBe(2);
 });
 
 test("(1) the SAME receipt re-delivered does NOT re-anchor — the age never snaps back", async ({

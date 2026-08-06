@@ -511,7 +511,7 @@ const MATRIX: Cell[] = [
       // under the dust step (refused rows are never dust) and stays in every
       // denominator.
       await expect(page.getByTestId("positions-accounting")).toHaveText(
-        "2 loaded of 2 qualifying (dust <1) · 0 hidden below step · 2 on book · sort headroom ▲",
+        "2 loaded of 2 qualifying (dust <$1) · 0 hidden below step · 2 on book · sort headroom ▲",
       );
     },
   },

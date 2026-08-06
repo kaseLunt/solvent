@@ -20,7 +20,7 @@
 //     column's canonical, and there is NO third unsorted state. The chip row
 //     shrinks to engine, dust, and ONE standalone "refused first" chip
 //     (sort=status) whose activation clears every header indicator.
-//   - DUST (points 1/2/14): chips off/<1/<100/<1k, DEFAULT <1, composed as
+//   - DUST (points 1/2/14): chips off/<$1/<$100/<$1k, DEFAULT <$1, composed as
 //     the API `min_value` = step × 10^value_decimals (exact bigint, the
 //     ACTIVE engine's decimals from the /v1/book aggregate — which is why
 //     the first walk waits for /v1/book to settle). Refused and null-valued
@@ -107,7 +107,6 @@ import {
   dustBoundInteger,
   dustDisclosureBound,
   dustDisclosureExact,
-  dustStepAmount,
   dustThresholdInteger,
   emptyFilteredWalk,
   FOOTER_REFUSED_NEVER_DUST,
@@ -779,10 +778,10 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
         : null;
     disclosureText =
       exact !== null
-        ? dustDisclosureExact(hidden, dustStepAmount(step), engineAmount(exact))
+        ? dustDisclosureExact(hidden, step, engineAmount(exact))
         : dustDisclosureBound(
             hidden,
-            dustStepAmount(step),
+            step,
             engineAmount(dustBoundInteger(step, valueDecimals, hidden)),
           );
   }

@@ -29,7 +29,6 @@ import {
   dustDisclosureBound,
   dustDisclosureExact,
   dustMapLegend,
-  dustStepAmount,
   dustStepUsdLabel,
   dustThresholdInteger,
   emptyFilteredWalk,
@@ -98,13 +97,18 @@ test.describe("bound arithmetic — exact, bigint, never a float", () => {
     expect(dustBoundInteger("1", 0, 7)).toBe(7n);
   });
 
-  test("the vocabulary survives: steps, default, chip labels, prose amounts", () => {
+  test("the vocabulary survives: steps, default, chip labels carry the unit", () => {
     expect([...DUST_STEPS]).toEqual(["off", "1", "100", "1k"]);
     expect(DUST_DEFAULT_STEP).toBe("1");
-    expect(DUST_CHIP_LABELS).toEqual({ off: "off", "1": "<1", "100": "<100", "1k": "<1k" });
-    expect(dustStepAmount("1")).toBe("1");
-    expect(dustStepAmount("100")).toBe("100");
-    expect(dustStepAmount("1k")).toBe("1k");
+    // W-FIX-WEB: the chips carry the unit the step is denominated in — "<$1",
+    // never a unitless "<1" that reads as a count or a ratio.
+    expect(DUST_CHIP_LABELS).toEqual({ off: "off", "1": "<$1", "100": "<$100", "1k": "<$1k" });
+    // ONE SOURCE: every active chip is "<" + dustStepUsdLabel(step), so the
+    // chip row and the risk map's source-filter sentence share one formatter
+    // and can never disagree about the unit.
+    expect(DUST_CHIP_LABELS["1"]).toBe(`<${dustStepUsdLabel("1")}`);
+    expect(DUST_CHIP_LABELS["100"]).toBe(`<${dustStepUsdLabel("100")}`);
+    expect(DUST_CHIP_LABELS["1k"]).toBe(`<${dustStepUsdLabel("1k")}`);
   });
 });
 
@@ -135,11 +139,11 @@ test.describe("dust copy constants — the ruling's strings, verbatim", () => {
 
   test("footer accounting, dust active", () => {
     expect(footerAccountingDust(120, "300", "1", hiddenBelowStepSegment(45), "345", "debt ▼")).toBe(
-      "120 loaded of 300 qualifying (dust <1) · 45 hidden below step · 345 on book · sort debt ▼",
+      "120 loaded of 300 qualifying (dust <$1) · 45 hidden below step · 345 on book · sort debt ▼",
     );
     // A degraded hidden count renders NOTHING in its slot — never a zero.
     expect(footerAccountingDust(0, "—", "1", "", "—", "headroom ▲")).toBe(
-      "0 loaded of — qualifying (dust <1) · — on book · sort headroom ▲",
+      "0 loaded of — qualifying (dust <$1) · — on book · sort headroom ▲",
     );
   });
 
@@ -157,11 +161,14 @@ test.describe("dust copy constants — the ruling's strings, verbatim", () => {
   });
 
   test("the dust disclosure span — bound form, then the exact form at exhaustion", () => {
+    // W-FIX-WEB: the threshold renders WITH its unit ("below $1"), composed by
+    // dust.ts through dustStepUsdLabel — the functions take the STEP, so no
+    // caller can hand them a unitless amount.
     expect(dustDisclosureBound(45, "1", "45")).toBe(
-      "hidden: 45 rows below 1 · Σ debt ≤ 45 (bound: every hidden row is below the step) · ",
+      "hidden: 45 rows below $1 · Σ debt ≤ 45 (bound: every hidden row is below the step) · ",
     );
     expect(dustDisclosureExact(45, "1", "12.480021")).toBe(
-      "hidden: 45 rows below 1 · Σ debt 12.480021 exact · ",
+      "hidden: 45 rows below $1 · Σ debt 12.480021 exact · ",
     );
   });
 
@@ -174,7 +181,7 @@ test.describe("dust copy constants — the ruling's strings, verbatim", () => {
 
   test("the empty filtered walk: hidden, not absent", () => {
     expect(emptyFilteredWalk("1", 2, "2")).toBe(
-      "no rows at or above the dust step (1) · 2 rows below it are hidden by the filter and " +
+      "no rows at or above the dust step ($1) · 2 rows below it are hidden by the filter and " +
         "still counted · Σ debt ≤ 2 · set dust off to see them",
     );
   });

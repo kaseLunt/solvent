@@ -971,7 +971,25 @@ async function openFrontier(page: Page, book: unknown): Promise<void> {
   await expect(page.getByTestId("lab-frontier")).toBeVisible();
 }
 
-/** Run one committed scenario, the way `runbook-bsplit.spec.ts` does. */
+/**
+ * Run one committed scenario, the way `runbook-bsplit.spec.ts` does.
+ *
+ * W-FIX-WEB SYNCHRONIZED THIS HELPER. It used to click the chip the moment it
+ * existed and click run the moment the chip click dispatched — two gaps under
+ * parallelism:
+ *   1. the chip renders when `/v1/scenarios` settles, but `/v1/book` settles
+ *      on its own schedule, and the frontier panel it renders is a tall block
+ *      ABOVE the chips — a late arrival shifts the chip between the harness's
+ *      hit check and its dispatch. So the frontier is awaited first, exactly
+ *      as `openFrontier` above already does.
+ *   2. clicking run "after" the chip click asserts nothing about the
+ *      SELECTION the run button's handler closes over. The committed-detail
+ *      panel publishes the selected id as its own attribute, so the helper
+ *      waits for that receipt before running — the run is then provably the
+ *      chosen scenario's, not whichever selection the click raced.
+ * No timeout is raised anywhere: both waits target the specific renders the
+ * two clicks depend on.
+ */
 async function openRunBook(page: Page, runBook: unknown): Promise<void> {
   await page.route("**/v1/stream**", (route) => route.abort());
   await page.route(`${API}/v1/scenarios`, (route) =>
@@ -982,7 +1000,12 @@ async function openRunBook(page: Page, runBook: unknown): Promise<void> {
   );
   await page.route(`${API}/v1/scenarios/*/run-book`, (route) => fulfillJson(route, runBook));
   await page.goto("/lab");
+  await expect(page.getByTestId("lab-frontier")).toBeVisible();
   await page.locator('[data-testid="lab-chip"][data-scenario-id="eth_minus_30"]').click();
+  await expect(page.getByTestId("committed-detail")).toHaveAttribute(
+    "data-scenario-id",
+    "eth_minus_30",
+  );
   await page.getByTestId("run-book-button").click();
   await expect(page.getByTestId("book-result")).toBeVisible();
 }

@@ -896,9 +896,23 @@ test("Lab run-book: wire notes become a counted verbatim details; collateral-at-
     }),
   );
   await page.goto("/lab");
+  // W-FIX-WEB SYNCHRONIZATION, the openRunBook discipline. Two waits close
+  // the two fetch-driven gaps this flow used to leave open under parallelism:
+  // the frontier (the tall /v1/book render ABOVE the chips) must be in place
+  // before the chip is clicked, or its late arrival shifts the chip under the
+  // click; and the SELECTION must be committed-detail's own published id
+  // before run is clicked — the flagship is NOT the default selection here
+  // (eth_minus_30 is first in wire order), so a run dispatched before the
+  // pick commits would run the wrong scenario and this panel would never
+  // render. Both waits target renders, not time.
+  await expect(page.getByTestId("lab-frontier")).toBeVisible();
   await page
     .locator('[data-testid="lab-chip"][data-scenario-id="weeth_market_depeg_oracles_held"]')
     .click();
+  await expect(page.getByTestId("committed-detail")).toHaveAttribute(
+    "data-scenario-id",
+    "weeth_market_depeg_oracles_held",
+  );
   await page.getByTestId("run-book-button").click();
   await expect(page.getByTestId("book-result")).toBeVisible();
 

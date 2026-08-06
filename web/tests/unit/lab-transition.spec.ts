@@ -26,6 +26,12 @@
 //     layout counts them, and the 10,000-row collision class is pinned;
 //   - on the wad engine crit rides EVERY arrival below 1.00, held diagonals
 //     included; the Debt Manager's identical shape takes none.
+//
+// Wave W-FIX-WEB adds:
+//   - the margin tallies are keyed by lane KIND, never by position: a
+//     reordered vocabulary whose swapped populations DIFFER reads clean, and
+//     a body whose margins balance only BY POSITION over a reordered
+//     vocabulary is refused with the four disagreements named.
 
 import { expect, test } from "@playwright/test";
 import type { LabRunBookEngine, RunBookTransitions } from "../../lib/runbook";
@@ -350,6 +356,115 @@ test("r57 item 10 — a one-ended cell against the unmeasured lane AT INDEX 0 is
   }
   expect(reasons.join(" ")).toContain("lane 0 (not measured) → lane 6 (1.50 – 2.00)");
   expect(reasons.join(" ")).toContain("lane 6 (1.50 – 2.00) → lane 0 (not measured)");
+});
+
+/**
+ * W-FIX-WEB — the PERMUTED engine with 2 rows ADDED to its unmeasured
+ * population, consistently on every surface that states it: the (0,0)
+ * unmeasured diagonal, both margins at index 0, the totals, the cause split,
+ * and both histograms' `refused_count`. Accounts are untouched — an
+ * unmeasured row is not a measured account.
+ *
+ * The point is to BREAK the count coincidence r57 item 10's permutation rides
+ * on. The committed DM body tallies 1 row in BOTH swapped lanes, so even a
+ * POSITIONAL tally read of the permuted body balanced — by luck, not by law.
+ * After this bump the unmeasured population (3) differs from the `< 0.90`
+ * bucket's (1), and the coincidence is gone.
+ */
+function withBiggerUnmeasuredPopulation(engine: LabRunBookEngine): LabRunBookEngine {
+  const mutated = withMatrix(engine, (t) => ({
+    ...t,
+    outflows: t.outflows.map((outflow) =>
+      outflow.from === 0
+        ? {
+            ...outflow,
+            cells: outflow.cells.map((cell) =>
+              cell.to === 0 ? { ...cell, rows: cell.rows + 2 } : cell,
+            ),
+          }
+        : outflow,
+    ),
+    from_rows: t.from_rows.map((rows, index) => (index === 0 ? rows + 2 : rows)),
+    to_rows: t.to_rows.map((rows, index) => (index === 0 ? rows + 2 : rows)),
+    total_rows: t.total_rows + 2,
+    unmeasured_rows: t.unmeasured_rows + 2,
+    unmeasured_refused_in_batch_rows: t.unmeasured_refused_in_batch_rows + 2,
+  }));
+  const bumpRefused = (side: LabRunBookEngine["before"]): LabRunBookEngine["before"] => ({
+    ...side,
+    hf_histogram: {
+      ...side.hf_histogram,
+      refused_count: side.hf_histogram.refused_count + 2,
+    },
+  });
+  return { ...mutated, before: bumpRefused(mutated.before), after: bumpRefused(mutated.after) };
+}
+
+test("W-FIX-WEB — tallies are keyed by lane KIND: a reordered vocabulary with DIFFERING swapped populations reads CLEAN", () => {
+  // KILLS: the positional tallyAt (lane < buckets → buckets[lane], then
+  // infinite, then unmeasured). On this HONEST body the unmeasured lane sits
+  // at index 0 holding 3 rows while `< 0.90` sits at index 9 holding 1; a
+  // positional read compares margin[0] (3) against buckets[0].count (1) and
+  // margin[9] (1) against refused_count (3), and refuses a body whose every
+  // stated number is true. Only a read keyed by the lane's KIND accepts it.
+  const engine = withBiggerUnmeasuredPopulation(
+    withMatrix(engineOf(RUN_BOOK_ETH, "debt_manager"), withUnmeasuredLaneAtZero),
+  );
+  expect(engine.hf_transitions.lanes[0]?.kind).toBe("unmeasured");
+  // The coincidence r57 item 10 rode on is really broken on this body.
+  expect(engine.before.hf_histogram.refused_count).not.toBe(
+    engine.before.hf_histogram.buckets[0]?.count,
+  );
+  const reading = readTransitions(engine);
+  expect(reading.kind, JSON.stringify(reading)).toBe("ok");
+});
+
+test("W-FIX-WEB — the positional blind spot: margins balanced BY POSITION over a reordered vocabulary are refused BY KIND", () => {
+  // THE COINCIDENTALLY-BALANCED MUTANT CASE, constructed. Start from the
+  // honest differing body above, then restate the two swapped lanes at each
+  // other's populations — margin[0] = 1 (which IS buckets[0].count) and
+  // margin[9] = 3 (which IS refused_count) — and rebalance the two diagonals
+  // so every cell sum, the total and the cause split still hold. EVERY
+  // positional comparison now balances, so a positional tallyAt accepts this
+  // body WHOLE while it states the unmeasured lane at a third of the
+  // population both histograms count there. The kind-keyed read names all
+  // four disagreements.
+  const engine = withBiggerUnmeasuredPopulation(
+    withMatrix(engineOf(RUN_BOOK_ETH, "debt_manager"), withUnmeasuredLaneAtZero),
+  );
+  const lying = withMatrix(engine, (t) => ({
+    ...t,
+    outflows: t.outflows.map((outflow) => {
+      if (outflow.from === 0) {
+        return {
+          ...outflow,
+          cells: outflow.cells.map((cell) => (cell.to === 0 ? { ...cell, rows: 1 } : cell)),
+        };
+      }
+      if (outflow.from === 9) {
+        return {
+          ...outflow,
+          cells: outflow.cells.map((cell) => (cell.to === 9 ? { ...cell, rows: 3 } : cell)),
+        };
+      }
+      return outflow;
+    }),
+    from_rows: t.from_rows.map((rows, index) => (index === 0 ? 1 : index === 9 ? 3 : rows)),
+    to_rows: t.to_rows.map((rows, index) => (index === 0 ? 1 : index === 9 ? 3 : rows)),
+  }));
+  const reasons = reasonsFor(lying);
+  // Exactly the four margin-versus-distribution disagreements — two lanes on
+  // two sides — and NOTHING else fired: the proof that the cell sums, the
+  // totals, the cause split and the diagonal law all balance, which is
+  // precisely the body a positional read waves through.
+  expect(reasons).toHaveLength(4);
+  for (const reason of reasons) {
+    expect(reason).toContain("distribution beside it counts");
+  }
+  expect(reasons.join(" ")).toContain("the before margin states 1 rows in lane 0");
+  expect(reasons.join(" ")).toContain("the after margin states 1 rows in lane 0");
+  expect(reasons.join(" ")).toContain("the before margin states 3 rows in lane 9");
+  expect(reasons.join(" ")).toContain("the after margin states 3 rows in lane 9");
 });
 
 test("a cell with exactly ONE end in the unmeasured lane is refused: the margin-preserving swap", () => {
