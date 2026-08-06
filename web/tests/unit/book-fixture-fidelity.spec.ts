@@ -30,11 +30,38 @@ const parse = (dir: string, name: string): unknown =>
   JSON.parse(readFileSync(path.join(dir, name), "utf8")) as unknown;
 
 /**
- * Pinned separately from the directory read, census-style: a generator that
- * quietly stopped writing files would otherwise shrink the comparison set and
- * pass on whatever remained.
+ * The generator's output manifest, BY NAME, census-style — pinned separately
+ * from both directory reads. A count alone left a hole (Codex r68): a
+ * generator that renamed an output would still write nine files, all nine
+ * would compare clean against their committed twins, and the ORPHANED
+ * committed file of the old name would keep serving tests, stale, forever.
+ * The manifest makes a rename a visible diff HERE, and the orphan law below
+ * makes the left-behind file a named failure.
  */
-const GENERATED_FILE_COUNT = 9;
+const MANIFEST = [
+  "batch-superseded.json",
+  "book-engine-refused.json",
+  "book-error-bad-request.json",
+  "book-error-unavailable.json",
+  "book-monotonicity-violation.json",
+  "book.json",
+  "positions-aave-page-1.json",
+  "positions-aave-page-2.json",
+  "positions-dm-page-1.json",
+];
+
+/**
+ * The generator's OWNERSHIP PATTERNS over the shared fixtures directory: the
+ * `book*`/`positions-*`/`batch-superseded` families are generate-book.mjs's
+ * per its own provenance record (`run-book*` is generate-run-book-set.mjs's
+ * and must never match). A committed file these claim that the manifest does
+ * not carry is an orphan — a generator-owned fixture nothing regenerates.
+ */
+const OWNED = [/^book[.-].*\.json$/, /^positions-.*\.json$/, /^batch-superseded\.json$/];
+
+/** Exported shape of the orphan law so its teeth are provable on synthetic listings. */
+const orphansOf = (listing: string[]): string[] =>
+  listing.filter((name) => OWNED.some((pattern) => pattern.test(name)) && !MANIFEST.includes(name));
 
 test("a fresh generator run agrees with every committed output — the corpus is not stale", () => {
   const scratch = mkdtempSync(path.join(os.tmpdir(), "book-fixtures-"));
@@ -46,10 +73,10 @@ test("a fresh generator run agrees with every committed output — the corpus is
     );
     expect(run.status, `generator failed:\n${run.stdout}\n${run.stderr}`).toBe(0);
 
-    const written = readdirSync(scratch).sort();
-    expect(written).toHaveLength(GENERATED_FILE_COUNT);
+    // Identity, not count (r68): the run wrote exactly the manifest's files.
+    expect(readdirSync(scratch).sort()).toEqual(MANIFEST);
 
-    for (const name of written) {
+    for (const name of MANIFEST) {
       expect(
         parse(fixturesDir, name),
         `${name} is stale — re-run \`node tests/fixtures/generate-book.mjs\` from web/`,
@@ -58,6 +85,20 @@ test("a fresh generator run agrees with every committed output — the corpus is
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+});
+
+test("r68 — no orphaned generator-owned fixture survives a rename", () => {
+  // KILLS: a generator edit that renames an output and updates the manifest,
+  // leaving the OLD committed file behind — nine fresh files compare clean
+  // while tests keep serving the stale orphan.
+  expect(orphansOf(readdirSync(fixturesDir))).toEqual([]);
+  // The law's own teeth, on a synthetic listing: an orphan is NAMED, the
+  // sibling generator's `run-book*` family is never claimed, and non-owned
+  // names pass through unexamined.
+  expect(
+    orphansOf(["book-old-shape.json", "run-book-set.json", "clock-law.mjs", "book.ts"]),
+  ).toEqual(["book-old-shape.json"]);
+  expect(orphansOf([...MANIFEST])).toEqual([]);
 });
 
 test("the copies really are the client package's contract-validated bodies", () => {
