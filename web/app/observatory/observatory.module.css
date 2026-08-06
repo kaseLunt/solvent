@@ -104,6 +104,16 @@
   color: var(--ink-3);
 }
 
+/* Wave W-OBS: the sparse-window STATE line — qualifies the visual BEFORE it
+ * renders (chart spec v4 template rule R6), in the legend's own caption
+ * register. Existing tokens only: no new size, no new color. */
+.stateLine {
+  padding: 8px 14px 0;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
 /* ---- newest-bucket strip ---- */
 
 .newestCaption {

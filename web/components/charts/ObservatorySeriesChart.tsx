@@ -10,13 +10,20 @@
 //   - a withheld gap wears the warn form-mark (outlined square — color AND
 //     form, the W0 severity ruling) so a refusal never reads as a mere hole;
 //   - the zero floor is drawn whenever `includeZero` holds (the default):
-//     scales never fabricate drama by cropping the floor away.
+//     scales never fabricate drama by cropping the floor away;
+//   - Wave W-OBS: the panel answers WITHOUT a click — the drawn y-max wears
+//     its exact display string, the x-axis states its extent buckets (and the
+//     selected bucket's time), and the newest captured point prints the same
+//     figure the summary card above carries. All label strings arrive from
+//     the caller's existing formatters (LAW-5: no number lives only in a
+//     hover; LAW-4: displayed numbers are string work, floats only place them).
 //
 // Values are GEOMETRY only — exact decimal strings live in adjacent mono
 // text and in the point-detail panel. Styling: shared chart atoms are
 // imported read-only from charts.module.css; everything new is inline.
 
 import type { KeyboardEvent } from "react";
+import { MONO_CH_FALLBACK } from "@/lib/useMeasuredWidth";
 import styles from "./charts.module.css";
 
 export interface ObservatorySeriesChartProps {
@@ -36,7 +43,37 @@ export interface ObservatorySeriesChartProps {
   selectedIndex?: number | null;
   /** Select a bucket (fired by points AND gap hit-targets). */
   onSelect?: (index: number) => void;
+  /**
+   * The drawn y-max's display string (Wave W-OBS): `seriesMaxPoint(...).label`
+   * — the SAME formatter output the ledger register uses for that wire row,
+   * derived from the drawn domain, never invented. Omit when nothing plots
+   * above the zero floor (the floor's own "0" label already states the max).
+   */
+  yMaxLabel?: string;
+  /** The oldest axis entry's bucket hour (the head's own UTC format). */
+  xStartLabel?: string;
+  /** The newest axis entry's bucket hour (the head's own UTC format). */
+  xEndLabel?: string;
+  /**
+   * The SELECTED bucket's hour, drawn on its own axis row at the selected
+   * x position. Pass only while a selection exists.
+   */
+  selectedTimeLabel?: string;
+  /**
+   * Measured mono glyph width (px) from `useMonoCharWidth` — used ONLY to
+   * clamp the selected-time label inside the frame. Falls back to the
+   * deliberately generous probe fallback before first measurement.
+   */
+  charPx?: number;
+  /**
+   * Direct value at the NEWEST captured point: the same `displayMetric`
+   * string the summary card above carries — one source, never retyped.
+   */
+  newestValueLabel?: string;
 }
+
+/** Height (rendered px) of each axis-label strip ADDED below the plot budget. */
+const X_LABEL_STRIP = 14;
 
 export function ObservatorySeriesChart({
   values,
@@ -48,6 +85,12 @@ export function ObservatorySeriesChart({
   includeZero = true,
   selectedIndex = null,
   onSelect,
+  yMaxLabel,
+  xStartLabel,
+  xEndLabel,
+  selectedTimeLabel,
+  charPx,
+  newestValueLabel,
 }: ObservatorySeriesChartProps) {
   const pad = 6;
   const finite = values.filter((v): v is number => v !== null && Number.isFinite(v));
@@ -59,6 +102,19 @@ export function ObservatorySeriesChart({
 
   const x = (index: number) => pad + index * step;
   const y = (value: number) => height - pad - ((value - min) / span) * (height - pad * 2);
+
+  // The axis strips are ADDED below the `height` plot budget, so the plot
+  // keeps its size and the existing geometry stays byte-identical.
+  const hasExtents = xStartLabel !== undefined || xEndLabel !== undefined;
+  const extentsStrip = hasExtents ? X_LABEL_STRIP : 0;
+  const selectedStrip =
+    selectedTimeLabel !== undefined &&
+    selectedIndex !== null &&
+    selectedIndex >= 0 &&
+    selectedIndex < values.length
+      ? X_LABEL_STRIP
+      : 0;
+  const totalHeight = height + extentsStrip + selectedStrip;
 
   // Segments between gaps; each renders as its own path (never bridged).
   const segments: string[] = [];
@@ -90,12 +146,27 @@ export function ObservatorySeriesChart({
     }
   };
 
+  // The newest captured point (last finite value) — where the direct value
+  // label prints. The STRING is the caller's; only its pixel position floats.
+  const newestIndex = pointIndexes.length > 0 ? pointIndexes[pointIndexes.length - 1] : undefined;
+  const newestValue = newestIndex !== undefined ? values[newestIndex] : undefined;
+
+  // Clamp the selected-time label into the frame using MEASURED glyph width
+  // (the corrected mono probe travels down from the caller), never a guess.
+  const glyphPx = charPx ?? MONO_CH_FALLBACK;
+  const selectedLabelX = (() => {
+    if (selectedStrip === 0 || selectedIndex === null || selectedTimeLabel === undefined) return 0;
+    const half = (selectedTimeLabel.length * glyphPx) / 2;
+    if (half * 2 >= width) return width / 2;
+    return Math.min(Math.max(x(selectedIndex), half + 1), width - half - 1);
+  })();
+
   return (
     <svg
       className={styles.chart}
       width={width}
-      height={height}
-      viewBox={`0 0 ${String(width)} ${String(height)}`}
+      height={totalHeight}
+      viewBox={`0 0 ${String(width)} ${String(totalHeight)}`}
       role="img"
       aria-label={label}
     >
@@ -112,6 +183,63 @@ export function ObservatorySeriesChart({
             0
           </text>
         </g>
+      )}
+
+      {yMaxLabel !== undefined && (
+        // The drawn y-max, labelled in the panel's own exact register — the
+        // domain is [0, max of finite values], so this string IS that point's
+        // ledger display, derived, never retyped (LAW-5).
+        <text
+          className={styles.axisLabel}
+          data-testid="obs-ymax-label"
+          // Starts PAST the first point's dot (cx = pad, r = 2.4): when the
+          // max IS the first captured bucket, a label at x = pad prints
+          // through the dot itself.
+          x={pad + 10}
+          y={Math.max(12, y(max) + 4)}
+        >
+          {yMaxLabel}
+        </text>
+      )}
+
+      {hasExtents && (
+        <g>
+          {xStartLabel !== undefined && (
+            <text
+              className={styles.axisLabel}
+              data-testid="obs-x-start"
+              x={pad}
+              y={height + extentsStrip - 3}
+            >
+              {xStartLabel}
+            </text>
+          )}
+          {xEndLabel !== undefined && (
+            <text
+              className={styles.axisLabel}
+              data-testid="obs-x-end"
+              x={width - pad}
+              y={height + extentsStrip - 3}
+              textAnchor="end"
+            >
+              {xEndLabel}
+            </text>
+          )}
+        </g>
+      )}
+
+      {selectedStrip > 0 && selectedTimeLabel !== undefined && (
+        // The selected bucket's own hour, on its own axis row at the selected
+        // x — the interaction exists, so its time is stated, not hover-only.
+        <text
+          className={styles.axisLabel}
+          data-testid="obs-x-selected"
+          x={selectedLabelX}
+          y={totalHeight - 3}
+          textAnchor="middle"
+        >
+          {selectedTimeLabel}
+        </text>
       )}
 
       {gapIndexes.map((index) => {
@@ -193,6 +321,24 @@ export function ObservatorySeriesChart({
           </circle>
         );
       })}
+
+      {newestValueLabel !== undefined &&
+        newestIndex !== undefined &&
+        newestValue !== null &&
+        newestValue !== undefined && (
+          // The newest captured point's figure, printed at the point — the
+          // summary card's exact string (one source), so the picture answers
+          // without a click.
+          <text
+            className={styles.valueLabel}
+            data-testid="obs-newest-value"
+            x={x(newestIndex) > width / 2 ? x(newestIndex) - 6 : x(newestIndex) + 6}
+            y={Math.max(12, Math.min(height - 8, y(newestValue) - 7))}
+            textAnchor={x(newestIndex) > width / 2 ? "end" : "start"}
+          >
+            {newestValueLabel}
+          </text>
+        )}
 
       {selectedIndex !== null &&
         selectedIndex >= 0 &&

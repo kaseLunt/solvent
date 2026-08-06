@@ -30,7 +30,37 @@ export interface SparklineProps {
    * text is as reachable as a gap's reason.
    */
   pointTitles?: ReadonlyArray<string | null>;
+  /**
+   * Drawn y-domain override (Wave W-OBS). Computed by the PURE module
+   * `lib/sparkline-scale` (`paddedSparklineDomain`) so specs pin the scale
+   * law and the axis labels derive from the SAME numbers the geometry uses.
+   * When absent, the inline extent (finite values + reference) applies,
+   * unchanged.
+   */
+  domain?: { min: number; max: number };
+  /**
+   * Direct y-axis bound labels for the drawn domain (LAW-5: a bound is a
+   * number, and no number lives only in a hover). Strings come from the
+   * caller's existing formatter register, never composed here.
+   */
+  yLabels?: { min: string; max: string };
+  /**
+   * Left gutter (RENDERED px) reserved for `yLabels` — sized by the caller
+   * from measured mono glyphs (`useMonoCharWidth`), never estimated here.
+   */
+  yGutterPx?: number;
+  /** X-axis extent labels: the oldest and newest axis entry, drawn below the plot. */
+  xLabels?: { start: string; end?: string };
+  /**
+   * Direct value label at the newest PLOTTED point — the same computed
+   * display string the panel head cites (one source), so the picture answers
+   * without a hover.
+   */
+  newestLabel?: string;
 }
+
+/** The x-label strip's height in rendered px (added BELOW the plot budget). */
+const X_LABEL_STRIP = 14;
 
 /**
  * A dense inline sparkline (SVG, no chart lib). Values are used for GEOMETRY
@@ -45,19 +75,32 @@ export function Sparkline({
   referenceValue,
   referenceLabel,
   pointTitles,
+  domain,
+  yLabels,
+  yGutterPx,
+  xLabels,
+  newestLabel,
 }: SparklineProps) {
   const pad = 3;
+  // The plot's left edge: the y-label gutter when bounds are drawn, else the
+  // historical pad (geometry byte-identical for callers without labels).
+  const plotLeft = yLabels !== undefined ? Math.max(pad, yGutterPx ?? 40) : pad;
+  // The x-label strip is ADDED below the `height` budget, so the plot keeps
+  // its size and existing callers keep their exact output.
+  const totalHeight = height + (xLabels !== undefined ? X_LABEL_STRIP : 0);
   const finite = values.filter((v): v is number => v !== null && Number.isFinite(v));
-  const domain =
+  const inlineDomain =
     referenceValue !== undefined && Number.isFinite(referenceValue)
       ? [...finite, referenceValue]
       : finite;
-  const min = domain.length > 0 ? Math.min(...domain) : 0;
-  const max = domain.length > 0 ? Math.max(...domain) : 1;
+  const min =
+    domain !== undefined ? domain.min : inlineDomain.length > 0 ? Math.min(...inlineDomain) : 0;
+  const max =
+    domain !== undefined ? domain.max : inlineDomain.length > 0 ? Math.max(...inlineDomain) : 1;
   const span = max - min || 1;
-  const step = values.length > 1 ? (width - pad * 2) / (values.length - 1) : 0;
+  const step = values.length > 1 ? (width - plotLeft - pad) / (values.length - 1) : 0;
 
-  const x = (index: number) => pad + index * step;
+  const x = (index: number) => plotLeft + index * step;
   const y = (value: number) => height - pad - ((value - min) / span) * (height - pad * 2);
 
   // Segments between gaps; each renders as its own path. A segment of ONE
@@ -92,8 +135,8 @@ export function Sparkline({
     <svg
       className={styles.chart}
       width={width}
-      height={height}
-      viewBox={`0 0 ${width} ${height}`}
+      height={totalHeight}
+      viewBox={`0 0 ${String(width)} ${String(totalHeight)}`}
       role="img"
       aria-label={label}
     >
@@ -101,7 +144,7 @@ export function Sparkline({
         <g data-testid="sparkline-reference">
           <line
             className={styles.refLine}
-            x1={pad}
+            x1={plotLeft}
             x2={width - pad}
             y1={y(referenceValue)}
             y2={y(referenceValue)}
@@ -114,6 +157,51 @@ export function Sparkline({
               textAnchor="end"
             >
               {referenceLabel}
+            </text>
+          )}
+        </g>
+      )}
+      {yLabels !== undefined && (
+        <g>
+          <text
+            className={styles.axisLabel}
+            data-testid="sparkline-ymax-label"
+            x={plotLeft - 6}
+            y={Math.max(10, y(max) + 4)}
+            textAnchor="end"
+          >
+            {yLabels.max}
+          </text>
+          <text
+            className={styles.axisLabel}
+            data-testid="sparkline-ymin-label"
+            x={plotLeft - 6}
+            y={Math.min(height - 2, y(min) + 2)}
+            textAnchor="end"
+          >
+            {yLabels.min}
+          </text>
+        </g>
+      )}
+      {xLabels !== undefined && (
+        <g>
+          <text
+            className={styles.axisLabel}
+            data-testid="sparkline-x-start"
+            x={plotLeft}
+            y={totalHeight - 3}
+          >
+            {xLabels.start}
+          </text>
+          {xLabels.end !== undefined && xLabels.end !== "" && (
+            <text
+              className={styles.axisLabel}
+              data-testid="sparkline-x-end"
+              x={width - pad}
+              y={totalHeight - 3}
+              textAnchor="end"
+            >
+              {xLabels.end}
             </text>
           )}
         </g>
@@ -155,6 +243,22 @@ export function Sparkline({
       {endDot && lastValue !== null && lastValue !== undefined && lastIndex >= 0 && (
         <circle className={styles.endDot} cx={x(lastIndex)} cy={y(lastValue)} r={2.2} />
       )}
+      {newestLabel !== undefined && lastValue !== null && lastValue !== undefined && lastIndex >= 0 && (
+        // The newest plotted value, printed AT its point — the same computed
+        // string the head's meta line carries (one source, never retyped).
+        <text
+          className={styles.valueLabel}
+          data-testid="sparkline-newest-value"
+          x={x(lastIndex) > plotLeft + (width - plotLeft - pad) / 2 ? x(lastIndex) - 6 : x(lastIndex) + 6}
+          // Above the point when there is headroom; BELOW it when the point
+          // rides the top of the padded domain — the old clamp parked the
+          // label straight onto the line there.
+          y={y(lastValue) - 6 >= 12 ? y(lastValue) - 6 : Math.min(height - 6, y(lastValue) + 14)}
+          textAnchor={x(lastIndex) > plotLeft + (width - plotLeft - pad) / 2 ? "end" : "start"}
+        >
+          {newestLabel}
+        </text>
+      )}
       {/* Invisible per-index hit rects (SHOULD-FIX 8): width = step, full
           height, transparent fill — a FINITE point's hover text is as
           reachable as a gap tick's. Rendered last so they sit on top; a rect
@@ -165,7 +269,7 @@ export function Sparkline({
           if (value === null || !Number.isFinite(value)) return null;
           const title = pointTitles[index];
           if (title === null || title === undefined) return null;
-          const hitW = step > 0 ? step : width - pad * 2;
+          const hitW = step > 0 ? step : width - plotLeft - pad;
           return (
             <rect
               key={`hit-${String(index)}`}

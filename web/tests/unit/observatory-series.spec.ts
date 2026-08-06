@@ -13,6 +13,9 @@ import {
   displayMetric,
   effectiveStrideSeconds,
   NATIVE_BUCKET_SECONDS,
+  seriesMaxPoint,
+  seriesNewestPoint,
+  sparseCaptureLine,
 } from "../../lib/observatory-series";
 import { EM_DASH } from "../../lib/format";
 import { OBSERVATORY_SERIES_AAVE, OBSERVATORY_SERIES_DM } from "../fixtures/observatory";
@@ -153,4 +156,93 @@ test("the stride is disclosed verbatim-or-native — a stride never averages", (
 test("the served range is disclosed, unbounded ends stated as unbounded", () => {
   expect(describeRange(null, null)).toBe("unbounded → unbounded");
   expect(describeRange("2026-07-29T08:00:00Z", null)).toBe("2026-07-29T08:00:00Z → unbounded");
+});
+
+// ---------------------------------------------------------------------------
+// Wave W-OBS — the direct labels: derived from the drawn domain, one source.
+// ---------------------------------------------------------------------------
+
+test("W-OBS: the y-max label IS the max point's ledger display — derived, never retyped", () => {
+  const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+  const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_AAVE, "debt_usd");
+  const maxPoint = seriesMaxPoint(axis, OBSERVATORY_SERIES_AAVE, "debt_usd", debt);
+  if (maxPoint === null) throw new Error("the aave debt series must have a max point");
+
+  // The drawn y-domain is [0, max of finite values]: the labelled value IS
+  // the drawn max, and ties keep the first (oldest) occurrence.
+  const finite = debt.values.filter((v): v is number => v !== null);
+  expect(maxPoint.value).toBe(Math.max(...finite));
+  expect(maxPoint.index).toBe(1); // 07:00 and 08:00 tie; the first wins
+
+  // The label equals the formatter output of the drawn max: the SAME
+  // displayMetric call the summary cards and the bucket record use.
+  const point = axis.entries[maxPoint.index]?.point;
+  if (point === null || point === undefined) throw new Error("max point must be wire-backed");
+  expect(maxPoint.label).toBe(
+    displayMetric(point, "debt_usd", OBSERVATORY_SERIES_AAVE.usd_decimals),
+  );
+  expect(maxPoint.label).toBe("$928.779012");
+});
+
+test("W-OBS: the newest captured point carries the summary card's exact figure", () => {
+  const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+  const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_AAVE, "debt_usd");
+  const newest = seriesNewestPoint(axis, OBSERVATORY_SERIES_AAVE, "debt_usd", debt);
+  if (newest === null) throw new Error("the aave debt series must have a newest point");
+
+  // The last finite value on the axis (index 4 — 10:00), labelled by the
+  // same formatter over the same wire row the newest-bucket card renders.
+  expect(newest.index).toBe(4);
+  const point = axis.entries[4]?.point;
+  if (point === null || point === undefined) throw new Error("newest point must be wire-backed");
+  expect(newest.label).toBe(
+    displayMetric(point, "debt_usd", OBSERVATORY_SERIES_AAVE.usd_decimals),
+  );
+  expect(newest.label).toBe("$619.186008");
+});
+
+test("W-OBS: max/newest are null when nothing plots — no label is ever invented", () => {
+  const withheldOnly = { ...OBSERVATORY_SERIES_DM, points: [DM_WITHHELD] };
+  const axis = buildBucketAxis(withheldOnly);
+  const debt = buildMetricSeries(axis, withheldOnly, "debt_usd");
+  expect(seriesMaxPoint(axis, withheldOnly, "debt_usd", debt)).toBeNull();
+  expect(seriesNewestPoint(axis, withheldOnly, "debt_usd", debt)).toBeNull();
+});
+
+test("W-OBS: the sparse STATE line appears exactly when one or fewer captured points plot", () => {
+  // Four plotted points: silent.
+  const aaveAxis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+  expect(sparseCaptureLine(buildMetricSeries(aaveAxis, OBSERVATORY_SERIES_AAVE, "debt_usd"))).toBeNull();
+
+  // The verbatim DM example: one captured + one withheld — the line renders,
+  // computed, in the absent/withheld register.
+  const dmAxis = buildBucketAxis(OBSERVATORY_SERIES_DM);
+  expect(sparseCaptureLine(buildMetricSeries(dmAxis, OBSERVATORY_SERIES_DM, "debt_usd"))).toBe(
+    "1 captured bucket plots in this window · 1 withheld bucket stays a named refusal",
+  );
+
+  // The boundary: exactly TWO plotted points stay silent (threshold is <= 1).
+  const two = {
+    ...OBSERVATORY_SERIES_DM,
+    points: [DM_CAPTURED, { ...DM_CAPTURED, bucket_start: "2026-07-29T09:00:00Z" }],
+  };
+  const twoAxis = buildBucketAxis(two);
+  expect(sparseCaptureLine(buildMetricSeries(twoAxis, two, "debt_usd"))).toBeNull();
+
+  // Zero plotted with an absent hole: both counts state themselves.
+  const holed = {
+    ...OBSERVATORY_SERIES_DM,
+    points: [DM_WITHHELD, { ...DM_WITHHELD, bucket_start: "2026-07-29T11:00:00Z" }],
+  };
+  const holedAxis = buildBucketAxis(holed);
+  expect(sparseCaptureLine(buildMetricSeries(holedAxis, holed, "debt_usd"))).toBe(
+    "0 captured buckets plot in this window · 1 absent bucket renders as a gap · 2 withheld buckets stay named refusals",
+  );
+
+  // A served-but-null metric is its own named class, never zero.
+  const nullAccounts = { ...OBSERVATORY_SERIES_DM, points: [{ ...DM_CAPTURED, accounts: null }] };
+  const nullAxis = buildBucketAxis(nullAccounts);
+  expect(sparseCaptureLine(buildMetricSeries(nullAxis, nullAccounts, "accounts"))).toBe(
+    "0 captured buckets plot in this window · 1 served bucket carries a null value (null is not zero)",
+  );
 });

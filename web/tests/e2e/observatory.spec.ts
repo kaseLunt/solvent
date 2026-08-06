@@ -269,3 +269,70 @@ test("a WITHHELD bucket stays visible with its named refusal — em dashes, neve
   // The bucket census counts the withheld bucket instead of dropping it.
   await expect(page.getByText("1 captured · 1 withheld · 0 absent")).toBeVisible();
 });
+
+// ---------------------------------------------------------------------------
+// Wave W-OBS — the panels answer as instruments, without a click.
+// ---------------------------------------------------------------------------
+
+test("W-OBS: y-max, x extents, selected time and the newest figure are direct labels", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  await openObservatory(page);
+
+  const debtChart = page.getByTestId("observatory-chart-debt_usd");
+
+  // The drawn y-max wears the max point's exact ledger string (the same
+  // displayMetric output the cards use) — derived, never retyped.
+  await expect(debtChart.getByTestId("obs-ymax-label")).toHaveText("$928.779012");
+
+  // The x-axis states the window's extent bucket hours, in the head's own
+  // UTC format.
+  await expect(debtChart.getByTestId("obs-x-start")).toHaveText("2026-07-29T06:00:00Z");
+  await expect(debtChart.getByTestId("obs-x-end")).toHaveText("2026-07-29T10:00:00Z");
+
+  // Default selection is the newest wire bucket, whose hour the x-end extent
+  // already states — the selected strip stays EMPTY rather than printing the
+  // same string twice on two stacked axis rows.
+  await expect(debtChart.getByTestId("obs-x-end")).toHaveText("2026-07-29T10:00:00Z");
+  await expect(debtChart.getByTestId("obs-x-selected")).toHaveCount(0);
+
+  // The newest captured point prints EXACTLY the summary card's figure —
+  // one source, asserted against the card's own strip.
+  const chartFigure = await debtChart.getByTestId("obs-newest-value").textContent();
+  expect(chartFigure).toBe("$619.186008");
+  await expect(page.getByTestId("observatory-newest")).toContainText(chartFigure ?? "NEVER");
+
+  // Selecting an older bucket moves the selected-time axis label with it.
+  await debtChart.locator('[data-testid="obs-point"]').first().click();
+  await expect(debtChart.getByTestId("obs-x-selected")).toHaveText("2026-07-29T06:00:00Z");
+
+  // A dense window (4 captured points) renders NO sparse STATE line.
+  await expect(page.getByTestId("observatory-sparse-debt_usd")).toHaveCount(0);
+});
+
+test("W-OBS: a sparse window states itself BEFORE the visual — computed, threshold <= 1", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  await openObservatory(page);
+  await page.getByTestId("observatory-engine-debt_manager").click();
+
+  // The verbatim DM example: one captured bucket plots, one withheld — the
+  // STATE line renders inside the panel, in the gap register, computed.
+  await expect(page.getByTestId("observatory-sparse-debt_usd")).toHaveText(
+    "1 captured bucket plots in this window · 1 withheld bucket stays a named refusal",
+  );
+
+  // Two captured buckets cross the threshold: the line does NOT render.
+  const captured = OBSERVATORY_SERIES_DM.points.find((point) => !point.refused);
+  if (captured === undefined) throw new Error("fixture invariant: a captured DM bucket exists");
+  const dense = {
+    ...OBSERVATORY_SERIES_DM,
+    points: [captured, { ...captured, bucket_start: "2026-07-29T09:00:00Z" }],
+  };
+  await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, dense));
+  await page.getByTestId("observatory-engine-aave_v3_etherfi").click();
+  await expect(page.getByTestId("observatory-chart-debt_usd")).toBeVisible();
+  await expect(page.getByTestId("observatory-sparse-debt_usd")).toHaveCount(0);
+});

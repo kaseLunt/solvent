@@ -25,10 +25,28 @@
 //   - the doctrine paragraph shrinks to one visible line, with the full text
 //     one click away — except the DM's disclosure-ratio warning, which stays
 //     visible because it is the conflation the surface exists to refuse.
+//
+// WAVE W-OBS — the sparkline becomes an instrument:
+//
+//   - LAW-3: the plot renders 1:1 from the MEASURED frame width (the
+//     padding-correct useMeasuredWidth), replacing the fixed 560px constant
+//     that left most of the panel empty at wide viewports;
+//   - the drawn y-domain comes from the PURE paddedSparklineDomain rule
+//     (lib/sparkline-scale — 4% padding around [min, max], the 1.0 line
+//     always inside, a flat series never pinned to an edge), and both bounds
+//     are labelled through the EXISTING HF truncation register (hfAxisLabel
+//     wraps truncateToDisplay — no new formatter);
+//   - the x-axis states its extent batch ids, and the newest plotted point
+//     prints the SAME display string the meta line's "newest:" cites (one
+//     source: HistorySeriesEntry.display);
+//   - everything kept: gaps break the line, the 1.0 dashed line stays a
+//     disclosure (never a verdict), hover reasons stay, and the never-present
+//     absence line renders exactly as before.
 
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { Sparkline } from "@/components/charts/Sparkline";
+import chart from "@/components/charts/charts.module.css";
 import {
   allGapFrameText,
   buildHistorySeries,
@@ -43,13 +61,25 @@ import {
   tallyHistory,
 } from "@/lib/history-series";
 import { renderLookupOutcome } from "@/lib/format";
-import type { HistoryLookup } from "@/lib/inspector-data";
+import type { AddressHistoryEngine, HistoryLookup } from "@/lib/inspector-data";
+import { hfAxisLabel, paddedSparklineDomain } from "@/lib/sparkline-scale";
+import { useMeasuredWidth, useMonoCharWidth } from "@/lib/useMeasuredWidth";
 import styles from "../inspector.module.css";
 
 export type HistoryState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; lookup: HistoryLookup };
+
+// LAW-3 geometry (rendered CSS px): the sparkline fills the measured frame,
+// never scales under a viewBox, scrolls below the minimum, and the old fixed
+// 560 survives only as the pre-measurement fallback.
+const HISTORY_MIN_WIDTH = 320;
+const HISTORY_MAX_WIDTH = 1600;
+const HISTORY_FALLBACK_WIDTH = 560;
+
+/** The reference line's value: HF 1.0 — always inside the drawn domain. */
+const HF_REFERENCE_VALUE = 1;
 
 export function InspectorHistory({ state }: { state: HistoryState }) {
   return (
@@ -97,6 +127,12 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
     );
   }
 
+  // Ruling 11: the response-level KNOWN batch axis, so a batch another
+  // engine (or the vantage batch) witnesses in which THIS engine has
+  // neither a point nor a withheld entry breaks the line as a NO-ROW
+  // gap instead of being drawn across.
+  const knownBatchIds = knownBatchAxis(lookup.response);
+
   return (
     <>
       {!lookup.complete && (
@@ -120,73 +156,149 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
             </p>
           );
         }
-
-        // Ruling 11: the response-level KNOWN batch axis, so a batch another
-        // engine (or the vantage batch) witnesses in which THIS engine has
-        // neither a point nor a withheld entry breaks the line as a NO-ROW
-        // gap instead of being drawn across.
-        const series = buildHistorySeries(engine, knownBatchAxis(lookup.response));
-        const tally = tallyHistory(series);
-        // Engine-conditional reference semantics (design ruling 6): 1.0 IS
-        // the aave engine's own boundary (wad strictly < 1e18), but the DM
-        // series plots the num/den DISCLOSURE ratio — its verdict is the
-        // engine's strict boolean, and a shared "own boundary" caption would
-        // imply the shared comparator the engine-separation law forbids.
-        // Each branch keys on ITS engine id (never an else-inherits): a
-        // future engine outside the sealed set gets the no-claim fallback,
-        // not a borrowed caption.
-        const referenceLegend =
-          engine.engine === "aave_v3_etherfi"
-            ? "reference line: 1.0, the engine's own boundary (wad strictly < 1e18)."
-            : engine.engine === "debt_manager"
-              ? "reference line: 1.0 on the DISCLOSURE ratio maxBorrowLT/borrowings. The verdict is the engine's strict boolean (equality healthy) and not this chart."
-              : "reference line: 1.0, a plotting aid only; this engine's verdict semantics are not asserted by this chart.";
         return (
-          <div key={engine.engine} className={styles.historyCard} data-testid={`history-${engine.engine}`}>
-            <div className={styles.historyMeta}>
-              <EngineChip engine={engine.engine} />
-              <span data-testid={`history-meta-${engine.engine}`}>
-                {historyMetaLine(tally, series.newest, engine.engine, lookup.response.limit)}
-              </span>
-            </div>
-            {tally.plotted === 0 && (
-              <p className={styles.historyAllGap} data-testid={`history-all-gap-${engine.engine}`}>
-                {allGapFrameText(tally)}
-              </p>
-            )}
-            <Sparkline
-              values={series.values}
-              pointTitles={series.titles}
-              width={560}
-              height={72}
-              label={`${engine.engine} health factor across retained batches`}
-              referenceValue={1}
-              referenceLabel="1.0"
-            />
-            <div className={styles.historyLegend}>
-              <span>{HISTORY_DOCTRINE_LINE}</span>
-              {engine.engine === "debt_manager" && (
-                <span
-                  className={styles.historyDmDisclosure}
-                  data-testid="history-dm-disclosure"
-                >
-                  {DM_DISCLOSURE_LINE}
-                </span>
-              )}
-              <details className={styles.historyDoctrine}>
-                <summary>{HISTORY_DOCTRINE_SUMMARY}</summary>
-                <p>
-                  a gap is a REFUSED, WITHHELD or NO-ROW point. hover any tick for its named
-                  reason, or any plotted point for its value and block; the line never
-                  interpolates across a gap. gaps mark only batches this response itself
-                  witnesses, because the wire does not enumerate the full retained set.{" "}
-                  {referenceLegend}
-                </p>
-              </details>
-            </div>
-          </div>
+          <EngineHistoryCard
+            key={engine.engine}
+            engine={engine}
+            knownBatchIds={knownBatchIds}
+            limit={lookup.response.limit}
+          />
         );
       })}
     </>
+  );
+}
+
+function EngineHistoryCard({
+  engine,
+  knownBatchIds,
+  limit,
+}: {
+  engine: AddressHistoryEngine;
+  knownBatchIds: readonly number[];
+  limit: number;
+}) {
+  // LAW-3: the frame is measured (content box, padding-correct) and the SVG
+  // renders 1:1 at that width — no viewBox scale, scroll below the minimum.
+  const { ref: frameRef, width } = useMeasuredWidth<HTMLDivElement>({
+    min: HISTORY_MIN_WIDTH,
+    max: HISTORY_MAX_WIDTH,
+    fallback: HISTORY_FALLBACK_WIDTH,
+  });
+  // The measured mono glyph (the corrected probe, letter-spacing included)
+  // sizes the y-label gutter from character counts — never estimated.
+  const { ref: probeRef, chPx } = useMonoCharWidth<HTMLSpanElement>();
+
+  const series = buildHistorySeries(engine, knownBatchIds);
+  const tally = tallyHistory(series);
+
+  // The drawn y-domain: the PURE padded rule (lib/sparkline-scale), with the
+  // 1.0 disclosure line always inside it. Both bound labels derive from the
+  // SAME domain object the geometry uses, through the existing HF truncation
+  // register — one source, no second formatter.
+  const domain = paddedSparklineDomain(series.values, HF_REFERENCE_VALUE);
+  const yMinLabel = hfAxisLabel(domain.min);
+  const yMaxLabel = hfAxisLabel(domain.max);
+  const yGutterPx = Math.ceil(Math.max(yMinLabel.length, yMaxLabel.length) * chPx) + 10;
+
+  const oldest = series.entries.length > 0 ? series.entries[0] : undefined;
+  const newestWitnessed =
+    series.entries.length > 1 ? series.entries[series.entries.length - 1] : undefined;
+
+  // The newest PLOTTED point's display — the same string the meta line's
+  // "newest:" cites when the newest witnessed batch plots (one source:
+  // HistorySeriesEntry.display, composed once in lib/history-series).
+  let newestPlottedDisplay: string | undefined;
+  for (let i = series.entries.length - 1; i >= 0; i -= 1) {
+    const entry = series.entries[i];
+    if (entry !== undefined && entry.value !== null) {
+      newestPlottedDisplay = entry.display;
+      break;
+    }
+  }
+
+  // Engine-conditional reference semantics (design ruling 6): 1.0 IS
+  // the aave engine's own boundary (wad strictly < 1e18), but the DM
+  // series plots the num/den DISCLOSURE ratio — its verdict is the
+  // engine's strict boolean, and a shared "own boundary" caption would
+  // imply the shared comparator the engine-separation law forbids.
+  // Each branch keys on ITS engine id (never an else-inherits): a
+  // future engine outside the sealed set gets the no-claim fallback,
+  // not a borrowed caption.
+  const referenceLegend =
+    engine.engine === "aave_v3_etherfi"
+      ? "reference line: 1.0, the engine's own boundary (wad strictly < 1e18)."
+      : engine.engine === "debt_manager"
+        ? "reference line: 1.0 on the DISCLOSURE ratio maxBorrowLT/borrowings. The verdict is the engine's strict boolean (equality healthy) and not this chart."
+        : "reference line: 1.0, a plotting aid only; this engine's verdict semantics are not asserted by this chart.";
+
+  return (
+    <div className={styles.historyCard} data-testid={`history-${engine.engine}`}>
+      <div className={styles.historyMeta}>
+        <EngineChip engine={engine.engine} />
+        <span data-testid={`history-meta-${engine.engine}`}>
+          {historyMetaLine(tally, series.newest, engine.engine, limit)}
+        </span>
+      </div>
+      {tally.plotted === 0 && (
+        <p className={styles.historyAllGap} data-testid={`history-all-gap-${engine.engine}`}>
+          {allGapFrameText(tally)}
+        </p>
+      )}
+      <div
+        className={chart.measuredFrame}
+        ref={frameRef}
+        data-testid={`history-frame-${engine.engine}`}
+      >
+        <span className={chart.chProbe} ref={probeRef} aria-hidden>
+          0000000000
+        </span>
+        <Sparkline
+          values={series.values}
+          pointTitles={series.titles}
+          width={width}
+          height={72}
+          label={`${engine.engine} health factor across retained batches`}
+          referenceValue={HF_REFERENCE_VALUE}
+          referenceLabel="1.0"
+          domain={domain}
+          yLabels={{ min: yMinLabel, max: yMaxLabel }}
+          yGutterPx={yGutterPx}
+          xLabels={
+            oldest !== undefined
+              ? {
+                  start: `batch ${String(oldest.batchId)}`,
+                  end:
+                    newestWitnessed !== undefined
+                      ? `batch ${String(newestWitnessed.batchId)}`
+                      : undefined,
+                }
+              : undefined
+          }
+          newestLabel={newestPlottedDisplay}
+        />
+      </div>
+      <div className={styles.historyLegend}>
+        <span>{HISTORY_DOCTRINE_LINE}</span>
+        {engine.engine === "debt_manager" && (
+          <span
+            className={styles.historyDmDisclosure}
+            data-testid="history-dm-disclosure"
+          >
+            {DM_DISCLOSURE_LINE}
+          </span>
+        )}
+        <details className={styles.historyDoctrine}>
+          <summary>{HISTORY_DOCTRINE_SUMMARY}</summary>
+          <p>
+            a gap is a REFUSED, WITHHELD or NO-ROW point. hover any tick for its named
+            reason, or any plotted point for its value and block; the line never
+            interpolates across a gap. gaps mark only batches this response itself
+            witnesses, because the wire does not enumerate the full retained set.{" "}
+            {referenceLegend}
+          </p>
+        </details>
+      </div>
+    </div>
   );
 }

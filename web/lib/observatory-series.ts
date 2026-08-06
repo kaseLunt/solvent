@@ -243,3 +243,121 @@ export function describeStride(stepSeconds: number | null): string {
 export function describeRange(from: string | null, to: string | null): string {
   return `${from ?? "unbounded"} → ${to ?? "unbounded"}`;
 }
+
+// ---------------------------------------------------------------------------
+// Wave W-OBS — the direct labels the panels draw, derived (never retyped).
+// ---------------------------------------------------------------------------
+
+/**
+ * A labelled point of one metric series: the index into the axis, the drawn
+ * geometry at that index, and the display string of the SAME wire row through
+ * `displayMetric` — the exact formatter the summary cards and the bucket
+ * record use, so a label on the chart and the card above it share one source.
+ */
+export interface SeriesLabelledPoint {
+  /** Index into `axis.entries` / `series.values`. */
+  index: number;
+  /** The drawn geometry at that index (display precision, GEOMETRY only). */
+  value: number;
+  /** `displayMetric` of the same wire row — the card register, never retyped. */
+  label: string;
+}
+
+function labelledPointAt(
+  axis: BucketAxis,
+  response: ObservatorySeriesResponse,
+  metric: BucketMetric,
+  index: number,
+  value: number,
+): SeriesLabelledPoint | null {
+  const point = axis.entries[index]?.point;
+  if (point === null || point === undefined) return null;
+  return { index, value, label: displayMetric(point, metric, response.usd_decimals) };
+}
+
+/**
+ * The point the drawn y-max belongs to. The chart's y-domain is [0, max of
+ * finite values] (the zero floor is always drawn), so the max label IS this
+ * point's display string — derived from the drawn domain, never invented.
+ * Ties keep the first (oldest) occurrence; null when nothing plots.
+ */
+export function seriesMaxPoint(
+  axis: BucketAxis,
+  response: ObservatorySeriesResponse,
+  metric: BucketMetric,
+  series: BucketMetricSeries,
+): SeriesLabelledPoint | null {
+  let bestIndex = -1;
+  let bestValue = Number.NEGATIVE_INFINITY;
+  series.values.forEach((value, index) => {
+    if (value !== null && Number.isFinite(value) && value > bestValue) {
+      bestValue = value;
+      bestIndex = index;
+    }
+  });
+  if (bestIndex < 0) return null;
+  return labelledPointAt(axis, response, metric, bestIndex, bestValue);
+}
+
+/**
+ * The NEWEST captured point of one metric series (the last finite value on
+ * the axis), with its display string — the same figure the newest-bucket
+ * summary card carries when the newest wire bucket is captured, from the
+ * same formatter over the same wire row. Null when nothing plots.
+ */
+export function seriesNewestPoint(
+  axis: BucketAxis,
+  response: ObservatorySeriesResponse,
+  metric: BucketMetric,
+  series: BucketMetricSeries,
+): SeriesLabelledPoint | null {
+  for (let index = series.values.length - 1; index >= 0; index -= 1) {
+    const value = series.values[index];
+    if (value !== null && value !== undefined && Number.isFinite(value)) {
+      return labelledPointAt(axis, response, metric, index, value);
+    }
+  }
+  return null;
+}
+
+/**
+ * The sparse-window STATE line (template rule R6: everything that qualifies
+ * the visual renders before it). Non-null exactly when ONE or ZERO captured
+ * points plot in the window — a panel that is mostly gaps must say so in the
+ * existing absent/withheld register instead of reading as a blank box.
+ * Computed from the series, never static copy.
+ */
+export function sparseCaptureLine(series: BucketMetricSeries): string | null {
+  const plotted = series.values.filter((v) => v !== null && Number.isFinite(v)).length;
+  if (plotted > 1) return null;
+  const absent = series.gapKinds.filter((kind) => kind === "absent").length;
+  const withheld = series.gapKinds.filter((kind) => kind === "withheld").length;
+  const nulls = series.gapKinds.filter((kind) => kind === "null").length;
+  const parts = [
+    plotted === 1
+      ? "1 captured bucket plots in this window"
+      : `${String(plotted)} captured buckets plot in this window`,
+  ];
+  if (absent > 0) {
+    parts.push(
+      absent === 1
+        ? "1 absent bucket renders as a gap"
+        : `${String(absent)} absent buckets render as gaps`,
+    );
+  }
+  if (withheld > 0) {
+    parts.push(
+      withheld === 1
+        ? "1 withheld bucket stays a named refusal"
+        : `${String(withheld)} withheld buckets stay named refusals`,
+    );
+  }
+  if (nulls > 0) {
+    parts.push(
+      nulls === 1
+        ? "1 served bucket carries a null value (null is not zero)"
+        : `${String(nulls)} served buckets carry null values (null is not zero)`,
+    );
+  }
+  return parts.join(" · ");
+}

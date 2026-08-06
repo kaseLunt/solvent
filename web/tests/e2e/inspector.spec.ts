@@ -113,6 +113,71 @@ test("history sparkline: a refused point is a GAP carrying its named reason", as
   await expect(history.getByTestId("sparkline-reference")).toHaveCount(1);
 });
 
+test("W-OBS: the HF sparkline is a measured, labelled instrument", async ({ page }) => {
+  await mockApi(page, ADDRESS_FOUND);
+  await page.setViewportSize({ width: 1000, height: 900 });
+  await page.goto(`/inspector/${FOUND_ADDR}`);
+
+  const frame = page.getByTestId("history-frame-aave_v3_etherfi");
+  await expect(frame).toBeVisible();
+
+  // LAW-3 at two viewports: the SVG width attribute tracks the frame's
+  // CONTENT box (padding-correct), renders 1:1 (viewBox = width, no scale
+  // factor), and grows with the viewport — the fixed-width constant is gone.
+  const measure = () =>
+    frame.evaluate((node) => {
+      const svg = node.querySelector("svg");
+      if (svg === null) throw new Error("no svg in the history frame");
+      const style = getComputedStyle(node);
+      const content =
+        node.clientWidth -
+        (Number.parseFloat(style.paddingLeft) || 0) -
+        (Number.parseFloat(style.paddingRight) || 0);
+      return {
+        widthAttr: Number(svg.getAttribute("width")),
+        viewBoxW: (svg.getAttribute("viewBox") ?? "").split(" ")[2],
+        rendered: svg.getBoundingClientRect().width,
+        content,
+      };
+    });
+
+  const narrow = await measure();
+  expect(Math.abs(narrow.widthAttr - narrow.content)).toBeLessThanOrEqual(1);
+  expect(narrow.viewBoxW).toBe(String(narrow.widthAttr));
+  expect(narrow.rendered).toBeCloseTo(narrow.widthAttr, 0);
+
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await expect
+    .poll(async () => (await measure()).widthAttr, { message: "svg width tracks the frame" })
+    .toBeGreaterThan(narrow.widthAttr);
+  const wide = await measure();
+  expect(Math.abs(wide.widthAttr - wide.content)).toBeLessThanOrEqual(1);
+  expect(wide.viewBoxW).toBe(String(wide.widthAttr));
+
+  // The drawn domain's bounds are labelled through the HF truncation
+  // register: fixture extent [1.0, 1.08] (the 1.0 line always included),
+  // padded 4% a side — pinned pure in tests/unit/sparkline-scale.spec.ts.
+  await expect(frame.getByTestId("sparkline-ymax-label")).toHaveText("1.083");
+  await expect(frame.getByTestId("sparkline-ymin-label")).toHaveText("0.996");
+
+  // X extents: the oldest and newest witnessed batch ids from the wire.
+  await expect(frame.getByTestId("sparkline-x-start")).toHaveText("batch 1");
+  await expect(frame.getByTestId("sparkline-x-end")).toHaveText("batch 2");
+
+  // The newest plotted point prints the SAME computed string the meta line
+  // cites — one source (HistorySeriesEntry.display), asserted against it.
+  const newestFigure = await frame.getByTestId("sparkline-newest-value").textContent();
+  expect(newestFigure).toBe("1.08");
+  await expect(page.getByTestId("history-meta-aave_v3_etherfi")).toContainText(
+    `newest: ${newestFigure ?? "NEVER"}`,
+  );
+
+  // Kept laws: the refused point still breaks the line with its named
+  // reason, and the 1.0 reference line still renders.
+  await expect(frame.getByTestId("sparkline-gap")).toHaveCount(1);
+  await expect(frame.getByTestId("sparkline-reference")).toHaveCount(1);
+});
+
 test("drawer: opens from a number, locks body scroll, Escape closes and restores", async ({
   page,
 }) => {
