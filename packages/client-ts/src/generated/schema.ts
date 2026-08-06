@@ -1508,6 +1508,13 @@ export interface components {
              *       cleared it. No feed currently holds it: a complete ledger's maximum
              *       gap is exact HISTORY and cannot certify the future, so a scan never
              *       produces this grade on its own.
+             *     - `empirical-historical` (ADDED 1.8.0) — a scan judged the ACTIVE
+             *       budget and the measured maximum publication gap sits within it.
+             *       Still never `verified`, for the same reason: history cannot certify
+             *       the future. This grade exists because a budget corrected AFTER a
+             *       refutation (the 09d496e heartbeat widenings) must not go on wearing
+             *       `published-and-refuted` — that would tell a consumer the active
+             *       budget is falsified by an observation that sits below it.
              *     - `empirical-historical-with-qualifier` — a scan measured a maximum
              *       publication gap ABOVE the published heartbeat but within the declared
              *       operator grace. The budget survives; the headroom does not.
@@ -1519,7 +1526,7 @@ export interface components {
              *       with no scan behind it either way.
              * @enum {string}
              */
-            provenance_grade: "verified" | "empirical-historical-with-qualifier" | "published-and-refuted" | "published-not-verified";
+            provenance_grade: "verified" | "empirical-historical" | "empirical-historical-with-qualifier" | "published-and-refuted" | "published-not-verified";
             /**
              * Format: int64
              * @description The scan's measured maximum publication interval. Null when no scan has judged this feed.
@@ -5557,7 +5564,7 @@ export interface operations {
                      *             }
                      *           ],
                      *           "label": "Stable depeg to 0.995 (inside the snap band - a true no-op)",
-                     *           "note": "IDENTITY: this result is scenario stable_depeg_0995_in_band at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. NOT COVERED: aave_v3_etherfi carry rows in this batch and this scenario's committed definition does not cover them, so they are absent from `covered_engines` entirely. That absence is by DEFINITION, never withholding. SHOCK REACH: NO MARK MOVED: every mark this scenario's propagation matrix describes came back at the value it started at, and at least one declared shock was NOT the identity factor. This zero is the PRICING TRANSFORMS' doing, not the book's — the Debt Manager's stable snap band, a snapped stable BASE, or a bound price cap, each of them a property of the oracle path rather than of any position. Of the held marks: 4 pinned by a pricing transform (a stable snap, a snapped base or a bound cap). The `before_*` figures beside this are a true measurement of a real book and nothing was suppressed to hide the zero.",
+                     *           "note": "IDENTITY: this result is scenario stable_depeg_0995_in_band at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. NOT COVERED: aave_v3_etherfi carry rows in this batch and this scenario's committed definition does not cover them, so they are absent from `covered_engines` entirely. That absence is by DEFINITION, never withholding. SHOCK REACH: NO MARK MOVED: every mark this scenario's propagation matrix describes came back at the value it started at, and at least one declared shock was NOT the identity factor. This zero is the PRICING TRANSFORMS' doing, not the book's: all 4 held mark(s) were pinned by the Debt Manager's stable snap band, by a snapped stable BASE, or by a bound price cap, each of them a property of the oracle path rather than of any position. Of the held marks: 4 pinned by a pricing transform (a stable snap, a snapped base or a bound cap). The `before_*` figures beside this are a true measurement of a real book and nothing was suppressed to hide the zero.",
                      *           "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
                      *           "positions_answered": 1,
                      *           "positions_withheld": 0,
@@ -5634,7 +5641,7 @@ export interface operations {
                      *             "marks_held_by_transform": 4,
                      *             "marks_moved": 0,
                      *             "marks_snapped": 3,
-                     *             "note": "NO MARK MOVED: every mark this scenario's propagation matrix describes came back at the value it started at, and at least one declared shock was NOT the identity factor. This zero is the PRICING TRANSFORMS' doing, not the book's — the Debt Manager's stable snap band, a snapped stable BASE, or a bound price cap, each of them a property of the oracle path rather than of any position. Of the held marks: 4 pinned by a pricing transform (a stable snap, a snapped base or a bound cap). The `before_*` figures beside this are a true measurement of a real book and nothing was suppressed to hide the zero.",
+                     *             "note": "NO MARK MOVED: every mark this scenario's propagation matrix describes came back at the value it started at, and at least one declared shock was NOT the identity factor. This zero is the PRICING TRANSFORMS' doing, not the book's: all 4 held mark(s) were pinned by the Debt Manager's stable snap band, by a snapped stable BASE, or by a bound price cap, each of them a property of the oracle path rather than of any position. Of the held marks: 4 pinned by a pricing transform (a stable snap, a snapped base or a bound cap). The `before_*` figures beside this are a true measurement of a real book and nothing was suppressed to hide the zero.",
                      *             "reach": "no_mark_moved"
                      *           },
                      *           "shocks": [

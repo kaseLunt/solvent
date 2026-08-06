@@ -125,8 +125,12 @@ func fxFeeds() *config.Feeds {
 				Method: "price(address)", PriceDecimals: 6},
 		},
 		// Three stream entries, one per grade the record can assign: the ETH/USD leg
-		// whose measured gap earns a QUALIFIER, USDC whose published budget is
-		// REFUTED, and one proxy the record has not judged at all.
+		// whose measured gap earns a QUALIFIER, USDC graded against its ACTIVE
+		// corrected budget (empirical-historical; the retired 90000s budget's
+		// refutation lives in the basis as history), and one proxy the record has
+		// not judged at all. The graded rows serve the REAL registry's budgets so
+		// the seeded coherence law (tested budget == the row's own heartbeat +
+		// grace) binds against fixtures shaped like production.
 		{
 			Chain: "eth", ChainID: fxETHChain, Engine: risk.AaveEngine, Address: fxWeETHEth,
 			Symbol: "weETH", Decimals: 18,
@@ -142,7 +146,9 @@ func fxFeeds() *config.Feeds {
 			Oracle: config.FeedOracle{
 				Kind: config.FeedKindChainlinkStream, Contract: fxAggUnverified,
 				PriceDecimals: 8, StartBlock: 20_000_000, Proxy: fxProxyRefuted,
-				Heartbeat: 86400 * time.Second, Grace: 3600 * time.Second,
+				// The ACTIVE corrected budget (09d496e): 259200s + 43200s = 302400s,
+				// the budget the grade table's USDC row is judged against.
+				Heartbeat: 259200 * time.Second, Grace: 43200 * time.Second,
 			},
 		},
 		// A third stream whose proxy the record has NOT judged, so the default
@@ -168,8 +174,10 @@ var (
 	// only inside the 1,800s grace — a QUALIFIER, not a pass.
 	fxProxyQualified = mustAddr("0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419")
 	fxAggVerified    = mustAddr("0x00c7A37B03690fb9f41b5C5AF8131735C7275446")
-	// fxProxyRefuted is USDC's: a measured 248,460s interval FALSIFIES the 90,000s
-	// tested budget.
+	// fxProxyRefuted is USDC's. The NAME is historical (it earned it when the
+	// 248,460s measured interval falsified the retired 90,000s budget); since
+	// 09d496e the row is graded `empirical-historical` against its ACTIVE
+	// 302,400s budget, and the seeded test pins that regrade.
 	fxProxyRefuted = mustAddr("0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6")
 	// fxProxyUnjudged is not in the record's grade table at all.
 	fxProxyUnjudged = mustAddr("0x1234567890AbCdEf1234567890aBcDeF12345678")

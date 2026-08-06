@@ -20,7 +20,7 @@ openapi: 3.0.3
 
 info:
   title: Solvent Risk API
-  version: "1.7.0"
+  version: "1.8.0"
   description: |
     A read-only public view of ether.fi lending risk across two engines: the Aave
     v3 ether.fi market (Ethereum) and the ether.fi Debt Manager (Optimism).
@@ -3500,6 +3500,7 @@ components:
           type: string
           enum:
             - verified
+            - empirical-historical
             - empirical-historical-with-qualifier
             - published-and-refuted
             - published-not-verified
@@ -3510,6 +3511,13 @@ components:
               cleared it. No feed currently holds it: a complete ledger's maximum
               gap is exact HISTORY and cannot certify the future, so a scan never
               produces this grade on its own.
+            - `empirical-historical` (ADDED 1.8.0) — a scan judged the ACTIVE
+              budget and the measured maximum publication gap sits within it.
+              Still never `verified`, for the same reason: history cannot certify
+              the future. This grade exists because a budget corrected AFTER a
+              refutation (the 09d496e heartbeat widenings) must not go on wearing
+              `published-and-refuted` — that would tell a consumer the active
+              budget is falsified by an observation that sits below it.
             - `empirical-historical-with-qualifier` — a scan measured a maximum
               publication gap ABOVE the published heartbeat but within the declared
               operator grace. The budget survives; the headroom does not.

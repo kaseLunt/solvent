@@ -154,6 +154,24 @@ export function readTransitions(engine: LabRunBookEngine): TransitionReading {
   }
   for (let lane = 0; lane < laneCount; lane += 1) {
     const record = t.lanes[lane];
+    // Codex r65: an UNKNOWN lane kind refuses, ONCE per lane. The vocabulary
+    // is closed (bucket/infinite/unmeasured); runtime JSON is cast, not
+    // validated, so a renamed or typoed kind from a newer/broken deployment
+    // used to mean "skip the histogram comparison for this lane" - a margin
+    // could then disagree with the distribution beside it and still read ok,
+    // and belowOneLanes would publish crossing counts over a lane nobody
+    // checked. Unknown means unreadable.
+    if (
+      record !== undefined &&
+      record.kind !== LANE_KIND_BUCKET &&
+      record.kind !== LANE_KIND_INFINITE &&
+      record.kind !== LANE_KIND_UNMEASURED
+    ) {
+      reasons.push(
+        `lane ${String(lane)} carries a kind (${JSON.stringify(record.kind)}) outside the ` +
+          `contract's closed vocabulary, so no histogram tally can vouch for its margin`,
+      );
+    }
     for (const [name, margin, sums, histogram] of [
       ["before", t.from_rows, rowSums, engine.before.hf_histogram],
       ["after", t.to_rows, colSums, engine.after.hf_histogram],
@@ -183,6 +201,7 @@ export function readTransitions(engine: LabRunBookEngine): TransitionReading {
             `${name} distribution beside it does not serve`,
         );
       }
+
     }
   }
   if (cellTotal !== t.total_rows) {

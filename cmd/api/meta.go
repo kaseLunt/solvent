@@ -439,7 +439,7 @@ func (s *server) standingDisclosures() []string {
 		"Aave base values are 8-decimal and Debt Manager USD is 6-decimal. The two engines are NEVER summed into one number.",
 		"Refused positions are served WITH their reason and are counted in every aggregate's refusal count. This surface never omits a position it could not compute.",
 		"An ENGINE-scoped refusal withholds that engine's whole book even when it has no positions at all: its totals are served as null, never zero, and it is named in `batch.refused_engines`. A withheld engine is never representable as an empty healthy one.",
-		"Three published feed heartbeats are REFUTED by empirical measurement, not merely unverified (see `heartbeat_provenance`: `budget_refuted`, with the observed maximum gap and the budget it was tested against). Their served freshness budgets must carry the OBSERVED bound; the published number is the friendlier one and using it would be a silent cap.",
+		"Three stable feeds serve empirically corrected heartbeat budgets, not the friendlier published ones: the B3 scan refuted the published 24h bounds with the feeds' own complete event ledgers, and the registry's active budgets carry the OBSERVED bound plus grace since 09d496e (see `heartbeat_provenance`: the observed maximum gap, the ACTIVE budget it sits within, and each row's history in `basis`). The retired published budgets remain refuted; the active ones are not.",
 		"This service makes zero RPC calls. Every age is the database clock minus a durable stamp, so nothing here is measured against a chain head observed at request time.",
 	}
 }
@@ -452,6 +452,12 @@ const (
 	// repo's own law is that a complete ledger's max gap is exact HISTORY and
 	// cannot certify the future, so a scan never produces this grade on its own.
 	heartbeatVerified = "verified"
+	// heartbeatEmpirical — an empirical scan judged the ACTIVE budget and the
+	// measured maximum publication gap sits WITHIN it (Codex r65; the grade the
+	// acceptance artifact has carried since the 09d496e corrections landed).
+	// Still never `verified`: a complete ledger's max gap is exact HISTORY and
+	// cannot certify the future.
+	heartbeatEmpirical = "empirical-historical"
 	// heartbeatQualified — an empirical scan measured a maximum publication gap
 	// that EXCEEDS the published heartbeat but sits within the declared operator
 	// grace. The budget survives; the headroom does not.
@@ -488,10 +494,15 @@ const (
 // Keyed by the PROXY address, lowercased: the proxy is the stream's stable
 // identity (Chainlink re-points aggregator() on phase changes).
 //
-// Owed forward, deliberately visible: the Task 6 acceptance run exits non-zero on
-// these three refutations and lands feeds.json budget corrections under owner ack.
-// When it does, the corrected budgets become the published ones and this table's
-// refutations are re-derived against them. Until then this is the honest state.
+// The debt this table owed forward WAS PAID (Codex r65): 09d496e landed the
+// feeds.json budget corrections under owner ack (USDC 259200+43200, FRAX
+// 172800+43200, PYUSD 604800+86400), and these grades are re-derived against
+// the ACTIVE budgets — the same regrade the acceptance artifact has carried
+// since (drift-report B3: USDC/FRAX `empirical-historical`, PYUSD qualified).
+// The historical refutation of the RETIRED published 24h budgets is preserved
+// in each row's basis as history; grading the corrected budgets as refuted
+// would tell an operator the active 84h USDC budget is falsified by a 248,460s
+// observation that sits BELOW it.
 var heartbeatGrades = map[string]struct {
 	grade string
 	// observedMaxGap is the scan's measured maximum publication interval, seconds.
@@ -508,23 +519,32 @@ var heartbeatGrades = map[string]struct {
 			"Separately, the VALUE 3600 is evidence-backed: deployed code was observed consuming this exact proxy with a 3600-second heartbeat (constructor evidence at 0x641169f048ee8de8b3037c9d9c840060fe03e463). " +
 			"A complete ledger's max gap is exact HISTORY and cannot certify the future, so this is never graded `verified`.",
 	},
-	// USDC.
+	// USDC — active budget 302400s (259200s heartbeat + 43200s grace, 09d496e).
 	"0x8fffffd4afb6115b954bd326cbe7b4ba576818f6": {
-		grade: heartbeatRefuted, observedMaxGap: 248460, testedBudget: 90000,
-		basis: "B3 empirical scan: the published budget is FALSIFIED — a measured 248460s publication interval against a tested budget of 90000s (86400s heartbeat + 3600s grace). " +
-			"The served freshness budget must carry the OBSERVED bound; keeping the friendlier published number would be a silent cap.",
+		grade: heartbeatEmpirical, observedMaxGap: 248460, testedBudget: 302400,
+		basis: "B3 empirical scan against the ACTIVE budget: measured maximum publication gap 248460s sits within " +
+			"302400s (259200s heartbeat + 43200s grace), the correction 09d496e landed after this same ledger " +
+			"REFUTED the retired published budget of 90000s (86400s + 3600s). The served budget carries the " +
+			"observed bound; the retired published number stays refuted as history. Never `verified`: a complete " +
+			"ledger's max gap is exact HISTORY and cannot certify the future.",
 	},
-	// PYUSD — weekly publication observed Apr–Jun 2024.
+	// PYUSD — weekly publication; active budget 691200s (604800s + 86400s, 09d496e).
 	"0x8f1df6d7f2db73eece86a18b4381f4707b918fb1": {
-		grade: heartbeatRefuted, observedMaxGap: 604896, testedBudget: 90000,
-		basis: "B3 empirical scan: the published budget is FALSIFIED — a measured 604896s (≈7 day) publication interval against a tested budget of 90000s (86400s heartbeat + 3600s grace). " +
-			"The served freshness budget must carry the OBSERVED bound; keeping the friendlier published number would be a silent cap.",
+		grade: heartbeatQualified, observedMaxGap: 604896, testedBudget: 691200,
+		basis: "B3 empirical scan against the ACTIVE budget: measured maximum publication gap 604896s (≈7 days) " +
+			"EXCEEDS the published 604800s heartbeat and survives only inside the declared 86400s operator grace " +
+			"(tested budget 691200s) — a QUALIFIER, not a pass. The correction 09d496e landed after this same " +
+			"ledger REFUTED the retired published budget of 90000s (86400s + 3600s), which stays refuted as " +
+			"history. Never `verified`: a complete ledger's max gap is exact HISTORY and cannot certify the future.",
 	},
-	// FRAX.
+	// FRAX — active budget 216000s (172800s heartbeat + 43200s grace, 09d496e).
 	"0xb9e1e3a9feff48998e45fa90847ed4d467e8bcfd": {
-		grade: heartbeatRefuted, observedMaxGap: 170712, testedBudget: 90000,
-		basis: "B3 empirical scan: the published budget is FALSIFIED — a measured 170712s publication interval against a tested budget of 90000s (86400s heartbeat + 3600s grace). " +
-			"The served freshness budget must carry the OBSERVED bound; keeping the friendlier published number would be a silent cap.",
+		grade: heartbeatEmpirical, observedMaxGap: 170712, testedBudget: 216000,
+		basis: "B3 empirical scan against the ACTIVE budget: measured maximum publication gap 170712s sits within " +
+			"216000s (172800s heartbeat + 43200s grace), the correction 09d496e landed after this same ledger " +
+			"REFUTED the retired published budget of 90000s (86400s + 3600s). The served budget carries the " +
+			"observed bound; the retired published number stays refuted as history. Never `verified`: a complete " +
+			"ledger's max gap is exact HISTORY and cannot certify the future.",
 	},
 }
 

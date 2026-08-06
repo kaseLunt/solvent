@@ -508,6 +508,70 @@ test("a cell with exactly ONE end in the unmeasured lane is refused: the margin-
   expect(reasons.join(" ")).toContain("lane 9 (not measured) → lane 0 (< 0.90)");
 });
 
+test("Codex r65 — the bucket join is the WHOLE identity: a drifted edge under a matching label refuses", () => {
+  // KILLS: the label-only join (candidate.label === lane.label alone). Rev2
+  // §2.1 makes (label, lower_wad, upper_wad) the bucket identity — a body
+  // whose histogram keeps a bucket's display label while one exact edge
+  // drifts is two vocabularies wearing one name, and joining them renders
+  // reconciled-looking margins over bands that are not the same band. The
+  // three-field join finds no such bucket and refuses; a label-only mutant
+  // finds it and reads this body CLEAN.
+  const engine = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const lane = engine.hf_transitions.lanes.find((candidate) => candidate.kind === "bucket");
+  if (lane === undefined) throw new Error("fixture invariant: a bucket lane exists");
+  const drifted: typeof engine = {
+    ...engine,
+    before: {
+      ...engine.before,
+      hf_histogram: {
+        ...engine.before.hf_histogram,
+        buckets: engine.before.hf_histogram.buckets.map((bucket) =>
+          bucket.label === lane.label
+            ? { ...bucket, lower_wad: `${bucket.lower_wad}1` }
+            : bucket,
+        ),
+      },
+    },
+  };
+  const reading = readTransitions(drifted);
+  expect(reading.kind).toBe("contradictory");
+  if (reading.kind !== "contradictory") return;
+  expect(reading.reasons.join(" ")).toContain(
+    `lane ${String(engine.hf_transitions.lanes.indexOf(lane))} (${lane.label})`,
+  );
+  expect(reading.reasons.join(" ")).toContain("does not serve");
+  // The after side is untouched, so ONLY the before side refused — the join
+  // really is per histogram, not a shared verdict.
+  expect(reading.reasons.filter((reason) => reason.includes("does not serve"))).toHaveLength(1);
+});
+
+test("Codex r65 — a lane kind outside the closed vocabulary refuses; unknown never means skip", () => {
+  // KILLS: the silent-skip arm. tallyAt returns null for an unknown kind and
+  // the old caller refused null only for kind === "bucket" — a renamed or
+  // typoed kind from a newer/broken deployment (runtime JSON is cast, not
+  // validated) turned OFF the margin-versus-distribution comparison for that
+  // lane while belowOneLanes went on publishing crossing counts over it.
+  const engine = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const unknownKind: typeof engine = {
+    ...engine,
+    hf_transitions: {
+      ...engine.hf_transitions,
+      lanes: engine.hf_transitions.lanes.map((laneRecord, index) =>
+        index === 0 ? { ...laneRecord, kind: "buckett" as typeof laneRecord.kind } : laneRecord,
+      ),
+    },
+  };
+  const reading = readTransitions(unknownKind);
+  expect(reading.kind).toBe("contradictory");
+  if (reading.kind !== "contradictory") return;
+  const vocab = reading.reasons.filter((reason) =>
+    reason.includes("outside the contract's closed vocabulary"),
+  );
+  // ONCE per lane, naming the kind verbatim.
+  expect(vocab).toHaveLength(1);
+  expect(vocab[0]).toContain('"buckett"');
+});
+
 // ---------------------------------------------------------------------------
 // NULL IS NOT ZERO
 // ---------------------------------------------------------------------------

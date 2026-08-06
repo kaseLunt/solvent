@@ -893,13 +893,46 @@ func TestMetaServesTheFullPosture(t *testing.T) {
 	require.False(t, boolAt(t, qualified, "budget_refuted"))
 	require.Contains(t, str(t, qualified, "basis"), "never graded `verified`")
 
-	refuted := byKey(t, hb, "proxy", fxProxyRefuted.Hex())
-	require.Equal(t, "published-and-refuted", str(t, refuted, "provenance_grade"))
-	require.True(t, boolAt(t, refuted, "budget_refuted"))
-	require.EqualValues(t, 248460, num(t, refuted, "observed_max_gap_seconds"))
-	require.EqualValues(t, 90000, num(t, refuted, "tested_budget_seconds"))
-	require.Contains(t, str(t, refuted, "basis"), "FALSIFIED")
-	require.Contains(t, str(t, refuted, "basis"), "silent cap")
+	// Codex r65: USDC is graded against the ACTIVE budget (09d496e's 302400s),
+	// which its 248460s observation sits WITHIN — `empirical-historical`, not
+	// refuted. The retired 90000s budget's refutation is preserved as history
+	// in the basis, and the COHERENCE law below is what forbids this row from
+	// ever wearing `published-and-refuted` again while its own numbers say the
+	// observation is inside the budget.
+	regraded := byKey(t, hb, "proxy", fxProxyRefuted.Hex())
+	require.Equal(t, "empirical-historical", str(t, regraded, "provenance_grade"))
+	require.False(t, boolAt(t, regraded, "budget_refuted"))
+	require.EqualValues(t, 248460, num(t, regraded, "observed_max_gap_seconds"))
+	require.EqualValues(t, 302400, num(t, regraded, "tested_budget_seconds"))
+	require.Contains(t, str(t, regraded, "basis"), "09d496e")
+	require.Contains(t, str(t, regraded, "basis"), "REFUTED the retired published budget")
+
+	// THE COHERENCE LAW (Codex r65): every scanned row's verdict must agree
+	// with its own served arithmetic. `budget_refuted` iff the observation
+	// exceeds the tested budget; a qualified row exceeds its heartbeat but not
+	// its budget; and a scanned row's tested budget IS the row's own served
+	// heartbeat + grace — the exact inconsistency the old table carried
+	// (grade `refuted`, tested budget 90000s, served budget 302400s).
+	for _, row := range hb {
+		grade := str(t, row, "provenance_grade")
+		if at(t, row, "observed_max_gap_seconds") == nil {
+			require.Equal(t, "published-not-verified", grade)
+			continue
+		}
+		gap := num(t, row, "observed_max_gap_seconds")
+		tested := num(t, row, "tested_budget_seconds")
+		require.Equal(t, gap > tested, boolAt(t, row, "budget_refuted"),
+			"grade/arithmetic coherence for %v", str(t, row, "proxy"))
+		require.EqualValues(t, num(t, row, "heartbeat_seconds")+num(t, row, "grace_seconds"), tested,
+			"a scanned row is judged against ITS OWN served budget, %v", str(t, row, "proxy"))
+		if grade == "empirical-historical-with-qualifier" {
+			require.Greater(t, gap, num(t, row, "heartbeat_seconds"))
+			require.LessOrEqual(t, gap, tested)
+		}
+		if grade == "empirical-historical" {
+			require.LessOrEqual(t, gap, num(t, row, "heartbeat_seconds"))
+		}
+	}
 
 	// The DISCRIMINATOR: a feed the record has NOT judged still reports
 	// published-not-verified with NO measurement attached. Without this, a table
@@ -911,15 +944,19 @@ func TestMetaServesTheFullPosture(t *testing.T) {
 	require.Nil(t, at(t, unjudged, "tested_budget_seconds"))
 	require.Contains(t, str(t, unjudged, "basis"), "NOT independently confirmed")
 
-	// And the refutation is loud in the standing disclosures, not only in a nested
-	// field a client might never enumerate.
-	var refutedDisclosure bool
+	// And the heartbeat story is loud in the standing disclosures, not only in
+	// a nested field a client might never enumerate — CURRENT-TENSE (Codex
+	// r65): the active budgets are empirically corrected and NOT refuted; the
+	// retired published ones stay refuted as history.
+	var heartbeatDisclosure bool
 	for _, d := range arr(t, body, "disclosures") {
-		if s, _ := d.(string); s != "" && (containsAll(s, "REFUTED", "budget_refuted")) {
-			refutedDisclosure = true
+		if s, _ := d.(string); s != "" &&
+			containsAll(s, "empirically corrected heartbeat budgets", "retired published budgets remain refuted") {
+			heartbeatDisclosure = true
 		}
 	}
-	require.True(t, refutedDisclosure, "the refuted budgets must be named in the standing disclosures")
+	require.True(t, heartbeatDisclosure,
+		"the corrected heartbeat budgets and their retired refutations must be named in the standing disclosures")
 
 	// Published constants.
 	require.EqualValues(t, 5, num(t, body, "constants", "confirmation_blocks"))
