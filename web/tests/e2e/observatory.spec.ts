@@ -553,3 +553,109 @@ test("W-3L: a WITHHELD record keeps its refusal and null-never-zero clauses OUTS
   await expect(page.getByTestId("observatory-point-takeaway")).toContainText("withheld");
   await expect(detail.getByText("null because the book was withheld and never zero").first()).toBeVisible();
 });
+
+// ---------------------------------------------------------------------------
+// r73 — HAZARD PLACEMENT, mutation-backed on the rendered page. The earlier
+// weld proved only the safe fixture (vacuous, Codex r73): a JSX edit moving a
+// BITING hazard row inside the forensic <details> would not have failed it.
+// Each variant here asserts, with the disclosure still CLOSED: the hazard is
+// VISIBLE, it is NOT a descendant of the disclosure, and the counted summary
+// recounts what the disclosure now actually hides.
+// ---------------------------------------------------------------------------
+
+test("r73 — unacked epochs render OUTSIDE the closed disclosure, and the count follows", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  const unacked = {
+    ...OBSERVATORY_SERIES_AAVE,
+    points: OBSERVATORY_SERIES_AAVE.points.map((point, i, all) =>
+      i === all.length - 1
+        ? { ...point, acked_epoch: point.acked_epoch, max_epoch_at_compute: point.acked_epoch + 2 }
+        : point,
+    ),
+  };
+  await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, unacked));
+  await openObservatory(page);
+
+  const forensics = page.getByTestId("observatory-point-forensics");
+  const epochs = page.getByTestId("observatory-point-epochs");
+  await expect(epochs).toBeVisible(); // the disclosure is closed by default
+  await expect(epochs).toContainText("2 unacked epoch(s)");
+  await expect(forensics.locator('[data-testid="observatory-point-epochs"]')).toHaveCount(0);
+  await expect(forensics.locator("summary")).toHaveText("5 provenance row(s) + the rate snapshot");
+});
+
+test("r73 — an UNRECORDED sweep renders OUTSIDE the closed disclosure, and the count follows", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  const unrecorded = {
+    ...OBSERVATORY_SERIES_AAVE,
+    points: OBSERVATORY_SERIES_AAVE.points.map((point, i, all) =>
+      i === all.length - 1 ? { ...point, sweep_recorded: false, sweep: null } : point,
+    ),
+  };
+  await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, unrecorded));
+  await openObservatory(page);
+
+  const forensics = page.getByTestId("observatory-point-forensics");
+  const sweep = page.getByTestId("observatory-point-sweep");
+  await expect(sweep).toBeVisible();
+  await expect(sweep).toContainText("unrecorded: this point predates migration 00018");
+  await expect(forensics.locator('[data-testid="observatory-point-sweep"]')).toHaveCount(0);
+  await expect(forensics.locator("summary")).toHaveText("5 provenance row(s) + the rate snapshot");
+});
+
+test("r73 — an UNSTATED-scale rate table renders OUTSIDE the closed disclosure, and the count follows", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  const unstated = {
+    ...OBSERVATORY_SERIES_AAVE,
+    points: OBSERVATORY_SERIES_AAVE.points.map((point, i, all) =>
+      i === all.length - 1
+        ? { ...point, rates: point.rates.map((rate) => ({ ...rate, scale: "unstated" })) }
+        : point,
+    ),
+  };
+  await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, unstated));
+  await openObservatory(page);
+
+  const forensics = page.getByTestId("observatory-point-forensics");
+  const rates = page.getByTestId("observatory-rates");
+  await expect(rates).toBeVisible();
+  await expect(rates).toContainText("unstated · kind outside the known vocabulary");
+  await expect(forensics.locator('[data-testid="observatory-rates"]')).toHaveCount(0);
+  // Rates left the disclosure entirely: 6 rows, no rate-snapshot suffix.
+  await expect(forensics.locator("summary")).toHaveText("6 provenance row(s)");
+});
+
+test("r73 — all three hazards at once: each outside, the disclosure keeps only the neutral four", async ({
+  page,
+}) => {
+  await mockSeries(page);
+  const all = {
+    ...OBSERVATORY_SERIES_AAVE,
+    points: OBSERVATORY_SERIES_AAVE.points.map((point, i, entries) =>
+      i === entries.length - 1
+        ? {
+            ...point,
+            max_epoch_at_compute: point.acked_epoch + 1,
+            sweep_recorded: false,
+            sweep: null,
+            rates: point.rates.map((rate) => ({ ...rate, scale: "unstated" })),
+          }
+        : point,
+    ),
+  };
+  await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, all));
+  await openObservatory(page);
+
+  const forensics = page.getByTestId("observatory-point-forensics");
+  for (const id of ["observatory-point-epochs", "observatory-point-sweep", "observatory-rates"]) {
+    await expect(page.getByTestId(id)).toBeVisible();
+    await expect(forensics.locator(`[data-testid="${id}"]`)).toHaveCount(0);
+  }
+  await expect(forensics.locator("summary")).toHaveText("4 provenance row(s)");
+});
