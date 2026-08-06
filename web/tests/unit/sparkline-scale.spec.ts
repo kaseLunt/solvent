@@ -59,10 +59,12 @@ test("a flat series is never pinned to an edge — the flat pad floor applies", 
   expect(flat.max).toBeCloseTo(1 + Math.max(SPARKLINE_PAD_RATIO, SPARKLINE_FLAT_PAD_FLOOR), 10);
   expect(flat.max).toBeGreaterThan(flat.min);
 
-  // Flat away from the reference, no reference drawn: pad is 4% of the value.
+  // Flat away from the reference, no reference drawn: pad is 4% of the
+  // value, then the bounds land on thousandths OUTWARD (rule 5): raw
+  // 1.0368/1.1232 become 1.036/1.124.
   const away = paddedSparklineDomain([1.08, 1.08]);
-  expect(away.min).toBeCloseTo(1.08 - 1.08 * SPARKLINE_PAD_RATIO, 10);
-  expect(away.max).toBeCloseTo(1.08 + 1.08 * SPARKLINE_PAD_RATIO, 10);
+  expect(Math.round(away.min * 1000)).toBe(1036);
+  expect(Math.round(away.max * 1000)).toBe(1124);
 });
 
 test("an empty domain keeps the historical [0, 1] fallback", () => {
@@ -114,20 +116,61 @@ test("the fixture engine's drawn domain and its labels derive from ONE source", 
   // HISTORY: batch 1 REFUSED (gap), batch 2 computed at HF 1.08.
   const series = buildHistorySeries(ENGINE);
   const domain = paddedSparklineDomain(series.values, 1);
-  // Extent [1.0, 1.08] (reference included), padded 4% of the 0.08 span.
-  expect(domain.min).toBeCloseTo(0.9968, 10);
-  expect(domain.max).toBeCloseTo(1.0832, 10);
+  // Extent [1.0, 1.08] (reference included), padded 4% of the 0.08 span,
+  // then landed on thousandths OUTWARD (rule 5): raw 0.9968/1.0832 become
+  // exactly 0.996/1.084.
+  expect(Math.round(domain.min * 1000)).toBe(996);
+  expect(Math.round(domain.max * 1000)).toBe(1084);
   expect(domain.min).toBeLessThan(1);
   expect(domain.max).toBeGreaterThan(1.08);
-  // The bound labels ARE the outward-directed renderings of the drawn
-  // domain — same object, same register (the law the e2e checks against the
-  // rendered SVG). The max CEILS: the drawn 1.0832 sits under "1.084".
+  // The bound labels ARE the drawn bounds VERBATIM — same object, same
+  // register (the law the e2e checks against the rendered SVG).
   expect(hfAxisMaxLabel(domain.max)).toBe("1.084");
   expect(hfAxisMinLabel(domain.min)).toBe("0.996");
-  // CONTAINMENT, stated as the law it is: the labelled range contains the
-  // drawn domain on both sides.
-  expect(Number(hfAxisMinLabel(domain.min))).toBeLessThanOrEqual(domain.min);
-  expect(Number(hfAxisMaxLabel(domain.max))).toBeGreaterThanOrEqual(domain.max);
+  // CONTAINMENT is identity under rule 5: the label parses back to the
+  // exact drawn bound on both sides.
+  expect(Number(hfAxisMinLabel(domain.min))).toBe(domain.min);
+  expect(Number(hfAxisMaxLabel(domain.max))).toBe(domain.max);
+});
+
+test("r63 rule 5: an honest bound a hair past a 3dp boundary can never print inside the domain", () => {
+  // Codex round 63's honest scenario: one plotted HF at 1.0009615388461537
+  // with the 1.0 reference. The float pad arithmetic lands the raw max at
+  // ~1.0010000004 — 4e-10 PAST the 1.001 boundary. r62's label path rounded
+  // that back to "1.001" while the DRAWN max stayed above it: a printed
+  // ceiling below the drawn domain. Rule 5 quantizes the DOMAIN itself
+  // outward-with-shed, so the drawn max IS 1.001, the label renders it
+  // verbatim, and the plotted value sits strictly inside.
+  const value = 1.0009615388461537;
+  const domain = paddedSparklineDomain([value], 1);
+  expect(Math.round(domain.max * 1000)).toBe(1001);
+  expect(hfAxisMaxLabel(domain.max)).toBe("1.001");
+  expect(value).toBeLessThan(domain.max);
+  expect(Number(hfAxisMaxLabel(domain.max))).toBe(domain.max);
+  // The min side of the same shape: raw 0.9990 - pad lands below 0.999 and
+  // floors outward; the plotted reference stays strictly inside too.
+  expect(domain.min).toBeLessThan(1);
+  expect(Number(hfAxisMinLabel(domain.min))).toBe(domain.min);
+});
+
+test("r63 rule 5: drawn bounds always land on thousandths, both sides, across shapes", () => {
+  // The micro-span guard (SPARKLINE_MIN_PAD) keeps quantization from ever
+  // landing a bound at or inside the data: two values 1e-9 apart still get
+  // a pad four orders above the 5e-10 shed.
+  const shapes: ReadonlyArray<ReadonlyArray<number>> = [
+    [1.0000000001, 1.0000000002],
+    [0.9968, 1.0832],
+    [49.9, 50.1],
+  ];
+  for (const values of shapes) {
+    const domain = paddedSparklineDomain(values, 1);
+    expect(Math.abs(domain.min * 1000 - Math.round(domain.min * 1000))).toBeLessThan(1e-9);
+    expect(Math.abs(domain.max * 1000 - Math.round(domain.max * 1000))).toBeLessThan(1e-9);
+    for (const value of values) {
+      expect(value).toBeGreaterThan(domain.min);
+      expect(value).toBeLessThan(domain.max);
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -211,9 +254,13 @@ test("placement: when neither side fits, the label leaves the right-edge column"
   ).toEqual({ y: 17, anchorEnd: true });
 });
 
-test("placement: exactly 12px of separation is OUTSIDE the collision band", () => {
-  // |candidate - referenceLabelY| = 12 does not displace: the band is a
-  // strict `< 12`. Pins the boundary so the band cannot silently widen.
+test("placement: 12px of separation is INSIDE the collision band (Codex r63)", () => {
+  // r62's band was a strict `< 12`, but a 12px mono glyph renders ~14px of
+  // ink: baselines 12-14px apart still overlapped their boxes (Codex r63's
+  // honest scenario: values 0.90/1.10 with newest 0.9509 land the two
+  // baselines ~12.003px apart). The band is now < NEWEST_LABEL_COLLISION_PX
+  // (15): a 12px candidate displaces across the reference to 33 - 16 = 17.
+  // Kills the r62 band width outright.
   expect(
     sparklineNewestLabelPlacement({
       pointX: 137,
@@ -222,7 +269,23 @@ test("placement: exactly 12px of separation is OUTSIDE the collision band", () =
       height: 72,
       referenceLabelY: 33,
     }),
-  ).toEqual({ y: 45, anchorEnd: true });
+  ).toEqual({ y: 17, anchorEnd: true });
+});
+
+test("placement: exactly 15px of separation is OUTSIDE the band — the boundary is pinned", () => {
+  // |candidate - referenceLabelY| = 15 does not displace (strict < 15): two
+  // baselines a full 15px apart hold ~1px of clear space between their
+  // ~14px ink boxes. Pins the boundary so the band cannot silently move in
+  // either direction.
+  expect(
+    sparklineNewestLabelPlacement({
+      pointX: 137,
+      pointY: 54,
+      midX: 80,
+      height: 72,
+      referenceLabelY: 33,
+    }),
+  ).toEqual({ y: 48, anchorEnd: true });
 });
 
 // ---------------------------------------------------------------------------

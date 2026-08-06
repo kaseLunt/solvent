@@ -16,21 +16,31 @@
 //      a zero-height band.
 //   4. No finite values and no reference: [0, 1] — the component's historical
 //      empty-domain fallback, kept identical.
+//   5. (Codex r63) The padded bounds then LAND ON THOUSANDTHS, outward: the
+//      min floors and the max ceils at 3dp, each after shedding no more than
+//      5e-10 of float representation fuzz in the SAFE direction. The drawn
+//      domain and its labels are therefore the SAME 3dp numbers — a label
+//      can never sit inside the drawn bound, because it IS the drawn bound.
+//      The plotted data stays strictly inside since every pad is at least
+//      SPARKLINE_MIN_PAD (1e-6), four orders above the shed. (r62's fix
+//      rounded at 1e-9 BEFORE the directed floor/ceil, so a bound a hair
+//      past a 3dp boundary — an honest 1.0010000004 from pad arithmetic —
+//      crossed INWARD and printed a ceiling below the drawn max.)
 //
 // Because the reference sits INSIDE [lo, hi] before padding, the padded
 // domain contains it STRICTLY: the disclosure line cannot land on (or off)
 // an edge.
 //
-// THE BOUND-LABEL RULE (Wave W-OBS-B): the labelled range CONTAINS the drawn
-// domain — the MIN bound label FLOORS to 3dp and the MAX bound label CEILS
-// to 3dp, so no drawn point ever lies outside the printed range. These
-// labels annotate the PADDED axis bounds, never an account's HF, so the
-// never-round-up display law for position claims does not apply — the
-// outward rule is the instrument-honesty analogue: a printed range may
-// overstate what it frames, never understate it. (The retired `hfAxisLabel`
-// truncated both bounds, which ROUNDED THE MAX DOWN — a drawn max of 1.0832
-// sat above a printed "1.083" ceiling — and its round-at-micros step even
-// rounded 0.9969996 UP to "0.997" while claiming truncation.)
+// THE BOUND-LABEL RULE (Wave W-OBS-B, sharpened by r63 rule 5): the labels
+// render the drawn bounds VERBATIM — the domain already carries the outward
+// 3dp rule, so no direction is decided at label time. These labels annotate
+// the PADDED axis bounds, never an account's HF, so the never-round-up
+// display law for position claims does not apply — the outward rule is the
+// instrument-honesty analogue: a printed range may overstate what it frames,
+// never understate it. (The retired `hfAxisLabel` truncated both bounds,
+// which ROUNDED THE MAX DOWN — a drawn max of 1.0832 sat above a printed
+// "1.083" ceiling — and its round-at-micros step even rounded 0.9969996 UP
+// to "0.997" while claiming truncation.)
 //
 // Pure functions — pinned by tests/unit/sparkline-scale.spec.ts.
 
@@ -46,6 +56,33 @@ export const SPARKLINE_PAD_RATIO = 0.04;
 
 /** Rule 3: a flat extent never pads by less than this absolute amount. */
 export const SPARKLINE_FLAT_PAD_FLOOR = 0.02;
+
+/**
+ * Rule 5: every pad is at least this much, so the thousandth-quantized
+ * outward bounds (shed tolerance 5e-10) can never land at or inside the
+ * data. Visually invisible; four orders above the shed.
+ */
+export const SPARKLINE_MIN_PAD = 0.000001;
+
+/**
+ * Rule 5's shed, in THOUSANDTHS-scale units (5e-7 scaled = 5e-10 absolute):
+ * the directed floor/ceil absorbs float representation error (~1e-13 at
+ * these magnitudes) without letting a genuinely-past-the-boundary bound
+ * cross inward by more than 5e-10 — and the pad floor keeps the data more
+ * than SPARKLINE_MIN_PAD away, so even that worst case stays outside the
+ * plotted values.
+ */
+const BOUND_REPR_SHED = 0.0000005;
+
+/** Floor to thousandths, shedding only representation fuzz (rule 5). */
+function floorThousandths(value: number): number {
+  return Math.floor(value * 1000 + BOUND_REPR_SHED);
+}
+
+/** Ceil to thousandths, shedding only representation fuzz (rule 5). */
+function ceilThousandths(value: number): number {
+  return Math.ceil(value * 1000 - BOUND_REPR_SHED);
+}
 
 /**
  * The padded sparkline y-domain (rules 1-4 above). `referenceValue` is the
@@ -67,42 +104,37 @@ export function paddedSparklineDomain(
   const span = hi - lo;
   const pad =
     span > 0
-      ? span * SPARKLINE_PAD_RATIO
+      ? Math.max(span * SPARKLINE_PAD_RATIO, SPARKLINE_MIN_PAD)
       : Math.max(Math.abs(hi) * SPARKLINE_PAD_RATIO, SPARKLINE_FLAT_PAD_FLOOR);
-  return { min: lo - pad, max: hi + pad };
+  // Rule 5: the drawn bounds land on thousandths, OUTWARD, so the axis
+  // labels can render them verbatim and containment is exact by identity.
+  return {
+    min: floorThousandths(lo - pad) / 1000,
+    max: ceilThousandths(hi + pad) / 1000,
+  };
 }
 
 /**
- * The bound at thousandths, with float REPRESENTATION fuzz shed first: the
- * bound is rounded at 1e-9 (two orders below the finest boundary the outward
- * rule must respect, three below the displayed precision) so that a value
- * stored as 1080.0000000000002 thousandths does not ceil to 1081. Rounding
- * at this scale collapses only differences below 5e-10 — it cannot move a
- * real value like 0.9969996 (996.9996 thousandths) across a 3dp boundary;
- * the directed floor/ceil below does ALL the work at the displayed
- * precision.
- */
-function boundThousandths(bound: number): number {
-  return Math.round(bound * 1_000_000_000) / 1_000_000;
-}
-
-/**
- * The MIN bound's label: FLOORS to 3dp (a negative min floors AWAY from
- * zero — the printed floor sits at or below the drawn floor, never above
- * it). Rendered through the EXISTING HF register's formatter
- * (`truncateToDisplay` over an integer already AT 3dp, so it only places
- * the point and trims zeros; the direction was decided here).
+ * The MIN bound's label: the drawn bound VERBATIM. `paddedSparklineDomain`
+ * already floored the min onto a thousandth (rule 5), so this only recovers
+ * that integer through the directed floor (which, for a thousandth-quantized
+ * input, sheds nothing but float representation error) and renders it
+ * through the EXISTING HF register's formatter (`truncateToDisplay` over an
+ * integer already AT 3dp — it only places the point and trims zeros).
+ * A negative min floors AWAY from zero: at or below the drawn floor, never
+ * above it.
  */
 export function hfAxisMinLabel(bound: number): string {
-  return truncateToDisplay(BigInt(Math.floor(boundThousandths(bound))), 3);
+  return truncateToDisplay(BigInt(floorThousandths(bound)), 3);
 }
 
 /**
- * The MAX bound's label: CEILS to 3dp — the printed ceiling sits at or above
- * the drawn max, never below it. Same register formatter as the min label.
+ * The MAX bound's label: the drawn bound VERBATIM — the domain ceiled it
+ * onto a thousandth (rule 5); the directed ceil here recovers that integer.
+ * At or above the drawn max, never below it.
  */
 export function hfAxisMaxLabel(bound: number): string {
-  return truncateToDisplay(BigInt(Math.ceil(boundThousandths(bound))), 3);
+  return truncateToDisplay(BigInt(ceilThousandths(bound)), 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -112,10 +144,13 @@ export function hfAxisMaxLabel(bound: number): string {
 // ---------------------------------------------------------------------------
 
 /**
- * The collision band: two 12px mono baselines closer than this print on top
- * of each other (the label the band guards against is the reference "1.0").
+ * The collision band (Codex r63 widened it from 12): a 12px mono glyph
+ * renders about 14px of ink top to bottom, so two baselines 12-14px apart
+ * still overlap their boxes; the band must cover that interval. 15 keeps a
+ * margin above the 14px ink height while staying below the 16px
+ * displacement row, so a displaced pair is always disjoint.
  */
-export const NEWEST_LABEL_COLLISION_PX = 12;
+export const NEWEST_LABEL_COLLISION_PX = 15;
 
 /**
  * The displacement: one full label row. A 12px glyph renders ~14px of ink
