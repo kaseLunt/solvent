@@ -56,7 +56,7 @@ test("found: the position layout renders, with the stale price verdict visible",
   await mockApi(page, ADDRESS_FOUND);
   await page.goto(`/inspector/${FOUND_ADDR}`);
 
-  await expect(page.getByTestId("inspector-outcome")).toBeVisible();
+  await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
   await expect(page.getByTestId("position-aave_v3_etherfi")).toBeVisible();
   await expect(page.getByTestId("position-debt_manager")).toBeVisible();
 
@@ -354,7 +354,7 @@ test("landing: an invalid address is an inline refusal and never navigates", asy
   await page.getByLabel("address to inspect").fill(FOUND_ADDR);
   await page.getByRole("button", { name: "Inspect" }).click();
   await expect(page).toHaveURL(new RegExp(`/inspector/${FOUND_ADDR}$`));
-  await expect(page.getByTestId("inspector-outcome")).toBeVisible();
+  await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
 });
 
 test("an invalid [addr] path segment is refused inline — nothing is looked up", async ({ page }) => {
@@ -363,4 +363,23 @@ test("an invalid [addr] path segment is refused inline — nothing is looked up"
   await expect(page.getByTestId("address-refusal")).toBeVisible();
   await expect(page.getByTestId("address-refusal")).toContainText("REFUSED");
   await expect(page.getByTestId("inspector-outcome")).toHaveCount(0);
+});
+
+test("r74 — the activity takeaway disclaims the untimed tail on the rendered page", async ({
+  page,
+}) => {
+  // The committed EVENTS fixture carries a null block_time row: the sentence
+  // must split its claim — timed rows newest first, the tail disclaimed —
+  // composed from the same counts the rows themselves render.
+  await mockApi(page, ADDRESS_FOUND);
+  await page.goto(`/inspector/${FOUND_ADDR}`);
+  const timed = EVENTS.events.filter((event) => event.block_time !== null).length;
+  const untimed = EVENTS.events.length - timed;
+  if (untimed === 0) throw new Error("fixture invariant: an untimed row expected");
+  const takeaway = page.getByTestId("activity-takeaway");
+  await expect(takeaway).toContainText(
+    `${String(timed)} with custodied header time, newest first; ${String(untimed)} untimed ` +
+      `row(s) follow, in an order that is not chronology`,
+  );
+  await expect(takeaway).not.toContainText("loaded for this account, newest first");
 });

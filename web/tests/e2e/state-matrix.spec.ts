@@ -578,7 +578,7 @@ const MATRIX: Cell[] = [
       await mockInspector(page, ADDRESS_FOUND);
     },
     verify: async (page) => {
-      await expect(page.getByTestId("inspector-outcome")).toBeVisible();
+      await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
       // No fake freshness: the stale verdict is its OWN visible state,
       // alongside the fresh one — never silently normalized.
       await expect(page.getByTestId("price-verdict").filter({ hasText: "stale" })).toBeVisible();
@@ -672,7 +672,7 @@ const MATRIX: Cell[] = [
       await mockInspector(page, ADDRESS_FOUND);
     },
     verify: async (page) => {
-      await expect(page.getByTestId("inspector-outcome")).toBeVisible();
+      await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
       await expectNoHorizontalOverflow(page);
     },
   },

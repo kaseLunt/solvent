@@ -506,7 +506,11 @@ test("(2) the Inspector: same law, its own envelope — a failed repair, then a 
   // unavailable", because a failed BACKGROUND repair is not an answer about
   // this address.
   await expect(page.getByText("querying the newest servable batch…")).toHaveCount(0);
-  await expect(page.getByTestId("inspector-outcome")).toBeVisible();
+  // r74: the outcome line renders for EVERY ready arm — the retained state
+  // must be proven POSITIVE, or a repair that swapped the position for a
+  // negative/unknowable would stay green.
+  await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
+  await expect(page.getByTestId("position-aave_v3_etherfi")).toBeVisible();
 
   // THE FIRST BOUNDED RETRY LANDS, and the receipt it brings discharges the
   // unknown.

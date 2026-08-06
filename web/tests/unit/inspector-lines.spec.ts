@@ -6,7 +6,7 @@
 
 import { expect, test } from "@playwright/test";
 import type { AddressLookup } from "@solvent/client";
-import { lookupTakeaway } from "../../lib/inspector-lines";
+import { activityTakeaway, lookupTakeaway } from "../../lib/inspector-lines";
 
 const base = { batch: { id: 7 } };
 const lookup = (partial: Record<string, unknown>): AddressLookup =>
@@ -55,4 +55,36 @@ test("unknowable: never the definitive negative, and it says so", () => {
       "NEVER the definitive negative",
   );
   expect(line).not.toContain("no position in this batch");
+});
+
+// ---------------------------------------------------------------------------
+// r74 — activityTakeaway: "newest first" may only be claimed over rows that
+// carry a custodied header time; the untimed tail's order is not chronology.
+// ---------------------------------------------------------------------------
+
+test.describe("r74 — activityTakeaway", () => {
+  test("all rows timed: newest-first is honest, and hasMore blocks the totality reading", () => {
+    expect(activityTakeaway(3, 0, false)).toBe(
+      "3 custodied action(s) loaded for this account, newest first.",
+    );
+    expect(activityTakeaway(3, 0, true)).toBe(
+      "3 custodied action(s) loaded for this account, newest first · more exist behind the cursor.",
+    );
+  });
+
+  test("a mixed list splits the claim: timed rows newest first, the untimed tail disclaimed", () => {
+    expect(activityTakeaway(4, 2, false)).toBe(
+      "6 custodied action(s) loaded for this account: 4 with custodied header time, newest " +
+        "first; 2 untimed row(s) follow, in an order that is not chronology.",
+    );
+  });
+
+  test("no timed rows: NO newest-first claim survives anywhere in the sentence", () => {
+    const line = activityTakeaway(0, 2, false);
+    expect(line).toBe(
+      "2 custodied action(s) loaded for this account, none with a custodied header time — " +
+        "their order is not chronology.",
+    );
+    expect(line).not.toContain("newest first");
+  });
 });

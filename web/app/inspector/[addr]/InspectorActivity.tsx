@@ -13,6 +13,7 @@ import { AddressMono } from "@/components/AddressMono";
 import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal } from "@/lib/format";
 import { txExplorerUrl, type ChainEvent } from "@/lib/inspector-data";
 import { feedAmount } from "@/lib/feed-view";
+import { activityTakeaway } from "@/lib/inspector-lines";
 import styles from "../inspector.module.css";
 
 export interface InspectorActivityProps {
@@ -106,11 +107,17 @@ export function InspectorActivity({ events, loading, error, hasMore, onLoadMore 
       <div className={styles.sectionHead}>Address activity · durable chain actions (this account)</div>
 
       {/* W-3L: the section takeaway — the LOADED count, never a totality
-          claim while more rows exist behind the cursor. */}
+          claim while more rows exist behind the cursor, and (r74) "newest
+          first" claimed ONLY over rows carrying a custodied header time:
+          the untimed tail's order is not chronology, and the sentence says
+          so instead of licensing a false reading. */}
       {events.length > 0 && (
         <p className={styles.historyTakeaway} data-testid="activity-takeaway">
-          {String(events.length)} custodied action(s) loaded for this account, newest first
-          {hasMore ? " · more exist behind the cursor" : ""}.
+          {activityTakeaway(
+            events.filter((event) => event.block_time !== null).length,
+            events.filter((event) => event.block_time === null).length,
+            hasMore,
+          )}
         </p>
       )}
 

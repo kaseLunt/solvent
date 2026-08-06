@@ -7,6 +7,32 @@
 import type { AddressLookup } from "@solvent/client";
 
 /**
+ * The activity section's takeaway (r74): the feed orders CUSTODIED header
+ * times newest-first, but null-time rows form a deterministic untimed TAIL
+ * whose internal order is explicitly not chronology — so "newest first" may
+ * only be claimed over the rows that carry a time. An untimed row read as
+ * "older" is a wrong answer; this sentence refuses to license that reading.
+ */
+export function activityTakeaway(timed: number, untimed: number, hasMore: boolean): string {
+  const total = timed + untimed;
+  const more = hasMore ? " · more exist behind the cursor" : "";
+  if (untimed === 0) {
+    return `${String(total)} custodied action(s) loaded for this account, newest first${more}.`;
+  }
+  if (timed === 0) {
+    return (
+      `${String(total)} custodied action(s) loaded for this account, none with a custodied ` +
+      `header time — their order is not chronology${more}.`
+    );
+  }
+  return (
+    `${String(total)} custodied action(s) loaded for this account: ${String(timed)} with ` +
+    `custodied header time, newest first; ${String(untimed)} untimed row(s) follow, in an ` +
+    `order that is not chronology${more}.`
+  );
+}
+
+/**
  * The lookup's outcome sentence, hoisted to the surface head (inventory:
  * "the head shows an address with no verdict beside it" was the defect).
  * The FLOOR qualifier rides the found arm by law — a floor stated only in a
