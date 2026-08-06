@@ -57,15 +57,37 @@ const MANIFEST = [
  * and must never match). A committed file these claim that the manifest does
  * not carry is an orphan — a generator-owned fixture nothing regenerates.
  */
-const OWNED = [/^book([.-].*)?\.json$/, /^positions-.*\.json$/, /^batch-superseded\.json$/];
+const OWNED = [/^book([.-].*)?\.json$/, /^positions-.*\.json$/, /^batch-.*\.json$/];
 
 /**
- * Parameterized over the manifest so the rename scenario is provable
- * synthetically (r69): the law's teeth must be demonstrable against an
+ * Names this generator RETIRED — renamed or dropped outputs whose committed
+ * files no longer regenerate. APPEND-ONLY: an out-of-family rename moves the
+ * old name here in the same diff, and the name never leaves. r70's escape
+ * was a singleton pattern replaced wholesale on rename, silently discarding
+ * ownership of the stale old filename; the patterns above are therefore
+ * FAMILIES (a rename inside the book, positions- or batch- families keeps
+ * the old name owned automatically); this set covers departures from one. The
+ * one move neither catches — deleting a family pattern outright while its
+ * files sit committed — is a visible one-line deletion in this file, which
+ * is where review lives.
+ */
+const RETIRED: string[] = [];
+
+/**
+ * Parameterized over the manifest so rename scenarios are provable
+ * synthetically (r69/r70): the law's teeth must be demonstrable against an
  * ALTERNATE manifest, not just the committed one.
  */
-const orphansOf = (listing: string[], manifest: string[] = MANIFEST): string[] =>
-  listing.filter((name) => OWNED.some((pattern) => pattern.test(name)) && !manifest.includes(name));
+const orphansOf = (
+  listing: string[],
+  manifest: string[] = MANIFEST,
+  retired: string[] = RETIRED,
+): string[] =>
+  listing.filter(
+    (name) =>
+      (OWNED.some((pattern) => pattern.test(name)) || retired.includes(name)) &&
+      !manifest.includes(name),
+  );
 
 test("a fresh generator run agrees with every committed output — the corpus is not stale", () => {
   const scratch = mkdtempSync(path.join(os.tmpdir(), "book-fixtures-"));
@@ -123,6 +145,31 @@ test("r69 — the ownership predicate covers the WHOLE manifest, bare book.json 
   //    NAME the leftover under the alternate manifest.
   const renamed = MANIFEST.map((name) => (name === "book.json" ? "book-current.json" : name));
   expect(orphansOf(["book.json", ...renamed], renamed)).toEqual(["book.json"]);
+});
+
+test("r70 — a SINGLETON rename cannot discard ownership of the stale old name", () => {
+  // r70's escape, replayed exactly: batch-superseded.json honestly renamed to
+  // batch-current.json. Under an exact-name pattern the editor would replace
+  // the pattern too, and the stale committed batch-superseded.json would
+  // match nothing — manifest fully covered, orphansOf [], wrong demo data
+  // green. The batch pattern is now a FAMILY, so the old name stays owned
+  // and the leftover is reported by name under the alternate manifest.
+  const renamed = MANIFEST.map((name) =>
+    name === "batch-superseded.json" ? "batch-current.json" : name,
+  );
+  expect(orphansOf(["batch-superseded.json", ...renamed], renamed)).toEqual([
+    "batch-superseded.json",
+  ]);
+  // The tombstone arm, through the REAL function (no local re-implementation
+  // that could drift from the law): a name that departed its family entirely
+  // stays owned through a retired set, proven against a synthetic member —
+  // and without the tombstone the same leftover escapes, which is exactly
+  // what RETIRED being append-only exists to prevent.
+  const listing = ["envelope-legacy.json", ...MANIFEST];
+  expect(orphansOf(listing, [...MANIFEST], ["envelope-legacy.json"])).toEqual([
+    "envelope-legacy.json",
+  ]);
+  expect(orphansOf(listing, [...MANIFEST], [])).toEqual([]);
 });
 
 test("the copies really are the client package's contract-validated bodies", () => {
