@@ -540,12 +540,20 @@ test("VIEW 4: an unmoved book draws NOTHING — no chart, no population sentence
   await expect(aave.getByTestId("dumbbell-census")).toHaveCount(0);
 });
 
-/** r88 doctoring shape: only the fields the negatives below mutate. */
+/** r88/r89/view-5 doctoring shape: only the fields the negatives below mutate. */
 interface DoctoredRunBook {
   engines: {
     engine: string;
-    before: { hf_histogram: { wad_scale: string; refused_count: number } };
-    after: { hf_histogram: { wad_scale: string; refused_count: number } };
+    before: {
+      accounts: number;
+      hf_histogram: { wad_scale: string; refused_count: number };
+      collateral_by_asset: { symbol: string | null; unpriced: boolean }[];
+    };
+    after: {
+      accounts: number;
+      hf_histogram: { wad_scale: string; refused_count: number };
+      collateral_by_asset: { symbol: string | null; unpriced: boolean }[];
+    };
   }[];
 }
 
@@ -598,4 +606,116 @@ test("r88: a ZERO-MOVER run still surfaces a census contradiction on the page", 
   // replaces the claim, it does not decorate it.
   await expect(aave.getByTestId("runbook-dumbbells")).toHaveCount(0);
   await expect(aave.getByTestId("dumbbell-census")).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------------------
+// VIEW 5 — the Debt Manager flip ranking (views spec view 5 + critic Finding 2)
+
+test("VIEW 5: the four-cell partition, its named aside, and the sized flip bars render on the DM arm", async ({
+  page,
+}) => {
+  await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
+
+  const dm = page.locator('[data-testid="runbook-movers"][data-engine="debt_manager"]');
+
+  // The takeaway names the gross, the window, and the total it may NOT claim.
+  const takeaway = dm.getByTestId("flip-takeaway");
+  await expect(takeaway).toBeVisible();
+  await expect(takeaway).toHaveText(
+    "This scenario flips 1 account to liquidation-eligible — all 1 are drawn below, ranked by " +
+      "flipped debt. No total of flipped debt is served, so none is claimed.",
+  );
+
+  // The FOUR cells partition the run's 3 accounts exactly; the legend carries
+  // every count including the computed zeros the strip cannot show as area.
+  const legend = dm.getByTestId("flip-legend");
+  await expect(legend).toBeVisible();
+  await expect(legend).toHaveText(
+    "1 flipped to eligible · 0 flipped back to healthy · 1 stayed eligible · " +
+      "1 stayed not eligible = 3 accounts",
+  );
+  await expect(
+    dm.locator('[data-testid="flip-cell"][data-cell="flipsToEligible"]'),
+  ).toHaveAttribute("data-count", "1");
+
+  // Finding 2's aside: refused rides BESIDE the partition, never as a cell.
+  const aside = dm.getByTestId("flip-refused-aside");
+  await expect(aside).toBeVisible();
+  await expect(aside).toContainText("Beside the partition, not inside it: 1 refused row");
+  await expect(aside).toContainText("belong to no cell and are never zero");
+
+  // ONE SOURCE: one bar per table row, carrying the exact money register.
+  await expect(dm.getByTestId("flip-bar-row")).toHaveCount(1);
+  await expect(dm.getByTestId("runbook-mover")).toHaveCount(1);
+  await expect(dm.getByTestId("flip-money")).toHaveText("$1,500");
+
+  // The method line names the verdict source and the disclosure law.
+  await expect(dm.getByTestId("flip-method")).toContainText("became_eligible");
+
+  // VOCABULARY LAW: Aave flips nothing — no partition, no flip bars there.
+  const aave = page.locator('[data-testid="runbook-movers"][data-engine="aave_v3_etherfi"]');
+  await expect(aave.getByTestId("flip-strip")).toHaveCount(0);
+  await expect(aave.getByTestId("flip-takeaway")).toHaveCount(0);
+});
+
+test("VIEW 5: a partition the served counts contradict is REFUSED visibly — no strip, no bars", async ({
+  page,
+}) => {
+  // DERIVED NEGATIVE: the sides disagree on the account count, so the
+  // partition has no honest total to close on.
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook;
+  for (const engine of body.engines) {
+    if (engine.engine !== "debt_manager") continue;
+    engine.after.accounts = 4;
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const dm = page.locator('[data-testid="runbook-movers"][data-engine="debt_manager"]');
+  const refused = dm.getByTestId("flip-refused");
+  await expect(refused).toBeVisible();
+  await expect(refused).toContainText("PARTITION CONTRADICTION");
+  await expect(dm.getByTestId("flip-strip")).toHaveCount(0);
+  await expect(dm.getByTestId("flip-bars")).toHaveCount(0);
+  // The LEDGER table stays — served rows render; only the derived claim is
+  // refused.
+  await expect(dm.getByTestId("runbook-mover")).toHaveCount(1);
+});
+
+test("r89: a CONTRADICTORY collateral row never renders its money, and the sum weld fires", async ({
+  page,
+}) => {
+  // DERIVED NEGATIVE: the DM before side's weETH keeps its served $4,000
+  // value AND gains the no-price-witness flag — a row contradicting itself.
+  // Excluding it from the sum also breaks reconciliation with the served
+  // total, so BOTH r89 guards must fire on one honest page.
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook;
+  for (const engine of body.engines) {
+    if (engine.engine !== "debt_manager") continue;
+    for (const entry of engine.before.collateral_by_asset) {
+      if (entry.symbol === "weETH") entry.unpriced = true;
+    }
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const dm = page.locator('[data-testid="runbook-collateral"][data-engine="debt_manager"]');
+  const before = dm.locator('[data-testid="runbook-collateral-before"]');
+
+  // The row sits in the refusal register with its disclosure named — the
+  // disputed figure is NOT read as money anywhere on this side.
+  const row = before.locator('[data-testid="runbook-collateral-row"][data-disclosure="contradictory"]');
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("CONTRADICTORY");
+  await expect(row).not.toContainText("$4,000");
+  await expect(before).not.toContainText("$4,000");
+
+  // The reading line refuses the sum claim instead of reading it out.
+  const reading = before.getByTestId("runbook-collateral-reading-before");
+  await expect(reading).toContainText("COLLATERAL CONTRADICTION");
+  await expect(reading).toContainText("does not reconcile");
+  await expect(reading).toContainText("CONTRADICTORY");
+
+  // The AFTER side is untouched and still reconciles — the weld is per side.
+  await expect(dm.getByTestId("runbook-collateral-reading-after")).toContainText(
+    "assets sum to",
+  );
 });

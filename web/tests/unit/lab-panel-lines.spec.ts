@@ -592,3 +592,13 @@ test("appliedShocksSummary: the three modelling disclosures are counted, never d
   );
   expect(appliedShocksDetailsSummary(3)).toContain("applied shocks: 3 named");
 });
+
+test("r89: collateralGroupAnswer names a CONTRADICTORY row and withholds the all-counted blessing", () => {
+  // DERIVED NEGATIVE: a value AND the no-price-witness flag on one row. The
+  // positive claim ("every holding carries a counted value") must not stand
+  // over a side whose own rows dispute it.
+  const line = collateralGroupAnswer(sides([{ ...COUNTED, unpriced: true }], [COUNTED]));
+  expect(line).toContain("CONTRADICTORY");
+  expect(line).toContain("counted in no total here");
+  expect(line).not.toContain("Every holding on both sides carries a counted value");
+});

@@ -332,13 +332,18 @@ export function moversDisclosure(engine: LabRunBookEngine): string {
  *   unpriced     value_usd is null AND no price witness describes the balance
  *   not-counted  value_usd is null because the engine counts none of it
  */
-export type CollateralDisclosure = "counted" | "unpriced" | "not-counted";
+export type CollateralDisclosure = "counted" | "unpriced" | "not-counted" | "contradictory";
 
 export function collateralDisclosure(
   entry: RunBookAggregate["collateral_by_asset"][number],
 ): CollateralDisclosure {
   if (entry.value_usd !== null) {
-    return "counted";
+    // r89: `unpriced: true` asserts NO price witness exists and the value is
+    // OUTSIDE the total — beside a served dollar figure that is a row
+    // contradicting itself, and blessing it as counted was how a disputed
+    // number reached the page as money. It is its own disclosure, rendered in
+    // the refusal register and summed into nothing.
+    return entry.unpriced ? "contradictory" : "counted";
   }
   return entry.unpriced ? "unpriced" : "not-counted";
 }
@@ -365,18 +370,52 @@ export function collateralReadingLine(
   side: "before" | "after",
 ): string {
   const entries = aggregate.collateral_by_asset;
-  const counted = entries.filter((entry) => entry.value_usd !== null);
   const uncounted = entries.filter((entry) => entry.value_usd === null);
   const unpriced = uncounted.filter((entry) => entry.unpriced);
 
+  // THE SUM WELD (r89). The sentence below repeats the contract's own
+  // reconciliation claim — "the counted entries sum exactly to this side's
+  // total" — so the arithmetic is performed BEFORE the claim is made, in
+  // bigint over the exact wire strings. A contradictory row (a value beside
+  // the no-price-witness flag) is inside neither the count nor the sum.
+  let countedCount = 0;
+  let countedSum = 0n;
+  let contradictoryCount = 0;
+  for (const entry of entries) {
+    if (entry.value_usd === null) continue;
+    if (entry.unpriced) {
+      contradictoryCount++;
+      continue;
+    }
+    countedCount++;
+    countedSum += BigInt(entry.value_usd);
+  }
+
+  const contradictoryClause =
+    contradictoryCount === 0
+      ? ""
+      : ` ${String(contradictoryCount)} ${contradictoryCount === 1 ? "entry carries" : "entries carry"} ` +
+        `BOTH a dollar value and the no-price-witness flag — CONTRADICTORY, listed without a ` +
+        `value, outside every sum here.`;
+
   const total = labUsd(aggregate.total_collateral_usd, usdDecimals);
+  if (countedSum !== BigInt(aggregate.total_collateral_usd)) {
+    return (
+      `COLLATERAL CONTRADICTION: the ${String(countedCount)} counted ` +
+      `${countedCount === 1 ? "entry sums" : "entries sum"} to ` +
+      `${labUsd(countedSum.toString(), usdDecimals)} but the engine claims ${total} ${side} ` +
+      `the shock — the decomposition does not reconcile, so no sum claim is made.` +
+      contradictoryClause
+    );
+  }
+
   const head =
     `What this shows: which assets make up this engine's collateral ${side} the shock. ` +
-    `${String(counted.length)} ${counted.length === 1 ? "asset sums" : "assets sum"} to ${total}, ` +
+    `${String(countedCount)} ${countedCount === 1 ? "asset sums" : "assets sum"} to ${total}, ` +
     `this engine's own USD at ${String(usdDecimals)} decimals, never added to another engine's.`;
 
   if (uncounted.length === 0) {
-    return head;
+    return `${head}${contradictoryClause}`;
   }
   const unpricedClause =
     unpriced.length === 0
@@ -384,6 +423,6 @@ export function collateralReadingLine(
       : ` ${String(unpriced.length)} of those ${unpriced.length === 1 ? "carries" : "carry"} no price at all, so ${unpriced.length === 1 ? "its worth is" : "their worth is"} UNKNOWABLE rather than zero.`;
   return (
     `${head} ${String(uncounted.length)} further ${uncounted.length === 1 ? "holding is" : "holdings are"} ` +
-    `listed with NO value, and ${uncounted.length === 1 ? "it is" : "they are"} outside that total.${unpricedClause}`
+    `listed with NO value, and ${uncounted.length === 1 ? "it is" : "they are"} outside that total.${unpricedClause}${contradictoryClause}`
   );
 }

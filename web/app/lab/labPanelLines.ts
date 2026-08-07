@@ -555,10 +555,23 @@ export function collateralGroupAnswer(engine: {
     engine.after.collateral_by_asset,
     (e) => e.value_usd === null && e.unpriced,
   );
+  // r89: a value beside the no-price-witness flag is a row contradicting
+  // itself. It blocks the all-counted blessing and is named on the page.
+  const contradictory =
+    count(engine.before.collateral_by_asset, (e) => e.value_usd !== null && e.unpriced) +
+    count(engine.after.collateral_by_asset, (e) => e.value_usd !== null && e.unpriced);
   const uncounted = uncountedBefore + uncountedAfter;
   const unpriced = unpricedBefore + unpricedAfter;
   const notCounted = uncounted - unpriced;
+  const contradictoryClause =
+    contradictory === 0
+      ? ""
+      : ` ${String(contradictory)} ${contradictory === 1 ? "row carries" : "rows carry"} BOTH a ` +
+        `dollar value and the no-price-witness flag — CONTRADICTORY, counted in no total here.`;
   if (uncounted === 0) {
+    if (contradictory > 0) {
+      return `Collateral by asset, before and after the shock.${contradictoryClause}`;
+    }
     return (
       "Collateral by asset, before and after the shock. Every holding on both sides carries a " +
       "counted value."
@@ -581,7 +594,7 @@ export function collateralGroupAnswer(engine: {
   return (
     `Collateral by asset, before and after the shock. ${String(uncounted)} ` +
     `${uncounted === 1 ? "holding is" : "holdings are"} listed with no value across the two ` +
-    `sides. ${clauses.join(" ")} Neither kind sits inside a total on this panel.`
+    `sides. ${clauses.join(" ")} Neither kind sits inside a total on this panel.${contradictoryClause}`
   );
 }
 

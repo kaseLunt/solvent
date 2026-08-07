@@ -786,14 +786,17 @@ const NOT_COUNTED = {
   note: "NOT COUNTED AS COLLATERAL",
 } as const;
 
-test("the three disclosures are recovered from the two fields that carry them", () => {
+test("the disclosures are recovered from the two fields that carry them", () => {
   expect(collateralDisclosure(COUNTED)).toBe("counted");
   expect(collateralDisclosure(UNPRICED)).toBe("unpriced");
   expect(collateralDisclosure(NOT_COUNTED)).toBe("not-counted");
-  // A value present outranks the flag: `unpriced` is only meaningful once the
-  // engine counted nothing, and a priced-and-counted row is COUNTED whatever
-  // else the flag says.
-  expect(collateralDisclosure({ ...COUNTED, unpriced: true })).toBe("counted");
+  // r89 RE-LAW. The old law here read "a value present outranks the flag" —
+  // and that blessing is exactly how a wire contradiction reached the page as
+  // money. The contract says `unpriced: true` means NO price witness exists
+  // and the value is OUTSIDE the total; a row carrying both a dollar figure
+  // and that flag contradicts itself, and a self-contradictory row is never
+  // counted and never renders its number.
+  expect(collateralDisclosure({ ...COUNTED, unpriced: true })).toBe("contradictory");
 });
 
 test("ONE ASSET, THREE DISCLOSURES, THREE DISTINCT KEYS — the collision the live book serves", () => {
@@ -816,4 +819,55 @@ test("ONE ASSET, THREE DISCLOSURES, THREE DISTINCT KEYS — the collision the li
   expect(collateralRowKey(COUNTED)).not.toBe(
     collateralRowKey({ ...COUNTED, asset: UNPRICED.asset }),
   );
+});
+
+// ---------------------------------------------------------------------------
+// r89 — the SUM WELD and the contradictory-row register.
+
+test("r89: the reading line VERIFIES the sum it repeats — a mismatch is a contradiction, not a claim", () => {
+  // DERIVED NEGATIVE: one counted entry of $8,000 under a claimed $9,000
+  // total. The old sentence would have read the claim out as if exact.
+  const line = collateralReadingLine(collateralOf([COUNTED], "900000000000"), 8, "before");
+  expect(line).toContain("COLLATERAL CONTRADICTION");
+  expect(line).toContain("$8,000");
+  expect(line).toContain("$9,000");
+  expect(line).toContain("does not reconcile");
+  expect(line).not.toContain("asset sums to");
+});
+
+test("r89: an EMPTY itemization under a nonzero total is a contradiction, never an exact-looking zero", () => {
+  const line = collateralReadingLine(collateralOf([], "800000000000"), 8, "before");
+  expect(line).toContain("COLLATERAL CONTRADICTION");
+  expect(line).toContain("$0");
+  expect(line).toContain("$8,000");
+});
+
+test("r89: a contradictory row is OUTSIDE the sum and NAMED beside it", () => {
+  // The counted entry alone reconciles with the total; the contradictory row
+  // (value + no-price-witness flag) is excluded from the arithmetic and the
+  // sentence says so.
+  const contradictory = {
+    ...COUNTED,
+    asset: "0x000000000000000000000000000000000000CAFE",
+    symbol: null,
+    value_usd: "12300000000",
+    unpriced: true,
+    note: "CONTRADICTORY",
+  };
+  const line = collateralReadingLine(
+    collateralOf([COUNTED, contradictory], "800000000000"),
+    8,
+    "before",
+  );
+  expect(line).toContain("1 asset sums to $8,000");
+  expect(line).toContain("CONTRADICTORY");
+  expect(line).toContain("outside every sum here");
+  // The disputed figure itself is never read out as money.
+  expect(line).not.toContain("$123");
+});
+
+test("r89: the honest fixture side still reads exactly as before — the weld is silent when the sum holds", () => {
+  const line = collateralReadingLine(collateralOf([COUNTED], "800000000000"), 8, "before");
+  expect(line).toContain("1 asset sums to $8,000");
+  expect(line).not.toContain("CONTRADICTION");
 });

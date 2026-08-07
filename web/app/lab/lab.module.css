@@ -873,6 +873,30 @@
   color: var(--crit);
 }
 
+/* VIEW 5 (flip ranking) — the strip's four cells and the flip bars. The two
+   flip directions carry the verdict colors; the two stay-cells are ground. */
+.flipCellEligible {
+  fill: var(--crit);
+}
+
+.flipCellBack {
+  fill: var(--accent);
+}
+
+.flipCellStayedElig {
+  fill: var(--crit);
+  opacity: 0.35;
+}
+
+.flipCellStayedOut {
+  fill: var(--line);
+}
+
+.flipBar {
+  fill: var(--crit);
+  opacity: 0.85;
+}
+
 .histAside {
   display: flex;
   gap: var(--sp-4);

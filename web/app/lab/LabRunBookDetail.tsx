@@ -37,6 +37,14 @@ import {
 } from "@/lib/book-copy";
 import { labUsd } from "./frontierView";
 import {
+  FLIP_METHOD,
+  flipCellLabel,
+  flipRanking,
+  flipRefusedAsideLine,
+  flipTakeaway,
+  flipUnbarrableLine,
+} from "./flipRanking";
+import {
   DUMBBELL_METHOD,
   dumbbellCensusLine,
   dumbbellPosition,
@@ -81,6 +89,14 @@ const DUMB_ROW_H = 26;
 const DUMB_AXIS_H = 26;
 const DUMB_PAD = 8;
 const DUMB_R = 4;
+
+// VIEW 5 (flip ranking) — authored geometry, RENDERED CSS px (LAW-3).
+const FLIP_STRIP_W = 380;
+const FLIP_STRIP_H = 12;
+const FLIP_LABEL_W = 110;
+const FLIP_BAR_MAX = 240;
+const FLIP_MONEY_W = 130;
+const FLIP_ROW_H = 20;
 
 // ---------------------------------------------------------------------------
 // B1 — the BEFORE/AFTER histogram pair
@@ -535,6 +551,181 @@ function LabMoverDumbbells({ engine }: { engine: LabRunBookEngine }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// B2c — VIEW 5: the Debt Manager flip ranking (DM arm only)
+//
+// The four-cell strip is the run's OWN partition — algebra on served counts,
+// closing on before.accounts exactly — with the refused rows as a NAMED ASIDE
+// beside it (critic Finding 2: the wire sums two populations under
+// refused_count, so a fifth cell would double-count). The bars are the served
+// largest-debt window onto the flips; nothing sums them, and the takeaway
+// says why. The movers table below stays this view's LEDGER.
+
+function LabFlipRanking({ engine }: { engine: LabRunBookEngine }) {
+  const model = flipRanking(engine);
+  if (model.kind === "not-dm" || model.kind === "none") return null;
+  if (model.kind === "refused") {
+    return (
+      <div className={styles.stateSlot} data-testid="dumbbell-state">
+        <span className={styles.dumbbellContradiction} data-testid="flip-refused">
+          {model.reason}
+        </span>
+      </div>
+    );
+  }
+
+  const { cells } = model;
+  const shown = model.bars.length + model.unbarrable.length;
+  const segments = [
+    { key: "flipsToEligible", count: cells.flipsToEligible, cls: styles.flipCellEligible },
+    { key: "flipsToHealthy", count: cells.flipsToHealthy, cls: styles.flipCellBack },
+    { key: "stayedEligible", count: cells.stayedEligible, cls: styles.flipCellStayedElig },
+    { key: "stayedNotEligible", count: cells.stayedNotEligible, cls: styles.flipCellStayedOut },
+  ] as const;
+  // Cumulative whole-px edges (LAW-3): the strip closes to exactly its
+  // authored width, with no rounding residue invented or lost.
+  let runningCount = 0;
+  const placed = segments.map((segment) => {
+    const x0 = Math.round((runningCount / cells.total) * FLIP_STRIP_W);
+    runningCount += segment.count;
+    const x1 = Math.round((runningCount / cells.total) * FLIP_STRIP_W);
+    return { ...segment, x: x0, width: x1 - x0 };
+  });
+  const maxDebt = BigInt(model.maxDebtUsd);
+  // Whole-px bar widths by integer division — the ONLY rounding is the floor,
+  // and a nonzero flip too small for a pixel keeps a presence dot (CX-6).
+  const barWidth = (debtUsd: string) =>
+    maxDebt === 0n ? 0 : Number((BigInt(debtUsd) * BigInt(FLIP_BAR_MAX)) / maxDebt);
+  const barsWidth = FLIP_LABEL_W + FLIP_BAR_MAX + FLIP_MONEY_W + 24;
+  const barsHeight = model.bars.length * FLIP_ROW_H + 8;
+
+  return (
+    <div data-testid="runbook-flip-block">
+      {/* ---- SLOT 3 (supplement): the flip story in one sentence, with the
+              unserved total NAMED rather than implied. ---- */}
+      <p className={styles.answerLine} data-testid="flip-takeaway">
+        {flipTakeaway(model, shown)}
+      </p>
+      {/* ---- SLOT 2: STATE — the partition, its legend, and every aside,
+              BEFORE the bars (R6/R7). ---- */}
+      <div className={styles.stateSlot} data-testid="flip-state">
+        {/* LAW-3: the strip is authored geometry and scrolls in its own
+            frame below its width — the PAGE never scrolls sideways for it. */}
+        <div className={styles.chartScroll} data-testid="flip-strip-frame">
+        <svg
+          width={FLIP_STRIP_W}
+          height={FLIP_STRIP_H}
+          viewBox={`0 0 ${String(FLIP_STRIP_W)} ${String(FLIP_STRIP_H)}`}
+          role="img"
+          aria-label={`flip partition of ${String(cells.total)} accounts on ${engine.engine}`}
+          style={{ display: "block" }}
+          data-testid="flip-strip"
+        >
+          {placed.map(
+            (segment) =>
+              segment.width > 0 && (
+                <rect
+                  key={segment.key}
+                  className={segment.cls}
+                  data-testid="flip-cell"
+                  data-cell={segment.key}
+                  data-count={String(segment.count)}
+                  x={segment.x}
+                  y={0}
+                  width={segment.width}
+                  height={FLIP_STRIP_H}
+                />
+              ),
+          )}
+        </svg>
+        </div>
+        <span data-testid="flip-legend">
+          {segments
+            .map((segment) => `${String(segment.count)} ${flipCellLabel(segment.key)}`)
+            .join(" · ")}{" "}
+          = {String(cells.total)} accounts
+        </span>
+        <span data-testid="flip-refused-aside">{flipRefusedAsideLine(model.refusedAside)}</span>
+        {model.unbarrable.length > 0 && (
+          <span data-testid="flip-unbarrable">{flipUnbarrableLine(model.unbarrable.length)}</span>
+        )}
+        {model.rankingContradiction !== null && (
+          <span className={styles.dumbbellContradiction} data-testid="flip-ranking-contradiction">
+            {model.rankingContradiction}
+          </span>
+        )}
+      </div>
+      {model.bars.length > 0 && (
+        <div className={styles.chartScroll} data-testid="flip-frame">
+          <svg
+            width={barsWidth}
+            height={barsHeight}
+            viewBox={`0 0 ${String(barsWidth)} ${String(barsHeight)}`}
+            role="img"
+            aria-label={`flipped debt per shown account on ${engine.engine}, largest first`}
+            style={{ display: "block" }}
+            data-testid="flip-bars"
+          >
+            {model.bars.map((bar, index) => {
+              const y = index * FLIP_ROW_H + 4;
+              const width = barWidth(bar.debtUsd);
+              const subPixel = BigInt(bar.debtUsd) > 0n && width < PRESENCE_MIN;
+              return (
+                <g key={bar.account} data-testid="flip-bar-row" data-account={bar.account}>
+                  <text
+                    className={styles.histLabel}
+                    x={FLIP_LABEL_W}
+                    y={y + 10}
+                    textAnchor="end"
+                  >
+                    {truncateAddress(bar.account)}
+                  </text>
+                  {width > 0 && (
+                    <rect
+                      className={styles.flipBar}
+                      data-testid="flip-bar"
+                      x={FLIP_LABEL_W + 6}
+                      y={y + 2}
+                      width={width}
+                      height={FLIP_ROW_H - 8}
+                    />
+                  )}
+                  {subPixel && (
+                    <circle
+                      className={styles.histPresence}
+                      data-testid="flip-presence"
+                      cx={FLIP_LABEL_W + 6 + PRESENCE_R}
+                      cy={y + 2 + (FLIP_ROW_H - 8) / 2}
+                      r={PRESENCE_R}
+                    >
+                      <title>
+                        a flipped debt too small to draw at one pixel on this scale — the exact
+                        figure is beside the bar and in the table below
+                      </title>
+                    </circle>
+                  )}
+                  <text
+                    className={styles.histCount}
+                    x={FLIP_LABEL_W + 12 + FLIP_BAR_MAX}
+                    y={y + 10}
+                    data-testid="flip-money"
+                  >
+                    {labUsd(bar.debtUsd, engine.usd_decimals)}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      )}
+      {/* ---- SLOT 6: METHOD for the bars. ---- */}
+      <p className={styles.methodLine} data-testid="flip-method">
+        {FLIP_METHOD}
+      </p>
+    </div>
+  );
+}
+
 export function LabRunBookMovers({ engine }: { engine: LabRunBookEngine }) {
   const isWadEngine = engine.before.hf_histogram.comparator === "hf_wad";
   return (
@@ -565,6 +756,9 @@ export function LabRunBookMovers({ engine }: { engine: LabRunBookEngine }) {
       {/* ---- SLOT 4: VISUAL — VIEW 4's dumbbells; the table below stays as
               this chart's LEDGER, exact and unrounded. ---- */}
       {isWadEngine && <LabMoverDumbbells engine={engine} />}
+      {/* ---- SLOT 4: VISUAL — VIEW 5's partition strip + flip bars on the
+              Debt Manager arm; the table below stays the LEDGER. ---- */}
+      {!isWadEngine && <LabFlipRanking engine={engine} />}
       {engine.movers.length > 0 && (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -644,7 +838,9 @@ function CollateralSide({
             </tr>
           </thead>
           <tbody>
-            {aggregate.collateral_by_asset.map((entry) => (
+            {aggregate.collateral_by_asset.map((entry) => {
+              const disclosure = collateralDisclosure(entry);
+              return (
               <tr
                 // A KEY IS AN IDENTITY CLAIM. The server itemizes by asset AND
                 // disclosure, so one asset legitimately appears more than once
@@ -658,7 +854,7 @@ function CollateralSide({
                 // The row states which of the three disclosures it carries, in
                 // the wire's own vocabulary — the identity the key is built on,
                 // readable rather than implied by two separate attributes.
-                data-disclosure={collateralDisclosure(entry)}
+                data-disclosure={disclosure}
               >
                 <td className={styles.mono} title={entry.asset}>
                   {/* The symbol is decoration over an address that is already
@@ -670,22 +866,30 @@ function CollateralSide({
                   {renderNullableDecimal(entry.amount, { decimals: entry.decimals })}
                 </td>
                 <td className={styles.num}>
-                  {entry.value_usd === null ? (
+                  {disclosure === "counted" && entry.value_usd !== null ? (
+                    labUsd(entry.value_usd, usdDecimals)
+                  ) : (
                     // THE REFUSAL REGISTER. A balance the engine counted no
-                    // value for renders as a named absence, never as $0.
+                    // value for renders as a named absence, never as $0 — and
+                    // a CONTRADICTORY row (r89: a served value beside the
+                    // no-price-witness flag) renders here too, because a
+                    // number the row itself disputes is never read as money.
                     <span
                       className={styles.unpricedTag}
                       data-testid="runbook-collateral-unpriced"
                       title={entry.note}
                     >
-                      {entry.unpriced ? "UNPRICED · no price witness" : "NOT COUNTED"}
+                      {disclosure === "unpriced"
+                        ? "UNPRICED · no price witness"
+                        : disclosure === "not-counted"
+                          ? "NOT COUNTED"
+                          : "CONTRADICTORY · value + no-price flag; not counted"}
                     </span>
-                  ) : (
-                    labUsd(entry.value_usd, usdDecimals)
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
