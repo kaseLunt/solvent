@@ -472,3 +472,64 @@ test("INS-B: the proof card leads with the LIVE-vs-PROOF disclaimer; safe rows a
   await expect(aaveCard.getByText("none unacked")).toBeVisible();
   await expect(aaveCard.getByText("Balances mark")).toBeVisible();
 });
+
+// ---------------------------------------------------------------------------
+// r77 — PROOF-CARD HAZARD PLACEMENT, mutation-backed (the r73 lesson on the
+// new card). Each documented single-purpose mutation of the committed body
+// asserts, with proof-forensics still CLOSED: the hazard is VISIBLE, it is
+// NOT a descendant of the fold, its safe twin is ABSENT from the fold's
+// attached DOM, and the counted summary recounts the remaining safe rows.
+// ---------------------------------------------------------------------------
+
+test("r77 — a never-swept DM renders its ∅ OUTSIDE the closed proof fold", async ({ page }) => {
+  const mutated = structuredClone(ADDRESS_FOUND);
+  const dm = mutated.positions.find((p) => p.engine === "debt_manager");
+  if (dm === undefined) throw new Error("fixture lost its DM position");
+  dm.as_of.sweep_block = 0;
+  await mockApi(page, mutated);
+  await page.goto(`/inspector/${FOUND_ADDR}`);
+
+  const card = page.getByTestId("position-debt_manager");
+  const fold = card.getByTestId("proof-forensics");
+  await expect(card.getByText("∅ never swept")).toBeVisible();
+  await expect(fold.getByText("∅ never swept")).toHaveCount(0);
+  await expect(fold.getByText("Sweep mark")).toHaveCount(0);
+  // 4 base + safe reorg (fixture: none unacked) + no swept row = 5.
+  await expect(fold.locator("summary")).toHaveText("5 proof row(s)");
+});
+
+test("r77 — a missing engine watermark renders OUTSIDE the closed proof fold", async ({
+  page,
+}) => {
+  const mutated = structuredClone(ADDRESS_FOUND);
+  mutated.batch.watermarks = mutated.batch.watermarks.filter(
+    (stamp) => stamp.engine !== "aave_v3_etherfi",
+  );
+  await mockApi(page, mutated);
+  await page.goto(`/inspector/${FOUND_ADDR}`);
+
+  const card = page.getByTestId("position-aave_v3_etherfi");
+  const fold = card.getByTestId("proof-forensics");
+  await expect(card.getByText("no watermark for this engine")).toBeVisible();
+  await expect(fold.getByText("no watermark for this engine")).toHaveCount(0);
+  await expect(fold.getByText("Reorg epochs")).toHaveCount(0);
+  // 4 base + aave n/a-sweeper row + no safe-reorg row = 5.
+  await expect(fold.locator("summary")).toHaveText("5 proof row(s)");
+});
+
+test("r77 — unacked epochs render OUTSIDE the closed proof fold", async ({ page }) => {
+  const mutated = structuredClone(ADDRESS_FOUND);
+  const stamp = mutated.batch.watermarks.find((w) => w.engine === "aave_v3_etherfi");
+  if (stamp === undefined) throw new Error("fixture lost its aave watermark");
+  stamp.max_epoch_at_compute = stamp.acked_epoch + 3;
+  await mockApi(page, mutated);
+  await page.goto(`/inspector/${FOUND_ADDR}`);
+
+  const card = page.getByTestId("position-aave_v3_etherfi");
+  const fold = card.getByTestId("proof-forensics");
+  await expect(card.getByText("3 unacked")).toBeVisible();
+  await expect(fold.getByText("3 unacked")).toHaveCount(0);
+  await expect(fold.getByText("none unacked")).toHaveCount(0);
+  // 4 base + aave n/a-sweeper row + no safe-reorg row = 5.
+  await expect(fold.locator("summary")).toHaveText("5 proof row(s)");
+});

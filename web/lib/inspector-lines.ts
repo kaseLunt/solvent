@@ -56,10 +56,17 @@ export function positionTakeaway(args: {
   if (args.engine === "debt_manager") {
     return `${args.verdict} (strict) · debt ${args.debt} vs maxBorrowLT ${args.maxBorrowLt}`;
   }
-  return (
-    `${args.verdict} · HF ${args.hfDisplay ?? "—"} · ${args.totalCollateral} collateral ` +
-    `against ${args.totalDebt} debt`
-  );
+  if (args.engine === "aave_v3_etherfi") {
+    return (
+      `${args.verdict} · HF ${args.hfDisplay ?? "—"} · ${args.totalCollateral} collateral ` +
+      `against ${args.totalDebt} debt`
+    );
+  }
+  // r77: `engine` is an unconstrained wire string. An engine outside the
+  // sealed set must NOT wear Aave's HF sentence (relabeling another
+  // comparator as HF under version skew) — the no-claim arm mirrors
+  // positionMethodLine's register and points at the rows.
+  return `${args.verdict} · figures in the rows below; this engine's comparator is not asserted here`;
 }
 
 /**

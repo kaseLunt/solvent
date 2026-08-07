@@ -128,6 +128,15 @@ test.describe("W-3L INS-B — positionTakeaway", () => {
     expect(line).not.toContain("collateral");
   });
 
+  test("r77 — an engine outside the sealed set never wears Aave's HF sentence", () => {
+    const line = positionTakeaway({ ...base, engine: "engine_x" });
+    expect(line).toBe(
+      "not liquidatable · figures in the rows below; this engine's comparator is not asserted here",
+    );
+    expect(line).not.toContain("HF");
+    expect(line).not.toContain("maxBorrowLT");
+  });
+
   test("methodLine: each engine its own comparator; outside the sealed set, no claim", () => {
     expect(positionMethodLine("aave_v3_etherfi", 8)).toBe(
       "comparator: the engine's own wad HF — liquidatable iff strictly below 1e18 · values in the engine's own 8-dec unit",
