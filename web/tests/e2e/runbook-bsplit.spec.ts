@@ -388,7 +388,9 @@ test("CLICKING a mover opens the Inspector's DYNAMIC route with that account on 
   // And it is the POSITION surface — the account the run measured, answered.
   // r74: found-specific, not merely rendered — the outcome line exists on
   // every ready arm.
-  await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
+  await expect(
+    page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
+  ).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------

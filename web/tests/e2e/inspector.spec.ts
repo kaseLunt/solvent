@@ -56,7 +56,9 @@ test("found: the position layout renders, with the stale price verdict visible",
   await mockApi(page, ADDRESS_FOUND);
   await page.goto(`/inspector/${FOUND_ADDR}`);
 
-  await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
+  await expect(
+    page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
+  ).toBeVisible();
   await expect(page.getByTestId("position-aave_v3_etherfi")).toBeVisible();
   await expect(page.getByTestId("position-debt_manager")).toBeVisible();
 
@@ -90,7 +92,9 @@ test("definitive none: the honest statement WITH lookup completeness shown", asy
 
   // W-3L: the definitive-negative SENTENCE lives in the head takeaway; the
   // box below carries the entitlement (the method) and the wire note.
-  await expect(page.getByTestId("inspector-outcome")).toContainText("no position in this batch");
+  await expect(
+    page.getByTestId("inspector-outcome").filter({ hasText: "no position in this batch" }),
+  ).toBeVisible();
   const negative = page.getByTestId("found-negative");
   await expect(negative).toBeVisible();
   await expect(negative).toContainText("complete");
@@ -354,7 +358,9 @@ test("landing: an invalid address is an inline refusal and never navigates", asy
   await page.getByLabel("address to inspect").fill(FOUND_ADDR);
   await page.getByRole("button", { name: "Inspect" }).click();
   await expect(page).toHaveURL(new RegExp(`/inspector/${FOUND_ADDR}$`));
-  await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
+  await expect(
+    page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
+  ).toBeVisible();
 });
 
 test("an invalid [addr] path segment is refused inline — nothing is looked up", async ({ page }) => {

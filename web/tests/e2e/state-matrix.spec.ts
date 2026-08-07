@@ -578,7 +578,9 @@ const MATRIX: Cell[] = [
       await mockInspector(page, ADDRESS_FOUND);
     },
     verify: async (page) => {
-      await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
+      await expect(
+    page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
+  ).toBeVisible();
       // No fake freshness: the stale verdict is its OWN visible state,
       // alongside the fresh one — never silently normalized.
       await expect(page.getByTestId("price-verdict").filter({ hasText: "stale" })).toBeVisible();
@@ -597,7 +599,9 @@ const MATRIX: Cell[] = [
       // The ONE state entitled to say "no position": a definitive negative
       // from a complete lookup — empty, but PROVEN empty. W-3L: the sentence
       // lives in the head takeaway; the box carries the entitlement.
-      await expect(page.getByTestId("inspector-outcome")).toContainText("no position");
+      await expect(
+        page.getByTestId("inspector-outcome").filter({ hasText: "no position" }),
+      ).toBeVisible();
       await expect(page.getByTestId("found-negative")).toBeVisible();
       await expect(page.getByTestId("found-negative")).toContainText("complete");
       await expect(page.getByTestId("found-unknowable")).toHaveCount(0);
@@ -672,7 +676,9 @@ const MATRIX: Cell[] = [
       await mockInspector(page, ADDRESS_FOUND);
     },
     verify: async (page) => {
-      await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
+      await expect(
+    page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
+  ).toBeVisible();
       await expectNoHorizontalOverflow(page);
     },
   },

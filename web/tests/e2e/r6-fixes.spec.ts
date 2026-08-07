@@ -509,7 +509,9 @@ test("(2) the Inspector: same law, its own envelope — a failed repair, then a 
   // r74: the outcome line renders for EVERY ready arm — the retained state
   // must be proven POSITIVE, or a repair that swapped the position for a
   // negative/unknowable would stay green.
-  await expect(page.getByTestId("inspector-outcome")).toContainText("outcome · found");
+  await expect(
+    page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
+  ).toBeVisible();
   await expect(page.getByTestId("position-aave_v3_etherfi")).toBeVisible();
 
   // THE FIRST BOUNDED RETRY LANDS, and the receipt it brings discharges the
