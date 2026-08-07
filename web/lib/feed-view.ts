@@ -19,9 +19,15 @@
 // Nothing in this module produces a "$" — that is asserted in
 // tests/unit/feed-view.spec.ts, not just promised here.
 
-import { EM_DASH, renderNullableDecimal } from "./format";
+import { EM_DASH, formatBlock, renderNullableDecimal } from "./format";
 import { groupDecimalString } from "./book-format";
-import { isKnownAmountUnit, type EventDisplayType, type FeedChainEvent } from "./feed-data";
+import {
+  isKnownAmountUnit,
+  splitUntimedTail,
+  type EventDisplayType,
+  type FeedChainEvent,
+  type FeedOrderMode,
+} from "./feed-data";
 
 export type FeedAmount =
   | { kind: "record-only" }
@@ -196,4 +202,64 @@ export function feedRowKey(event: FeedChainEvent): string {
 /** Render a nullable bps decimal, with the never-estimated dash for null. */
 export function renderBps(value: string | null): string {
   return value === null ? EM_DASH : `${value} bps`;
+}
+
+/**
+ * The Feed's head takeaway (W-3L, inventory 397): the loaded WINDOW's own
+ * numbers — row count, liquidation count, and the newest row's coordinate —
+ * in one computed sentence. The newest claim is MODE-HONEST (the r74 law):
+ * engine-scoped pages are height-ordered, so the newest is a block;
+ * cross-engine pages are time-ordered, so the newest is a custodied header
+ * time — and a window with no custodied time, or one whose ordering the
+ * wire itself violated, makes NO newest claim rather than licensing a
+ * false reading. `hasMore` blocks the totality reading: a window is a
+ * floor of the filtered feed, never its total, while a cursor remains.
+ */
+export function feedTakeaway(
+  rows: readonly FeedChainEvent[],
+  mode: FeedOrderMode,
+  hasMore: boolean,
+): string {
+  const newest = rows[0];
+  if (newest === undefined) {
+    return "0 chain actions loaded in this window — the list below states the reason.";
+  }
+  const liquidations = rows.filter((event) => event.type === "liquidation").length;
+  const counts = `${String(rows.length)} chain action(s) loaded, ${String(liquidations)} liquidation(s)`;
+  const more = hasMore ? " · more exist behind the cursor" : "";
+  if (mode === "engine-scoped") {
+    return `${counts} · newest at block ${formatBlock(newest.block_number)}${more}.`;
+  }
+  const { timed, orderViolated } = splitUntimedTail(rows);
+  if (orderViolated) {
+    return (
+      `${counts} · the wire violated its own ordering law (see the alert below), ` +
+      `so no newest is claimed${more}.`
+    );
+  }
+  const newestTimed = timed[0];
+  if (newestTimed === undefined) {
+    return `${counts} · none carry custodied header time, so no newest is claimed${more}.`;
+  }
+  return `${counts} · newest custodied ${newestTimed.block_time ?? EM_DASH}${more}.`;
+}
+
+/**
+ * TRUE only when EVERY field of a liquidation extract is established: a
+ * non-null repaid amount, at least one seizure leg with every amount
+ * carried, and both bonus figures. The W-3L hazard fence (inventory 430):
+ * an extract carrying ANY em dash may not hide behind a closed fold, so
+ * the all-actions view opens an unestablished extract by default — the
+ * same law the Inspector's LiquidationExtract already enforces.
+ */
+export function liquidationEstablished(
+  detail: NonNullable<FeedChainEvent["liquidation"]>,
+): boolean {
+  return (
+    detail.debt_repaid !== null &&
+    detail.seized.length > 0 &&
+    detail.seized.every((leg) => leg.amount !== null) &&
+    detail.realized_bonus_bps !== null &&
+    detail.configured_bonus_bps !== null
+  );
 }

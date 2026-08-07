@@ -25,7 +25,14 @@ import {
   type FeedChainEvent,
   type FeedOrderMode,
 } from "@/lib/feed-data";
-import { RAW_UNITS_TAG, feedAmount, feedRowKey, feedTagTone, renderBps } from "@/lib/feed-view";
+import {
+  RAW_UNITS_TAG,
+  feedAmount,
+  feedRowKey,
+  feedTagTone,
+  liquidationEstablished,
+  renderBps,
+} from "@/lib/feed-view";
 import styles from "./feed.module.css";
 
 export interface FeedListProps {
@@ -169,7 +176,14 @@ function FeedRow({
   ledger: boolean;
   valueDecimals: number | null;
 }) {
-  const [open, setOpen] = useState(ledger);
+  // W-3L hazard fence (inventory 430): an extract carrying ANY unestablished
+  // field — a null repaid amount, an empty seizure list, a missing bonus —
+  // renders OPEN in every view, so an em dash never hides behind a closed
+  // fold. Only a fully-established extract may start closed (all-actions
+  // view); the ledger view opens everything as before.
+  const [open, setOpen] = useState(
+    ledger || (event.liquidation !== null && !liquidationEstablished(event.liquidation)),
+  );
   const tone = feedTagTone(event.type);
   const hasDetail = event.liquidation !== null;
   return (
@@ -252,10 +266,22 @@ export function FeedList({ events, mode, ledger, empty, valueDecimals = {} }: Fe
       {untimed.length > 0 && (
         <>
           <div className={styles.untimedDivider} data-testid="untimed-divider">
+            {/* W-3L (inventory 430): the divider reduced to one line carrying
+                its two hazards — the COUNT and the never-invented clause —
+                both visible with the fold closed. The full ordering rationale
+                lives in the counted fold. */}
             <b>UNTIMED TAIL</b> · {String(untimed.length)} row
-            {untimed.length === 1 ? "" : "s"} without custodied header time, served after every
-            timed row and ordered by the chain-aware tiebreak (chain, height, tx, log, seq)
-            instead of by time. A timestamp is never invented; each row shows its block number.
+            {untimed.length === 1 ? "" : "s"} without custodied header time. A timestamp is
+            never invented; each row shows its block number.
+            <details className={styles.dividerFold} data-testid="untimed-divider-forensics">
+              <summary>1 ordering note</summary>
+              <p>
+                these rows are served after every timed row and ordered by the chain-aware
+                tiebreak (chain, height, tx, log, seq) instead of by time — the tail&apos;s
+                internal order is not chronology, and two chains&apos; block heights are never
+                compared as time.
+              </p>
+            </details>
           </div>
           {orderViolated && (
             <div className={styles.untimedDivider} role="alert" data-testid="untimed-order-violation">

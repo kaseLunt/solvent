@@ -20,6 +20,15 @@
   margin: 0;
 }
 
+/* W-3L: the computed head takeaway. Scoped under .head so it wins the
+ * specificity contest against the `.head p` intro register. */
+.head .takeaway {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  margin: 0 0 6px;
+}
+
 .sectionHead {
   display: flex;
   align-items: baseline;
@@ -324,6 +333,28 @@
   color: var(--ink);
 }
 
+/* W-3L: the divider's counted fold — the full ordering rationale. */
+.dividerFold {
+  margin-top: 4px;
+}
+
+.dividerFold summary {
+  cursor: pointer;
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.dividerFold summary:hover {
+  color: var(--accent);
+}
+
+.dividerFold p {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+}
+
 /* ---- liquidation detail (expandable ledger extract) ---- */
 
 .detailToggle {
@@ -424,6 +455,29 @@
   font-family: var(--mono);
   font-size: var(--fs-mono);
   color: var(--ink-3);
+}
+
+/* W-3L: the foot's counted method-note fold. */
+.noteFold {
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+.noteFold summary {
+  cursor: pointer;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+}
+
+.noteFold summary:hover {
+  color: var(--accent);
+}
+
+.noteFold p {
+  margin: 6px 0 0;
+  max-width: 78ch;
 }
 
 /* ---- footer ---- */

@@ -24,10 +24,17 @@
 //     can tag it and no unscaled number ever renders bare.
 
 import { expect, test } from "@playwright/test";
-import { RAW_UNITS_TAG, feedAmount, feedTagTone, renderBps } from "../../lib/feed-view";
+import {
+  RAW_UNITS_TAG,
+  feedAmount,
+  feedTagTone,
+  feedTakeaway,
+  liquidationEstablished,
+  renderBps,
+} from "../../lib/feed-view";
 import { EM_DASH } from "../../lib/format";
 import type { FeedChainEvent } from "../../lib/feed-data";
-import { FEED_UNITS } from "../fixtures/feed";
+import { FEED_LIQUIDATIONS, FEED_UNITS } from "../fixtures/feed";
 
 /**
  * A minimal row builder over the fixture's first (aave_scaled) row.
@@ -199,5 +206,104 @@ test.describe("severity + bps", () => {
   test("a null bonus is an em dash — never an estimate", () => {
     expect(renderBps(null)).toBe(EM_DASH);
     expect(renderBps("500")).toBe("500 bps");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W-3L (inventory 397) — feedTakeaway: the head sentence over the loaded
+// window, MODE-HONEST about what "newest" may claim (the r74 law): a height
+// claim only where heights are the order, a time claim only over custodied
+// times, and NO newest claim over an untimed or drift-suspect window.
+// ---------------------------------------------------------------------------
+
+test.describe("W-3L — feedTakeaway", () => {
+  test("engine-scoped: the newest claim is a BLOCK, and hasMore blocks the totality reading", () => {
+    const rows = [
+      row({ block_number: 25635601, block_time: null, type: "liquidation" }),
+      row({ block_number: 25635580, block_time: null, type: "supply" }),
+    ];
+    expect(feedTakeaway(rows, "engine-scoped", false)).toBe(
+      "2 chain action(s) loaded, 1 liquidation(s) · newest at block 25,635,601.",
+    );
+    expect(feedTakeaway(rows, "engine-scoped", true)).toBe(
+      "2 chain action(s) loaded, 1 liquidation(s) · newest at block 25,635,601 · more exist " +
+        "behind the cursor.",
+    );
+  });
+
+  test("cross-engine: the newest claim is the head row's CUSTODIED time, never a height", () => {
+    const rows = [
+      row({ block_number: 25635601, block_time: "2026-07-29T09:57:11Z", type: "borrow" }),
+      row({ block_number: 154796490, block_time: null, type: "repay" }),
+    ];
+    const line = feedTakeaway(rows, "cross-engine", false);
+    expect(line).toBe(
+      "2 chain action(s) loaded, 0 liquidation(s) · newest custodied 2026-07-29T09:57:11Z.",
+    );
+    expect(line).not.toContain("newest at block");
+  });
+
+  test("an all-untimed window claims NO newest — its order is not chronology", () => {
+    const rows = [
+      row({ block_number: 154796400, block_time: null, type: "repay" }),
+      row({ block_number: 25635580, block_time: null, type: "supply" }),
+    ];
+    const line = feedTakeaway(rows, "cross-engine", false);
+    expect(line).toBe(
+      "2 chain action(s) loaded, 0 liquidation(s) · none carry custodied header time, so no " +
+        "newest is claimed.",
+    );
+    expect(line).not.toContain("newest custodied");
+    expect(line).not.toContain("newest at block");
+  });
+
+  test("ordering drift: a timed row inside the tail WITHHOLDS the newest claim entirely", () => {
+    const rows = [
+      row({ block_number: 25635601, block_time: "2026-07-29T09:57:11Z", type: "borrow" }),
+      row({ block_number: 154796490, block_time: null, type: "repay" }),
+      row({ block_number: 25635500, block_time: "2026-07-29T09:55:02Z", type: "supply" }),
+    ];
+    const line = feedTakeaway(rows, "cross-engine", false);
+    expect(line).toContain("the wire violated its own ordering law");
+    expect(line).toContain("no newest is claimed");
+    expect(line).not.toContain("newest custodied");
+  });
+
+  test("an empty window points at the list's own stated reason — no numbers invented", () => {
+    expect(feedTakeaway([], "cross-engine", false)).toBe(
+      "0 chain actions loaded in this window — the list below states the reason.",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W-3L (inventory 430) — liquidationEstablished: the fold license. Only a
+// fully-established extract may start closed; ANY em-dash field keeps it
+// open (the concrete defect: em-dash bonus/seized hidden behind a fold).
+// ---------------------------------------------------------------------------
+
+test.describe("W-3L — liquidationEstablished", () => {
+  const dm = FEED_LIQUIDATIONS.events[1]?.liquidation;
+  if (dm === undefined || dm === null) {
+    throw new Error("fixture invariant: the DM liquidation row expected");
+  }
+  const leg = dm.seized[0];
+  if (leg === undefined) throw new Error("fixture invariant: a seizure leg expected");
+
+  test("the committed DM extract is UNESTABLISHED — its realized bonus is null", () => {
+    expect(dm.realized_bonus_bps).toBeNull();
+    expect(liquidationEstablished(dm)).toBe(false);
+  });
+
+  test("established ONLY when every field is carried; each absence revokes the license", () => {
+    const established = { ...dm, realized_bonus_bps: "500" };
+    expect(liquidationEstablished(established)).toBe(true);
+    expect(liquidationEstablished({ ...established, debt_repaid: null })).toBe(false);
+    expect(liquidationEstablished({ ...established, seized: [] })).toBe(false);
+    // The generated type declares the leg amount non-null; the runtime
+    // guard exists because the wire's own bytes are the authority.
+    const nulledLeg = { ...leg, amount: null } as unknown as typeof leg;
+    expect(liquidationEstablished({ ...established, seized: [nulledLeg] })).toBe(false);
+    expect(liquidationEstablished({ ...established, configured_bonus_bps: null })).toBe(false);
   });
 });

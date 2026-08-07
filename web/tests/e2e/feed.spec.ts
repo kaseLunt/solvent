@@ -81,11 +81,39 @@ test("cross-engine walk: time-ordered head, DISCLOSED untimed tail across pages"
 
   // Page 1: one timed row, then the tail begins with the untimed DM borrow.
   await expect(page.getByTestId("feed-row")).toHaveCount(2);
+
+  // W-3L (inventory 397): the head takeaway is the window's own numbers —
+  // cross-engine, so the newest claim is the head row's CUSTODIED time, and
+  // the live cursor blocks any totality reading.
+  await expect(page.getByTestId("feed-takeaway")).toHaveText(
+    "2 chain action(s) loaded, 1 liquidation(s) · newest custodied 2026-07-29T09:57:11Z · " +
+      "more exist behind the cursor.",
+  );
+
+  // W-3L (inventory 430): the one-line divider keeps its two hazards visible
+  // with the fold CLOSED — the count and the never-invented clause.
   const divider = page.getByTestId("untimed-divider");
   await expect(divider).toHaveCount(1);
-  await expect(divider).toContainText("1 row without custodied header time");
-  await expect(divider).toContainText("instead of");
-  await expect(divider).toContainText("by time");
+  await expect(
+    divider.getByText("1 row without custodied header time", { exact: false }).first(),
+  ).toBeVisible();
+  // VISIBILITY asserted, not containment — toContainText passes on text
+  // hidden inside a closed fold (the r75 lesson), and this clause is a
+  // hazard that must render with the fold closed.
+  await expect(
+    divider.getByText("A timestamp is never invented", { exact: false }).first(),
+  ).toBeVisible();
+
+  // The full ordering rationale sits in the counted fold — closed by
+  // default, its prose NOT rendered until opened (never merely hidden text
+  // asserted through a closed fold).
+  const fold = divider.getByTestId("untimed-divider-forensics");
+  await expect(fold.locator("summary")).toHaveText("1 ordering note");
+  await expect(fold.locator("p")).toBeHidden();
+  await fold.locator("summary").click();
+  await expect(fold.locator("p")).toBeVisible();
+  await expect(fold.locator("p")).toContainText("chain-aware tiebreak");
+  await expect(fold.locator("p")).toContainText("instead of by time");
 
   // The untimed row renders its BLOCK NUMBER, never an invented time.
   await expect(page.getByTestId("feed-time").nth(1)).toHaveText("block 154,796,490");
@@ -94,11 +122,19 @@ test("cross-engine walk: time-ordered head, DISCLOSED untimed tail across pages"
   await page.getByTestId("feed-load-more").click();
   await expect(page.getByTestId("feed-row")).toHaveCount(4);
   await expect(page.getByTestId("untimed-divider")).toHaveCount(1);
-  await expect(page.getByTestId("untimed-divider")).toContainText(
-    "3 rows without custodied header time",
-  );
+  await expect(
+    page
+      .getByTestId("untimed-divider")
+      .getByText("3 rows without custodied header time", { exact: false })
+      .first(),
+  ).toBeVisible();
   await expect(page.getByTestId("untimed-order-violation")).toHaveCount(0);
   await expect(page.getByText("end of the filtered feed")).toBeVisible();
+
+  // The exhausted window drops the cursor clause; the counts advance.
+  await expect(page.getByTestId("feed-takeaway")).toHaveText(
+    "4 chain action(s) loaded, 1 liquidation(s) · newest custodied 2026-07-29T09:57:11Z.",
+  );
 });
 
 test("cross-engine order is header time — heights are visibly NOT the order", async ({
@@ -150,6 +186,11 @@ test("engine-scoped: height order, no tail concept, since_block round-trip; a cu
   await page.getByRole("button", { name: "aave_v3_etherfi" }).click();
   await expect(page.getByTestId("order-note")).toContainText("block height");
   await expect(page.getByTestId("feed-row")).toHaveCount(2);
+  // W-3L: engine-scoped, so the head takeaway's newest claim is a BLOCK —
+  // heights ARE the order within one chain.
+  await expect(page.getByTestId("feed-takeaway")).toHaveText(
+    "2 chain action(s) loaded, 1 liquidation(s) · newest at block 25,635,601.",
+  );
   // The null-time row falls back to its block number WITHOUT a tail divider.
   await expect(page.getByTestId("untimed-divider")).toHaveCount(0);
   await expect(page.getByTestId("feed-time").nth(1)).toHaveText("block 25,635,580");
@@ -235,10 +276,43 @@ test("liquidations ledger: typed extracts open, unestablished bonus stays a dash
   await expect(dmDetail.getByTestId("liquidation-bonus")).toContainText("configured 500 bps");
 });
 
-test("all-actions view: a liquidation row's detail opens on demand", async ({ page }) => {
+test("all-actions view (W-3L 430): an UNESTABLISHED extract renders OPEN — an em dash never hides behind a fold", async ({
+  page,
+}) => {
   await muteStream(page);
   await mockEvents(page, (params, route) => fulfillJson(route, FEED_CROSS_PAGE_1));
   await page.goto("/feed");
+  await expect(page.getByTestId("feed-row")).toHaveCount(2);
+
+  // The committed cross-page liquidation carries realized_bonus_bps null —
+  // the exact field the old closed-by-default fold used to hide. It opens
+  // unasked, with the em dash visible.
+  const detail = page.getByTestId("liquidation-detail");
+  await expect(detail).toHaveCount(1);
+  await expect(detail.getByTestId("liquidation-bonus")).toContainText("realized —");
+  const toggle = page.getByTestId("detail-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  // Open by DEFAULT, not by force: the reader may still close it.
+  await toggle.click();
+  await expect(page.getByTestId("liquidation-detail")).toHaveCount(0);
+});
+
+test("all-actions view: a FULLY-ESTABLISHED extract starts closed and opens on demand", async ({
+  page,
+}) => {
+  await muteStream(page);
+  // The committed page with ONE documented delta: realized_bonus_bps
+  // established at "500" — the extract's only unestablished field — so this
+  // is the fully-established complement of the law above.
+  const established = structuredClone(FEED_CROSS_PAGE_1);
+  const detail = established.events[0]?.liquidation;
+  if (detail === undefined || detail === null) {
+    throw new Error("fixture invariant: the cross-page liquidation row expected");
+  }
+  detail.realized_bonus_bps = "500";
+  await mockEvents(page, (params, route) => fulfillJson(route, established));
+  await page.goto("/feed");
+  await expect(page.getByTestId("feed-row")).toHaveCount(2);
 
   await expect(page.getByTestId("liquidation-detail")).toHaveCount(0);
   const toggle = page.getByTestId("detail-toggle");
@@ -248,6 +322,66 @@ test("all-actions view: a liquidation row's detail opens on demand", async ({ pa
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(toggle).toHaveText("close detail");
   await expect(page.getByTestId("liquidation-detail")).toHaveCount(1);
+});
+
+test("ordering drift (W-3L 430): the alert stays OUTSIDE the fold, and the takeaway withholds its newest claim", async ({
+  page,
+}) => {
+  await muteStream(page);
+  // The committed page with ONE documented delta: its own timed liquidation
+  // row re-served AFTER the untimed borrow (log_index bumped to keep chain
+  // coordinates distinct) — a timed row inside the untimed tail, the exact
+  // violation the ordering law forbids.
+  const drifted = structuredClone(FEED_CROSS_PAGE_1);
+  const first = drifted.events[0];
+  if (first === undefined) throw new Error("fixture invariant: the timed head row expected");
+  const smuggled = structuredClone(first);
+  smuggled.log_index = 43;
+  drifted.events.push(smuggled);
+  drifted.next_cursor = null;
+  await mockEvents(page, (params, route) => fulfillJson(route, drifted));
+  await page.goto("/feed");
+  await expect(page.getByTestId("feed-row")).toHaveCount(3);
+
+  // The drift alert is VISIBLE and is not a descendant of the divider's
+  // fold — a hazard never collapses (the r73 placement law).
+  const alert = page.getByTestId("untimed-order-violation");
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText("ORDERING DRIFT");
+  await expect(alert).toContainText("treat this walk as suspect");
+  await expect(
+    page.getByTestId("untimed-divider-forensics").getByTestId("untimed-order-violation"),
+  ).toHaveCount(0);
+
+  // The head takeaway refuses the newest claim over a drift-suspect window.
+  await expect(page.getByTestId("feed-takeaway")).toHaveText(
+    "3 chain action(s) loaded, 2 liquidation(s) · the wire violated its own ordering law " +
+      "(see the alert below), so no newest is claimed.",
+  );
+  await expect(page.getByTestId("feed-takeaway")).not.toContainText("newest custodied");
+});
+
+test("W-3L (432): the foot method line keeps the amount-unit clause visible; the full note sits in the counted fold", async ({
+  page,
+}) => {
+  await muteStream(page);
+  await mockEvents(page, (params, route) => fulfillJson(route, FEED_CROSS_PAGE_1));
+  await page.goto("/feed");
+  await expect(page.getByTestId("feed-row")).toHaveCount(2);
+
+  const method = page.getByTestId("feed-foot-method");
+  await expect(method).toBeVisible();
+  await expect(method).toContainText("never dressed up as a token or USD figure");
+  await expect(method).toContainText("chain-asserted header custody");
+
+  const fold = page.getByTestId("feed-foot-forensics");
+  await expect(fold.locator("summary")).toHaveText("1 method note");
+  await expect(fold.locator("p")).toBeHidden();
+  await fold.locator("summary").click();
+  await expect(fold.locator("p")).toBeVisible();
+  await expect(fold.locator("p")).toContainText(
+    "null until custodied, in which case the block number renders instead",
+  );
 });
 
 test("a refused cursor (400) renders the envelope's own words + an honest restart", async ({
@@ -314,6 +448,12 @@ test("an empty filtered feed states its reason — a real answer, not a failure"
   await expect(empty).toBeVisible();
   await expect(empty).toContainText("no custodied chain actions match this filter");
   await expect(empty).toContainText("a real answer");
+
+  // W-3L: the head takeaway invents no numbers over an empty window — it
+  // points at the list's own stated reason.
+  await expect(page.getByTestId("feed-takeaway")).toHaveText(
+    "0 chain actions loaded in this window — the list below states the reason.",
+  );
 });
 
 test("live posture: no base frame → nothing pretended; the law is printed", async ({

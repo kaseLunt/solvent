@@ -35,6 +35,7 @@ import {
   type FeedEngine,
   type FeedScope,
 } from "@/lib/feed-data";
+import { feedTakeaway } from "@/lib/feed-view";
 import { FeedLiveStrip } from "./FeedLiveStrip";
 import { FeedList } from "./FeedList";
 import styles from "./feed.module.css";
@@ -211,6 +212,13 @@ export function FeedSurface() {
       {/* Wave R1 items 6 + 10: no numbered eyebrow; the adjudicated intro. */}
       <div className={styles.head}>
         <h1>Feed</h1>
+        {/* W-3L (inventory 397): the computed takeaway over the LOADED
+            window sits at the head; the adjudicated intro below it is the
+            surface's one-line method, and its two-instruments law ("the two
+            never blend") stays visible — never an expandable footnote. */}
+        <p className={styles.takeaway} data-testid="feed-takeaway">
+          {feedTakeaway(rows, mode, hasMore)}
+        </p>
         <p>
           Chain actions as recorded: borrows, repays, supplies, withdrawals, liquidations. The
           live strip shows the stream&apos;s posture now; the list below pages through durable
@@ -426,12 +434,23 @@ export function FeedSurface() {
         )}
       </div>
 
-      <p className={styles.sectionNote}>
-        block_time is chain-asserted header custody: null until custodied, in which case the
-        block number renders instead. A timestamp is never invented. Amounts are the engine&apos;s
-        own accounting units, named per row, and a scaled or normalized value is never dressed up
-        as a token or USD figure.
+      {/* W-3L (inventory 432): the one-line method keeps both custody
+          clauses visible — the amount-unit clause by law — and the full
+          note prose moves to the counted fold below it. */}
+      <p className={styles.sectionNote} data-testid="feed-foot-method">
+        block_time is chain-asserted header custody, never invented; amounts are the
+        engine&apos;s own accounting units, named per row, and a scaled or normalized value is
+        never dressed up as a token or USD figure.
       </p>
+      <details className={styles.noteFold} data-testid="feed-foot-forensics">
+        <summary>1 method note</summary>
+        <p>
+          block_time is chain-asserted header custody: null until custodied, in which case the
+          block number renders instead. A timestamp is never invented. Amounts are the
+          engine&apos;s own accounting units, named per row, and a scaled or normalized value is
+          never dressed up as a token or USD figure.
+        </p>
+      </details>
     </>
   );
 }
