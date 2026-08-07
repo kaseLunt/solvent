@@ -302,7 +302,8 @@ export function flipUnbarrableLine(count: number): string {
 /** SLOT 6 for the flip ranking. */
 export const FLIP_METHOD =
   "Bars: the debt that became eligible per shown flip, at the Debt Manager's own USD decimals, " +
-  "longest bar = largest shown flip. The rows are the server's own window onto the flips — " +
+  "longest bar = the largest flip among rows carrying a served debt (a row without one draws " +
+  "no bar and is outranked by nothing). The rows are the server's own window onto the flips — " +
   "never the whole of them, and ranked only where every row carries a served debt — and the " +
   "verdict is the served became_eligible flag; the maxBorrowLT/borrowings rationals beside it " +
   "are a disclosure, not a comparator.";

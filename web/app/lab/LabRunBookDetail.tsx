@@ -643,8 +643,17 @@ function LabFlipRanking({ engine }: { engine: LabRunBookEngine }) {
             const usedX: number[] = [];
             return placed.map((segment) => {
               if (segment.width > 0 || segment.count === 0) return null;
-              let cx = Math.min(Math.max(segment.x, 2), FLIP_STRIP_W - 2);
-              while (usedX.some((used) => Math.abs(used - cx) < 5)) cx += 6;
+              // r92: the search alternates right/left and never leaves the
+              // strip — a dot painted outside the viewBox is a hidden cell.
+              const base = Math.min(Math.max(segment.x, 2), FLIP_STRIP_W - 2);
+              const inBounds = (x: number) => x >= 2 && x <= FLIP_STRIP_W - 2;
+              const collides = (x: number) => usedX.some((used) => Math.abs(used - x) < 5);
+              let cx = base;
+              let offset = 0;
+              while (!inBounds(cx) || collides(cx)) {
+                offset = offset <= 0 ? -offset + 6 : -offset;
+                cx = base + offset;
+              }
               usedX.push(cx);
               return (
                 // r90 F5 — PRESENCE, NOT SHARE: a positive cell whose share

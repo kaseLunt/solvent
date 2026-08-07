@@ -219,6 +219,10 @@ test("r91: a window holding a NULL-DEBT row earns no ranking claim — capped or
   expect(line).not.toContain("largest by flipped debt");
   // And the method line claims ranking only where every row carries a debt.
   expect(FLIP_METHOD).toContain("ranked only where every row carries a served debt");
+  // r92: the longest-bar claim is scoped to rows WITH a served debt — an
+  // unknowable is outranked by nothing.
+  expect(FLIP_METHOD).toContain("among rows carrying a served debt");
+  expect(FLIP_METHOD).not.toContain("longest bar = largest shown flip");
   expect(FLIP_METHOD).not.toContain("served largest-debt ranking");
 });
 

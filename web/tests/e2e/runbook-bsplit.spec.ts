@@ -749,15 +749,22 @@ test("r90: a positive partition cell too small for a pixel keeps a PRESENCE dot 
   // r91 finding 3: the dot must be PAINTED, not merely present — every
   // rectangle precedes it in document order, so SVG draws the dot on top of
   // any full-height neighbor sharing its coordinate.
-  const painted = await dm
+  const paint = await dm
     .getByTestId("flip-strip")
     .evaluate((svg: SVGElement) => {
       const children = Array.from(svg.children);
-      const lastRect = children.map((c) => c.tagName).lastIndexOf("rect");
-      const firstCircle = children.map((c) => c.tagName).indexOf("circle");
-      return firstCircle > lastRect;
+      const tags = children.map((c) => c.tagName);
+      return {
+        rects: tags.filter((t) => t === "rect").length,
+        lastRect: tags.lastIndexOf("rect"),
+        firstCircle: tags.indexOf("circle"),
+      };
     });
-  expect(painted).toBe(true);
+  // r92: the assertion is NOT vacuous — this case renders exactly the two
+  // positive-width cells, and every one of them precedes the first circle.
+  expect(paint.rects).toBe(2);
+  expect(paint.lastRect).toBeGreaterThanOrEqual(0);
+  expect(paint.firstCircle).toBeGreaterThan(paint.lastRect);
   // The legend and the strip agree: 1 flip exists, drawn as presence.
   await expect(dm.getByTestId("flip-legend")).toContainText("1 flipped to eligible");
   await expect(dm.getByTestId("flip-strip")).toHaveCount(1);
@@ -787,4 +794,37 @@ test("r90: a shown mover without a true verdict refuses the BARS visibly — the
   await expect(dm.getByTestId("flip-strip")).toHaveCount(1);
   // And the ledger still shows the row with its own verdict.
   await expect(dm.getByTestId("runbook-mover-flip")).toHaveText("no");
+});
+
+test("r92: multiple sub-pixel cells at the RIGHT EDGE stay inside the strip, distinct", async ({
+  page,
+}) => {
+  // DERIVED CASE: 9,997 flips push three one-account cells onto the strip's
+  // right edge. Unbounded rightward stepping painted two of them outside the
+  // viewBox — populations the legend reported and the picture hid.
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook;
+  for (const engine of body.engines) {
+    if (engine.engine !== "debt_manager") continue;
+    engine.before.accounts = 10000;
+    engine.after.accounts = 10000;
+    engine.before.eligible_accounts = 2;
+    engine.after.eligible_accounts = 9998;
+    engine.movers_total = 9997;
+    engine.newly_eligible_accounts = 9996;
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const dm = page.locator('[data-testid="runbook-movers"][data-engine="debt_manager"]');
+  const centers = await dm.getByTestId("flip-strip").evaluate((svg: SVGElement) => {
+    return Array.from(svg.querySelectorAll("circle")).map((c) =>
+      Number(c.getAttribute("cx")),
+    );
+  });
+  expect(centers).toHaveLength(3);
+  for (const cx of centers) {
+    expect(cx).toBeGreaterThanOrEqual(2);
+    expect(cx).toBeLessThanOrEqual(378);
+  }
+  // Pairwise distinct — coincident dots are one dot in the reader's eye.
+  expect(new Set(centers).size).toBe(3);
 });
