@@ -31,6 +31,7 @@ import {
   proofPin,
   proofSubjectEvidence,
   proofSubjectStatus,
+  proofTakeaway,
   type EvidenceDescriptor,
   type EvidenceManifest,
 } from "@/lib/evidence";
@@ -106,6 +107,21 @@ function ProofSubjectCard({
   const feeds = manifest.feeds_registry;
   const fingerprintWelded = feeds.registry_fingerprint === service.registry_fingerprint;
 
+  // W-3L (inventory 446): a pub() refusal is ITSELF a refusal and may not
+  // hide behind the fold — every artifact-derived string destined for the
+  // forensic layer is checked here, and a refused one hoists out.
+  const reconcile = status.kind === "unavailable" ? null : status.reconcile;
+  const artifactPub = reconcile === null ? null : publishable(reconcile.artifact_path);
+  const receiptNotePub = reconcile === null ? null : publishable(reconcile.note);
+  const feedsPathPub = publishable(feeds.path);
+  const foldCount =
+    (reconcile === null
+      ? 0
+      : 4 + (artifactPub?.ok === true ? 1 : 0) + (receiptNotePub?.ok === true ? 1 : 0)) +
+    6 +
+    2 +
+    (feedsPathPub.ok ? 1 : 0);
+
   return (
     <section className={`${styles.subjectCard} ${styles.proofCard}`} data-testid="proof-subject">
       <h2 className={styles.subjectTitle}>
@@ -147,21 +163,16 @@ function ProofSubjectCard({
           </Row>
         )}
 
-        {status.kind !== "unavailable" && (
+        {/* W-3L (inventory 446): the ANSWER layer stays visible — gated
+            rows with their drift, every per-engine weld, and the
+            fingerprint weld; pure provenance folds below, counted. */}
+        {reconcile !== null && (
           <>
-            <div className={styles.cardSection}>RECEIPT · COMMITTED ARTIFACT</div>
-            <Row label="result · exit">
-              {status.reconcile.result} · {String(status.reconcile.exit_code)}
+            <Row label="gated rows" tone={reconcile.gated_drift === 0 ? "ok" : "crit"}>
+              {String(reconcile.gated_exact)}/{String(reconcile.gated_rows)} exact ·
+              drift {String(reconcile.gated_drift)}
             </Row>
-            <Row label="finished_at">{status.reconcile.finished_at}</Row>
-            <Row label="gated rows" tone={status.reconcile.gated_drift === 0 ? "ok" : "crit"}>
-              {String(status.reconcile.gated_exact)}/{String(status.reconcile.gated_rows)} exact ·
-              drift {String(status.reconcile.gated_drift)}
-            </Row>
-            <Row label="advisory rows" tone="dim">
-              {String(status.reconcile.advisory_rows)}
-            </Row>
-            {status.reconcile.welds.map((weld) => (
+            {reconcile.welds.map((weld) => (
               <Row
                 key={weld.engine}
                 label={`weld · ${weld.engine}`}
@@ -171,47 +182,83 @@ function ProofSubjectCard({
                 {String(weld.rows_exact)}/{String(weld.rows_compared)} exact
               </Row>
             ))}
-            <Row label="comparison sha256">
-              <Ident value={status.reconcile.comparison_sha256} copyLabel="copy comparison sha256" />
-            </Row>
-            <Row label="artifact">{pub(status.reconcile.artifact_path)}</Row>
-            <Row label="receipt note" tone="dim">
-              {pub(status.reconcile.note)}
-            </Row>
           </>
         )}
-
-        <div className={styles.cardSection}>BUILD · CONFIG IDENTITY</div>
-        <Row label="commit" tone={manifest.commit === null ? "dim" : "default"}>
-          {manifest.commit === null ? (
-            `${EM_DASH} (no build stamp, and never guessed)`
-          ) : (
-            <Ident value={manifest.commit} copyLabel="copy commit" />
-          )}
-        </Row>
-        <Row label="service">
-          {service.name} · {service.version}
-        </Row>
-        <Row label="schema version">{String(service.schema_version)}</Row>
-        <Row label="algorithm revision">{String(service.algorithm_revision)}</Row>
-        <Row label="scenario config">{service.scenario_config_version}</Row>
-        <Row label="seizure model" tone="dim">
-          {service.seizure_model}
-        </Row>
-
-        <div className={styles.cardSection}>FEEDS REGISTRY</div>
-        <Row label="path">{pub(feeds.path)}</Row>
-        <Row label="registry fingerprint">
-          <Ident value={feeds.registry_fingerprint} copyLabel="copy registry fingerprint" />
-        </Row>
-        <Row label="file sha256">
-          <Ident value={feeds.file_sha256} copyLabel="copy feeds file sha256" />
-        </Row>
         <Row label="fingerprint weld" tone={fingerprintWelded ? "ok" : "crit"}>
           {fingerprintWelded
             ? "identical to service fingerprint, by construction"
             : "MISMATCH against service fingerprint, which the contract says are identical by construction"}
         </Row>
+
+        {/* Hoisted pub() refusals — a withheld value is a refusal and
+            renders OUTSIDE the fold, exactly when it strikes. */}
+        {artifactPub !== null && !artifactPub.ok && (
+          <Row label="artifact" tone="warn" testId="proof-artifact-refused">
+            {artifactPub.refusal}
+          </Row>
+        )}
+        {receiptNotePub !== null && !receiptNotePub.ok && (
+          <Row label="receipt note" tone="warn" testId="proof-note-refused">
+            {receiptNotePub.refusal}
+          </Row>
+        )}
+        {!feedsPathPub.ok && (
+          <Row label="feeds registry path" tone="warn" testId="feeds-path-refused">
+            {feedsPathPub.refusal}
+          </Row>
+        )}
+
+        <details className={styles.cardForensics} data-testid="proof-subject-forensics">
+          <summary>{String(foldCount)} provenance row(s)</summary>
+          {reconcile !== null && (
+            <>
+              <div className={styles.cardSection}>RECEIPT · COMMITTED ARTIFACT</div>
+              <Row label="result · exit">
+                {reconcile.result} · {String(reconcile.exit_code)}
+              </Row>
+              <Row label="finished_at">{reconcile.finished_at}</Row>
+              <Row label="advisory rows" tone="dim">
+                {String(reconcile.advisory_rows)}
+              </Row>
+              <Row label="comparison sha256">
+                <Ident value={reconcile.comparison_sha256} copyLabel="copy comparison sha256" />
+              </Row>
+              {artifactPub?.ok === true && <Row label="artifact">{artifactPub.text}</Row>}
+              {receiptNotePub?.ok === true && (
+                <Row label="receipt note" tone="dim">
+                  {receiptNotePub.text}
+                </Row>
+              )}
+            </>
+          )}
+
+          <div className={styles.cardSection}>BUILD · CONFIG IDENTITY</div>
+          <Row label="commit" tone={manifest.commit === null ? "dim" : "default"}>
+            {manifest.commit === null ? (
+              `${EM_DASH} (no build stamp, and never guessed)`
+            ) : (
+              <Ident value={manifest.commit} copyLabel="copy commit" />
+            )}
+          </Row>
+          <Row label="service">
+            {service.name} · {service.version}
+          </Row>
+          <Row label="schema version">{String(service.schema_version)}</Row>
+          <Row label="algorithm revision">{String(service.algorithm_revision)}</Row>
+          <Row label="scenario config">{service.scenario_config_version}</Row>
+          <Row label="seizure model" tone="dim">
+            {service.seizure_model}
+          </Row>
+
+          <div className={styles.cardSection}>FEEDS REGISTRY</div>
+          {feedsPathPub.ok && <Row label="path">{feedsPathPub.text}</Row>}
+          <Row label="registry fingerprint">
+            <Ident value={feeds.registry_fingerprint} copyLabel="copy registry fingerprint" />
+          </Row>
+          <Row label="file sha256">
+            <Ident value={feeds.file_sha256} copyLabel="copy feeds file sha256" />
+          </Row>
+        </details>
       </div>
     </section>
   );
@@ -225,6 +272,11 @@ function LiveSubjectCard({
   onExplain: (descriptor: EvidenceDescriptor) => void;
 }) {
   const status = liveSubjectStatus(manifest);
+  // W-3L (inventory 453): the digest's predates-custody gap and a refused
+  // identity note are hazards and render OUTSIDE the fold.
+  const notePub = status.kind === "serving" ? publishable(status.substrate.note) : null;
+  const digestGap = status.kind === "serving" && status.substrate.substrate_digest === "";
+  const liveFoldCount = (digestGap ? 0 : 1) + (notePub?.ok === true ? 1 : 0);
 
   return (
     <section className={`${styles.subjectCard} ${styles.liveCard}`} data-testid="live-subject">
@@ -252,29 +304,47 @@ function LiveSubjectCard({
       <div className={styles.subjectBody}>
         {status.kind === "serving" ? (
           <>
-            <Row label="batch">#{String(status.substrate.batch_id)}</Row>
+            {/* W-3L (inventory 453): takeaway = the serving batch id +
+                status; the key with its copy affordance stays visible;
+                pure provenance folds, counted. */}
+            <p className={styles.cardTakeaway} data-testid="live-takeaway">
+              serving batch #{String(status.substrate.batch_id)} · watermarked, operational —
+              never the proof
+            </p>
             <Row label="materialization key" testId="materialization-key">
               <Ident
                 value={status.substrate.materialization_key}
                 copyLabel="copy materialization key"
               />
             </Row>
-            <Row
-              label="substrate digest"
-              tone={status.substrate.substrate_digest === "" ? "dim" : "default"}
-            >
-              {status.substrate.substrate_digest === "" ? (
-                `${EM_DASH} (predates substrate-digest custody, so this is an honest gap rather than a digest)`
-              ) : (
-                <Ident
-                  value={status.substrate.substrate_digest}
-                  copyLabel="copy substrate digest"
-                />
-              )}
-            </Row>
-            <Row label="identity note" tone="dim">
-              {pub(status.substrate.note)}
-            </Row>
+            {digestGap && (
+              <Row label="substrate digest" tone="dim" testId="live-digest-gap">
+                {`${EM_DASH} (predates substrate-digest custody, so this is an honest gap rather than a digest)`}
+              </Row>
+            )}
+            {notePub !== null && !notePub.ok && (
+              <Row label="identity note" tone="warn" testId="live-note-refused">
+                {notePub.refusal}
+              </Row>
+            )}
+            {liveFoldCount > 0 && (
+              <details className={styles.cardForensics} data-testid="live-subject-forensics">
+                <summary>{String(liveFoldCount)} provenance row(s)</summary>
+                {!digestGap && (
+                  <Row label="substrate digest">
+                    <Ident
+                      value={status.substrate.substrate_digest}
+                      copyLabel="copy substrate digest"
+                    />
+                  </Row>
+                )}
+                {notePub?.ok === true && (
+                  <Row label="identity note" tone="dim">
+                    {notePub.text}
+                  </Row>
+                )}
+              </details>
+            )}
           </>
         ) : (
           <>
@@ -287,6 +357,92 @@ function LiveSubjectCard({
           </>
         )}
       </div>
+    </section>
+  );
+}
+
+// W-3L (inventory 460): the record COUNT is the takeaway; lawful paths and
+// notes fold, counted. The empty arm stays visible — an empty probe list is
+// a statement about the deployment, not an absence to hide — and any pub()
+// refusal hoists out of the fold, because a publishability refusal is
+// itself a refusal.
+function ProbeRecordsCard({ manifest }: { manifest: EvidenceManifest }) {
+  const records = manifest.probe_records.map((record) => ({
+    record,
+    pathPub: publishable(record.path),
+    notePub: publishable(record.note),
+  }));
+  const refusedRecords = records.filter((entry) => !entry.pathPub.ok || !entry.notePub.ok);
+  const lawfulRecords = records.filter((entry) => entry.pathPub.ok && entry.notePub.ok);
+  const notes = manifest.notes.map((note) => ({ note, notePub: publishable(note) }));
+  const refusedNotes = notes.filter((entry) => !entry.notePub.ok);
+  const lawfulNotes = notes.filter((entry) => entry.notePub.ok);
+
+  return (
+    <section className={styles.subjectCard}>
+      <h2 className={styles.subjectTitle}>
+        <b>COMMITTED PROBE RECORDS</b>
+      </h2>
+      <p className={styles.cardTakeaway} data-testid="probe-records-takeaway">
+        {String(manifest.probe_records.length)} committed probe record(s)
+        {manifest.notes.length > 0 && ` · ${String(manifest.notes.length)} manifest note(s)`}
+      </p>
+
+      {manifest.probe_records.length === 0 && (
+        <p className={styles.recordNote} data-testid="probe-records-empty">
+          none named by this deployment&apos;s manifest — a statement about the deployment, not
+          an absence to hide.
+        </p>
+      )}
+
+      {(refusedRecords.length > 0 || refusedNotes.length > 0) && (
+        <ul className={styles.recordList} data-testid="probe-records-refused">
+          {refusedRecords.map((entry) => (
+            <li key={entry.record.path} className={styles.recordItem}>
+              <span className={styles.recordPath}>
+                {entry.pathPub.ok ? entry.pathPub.text : entry.pathPub.refusal}
+              </span>
+              <span className={styles.recordNote}>
+                {entry.notePub.ok ? entry.notePub.text : entry.notePub.refusal}
+              </span>
+            </li>
+          ))}
+          {refusedNotes.map((entry) => (
+            <li key={entry.note} className={styles.recordItem}>
+              <span className={styles.recordNote}>{entry.notePub.ok ? "" : entry.notePub.refusal}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {(lawfulRecords.length > 0 || lawfulNotes.length > 0) && (
+        <details className={styles.cardForensics} data-testid="probe-records-forensics">
+          <summary>
+            {String(lawfulRecords.length)} record path(s) + {String(lawfulNotes.length)} note(s)
+          </summary>
+          {lawfulRecords.length > 0 && (
+            <ul className={styles.recordList} data-testid="probe-records">
+              {lawfulRecords.map((entry) => (
+                <li key={entry.record.path} className={styles.recordItem}>
+                  <span className={styles.recordPath}>
+                    {entry.pathPub.ok ? entry.pathPub.text : ""}
+                  </span>
+                  <span className={styles.recordNote}>
+                    {entry.notePub.ok ? entry.notePub.text : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {lawfulNotes.length > 0 && (
+            <ul className={styles.notesList}>
+              {lawfulNotes.map((entry) => (
+                <li key={entry.note}>{entry.notePub.ok ? entry.notePub.text : ""}</li>
+              ))}
+            </ul>
+          )}
+        </details>
+      )}
     </section>
   );
 }
@@ -329,6 +485,14 @@ export function ProofSurface() {
           own name, and the intro is the adjudicated copy. */}
       <div className={styles.head}>
         <h1>Proof</h1>
+        {/* W-3L (inventory 439): both subjects' statuses in one computed
+            sentence — BY LAW both failing arms surface here. The adjudicated
+            intro below is the method line. */}
+        {state.phase === "ok" && (
+          <p className={styles.takeaway} data-testid="proof-head-takeaway">
+            {proofTakeaway(state.manifest)}
+          </p>
+        )}
         <p>
           What this deployment is, exactly: the pinned proof of its last reconcile and the
           identity of the batch it serves now. Nothing here is measured on request: every field
@@ -372,34 +536,7 @@ export function ProofSurface() {
             </p>
           </div>
 
-          <section className={styles.subjectCard}>
-            <h2 className={styles.subjectTitle}>
-              <b>COMMITTED PROBE RECORDS</b>
-            </h2>
-            <ul className={styles.recordList} data-testid="probe-records">
-              {state.manifest.probe_records.length === 0 ? (
-                <li className={styles.recordItem}>
-                  <span className={styles.recordNote}>
-                    none named by this deployment&apos;s manifest
-                  </span>
-                </li>
-              ) : (
-                state.manifest.probe_records.map((record) => (
-                  <li key={record.path} className={styles.recordItem}>
-                    <span className={styles.recordPath}>{pub(record.path)}</span>
-                    <span className={styles.recordNote}>{pub(record.note)}</span>
-                  </li>
-                ))
-              )}
-            </ul>
-            {state.manifest.notes.length > 0 && (
-              <ul className={styles.notesList}>
-                {state.manifest.notes.map((note) => (
-                  <li key={note}>{pub(note)}</li>
-                ))}
-              </ul>
-            )}
-          </section>
+          <ProbeRecordsCard manifest={state.manifest} />
 
           <button
             type="button"
@@ -418,7 +555,11 @@ export function ProofSurface() {
             </pre>
           )}
 
-          <Stampline>
+          {/* W-3L (inventory 474): the shared keepOpen split — the batch
+              pin is identity and stays inline; the em-dash batch/key pins
+              under a no-batch manifest are hazards and never fold; a
+              crit-toned receipt pin stays inline by tone. */}
+          <Stampline collapse>
             <StampItem
               label="batch"
               value={
@@ -427,9 +568,11 @@ export function ProofSurface() {
                   : `#${String(state.manifest.substrate.batch_id)}`
               }
               tone={state.manifest.substrate === null ? "dim" : "default"}
+              keepOpen
             />
             <StampItem
               label="key"
+              keepOpen={state.manifest.substrate === null}
               value={
                 state.manifest.substrate === null ? (
                   EM_DASH

@@ -310,3 +310,40 @@
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
+
+/* ---- W-3L registers: head takeaway, card takeaway, counted forensics ---- */
+
+.head .takeaway {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 78ch;
+  margin: 0 0 6px;
+}
+
+.cardTakeaway {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 72ch;
+  margin: 0 0 8px;
+}
+
+.cardForensics {
+  margin-top: 8px;
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+.cardForensics summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.cardForensics summary:hover {
+  color: var(--accent);
+}

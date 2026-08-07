@@ -23,6 +23,7 @@ import {
   proofPin,
   proofSubjectEvidence,
   proofSubjectStatus,
+  proofTakeaway,
   type EvidenceManifest,
 } from "../../lib/evidence";
 import { findEndpointLeaks, publishable } from "../../lib/proof-data";
@@ -201,4 +202,39 @@ test("the committed artifacts the manifest example cites EXIST and are leak-free
   for (const record of EVIDENCE_MANIFEST.probe_records) {
     expect(readFileSync(path.join(repoRoot, record.path), "utf8").length).toBeGreaterThan(0);
   }
+});
+
+// ---------------------------------------------------------------------------
+// W-3L (inventory 439) — proofTakeaway: both subjects' statuses in one head
+// sentence, and BY LAW each failing arm surfaces there — a head that says
+// nothing while the receipt is rejected reads as a pass.
+// ---------------------------------------------------------------------------
+
+test.describe("W-3L — proofTakeaway", () => {
+  test("accepted + serving: the pin and the batch id in one sentence", () => {
+    expect(proofTakeaway(EVIDENCE_MANIFEST)).toBe(
+      "receipt ACCEPTED at pin 5f0b3e2a; serving batch #1 under its watermark vector.",
+    );
+  });
+
+  test("a rejected receipt SURFACES in the head — never a silent pass", () => {
+    const line = proofTakeaway(EVIDENCE_PROOF_FAILED);
+    expect(line).toBe(
+      "RECEIPT REJECTED — the proof badge is refused; serving batch #1 under its watermark " +
+        "vector.",
+    );
+    expect(line).not.toContain("ACCEPTED");
+  });
+
+  test("a missing receipt says NOTHING IS PROVEN in the head", () => {
+    expect(proofTakeaway(EVIDENCE_NO_RECEIPT)).toBe(
+      "NO COMMITTED RECEIPT — nothing is proven; serving batch #1 under its watermark vector.",
+    );
+  });
+
+  test("a missing batch SURFACES beside the intact proof arm — no key, no batch id", () => {
+    const line = proofTakeaway(EVIDENCE_NO_BATCH);
+    expect(line).toBe("receipt ACCEPTED at pin 5f0b3e2a; NO SERVABLE BATCH.");
+    expect(line).not.toContain("batch #");
+  });
 });

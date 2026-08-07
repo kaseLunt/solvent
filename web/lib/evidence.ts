@@ -589,6 +589,31 @@ export function proofPin(reconcile: ManifestReconcile): string {
   return reconcile.comparison_sha256.slice(0, 8);
 }
 
+/**
+ * The Proof Center's head takeaway (W-3L, inventory 439): both subjects'
+ * statuses in ONE computed sentence. BY LAW both failing arms surface here
+ * — a head that says nothing while the receipt is rejected, or while no
+ * batch serves, reads as a pass. Composed from the same status derivations
+ * the two cards render (one source), so the head and the cards cannot
+ * disagree — including under wire contradictions, which those derivations
+ * already demote.
+ */
+export function proofTakeaway(manifest: EvidenceManifest): string {
+  const proof = proofSubjectStatus(manifest);
+  const live = liveSubjectStatus(manifest);
+  const proofArm =
+    proof.kind === "accepted"
+      ? `receipt ACCEPTED at pin ${proofPin(proof.reconcile)}`
+      : proof.kind === "rejected"
+        ? "RECEIPT REJECTED — the proof badge is refused"
+        : "NO COMMITTED RECEIPT — nothing is proven";
+  const liveArm =
+    live.kind === "serving"
+      ? `serving batch #${String(live.substrate.batch_id)} under its watermark vector`
+      : "NO SERVABLE BATCH";
+  return `${proofArm}; ${liveArm}.`;
+}
+
 const PROOF_COMPARATOR =
   "PROOF · EXACT @ PIN ⇔ the committed reconcile receipt's OWN verdict: result \"pass\", " +
   "exit code 0, gated_exact == gated_rows, gated_drift == 0, and every per-engine weld " +
