@@ -480,7 +480,7 @@ export function LabMatrix({
                       <span className="mono">
                         {scenario.id} · {scenario.version}
                       </span>{" "}
-                      · moves {axisFamilyWords(families)}
+                      · declares shocks on {axisFamilyWords(families)}
                     </span>
                   </td>
                   {columns.map((engine) => (

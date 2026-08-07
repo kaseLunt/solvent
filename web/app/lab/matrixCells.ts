@@ -131,9 +131,12 @@ export function scenarioCoverage(
   return {
     covered,
     families,
+    // r85: DECLARATION wording, never realized movement — a factor is an
+    // input, and what a mark realizes is the engine's own read path (the
+    // committed snap-band no-op declares ×0.995 stables that snap back).
     reason: covered
-      ? `${scenario.id} is defined for ${engine}; it moves ${axisFamilyWords(families)}.`
-      : `NOT COVERED · ${scenario.id} moves ${axisFamilyWords(families)} and is defined for ` +
+      ? `${scenario.id} is defined for ${engine}; it declares shocks on ${axisFamilyWords(families)}.`
+      : `NOT COVERED · ${scenario.id} declares shocks on ${axisFamilyWords(families)} and is defined for ` +
         `${definedFor}. ${engine} is outside this scenario's model: a property of the committed ` +
         `DEFINITION, not a refusal and not a failed run.`,
   };

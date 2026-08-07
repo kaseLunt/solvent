@@ -179,6 +179,21 @@ test("coverage FOLLOWS the definition — add the engine and the cell is covered
   expect(scenarioCoverage(widened, "aave_v3_etherfi").covered).toBe(true);
 });
 
+test("r85: coverage reasons DECLARE shock axes — never a realized-movement claim", () => {
+  // The snap-band no-op and every identity-factor scenario broke "moves":
+  // a declared factor is an INPUT, and what a mark realizes is the
+  // engine's own read path. The zero-shock depeg keeps its self-negating
+  // market-realization family words.
+  const eth = scenarioCoverage(ETH, "aave_v3_etherfi");
+  expect(eth.reason).toBe(
+    `${ETH.id} is defined for aave_v3_etherfi; it declares shocks on the ETH mark.`,
+  );
+  expect(eth.reason).not.toContain("it moves");
+  const rate = scenarioCoverage(RATE, "aave_v3_etherfi");
+  expect(rate.reason).toContain("declares shocks on the borrow rate");
+  expect(rate.reason).not.toContain("moves the borrow rate");
+});
+
 test("matrixColumns is the union of the definitions' engines, in wire order", () => {
   expect(matrixColumns(definitions)).toEqual(["aave_v3_etherfi", "debt_manager"]);
   expect(matrixColumns([RATE, ETHFI])).toEqual(["debt_manager"]);

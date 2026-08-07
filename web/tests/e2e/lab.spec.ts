@@ -959,3 +959,16 @@ test("r84: an aborted newer read never suppresses a live older recovery — arbi
     }
   }
 });
+
+test("r85: the matrix row DECLARES its shock axes — movement is never claimed from a cold definition", async ({
+  page,
+}) => {
+  await mockCold(page);
+  await page.goto("/lab");
+  const rows = page.getByTestId("matrix-row");
+  await expect(rows.first()).toContainText("declares shocks on the ETH mark");
+  await expect(rows.first()).not.toContainText("· moves");
+  // The zero-shock depeg keeps the self-negating family words — the one
+  // place "moves" survives is inside its own negation.
+  await expect(rows.nth(1)).toContainText("market realization (no oracle mark moves)");
+});
