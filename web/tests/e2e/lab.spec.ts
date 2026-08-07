@@ -972,3 +972,45 @@ test("r85: the matrix row DECLARES its shock axes — movement is never claimed 
   // place "moves" survives is inside its own negation.
   await expect(rows.nth(1)).toContainText("market realization (no oracle mark moves)");
 });
+
+test("W-3L (194): the row's disclosures compose into ONE settlement line, each piece keeping its identity", async ({
+  page,
+}) => {
+  // The r8 sequence: a first run that serves, a re-run that fails — the
+  // held outcome stays at its pin and the failure banner appears. The
+  // banner must render INSIDE the row's single settlement line (the
+  // composition), with its own testid and provenance intact.
+  let runCalls = 0;
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
+  await page.route(`${API}/v1/book`, (route) => json(route, fixture("book.json")));
+  await page.route(`${API}/v1/scenarios/eth_minus_30/run-book`, (route) => {
+    runCalls += 1;
+    return runCalls === 1
+      ? json(route, fixture("run-book.eth_minus_30.json"))
+      : json(route, fixture("error-unavailable.json"), 503);
+  });
+  await page.goto("/lab");
+
+  const row = page.locator('[data-testid="matrix-row"][data-scenario-id="eth_minus_30"]');
+  const run = row.getByTestId("matrix-run");
+  await run.click();
+  await expect(row.locator('[data-cell-state="result"]').first()).toBeVisible();
+  await run.click();
+
+  const banner = row.getByTestId("matrix-rerun-failed");
+  await expect(banner).toBeVisible();
+
+  // The composition: exactly one settlement line on the row, and the
+  // banner is ITS descendant — never a loose stacked footnote.
+  const settlement = row.getByTestId("matrix-settlement");
+  await expect(settlement).toHaveCount(1);
+  await expect(settlement.getByTestId("matrix-rerun-failed")).toBeVisible();
+
+  // A row with nothing to settle renders NO settlement line at all.
+  await expect(
+    page
+      .locator('[data-testid="matrix-row"][data-scenario-id="ethfi_minus_50"]')
+      .getByTestId("matrix-settlement"),
+  ).toHaveCount(0);
+});

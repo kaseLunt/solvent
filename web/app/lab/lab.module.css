@@ -457,6 +457,24 @@
   line-height: 1.55;
 }
 
+/* W-3L (inventory 194): the row's settlement line — the up-to-three run
+ * disclosures composed inline as ONE sentence with interpunct joints,
+ * instead of three stacked footnotes the eye skips. */
+.settlementLine {
+  display: block;
+  margin-top: 4px;
+  max-width: 52ch;
+}
+
+.settlementLine > span {
+  display: inline;
+}
+
+.settlementLine > span + span::before {
+  content: " · ";
+  color: var(--ink-3);
+}
+
 /* ---- W-3L registers: card takeaway/method + counted forensics ---- */
 
 .cardTakeaway {

@@ -457,6 +457,11 @@ export function LabMatrix({
               // re-read a listing that is already current.
               const staleAttempt = attemptSkew(phase, rowIdent);
               const rerunBanner = rerunFailedBanner(phase, rowIdent, "matrix", scenario.engines);
+              const definitionChanged =
+                staleAttempt === null &&
+                cohort.definitionChangedScenarioIds.includes(scenario.id);
+              const hasSettlement =
+                rerunBanner !== null || staleAttempt !== null || definitionChanged;
               const families = scenarioCoverage(scenario, scenario.engines[0] ?? "").families;
               return (
                 <tr
@@ -524,6 +529,16 @@ export function LabMatrix({
                         wordings, and the detail strip composes from the same
                         call, so the two can never give different accounts of one
                         retained response. */}
+                    {/* W-3L (inventory 194): the up-to-three disclosures
+                        compose into ONE settlement line per row — every
+                        piece keeps its testid, its data provenance and its
+                        full sentence; only the stacking went. */}
+                    {hasSettlement && (
+                    <span
+                      className={styles.settlementLine}
+                      data-testid="matrix-settlement"
+                      data-scenario-id={scenario.id}
+                    >
                     {rerunBanner !== null && (
                       <span
                         className={styles.cellSub}
@@ -585,8 +600,7 @@ export function LabMatrix({
                         each surface a second exception: the remedy that resolved
                         nothing stops being offered because the row stopped
                         claiming to be the thing that remedy is for. */}
-                    {staleAttempt === null &&
-                      cohort.definitionChangedScenarioIds.includes(scenario.id) && (
+                    {definitionChanged && (
                       <span
                         className={styles.cellSub}
                         data-testid="matrix-definition-changed"
@@ -606,6 +620,8 @@ export function LabMatrix({
                         longer showing. Re-read <span className="mono">GET /v1/scenarios</span> to
                         run against the current one. Nothing is re-run for you.
                       </span>
+                    )}
+                    </span>
                     )}
                   </td>
                 </tr>
