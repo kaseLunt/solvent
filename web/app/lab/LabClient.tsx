@@ -103,7 +103,16 @@ export function LabClient() {
   // lookup would be two answers about one service). A sequence guard keeps
   // late settlements from overwriting a newer read.
   const [book, setBook] = useState<BookState>({ phase: "loading" });
+  // r84: arbitration is by ACCEPTED settlement, not by dispatch. A
+  // dispatch-order guard let an ABORTED newer read (book-mode entered and
+  // left mid-flight) permanently invalidate a still-live older recovery
+  // read — the aborted request could never settle, the older one was
+  // discarded for being older, and the head kept claiming no batch beside
+  // a successful lookup. An aborted request never settles and therefore
+  // never claims; every live settlement lands iff newer than the last one
+  // ACCEPTED, so late stale bodies still lose to newer answers.
   const bookSeq = useRef(0);
+  const bookAccepted = useRef(0);
   const bookPhaseRef = useRef<BookState["phase"]>("loading");
   useEffect(() => {
     bookPhaseRef.current = book.phase;
@@ -114,11 +123,14 @@ export function LabClient() {
       .book(signal)
       .then(
         (response) => {
-          if (bookSeq.current === seq) setBook({ phase: "ok", book: response });
+          if (seq <= bookAccepted.current) return;
+          bookAccepted.current = seq;
+          setBook({ phase: "ok", book: response });
         },
         (cause: unknown) => {
           if (signal?.aborted === true) return;
-          if (bookSeq.current !== seq) return;
+          if (seq <= bookAccepted.current) return;
+          bookAccepted.current = seq;
           setBook(
             cause instanceof UnavailableError
               ? { phase: "no-batch", message: cause.body.error.message }

@@ -33,6 +33,12 @@ export function committedTakeaway(scenario: {
   // committed rate projection and the composition census both carry 1/1
   // placeholders whose real change lives outside the oracle marks, and
   // calling a hold a move contradicted their own labels.
+  //
+  // r84: a non-identity factor is a DECLARED INPUT, never a realized mark
+  // move — the committed snap-band no-op declares three ×0.995 stables
+  // that PriceProviderV2 pins straight back to par, and the wire carries
+  // no transform metadata this helper could read. So the verb is
+  // "declares", and the trailing clause names where realization lives.
   const graded = scenario.shocks.map((shock) => ({
     shock,
     factor: formatFactor(shock.factor_num, shock.factor_den),
@@ -48,5 +54,8 @@ export function committedTakeaway(scenario: {
   }
   const moves = moving.map((entry) => `${shockName(entry.shock)} ${entry.factor.times}`);
   const heldTail = held.length === 0 ? "" : ` · ${heldNames} held at ×1`;
-  return `${scenario.label} moves ${moves.join(" · ")}${heldTail}.`;
+  return (
+    `${scenario.label} declares ${moves.join(" · ")}${heldTail} — committed shock factors, ` +
+    `applied through each engine's own read path.`
+  );
 }

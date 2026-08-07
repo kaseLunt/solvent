@@ -789,7 +789,8 @@ test("W-3L: CommittedDetail — computed takeaway, visible method, definition pr
   // The takeaway: the first committed member's label plus what it moves,
   // through the shared factor formatter.
   await expect(detail.getByTestId("committed-takeaway")).toHaveText(
-    "ETH -30 percent moves eth_usd ×0.7.",
+    "ETH -30 percent declares eth_usd ×0.7 — committed shock factors, applied through each " +
+      "engine's own read path.",
   );
 
   // The method line stays visible with the fold closed — it carries the
@@ -900,4 +901,61 @@ test("r83: an unreadable book is never blamed on the service — the two refusal
     "no frontier can be stated — the book could not be read, and an unread book is not a safe book.",
   );
   await expect(takeaway).not.toContainText("statement about the service");
+});
+
+test("r84: an aborted newer read never suppresses a live older recovery — arbitration is by ACCEPTED settlement", async ({
+  page,
+}) => {
+  // The exact re-entrant schedule Codex named: a stored 503, an address
+  // success dispatching recovery read #2 (HELD), a book-mode entry
+  // dispatching read #3 (HELD), leaving book mode ABORTING #3 — and then
+  // #2 settling 200. Dispatch-order arbitration discarded #2 because #3
+  // had claimed the sequence; #3, aborted, could never settle; the head
+  // kept claiming no batch beside a successful lookup, forever.
+  let bookCalls = 0;
+  const held: Route[] = [];
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
+  await page.route(`${API}/v1/book`, (route) => {
+    bookCalls += 1;
+    if (bookCalls === 1) return json(route, fixture("error-unavailable.json"), 503);
+    held.push(route);
+  });
+  await mockStress(page, STRESS_AAVE.address, fixture("stress-aave.json"));
+  await page.goto("/lab");
+  await expect(page.getByTestId("lab-dek")).toContainText(
+    "No complete risk batch is available",
+  );
+
+  // Address success dispatches recovery read #2 — held open.
+  await page.getByTestId("mode-address").click();
+  const input = page.getByTestId("lab-address-input");
+  const button = page.getByTestId("run-stress-button");
+  await expect(async () => {
+    await input.fill(STRESS_AAVE.address);
+    await expect(button).toBeEnabled({ timeout: 250 });
+  }).toPass();
+  await button.click();
+  await expect(page.getByTestId("lab-found")).toBeVisible();
+  await expect.poll(() => held.length).toBeGreaterThanOrEqual(1);
+
+  // Book re-entry dispatches #3 (held); leaving aborts it client-side.
+  await page.getByTestId("mode-book").click();
+  await expect.poll(() => held.length).toBeGreaterThanOrEqual(2);
+  await page.getByTestId("mode-address").click();
+
+  // NOW the older, still-live #2 settles 200: its answer must land.
+  const recovery = held[0];
+  if (recovery === undefined) throw new Error("expected the held recovery read");
+  await json(recovery, fixture("book.json"));
+  await expect(page.getByTestId("lab-dek")).toContainText("The first step already bites");
+
+  // Release any remaining held routes (the aborted #3's route included).
+  for (const route of held.slice(1)) {
+    try {
+      await route.abort();
+    } catch {
+      // the browser already canceled it — nothing to release
+    }
+  }
 });
