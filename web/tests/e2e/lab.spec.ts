@@ -729,3 +729,91 @@ test("an invalid address never becomes a request", async ({ page }) => {
   await expect(page.getByTestId("run-stress-button")).toBeDisabled();
   expect(stressRequests).toBe(0);
 });
+
+// ---------------------------------------------------------------------------
+// W-3L (inventory 152-206) — the dek hoist, the frontier-refusal takeaway and
+// the CommittedDetail split. Placement asserted by VISIBILITY (the r75
+// lesson) and by DOM position, never containment through a closed fold.
+// ---------------------------------------------------------------------------
+
+test("W-3L: the dek sits at the PAGE head, above the mode bar, and survives the mode switch", async ({
+  page,
+}) => {
+  await mockCold(page);
+  await page.goto("/lab");
+
+  const dek = page.getByTestId("lab-dek");
+  await expect(dek).toContainText("The first step already bites");
+  // ABOVE the mode bar: the surface's answer leads the page.
+  const dekBox = await dek.boundingBox();
+  const modeBox = await page.getByTestId("mode-book").boundingBox();
+  if (dekBox === null || modeBox === null) throw new Error("expected laid-out dek + mode bar");
+  expect(dekBox.y + dekBox.height).toBeLessThanOrEqual(modeBox.y);
+
+  // The dek is the PAGE's answer now, not book mode's caption: switching to
+  // the address register keeps the whole sentence on screen.
+  await page.getByTestId("mode-address").click();
+  await expect(page.getByTestId("lab-address-section")).toBeVisible();
+  await expect(dek).toBeVisible();
+  await expect(dek).toContainText("The first step already bites");
+  await expect(dek).toContainText("debt_manager's bad debt reaches $2,219.801981");
+});
+
+test("W-3L: the frontier refusal LEADS with its takeaway; the server's words render beneath", async ({
+  page,
+}) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
+  await page.route(`${API}/v1/book`, (route) =>
+    json(route, fixture("error-unavailable.json"), 503),
+  );
+  await page.goto("/lab");
+
+  const refused = page.getByTestId("frontier-refused");
+  await expect(refused).toBeVisible();
+  await expect(refused.getByTestId("frontier-refused-takeaway")).toBeVisible();
+  await expect(refused.getByTestId("frontier-refused-takeaway")).toHaveText(
+    "no frontier on this batch — a statement about the service, never an empty book.",
+  );
+  await expect(refused).toContainText("no servable batch (503)");
+});
+
+test("W-3L: CommittedDetail — computed takeaway, visible method, definition provenance folded", async ({
+  page,
+}) => {
+  await mockCold(page);
+  await page.goto("/lab");
+  const detail = page.getByTestId("committed-detail");
+  await expect(detail).toBeVisible();
+
+  // The takeaway: the first committed member's label plus what it moves,
+  // through the shared factor formatter.
+  await expect(detail.getByTestId("committed-takeaway")).toHaveText(
+    "ETH -30 percent moves eth_usd ×0.7.",
+  );
+
+  // The method line stays visible with the fold closed — it carries the
+  // NOT COVERED vs WITHHELD distinction.
+  await expect(
+    detail.getByText("which is not the same statement as a withheld engine", { exact: false }),
+  ).toBeVisible();
+
+  // The fold: exact factors + path assumption + endpoint, closed by default.
+  const fold = detail.getByTestId("committed-forensics");
+  await expect(fold.locator("summary")).toHaveText(
+    "1 shock factor(s) + the path assumption + the endpoint",
+  );
+  await expect(detail.getByTestId("committed-shocks")).toBeHidden();
+  await expect(detail.getByText("writes nothing")).toBeHidden();
+  await fold.locator("summary").click();
+  await expect(detail.getByTestId("committed-shocks")).toBeVisible();
+  await expect(detail.getByTestId("committed-shocks")).toContainText("70/100");
+  await expect(detail.getByText("writes nothing")).toBeVisible();
+
+  // The zero-shock committed scenario keeps the honest no-mark arm in ITS
+  // takeaway when selected.
+  await page.getByTestId("lab-chip").nth(1).click();
+  await expect(detail.getByTestId("committed-takeaway")).toContainText(
+    "moves no oracle mark — this scenario's information lives on another axis.",
+  );
+});

@@ -51,6 +51,7 @@ import { LabFrontier } from "./LabFrontier";
 import { LabMatrix } from "./LabMatrix";
 import { LabScenarioChips } from "./LabScenarioChips";
 import { LAB_DEK_LOADING, labDek } from "./labDek";
+import { committedTakeaway } from "./scenarioLines";
 import {
   attemptChangedNote,
   bookHoleEngines,
@@ -696,31 +697,21 @@ function CommittedDetail({
           <EngineChip key={engine} engine={engine} />
         ))}
       </div>
+      {/* W-3L (inventory 201): the takeaway — the label plus what it MOVES,
+          in reader words, computed from the scenario's own shocks through
+          the shared factor formatter. */}
+      <p className={styles.cardTakeaway} data-testid="committed-takeaway">
+        {committedTakeaway(scenario)}
+      </p>
       <p className={styles.description}>{scenario.description}</p>
-      <dl className={styles.kv}>
-        <dt>path assumption</dt>
-        <dd>{scenario.path_assumption}</dd>
-        <dt>defined for</dt>
-        <dd data-testid="committed-engines">
-          {scenario.engines.join(", ")} · an engine absent here is outside this scenario&apos;s
-          MODEL, which is not the same statement as a withheld engine
-        </dd>
-        <dt>shocks</dt>
-        <dd data-testid="committed-shocks">
-          {scenario.shocks.length === 0
-            ? "none · no oracle mark moves; this scenario's information lives on another axis"
-            : scenario.shocks.map((shock, index) => (
-                <span key={`${shock.axis}-${shock.asset ?? String(index)}`}>
-                  {index > 0 && " · "}
-                  {shock.axis}
-                  {shock.asset === undefined
-                    ? ""
-                    : ` ${shock.asset.slice(0, 6)}…${shock.asset.slice(-4)}`}{" "}
-                  <FactorText num={shock.factor_num} den={shock.factor_den} />
-                </span>
-              ))}
-        </dd>
-      </dl>
+      {/* The one-line method: the defined-for clause carries the NOT COVERED
+          vs WITHHELD distinction and stays visible by law. */}
+      {/* The one-line method: the defined-for clause carries the NOT COVERED
+          vs WITHHELD distinction and stays visible by law. */}
+      <p className={styles.cardMethod} data-testid="committed-engines">
+        defined for {scenario.engines.join(", ")} · an engine absent here is outside this
+        scenario&apos;s MODEL, which is not the same statement as a withheld engine
+      </p>
       <div className={styles.addressForm}>
         <button
           type="button"
@@ -731,11 +722,38 @@ function CommittedDetail({
         >
           {phase.kind === "running" ? "running…" : "run book-wide"}
         </button>
-        <span className={styles.hint}>
-          POST /v1/scenarios/{scenario.id}/run-book · computed on request over the newest
-          servable batch; writes nothing
-        </span>
       </div>
+      {/* The forensic fold: the exact factors, the path assumption and the
+          endpoint hint — definition provenance, counted. */}
+      <details className={styles.cardForensics} data-testid="committed-forensics">
+        <summary>
+          {String(scenario.shocks.length)} shock factor(s) + the path assumption + the endpoint
+        </summary>
+        <dl className={styles.kv}>
+          <dt>shocks</dt>
+          <dd data-testid="committed-shocks">
+            {scenario.shocks.length === 0
+              ? "none · no oracle mark moves; this scenario's information lives on another axis"
+              : scenario.shocks.map((shock, index) => (
+                  <span key={`${shock.axis}-${shock.asset ?? String(index)}`}>
+                    {index > 0 && " · "}
+                    {shock.axis}
+                    {shock.asset === undefined
+                      ? ""
+                      : ` ${shock.asset.slice(0, 6)}…${shock.asset.slice(-4)}`}{" "}
+                    <FactorText num={shock.factor_num} den={shock.factor_den} />
+                  </span>
+                ))}
+          </dd>
+          <dt>path assumption</dt>
+          <dd>{scenario.path_assumption}</dd>
+          <dt>endpoint</dt>
+          <dd>
+            <span className="mono">POST /v1/scenarios/{scenario.id}/run-book</span> · computed
+            on request over the newest servable batch; writes nothing
+          </dd>
+        </dl>
+      </details>
       {phase.kind === "running" && staleAttempt === null && (
         <p className={styles.pendingState} data-testid="book-running">
           running <span className="mono">{scenario.id}</span> over the whole book · request in
@@ -808,13 +826,17 @@ type ListingState =
   | { phase: "ok"; scenarios: ScenarioDefinition[]; configVersion: string; notes: string[] }
   | { phase: "error"; message: string };
 
-type BookState =
+export type BookState =
   | { phase: "loading" }
   | { phase: "ok"; book: BookResponse }
   | { phase: "no-batch"; message: string }
   | { phase: "error"; message: string };
 
-function bookDekFor(state: BookState): string {
+// W-3L (inventory 152): exported — LabClient owns the book state now and
+// renders this dek at the PAGE head, above the mode bar. Every caveat
+// clause labDek appends travels with the hoisted sentence by construction:
+// this is the same string, relocated whole.
+export function bookDekFor(state: BookState): string {
   switch (state.phase) {
     case "loading":
       return LAB_DEK_LOADING;
@@ -850,7 +872,7 @@ function restoredAfterSetSettle(prior: MatrixPhase | undefined): MatrixPhase {
     : { kind: "outcome", outcome: prior.held, attempt: prior.attempt };
 }
 
-function LabBookPanelInner() {
+function LabBookPanelInner({ book }: { book: BookState }) {
   const searchParams = useSearchParams();
   const deepLinkId = searchParams.get("scenario");
   const deepLinkSetParam = searchParams.get("scenarios");
@@ -862,7 +884,6 @@ function LabBookPanelInner() {
   // what the reader is looking at. The failure is disclosed beside them.
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [book, setBook] = useState<BookState>({ phase: "loading" });
   // WAVE R13, FINDING 1 — THIS MAP IS NEVER PRUNED ON A LISTING REFRESH, and
   // the decision is recorded here because this is where the pruning would have
   // to happen.
@@ -1239,31 +1260,6 @@ function LabBookPanelInner() {
     };
   }, [run, runSet, searchParams]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    getSolventClient()
-      .book(controller.signal)
-      .then(
-        (response) => {
-          setBook({ phase: "ok", book: response });
-        },
-        (cause: unknown) => {
-          if (controller.signal.aborted) return;
-          setBook(
-            cause instanceof UnavailableError
-              ? { phase: "no-batch", message: cause.body.error.message }
-              : {
-                  phase: "error",
-                  message: cause instanceof Error ? cause.message : String(cause),
-                },
-          );
-        },
-      );
-    return () => {
-      controller.abort();
-    };
-  }, []);
-
   const scenarios: readonly ScenarioDefinition[] =
     listing.phase === "ok" ? listing.scenarios : NO_SCENARIOS;
   const columns = matrixColumns(scenarios);
@@ -1315,10 +1311,6 @@ function LabBookPanelInner() {
 
   return (
     <div data-testid="lab-book-panel">
-      <p className={styles.dek} data-testid="lab-dek">
-        {bookDekFor(book)}
-      </p>
-
       {book.phase === "loading" ? (
         <p className={styles.pendingState} data-testid="frontier-loading">
           reading the book&apos;s loss frontier · <span className="mono">GET /v1/book</span> in
@@ -1328,9 +1320,16 @@ function LabBookPanelInner() {
         <LabFrontier waterfall={waterfall} batchId={frontierBatchId} />
       ) : (
         <div className={styles.errorState} data-testid="frontier-refused">
-          {book.phase === "no-batch"
-            ? `no servable batch (503): ${book.message} That is a statement about the SERVICE, never an empty book.`
-            : `the book could not be read: ${book.message}`}
+          {/* W-3L (inventory 166): the refusal LEADS with its takeaway; the
+              server's own words render beneath it, never instead of it. */}
+          <b data-testid="frontier-refused-takeaway">
+            no frontier on this batch — a statement about the service, never an empty book.
+          </b>{" "}
+          <span>
+            {book.phase === "no-batch"
+              ? `no servable batch (503): ${book.message}`
+              : `the book could not be read: ${book.message}`}
+          </span>
         </div>
       )}
 
@@ -1433,7 +1432,7 @@ function LabBookPanelInner() {
  * prerenderable (the same contract `BookPositions` honours). The fallback
  * states what is loading; it invents no number.
  */
-export function LabBookPanel() {
+export function LabBookPanel({ book }: { book: BookState }) {
   return (
     <Suspense
       fallback={
@@ -1442,7 +1441,7 @@ export function LabBookPanel() {
         </p>
       }
     >
-      <LabBookPanelInner />
+      <LabBookPanelInner book={book} />
     </Suspense>
   );
 }

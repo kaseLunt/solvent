@@ -21,7 +21,7 @@
 // account is a narrower question than the whole book, and the surface now says
 // so in its ordering.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BadRequestError,
   ContractInvariantError,
@@ -39,7 +39,7 @@ import { RefusedTag } from "@/components/RefusedTag";
 import { getSolventClient } from "@/lib/api";
 import { isAddress, renderLookupOutcome } from "@/lib/format";
 import { LabBatchStamp } from "./LabBatchStamp";
-import { LabBookPanel } from "./LabBookPanel";
+import { LabBookPanel, bookDekFor, type BookState } from "./LabBookPanel";
 import { LabBoundaryGroup } from "./LabBoundaryGroup";
 import { LabScenarioChips } from "./LabScenarioChips";
 import { LabScenarioDetail } from "./LabScenarioDetail";
@@ -90,6 +90,36 @@ export function LabClient() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const requestSeq = useRef(0);
 
+  // W-3L (inventory 152): the book state lives HERE now, so the computed dek
+  // — the surface's answer — renders at the page head, above the mode bar,
+  // in BOTH modes. LabBookPanel receives the same state and renders the
+  // frontier from it; the sentence and the chart read one fetch.
+  const [book, setBook] = useState<BookState>({ phase: "loading" });
+  useEffect(() => {
+    const controller = new AbortController();
+    getSolventClient()
+      .book(controller.signal)
+      .then(
+        (response) => {
+          setBook({ phase: "ok", book: response });
+        },
+        (cause: unknown) => {
+          if (controller.signal.aborted) return;
+          setBook(
+            cause instanceof UnavailableError
+              ? { phase: "no-batch", message: cause.body.error.message }
+              : {
+                  phase: "error",
+                  message: cause instanceof Error ? cause.message : String(cause),
+                },
+          );
+        },
+      );
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
   const inputValid = isAddress(input);
 
   /**
@@ -124,6 +154,18 @@ export function LabClient() {
 
   return (
     <>
+      {/* W-3L (inventory 152): the hoisted dek — the cliff sentence is the
+          surface's answer and sits under the H1, above the mode bar. Every
+          caveat clause labDek appends travels with it (the sentence is
+          relocated whole, never truncated). */}
+      {/* W-3L (inventory 152): the hoisted dek — the cliff sentence is the
+          surface's answer and sits under the H1, above the mode bar. Every
+          caveat clause labDek appends travels with it (the sentence is
+          relocated whole, never truncated). */}
+      <p className={styles.dek} data-testid="lab-dek">
+        {bookDekFor(book)}
+      </p>
+
       <div className={styles.modeBar} role="group" aria-label="run mode">
         <button
           type="button"
@@ -155,7 +197,7 @@ export function LabClient() {
 
       {mode === "book" ? (
         <section aria-label="book-wide stress">
-          <LabBookPanel />
+          <LabBookPanel book={book} />
         </section>
       ) : (
         <section aria-label="address stress" data-testid="lab-address-section">
