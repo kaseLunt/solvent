@@ -1321,9 +1321,15 @@ function LabBookPanelInner({ book }: { book: BookState }) {
       ) : (
         <div className={styles.errorState} data-testid="frontier-refused">
           {/* W-3L (inventory 166): the refusal LEADS with its takeaway; the
-              server's own words render beneath it, never instead of it. */}
+              server's own words render beneath it, never instead of it.
+              r83: the two arms SPLIT — only the served 503 licenses a
+              service-side verdict. A generic failure (a network error has
+              no HTTP response at all) states only that the book could not
+              be read, never who is at fault. */}
           <b data-testid="frontier-refused-takeaway">
-            no frontier on this batch — a statement about the service, never an empty book.
+            {book.phase === "no-batch"
+              ? "no frontier on this batch — a statement about the service, never an empty book."
+              : "no frontier can be stated — the book could not be read, and an unread book is not a safe book."}
           </b>{" "}
           <span>
             {book.phase === "no-batch"

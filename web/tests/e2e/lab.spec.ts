@@ -817,3 +817,87 @@ test("W-3L: CommittedDetail — computed takeaway, visible method, definition pr
     "moves no oracle mark — this scenario's information lives on another axis.",
   );
 });
+
+// ---------------------------------------------------------------------------
+// r83 — three wrong-answer paths off the LAB-A landing, each law written
+// FIRST and observed red against the defective bundle.
+// ---------------------------------------------------------------------------
+
+test("r83: a stale book refusal does not outlive recovery — re-entry and address success both re-read", async ({
+  page,
+}) => {
+  // The service answers 503 once, then recovers. The pre-hoist panel
+  // re-read /v1/book on every book-mode mount; the lifted state must keep
+  // that promise, or the head claims no batch beside a serving panel.
+  let bookCalls = 0;
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
+  await page.route(`${API}/v1/book`, (route) => {
+    bookCalls += 1;
+    return bookCalls === 1
+      ? json(route, fixture("error-unavailable.json"), 503)
+      : json(route, fixture("book.json"));
+  });
+  await page.goto("/lab");
+  await expect(page.getByTestId("lab-dek")).toContainText(
+    "No complete risk batch is available",
+  );
+
+  // Leaving and re-entering book mode re-reads the book: the refusal is a
+  // statement about the service THEN, never a permanent verdict.
+  await page.getByTestId("mode-address").click();
+  await page.getByTestId("mode-book").click();
+  await expect(page.getByTestId("lab-dek")).toContainText("The first step already bites");
+  await expect(page.getByTestId("lab-frontier")).toBeVisible();
+  expect(bookCalls).toBeGreaterThanOrEqual(2);
+});
+
+test("r83: an address success under a stale refusal re-reads the book WITHOUT leaving address mode", async ({
+  page,
+}) => {
+  let bookCalls = 0;
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
+  await page.route(`${API}/v1/book`, (route) => {
+    bookCalls += 1;
+    return bookCalls === 1
+      ? json(route, fixture("error-unavailable.json"), 503)
+      : json(route, fixture("book.json"));
+  });
+  await mockStress(page, STRESS_AAVE.address, fixture("stress-aave.json"));
+  await page.goto("/lab");
+  await expect(page.getByTestId("lab-dek")).toContainText(
+    "No complete risk batch is available",
+  );
+
+  await page.getByTestId("mode-address").click();
+  const input = page.getByTestId("lab-address-input");
+  const button = page.getByTestId("run-stress-button");
+  await expect(async () => {
+    await input.fill(STRESS_AAVE.address);
+    await expect(button).toBeEnabled({ timeout: 250 });
+  }).toPass();
+  await button.click();
+  await expect(page.getByTestId("lab-found")).toBeVisible();
+
+  // The head may not keep claiming no batch beside a successful lookup.
+  await expect(page.getByTestId("lab-dek")).toContainText("The first step already bites");
+});
+
+test("r83: an unreadable book is never blamed on the service — the two refusal arms split", async ({
+  page,
+}) => {
+  // A network failure has NO HTTP response: nothing licenses a
+  // service-side verdict, and the takeaway must not issue one.
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
+  await page.route(`${API}/v1/book`, (route) => route.abort());
+  await page.goto("/lab");
+
+  const takeaway = page.getByTestId("frontier-refused-takeaway");
+  await expect(takeaway).toBeVisible();
+  await expect(takeaway).toHaveText(
+    "no frontier can be stated — the book could not be read, and an unread book is not a safe book.",
+  );
+  await expect(takeaway).not.toContainText("statement about the service");
+});

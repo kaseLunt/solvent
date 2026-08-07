@@ -46,6 +46,29 @@ test("zero shocks: the no-mark arm — an honest statement, never an empty defin
   expect(line).not.toContain("×");
 });
 
+test("r83: a ×1 factor is an EXPLICIT HOLD, never a move — the committed rate projection pinned", () => {
+  // dm_rate_horizon_plus_200bps carries a 1/1 placeholder: its +200bps
+  // lives in projection metadata, not in an oracle mark. "moves borrow_apy
+  // ×1" contradicted the scenario's own label.
+  const line = committedTakeaway(byId("dm_rate_horizon_plus_200bps"));
+  expect(line).toBe(
+    "Debt Manager borrow APY +200bps (PROJECTION) moves no oracle mark — borrow_apy is held " +
+      "at ×1, an explicit hold rather than a move.",
+  );
+  expect(line).not.toContain("moves borrow_apy ×1");
+});
+
+test("r83: a mixed definition names its moves AND its holds — never a hold dressed as a move", () => {
+  const line = committedTakeaway({
+    label: "mixed",
+    shocks: [
+      { axis: "eth_usd", factor_num: 70, factor_den: 100 },
+      { axis: "usdc_usd", factor_num: 1, factor_den: 1 },
+    ],
+  });
+  expect(line).toBe("mixed moves eth_usd ×0.7 · usdc_usd held at ×1.");
+});
+
 test("multiple shocks join with the interpunct, each through the formatter", () => {
   const line = committedTakeaway({
     label: "compound",

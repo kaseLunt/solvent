@@ -94,17 +94,31 @@ export function LabClient() {
   // — the surface's answer — renders at the page head, above the mode bar,
   // in BOTH modes. LabBookPanel receives the same state and renders the
   // frontier from it; the sentence and the chart read one fetch.
+  //
+  // r83: the lift must not let a stale refusal outlive the service's
+  // recovery. The pre-hoist panel re-read /v1/book on every book-mode
+  // mount; that promise is kept two ways — the effect below re-runs on
+  // book-mode re-entry, and a SUCCESSFUL address stress under a stored
+  // refusal triggers a re-read (a head claiming no batch beside a serving
+  // lookup would be two answers about one service). A sequence guard keeps
+  // late settlements from overwriting a newer read.
   const [book, setBook] = useState<BookState>({ phase: "loading" });
+  const bookSeq = useRef(0);
+  const bookPhaseRef = useRef<BookState["phase"]>("loading");
   useEffect(() => {
-    const controller = new AbortController();
+    bookPhaseRef.current = book.phase;
+  }, [book.phase]);
+  const readBook = useCallback((signal?: AbortSignal) => {
+    const seq = (bookSeq.current += 1);
     getSolventClient()
-      .book(controller.signal)
+      .book(signal)
       .then(
         (response) => {
-          setBook({ phase: "ok", book: response });
+          if (bookSeq.current === seq) setBook({ phase: "ok", book: response });
         },
         (cause: unknown) => {
-          if (controller.signal.aborted) return;
+          if (signal?.aborted === true) return;
+          if (bookSeq.current !== seq) return;
           setBook(
             cause instanceof UnavailableError
               ? { phase: "no-batch", message: cause.body.error.message }
@@ -115,10 +129,15 @@ export function LabClient() {
           );
         },
       );
+  }, []);
+  useEffect(() => {
+    if (mode !== "book") return;
+    const controller = new AbortController();
+    readBook(controller.signal);
     return () => {
       controller.abort();
     };
-  }, []);
+  }, [mode, readBook]);
 
   const inputValid = isAddress(input);
 
@@ -144,13 +163,21 @@ export function LabClient() {
     setSelectedId(null);
     try {
       const result = await getSolventClient().addressStress(addr);
-      if (requestSeq.current === seq) setPhase({ status: "done", addr, result });
+      if (requestSeq.current === seq) {
+        setPhase({ status: "done", addr, result });
+        // r83: a lookup that just served proves the service is answering —
+        // a stored book refusal is stale the moment this lands, so it is
+        // re-read rather than left claiming no batch beside a result.
+        if (bookPhaseRef.current === "no-batch" || bookPhaseRef.current === "error") {
+          readBook();
+        }
+      }
     } catch (error) {
       if (requestSeq.current === seq) {
         setPhase({ status: "error", addr, message: describeError(error) });
       }
     }
-  }, [input]);
+  }, [input, readBook]);
 
   return (
     <>
