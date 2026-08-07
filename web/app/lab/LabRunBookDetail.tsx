@@ -366,7 +366,32 @@ function MoverRow({ engine, mover }: { engine: LabRunBookEngine; mover: LabRunBo
 
 function LabMoverDumbbells({ engine }: { engine: LabRunBookEngine }) {
   const model = moverDumbbells(engine);
-  if (model.kind !== "chart") return null;
+  if (model.kind === "not-wad") return null;
+  // r88: a wire contradiction REFUSES the chart visibly — obeying a drifted
+  // scale would relabel accounts against a false 1.00, and ignoring it would
+  // draw a chart over a response that contradicts the chart's own law.
+  if (model.kind === "refused") {
+    return (
+      <div className={styles.stateSlot} data-testid="dumbbell-state">
+        <span className={styles.dumbbellContradiction} data-testid="dumbbell-scale-refused">
+          {model.reason}
+        </span>
+      </div>
+    );
+  }
+  // r88: a zero-mover run still surfaces its census contradiction — the
+  // "nothing moved" sentence above rides the same response, and it may not
+  // stand unqualified over served numbers that disagree with themselves.
+  if (model.kind === "none") {
+    if (model.censusContradiction === null) return null;
+    return (
+      <div className={styles.stateSlot} data-testid="dumbbell-state">
+        <span className={styles.dumbbellContradiction} data-testid="dumbbell-census-contradiction">
+          {model.censusContradiction}
+        </span>
+      </div>
+    );
+  }
 
   const plotLeft = DUMB_LABEL_W + 6;
   const width = plotLeft + DUMB_PLOT_W + 16;

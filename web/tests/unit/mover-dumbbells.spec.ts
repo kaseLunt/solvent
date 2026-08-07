@@ -185,10 +185,13 @@ test("decade ticks over a live-shaped seven-decade book, boundary flagged only a
 
 test("a census naming FEWER rows than the run's own accounts is a surfaced contradiction", () => {
   const engine = aaveClone();
-  // DERIVED NEGATIVE: accounts inflated past the census total. The honest
-  // excess direction (census > accounts) is lawful; THIS direction means rows
-  // are unaccounted for and must never render as a census claim.
+  // DERIVED NEGATIVE: accounts inflated past the census total — on BOTH
+  // sides equally, so the r88 side-mismatch arm does not fire first and the
+  // under-count arm is the one exercised. The honest excess direction
+  // (census > accounts) is lawful; THIS direction means rows are unaccounted
+  // for and must never render as a census claim.
   engine.before.accounts = 5;
+  engine.after.accounts = 5;
   const model = chartOf(engine);
   expect(model.censusContradiction).not.toBeNull();
   expect(model.censusContradiction).toContain("unaccounted");
@@ -280,4 +283,72 @@ test("dumbbellPosition is pixels-only plumbing: monotone over the domain and cla
   expect(DUMBBELL_METHOD).toContain("LOG");
   expect(DUMBBELL_METHOD).toContain("pixels only");
   expect(DUMBBELL_METHOD).toContain("strictly below 1.00");
+});
+
+// ---------------------------------------------------------------------------
+// r88 fixes — the SCALE WELD and census-before-empty-exit.
+
+test("r88: a served wad_scale that is not the WAD refuses the chart — the boundary is 1e18 by definition", () => {
+  const engine = aaveClone();
+  // DERIVED NEGATIVE: both sides declare a drifted scale. Obeying it would
+  // relabel every account against a false 1.00; ignoring it would render a
+  // chart over a response that contradicts the chart's own law. REFUSAL is
+  // the only honest arm.
+  engine.before.hf_histogram.wad_scale = "500000000000000000";
+  engine.after.hf_histogram.wad_scale = "500000000000000000";
+  const model = moverDumbbells(engine);
+  expect(model.kind).toBe("refused");
+  if (model.kind !== "refused") throw new Error("unreachable");
+  expect(model.reason).toContain("SCALE CONTRADICTION");
+  expect(model.reason).toContain("500000000000000000");
+});
+
+test("r88: the two sides declaring DIFFERENT wad_scales refuses the chart — no cross-scale dumbbell", () => {
+  const engine = aaveClone();
+  engine.after.hf_histogram.wad_scale = "500000000000000000";
+  const model = moverDumbbells(engine);
+  expect(model.kind).toBe("refused");
+  if (model.kind !== "refused") throw new Error("unreachable");
+  expect(model.reason).toContain("SCALE CONTRADICTION");
+});
+
+test("r88: an after side bucketing on a different comparator refuses the chart", () => {
+  const engine = aaveClone();
+  engine.after.hf_histogram.comparator = "hf_num/hf_den";
+  const model = moverDumbbells(engine);
+  expect(model.kind).toBe("refused");
+  if (model.kind !== "refused") throw new Error("unreachable");
+  expect(model.reason).toContain("hf_num/hf_den");
+});
+
+test("r88: a ZERO-MOVER run still surfaces its census contradiction — no validation-free exit", () => {
+  const engine = aaveClone();
+  engine.movers = [];
+  engine.after.hf_histogram.refused_count = 7;
+  const model = moverDumbbells(engine);
+  expect(model.kind).toBe("none");
+  if (model.kind !== "none") throw new Error("unreachable");
+  expect(model.censusContradiction).not.toBeNull();
+  expect(model.censusContradiction).toContain("one run faces one set of rows");
+});
+
+test("r88: a zero-mover run with an HONEST census carries no contradiction — the guard is not always-on", () => {
+  const engine = aaveClone();
+  engine.movers = [];
+  const model = moverDumbbells(engine);
+  expect(model.kind).toBe("none");
+  if (model.kind !== "none") throw new Error("unreachable");
+  expect(model.censusContradiction).toBeNull();
+});
+
+test("r88: the two sides disagreeing on the ACCOUNT COUNT is a contradiction — one run, one set of rows", () => {
+  const engine = aaveClone();
+  // DERIVED NEGATIVE: triples match, but the after side claims a different
+  // account count. before.accounts == after.accounts holds by construction
+  // (same run set); a response where it does not is a wire contradiction —
+  // and it is exactly the after-side undercount the before-only check missed.
+  engine.after.accounts = 2;
+  const model = chartOf(engine);
+  expect(model.censusContradiction).not.toBeNull();
+  expect(model.censusContradiction).toContain("1 accounts before and 2 after");
 });

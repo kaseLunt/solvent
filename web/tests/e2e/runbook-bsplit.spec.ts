@@ -539,3 +539,63 @@ test("VIEW 4: an unmoved book draws NOTHING — no chart, no population sentence
   await expect(aave.getByTestId("dumbbell-population")).toHaveCount(0);
   await expect(aave.getByTestId("dumbbell-census")).toHaveCount(0);
 });
+
+/** r88 doctoring shape: only the fields the negatives below mutate. */
+interface DoctoredRunBook {
+  engines: {
+    engine: string;
+    before: { hf_histogram: { wad_scale: string; refused_count: number } };
+    after: { hf_histogram: { wad_scale: string; refused_count: number } };
+  }[];
+}
+
+test("r88: a drifted wad_scale REFUSES the dumbbells visibly — never a chart on a false 1.00", async ({
+  page,
+}) => {
+  // DERIVED NEGATIVE: both sides declare a non-WAD scale. The pool's boundary
+  // is 1e18 by definition, so this response contradicts the chart's own law.
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook;
+  for (const engine of body.engines) {
+    if (engine.engine !== "aave_v3_etherfi") continue;
+    engine.before.hf_histogram.wad_scale = "500000000000000000";
+    engine.after.hf_histogram.wad_scale = "500000000000000000";
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const aave = page.locator('[data-testid="runbook-movers"][data-engine="aave_v3_etherfi"]');
+  const refusedLine = aave.getByTestId("dumbbell-scale-refused");
+  await expect(refusedLine).toBeVisible();
+  await expect(refusedLine).toContainText("SCALE CONTRADICTION");
+  await expect(refusedLine).toContainText("500000000000000000");
+  // NO chart, NO census claim, NO window sentence — every verdict would be
+  // unlicensed. The population line stays: movers_total is scale-independent.
+  await expect(aave.getByTestId("runbook-dumbbells")).toHaveCount(0);
+  await expect(aave.getByTestId("dumbbell-census")).toHaveCount(0);
+  await expect(aave.getByTestId("dumbbell-window-note")).toHaveCount(0);
+  await expect(aave.getByTestId("dumbbell-population")).toBeVisible();
+});
+
+test("r88: a ZERO-MOVER run still surfaces a census contradiction on the page", async ({
+  page,
+}) => {
+  // DERIVED NEGATIVE: the oracles-held run moves nobody, and its after side
+  // loses agreement with its before side. "Nothing moved" may not stand
+  // unqualified over served numbers that disagree with themselves.
+  const body = JSON.parse(
+    fixture("run-book.weeth_market_depeg_oracles_held.json"),
+  ) as DoctoredRunBook;
+  for (const engine of body.engines) {
+    if (engine.engine !== "aave_v3_etherfi") continue;
+    engine.after.hf_histogram.refused_count = 7;
+  }
+  await runScenario(page, "weeth_market_depeg_oracles_held", JSON.stringify(body));
+
+  const aave = page.locator('[data-testid="runbook-movers"][data-engine="aave_v3_etherfi"]');
+  const contradiction = aave.getByTestId("dumbbell-census-contradiction");
+  await expect(contradiction).toBeVisible();
+  await expect(contradiction).toContainText("one run faces one set of rows");
+  // Still no chart and no affirmative census sentence — the contradiction
+  // replaces the claim, it does not decorate it.
+  await expect(aave.getByTestId("runbook-dumbbells")).toHaveCount(0);
+  await expect(aave.getByTestId("dumbbell-census")).toHaveCount(0);
+});

@@ -82,7 +82,20 @@ export interface DumbbellChart {
   censusContradiction: string | null;
 }
 
-export type MoverDumbbells = DumbbellChart | { kind: "none" } | { kind: "not-wad" };
+export type MoverDumbbells =
+  | DumbbellChart
+  | { kind: "none"; censusContradiction: string | null }
+  | { kind: "not-wad" }
+  | { kind: "refused"; reason: string };
+
+/**
+ * The pool's liquidation boundary is the WAD — 1e18 — by DEFINITION (r88).
+ * The served `wad_scale` is read as a WELD against this constant, never as an
+ * authority over it: a response declaring any other scale contradicts the law
+ * this chart is built on, and the chart refuses rather than obeying or
+ * silently ignoring it.
+ */
+const AAVE_WAD = 10n ** 18n;
 
 function pow10(exponent: number): bigint {
   return 10n ** BigInt(exponent);
@@ -130,43 +143,35 @@ function censusOf(histogram: LabRunBookEngine["before"]["hf_histogram"]): Dumbbe
 
 export function moverDumbbells(engine: LabRunBookEngine): MoverDumbbells {
   if (engine.before.hf_histogram.comparator !== "hf_wad") return { kind: "not-wad" };
-  if (engine.movers.length === 0) return { kind: "none" };
 
-  const scale = BigInt(engine.before.hf_histogram.wad_scale);
-  const rows: DumbbellRow[] = [];
-  const unplottable: string[] = [];
-
-  for (const mover of engine.movers) {
-    if (mover.hf_before_wad === null || mover.hf_after_wad === null || mover.hf_drop_wad === null) {
-      unplottable.push(mover.account);
-      continue;
-    }
-    const before = BigInt(mover.hf_before_wad);
-    const after = BigInt(mover.hf_after_wad);
-    rows.push({
-      account: mover.account,
-      beforeWad: mover.hf_before_wad,
-      afterWad: mover.hf_after_wad,
-      dropWad: mover.hf_drop_wad,
-      beforeBelowOne: before < scale,
-      afterBelowOne: after < scale,
-      crossed: before >= scale && after < scale,
-    });
+  // THE SCALE WELD (r88). Two comparators cannot share one axis, and a
+  // declared scale that is not the WAD unlicenses every below-1.00 verdict —
+  // both are wire contradictions, and both REFUSE the chart visibly.
+  const afterComparator = engine.after.hf_histogram.comparator;
+  if (afterComparator !== "hf_wad") {
+    return {
+      kind: "refused",
+      reason:
+        `SCALE CONTRADICTION: the before side buckets on hf_wad but the after side buckets on ` +
+        `${afterComparator} — no verdict can compare across two comparators, so the chart is refused.`,
+    };
   }
-
-  // The domain is the data's extent AND the boundary: on a log axis the
-  // stretch to 1.00 is cheap, and a boundary off-axis is a boundary unmarked.
-  let min = scale;
-  let max = scale;
-  for (const row of rows) {
-    const before = BigInt(row.beforeWad);
-    const after = BigInt(row.afterWad);
-    if (after < min) min = after;
-    if (before > max) max = before;
-    if (before < min) min = before;
-    if (after > max) max = after;
+  const beforeScale = engine.before.hf_histogram.wad_scale;
+  const afterScale = engine.after.hf_histogram.wad_scale;
+  if (BigInt(beforeScale) !== AAVE_WAD || BigInt(afterScale) !== AAVE_WAD) {
+    return {
+      kind: "refused",
+      reason:
+        `SCALE CONTRADICTION: the pool's health factor is a WAD (1e18) by definition, but this ` +
+        `response declares wad_scale ${beforeScale} before and ${afterScale} after — every ` +
+        `below-1.00 verdict would be unlicensed, so the chart is refused.`,
+    };
   }
+  const scale = AAVE_WAD;
 
+  // THE CENSUS IS VALIDATED BEFORE ANY EXIT (r88): a zero-mover run rides the
+  // same response, and "nothing moved" over an internally contradictory
+  // census is an unqualified story the reader has no way to doubt.
   const before = censusOf(engine.before.hf_histogram);
   const after = censusOf(engine.after.hf_histogram);
   let censusContradiction: string | null = null;
@@ -180,11 +185,52 @@ export function moverDumbbells(engine: LabRunBookEngine): MoverDumbbells {
       `${String(before.infinite)} no-debt + ${String(before.refused)} refused and the after side ` +
       `${String(after.bucketed)} + ${String(after.infinite)} + ${String(after.refused)} — one run ` +
       `faces one set of rows, so no census claim is made.`;
+  } else if (engine.before.accounts !== engine.after.accounts) {
+    censusContradiction =
+      `CENSUS CONTRADICTION: the run reports ${String(engine.before.accounts)} accounts before ` +
+      `and ${String(engine.after.accounts)} after — one run measures one set of rows, so no ` +
+      `census claim is made.`;
   } else if (before.total < engine.before.accounts) {
     censusContradiction =
       `CENSUS CONTRADICTION: buckets + no-debt + refused name ${String(before.total)} rows, ` +
       `fewer than the run's own ${String(engine.before.accounts)} accounts — rows are ` +
       `unaccounted for, so no census claim is made.`;
+  }
+
+  if (engine.movers.length === 0) return { kind: "none", censusContradiction };
+
+  const rows: DumbbellRow[] = [];
+  const unplottable: string[] = [];
+
+  for (const mover of engine.movers) {
+    if (mover.hf_before_wad === null || mover.hf_after_wad === null || mover.hf_drop_wad === null) {
+      unplottable.push(mover.account);
+      continue;
+    }
+    const beforeWad = BigInt(mover.hf_before_wad);
+    const afterWad = BigInt(mover.hf_after_wad);
+    rows.push({
+      account: mover.account,
+      beforeWad: mover.hf_before_wad,
+      afterWad: mover.hf_after_wad,
+      dropWad: mover.hf_drop_wad,
+      beforeBelowOne: beforeWad < scale,
+      afterBelowOne: afterWad < scale,
+      crossed: beforeWad >= scale && afterWad < scale,
+    });
+  }
+
+  // The domain is the data's extent AND the boundary: on a log axis the
+  // stretch to 1.00 is cheap, and a boundary off-axis is a boundary unmarked.
+  let min = scale;
+  let max = scale;
+  for (const row of rows) {
+    const beforeWad = BigInt(row.beforeWad);
+    const afterWad = BigInt(row.afterWad);
+    if (afterWad < min) min = afterWad;
+    if (beforeWad > max) max = beforeWad;
+    if (beforeWad < min) min = beforeWad;
+    if (afterWad > max) max = afterWad;
   }
 
   return {
