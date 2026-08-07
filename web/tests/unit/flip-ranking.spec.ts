@@ -174,18 +174,22 @@ test("a served order that breaks its own largest-first rule is SURFACED, never r
   expect(model.maxDebtUsd).toBe("9000000000");
 });
 
-test("the takeaway names the gross, the counter-flow, the window — and the total it may NOT claim", () => {
+test("the takeaway names the gross, the counter-flow, the page — and the total it may NOT claim", () => {
   const model = viewOf(dmClone());
+  // r90 F3 RE-LAW: the page holds SERVED ROWS, and only a row with a served
+  // debt draws a bar — so the takeaway says "on this page", and the drawing
+  // claim lives with the bars. "All 1 are drawn below" beside an unbarrable
+  // row was two mutually exclusive sentences on one page.
   expect(flipTakeaway(model, 1)).toBe(
-    "This scenario flips 1 account to liquidation-eligible — all 1 are drawn below, ranked by " +
-      "flipped debt. No total of flipped debt is served, so none is claimed.",
+    "This scenario flips 1 account to liquidation-eligible — the 1 flip is on this page. " +
+      "No total of flipped debt is served, so none is claimed.",
   );
   // The truncation arm, live-book shaped: top 20 of 130 with 0 flips back.
   const truncated = viewOf(dmClone());
   truncated.cells.flipsToEligible = 130;
   expect(flipTakeaway(truncated, 20)).toBe(
     "This scenario flips 130 accounts to liquidation-eligible — the 20 largest by flipped debt " +
-      "are drawn below. No total of flipped debt is served, so none is claimed.",
+      "are on this page. No total of flipped debt is served, so none is claimed.",
   );
   // The counter-flow clause, when it exists, is named with the gross.
   const withBack = viewOf(dmClone());
@@ -194,11 +198,88 @@ test("the takeaway names the gross, the counter-flow, the window — and the tot
   expect(flipTakeaway(withBack, 5)).toContain("while 3 flip back to healthy");
 });
 
-test("the refused aside carries Finding 2's caveat: two populations, no split, no cell, no zero", () => {
+test("r90: a REVERSE-FLOW run is a view, never `none` — the counter-flow is the whole point", () => {
+  // r90 F1: 3 eligible before, 2 after, zero flips in, one flip back. The
+  // old zero-mover exit swallowed this partition whole, and an honest user
+  // read only that nobody became eligible.
+  const engine = dmClone();
+  engine.movers = [];
+  engine.movers_total = 0;
+  engine.newly_eligible_accounts = -1;
+  engine.before.eligible_accounts = 3;
+  engine.after.eligible_accounts = 2;
+  engine.before.accounts = 10;
+  engine.after.accounts = 10;
+  const model = viewOf(engine);
+  expect(model.cells).toEqual({
+    flipsToEligible: 0,
+    flipsToHealthy: 1,
+    stayedEligible: 2,
+    stayedNotEligible: 7,
+    total: 10,
+  });
+  expect(model.bars).toHaveLength(0);
+  expect(flipTakeaway(model, 0)).toBe(
+    "This scenario flips no accounts to liquidation-eligible, while 1 flips back to healthy — " +
+      "the served flow is the reverse one. No total of flipped debt is served, so none is claimed.",
+  );
+});
+
+test("r90: a counted flip population with an EMPTY mover window is a contradiction, never `none`", () => {
+  const engine = dmClone();
+  engine.movers = [];
+  // movers_total 1 with no served window: the ranking this view draws does
+  // not exist on the wire.
+  const reason = refusedOf(engine);
+  expect(reason).toContain("WINDOW CONTRADICTION");
+  expect(reason).toContain("empty mover window");
+});
+
+test("r90: a mover window LARGER than its population is a contradiction", () => {
+  const engine = dmClone();
+  const base = engine.movers[0];
+  if (base === undefined) throw new Error("fixture invariant: one DM mover expected");
+  engine.movers = [base, { ...base, account: "0x6666666666666666666666666666666666666666" }];
+  // movers_total stays 1: two windowed rows over a one-flip population.
+  const reason = refusedOf(engine);
+  expect(reason).toContain("WINDOW CONTRADICTION");
+  expect(reason).toContain("larger than");
+});
+
+test("r90: a shown mover WITHOUT a true became_eligible verdict refuses the bars, visibly", () => {
+  // r90 F2: eligibility comes from the served verdict, never from array
+  // membership. A false or null verdict row must not be charted as a flip.
+  const engine = dmClone();
+  const base = engine.movers[0];
+  if (base === undefined) throw new Error("fixture invariant: one DM mover expected");
+  engine.movers = [base, { ...base, account: "0x7777777777777777777777777777777777777777", became_eligible: false }];
+  engine.movers_total = 2;
+  engine.newly_eligible_accounts = 2;
+  engine.after.eligible_accounts = engine.before.eligible_accounts + 2;
+  const model = viewOf(engine);
+  expect(model.barsRefused).not.toBeNull();
+  expect(model.barsRefused).toContain("VERDICT CONTRADICTION");
+  expect(model.bars).toHaveLength(0);
+  // A null verdict is refused the same way — null is not a yes.
+  engine.movers = [base, { ...base, account: "0x7777777777777777777777777777777777777777", became_eligible: null }];
+  expect(viewOf(engine).barsRefused).not.toBeNull();
+  // And the honest window keeps its bars.
+  engine.movers = [base];
+  engine.movers_total = 1;
+  engine.newly_eligible_accounts = 1;
+  engine.after.eligible_accounts = engine.before.eligible_accounts + 1;
+  expect(viewOf(engine).barsRefused).toBeNull();
+});
+
+test("the refused aside claims ONLY what the unsplit wire supports (r90 F4 re-law)", () => {
+  // The old sentence said refused rows "belong to no cell and are never
+  // zero" — but the wire's count MIXES rows already inside the four cells
+  // with rows outside `accounts`, and it can legitimately be zero. The
+  // sentence now claims membership in nothing.
   expect(flipRefusedAsideLine(1)).toBe(
-    "Beside the partition, not inside it: 1 refused row — the wire counts rows with no usable " +
-      "comparator and rows it could not rebuild under one number, so they belong to no cell " +
-      "and are never zero.",
+    "Beside the partition: 1 refused row — an unsplit mix of rows with no usable comparator " +
+      "and rows never rebuilt; the wire serves no split, so no cell membership is claimed and " +
+      "the count sits outside the partition arithmetic.",
   );
 });
 

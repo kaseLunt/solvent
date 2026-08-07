@@ -63,6 +63,13 @@ export interface FlipView {
   maxDebtUsd: string;
   /** Non-null when the served order contradicts the served ranking rule. */
   rankingContradiction: string | null;
+  /**
+   * r90: non-null when a shown mover carries no true `became_eligible`
+   * verdict (or the wrong engine identity) — the bars are REFUSED, because a
+   * flip bar's license is the served verdict, never array membership. The
+   * partition stands: its inputs are the welded counts, not the window rows.
+   */
+  barsRefused: string | null;
 }
 
 export type FlipRanking =
@@ -75,7 +82,8 @@ export function flipRanking(engine: LabRunBookEngine): FlipRanking {
   if (engine.before.hf_histogram.comparator !== "hf_num/hf_den") return { kind: "not-dm" };
 
   // THE COUNT WELDS — every partition input must agree with the response's
-  // own structure before any cell is derived.
+  // own structure before any cell is derived, and BEFORE any exit (the r88
+  // lesson: a validation-free empty exit renders an unqualified story).
   if (engine.before.accounts !== engine.after.accounts) {
     return {
       kind: "refused",
@@ -93,6 +101,27 @@ export function flipRanking(engine: LabRunBookEngine): FlipRanking {
         `PARTITION CONTRADICTION: newly_eligible_accounts is ${String(engine.newly_eligible_accounts)} ` +
         `but the two sides' eligible counts differ by ${String(net)} — the net disagrees with its ` +
         `own definition, so no partition is drawn.`,
+    };
+  }
+  // THE WINDOW CARDINALITY WELDS (r90): the mover window is the evidence for
+  // movers_total, and a window that disagrees with its population poisons
+  // everything derived from either.
+  if (engine.movers.length > engine.movers_total) {
+    return {
+      kind: "refused",
+      reason:
+        `WINDOW CONTRADICTION: the mover window shows ${String(engine.movers.length)} rows but ` +
+        `the run counts only ${String(engine.movers_total)} flips — a window larger than its ` +
+        `population, so nothing derived from either is drawn.`,
+    };
+  }
+  if (engine.movers_total > 0 && engine.movers.length === 0) {
+    return {
+      kind: "refused",
+      reason:
+        `WINDOW CONTRADICTION: the run counts ${String(engine.movers_total)} flips to eligible ` +
+        `but serves an empty mover window — the ranking this view draws does not exist on the ` +
+        `wire, so the partition and bars are refused.`,
     };
   }
 
@@ -130,16 +159,35 @@ export function flipRanking(engine: LabRunBookEngine): FlipRanking {
     };
   }
 
-  if (engine.movers_total === 0 || engine.movers.length === 0) return { kind: "none" };
+  // r90: `none` ONLY when NOTHING flowed in either direction. A reverse-flow
+  // run (zero flips in, some flip back) is a view — the counter-flow is the
+  // very number this partition exists to expose.
+  if (flipsToEligible === 0 && flipsToHealthy === 0) return { kind: "none" };
 
+  // THE VERDICT WELD (r90): a flip bar's license is the served
+  // became_eligible flag on the served engine — never membership in the
+  // array. A false or null verdict beside a debt figure refuses the BARS,
+  // visibly; the ledger table still shows each row's own verdict.
+  const offending = engine.movers.filter(
+    (mover) => mover.engine !== engine.engine || mover.became_eligible !== true,
+  ).length;
+  let barsRefused: string | null = null;
   const bars: FlipBar[] = [];
   const unbarrable: string[] = [];
-  for (const mover of engine.movers) {
-    if (mover.debt_usd === null) {
-      unbarrable.push(mover.account);
-      continue;
+  if (offending > 0) {
+    barsRefused =
+      `VERDICT CONTRADICTION: ${String(offending)} shown mover ` +
+      `${offending === 1 ? "row carries" : "rows carry"} no true became_eligible verdict for ` +
+      `this engine — a flip bar's license is the served verdict, so the bars are refused; ` +
+      `the table below shows each row's own verdict.`;
+  } else {
+    for (const mover of engine.movers) {
+      if (mover.debt_usd === null) {
+        unbarrable.push(mover.account);
+        continue;
+      }
+      bars.push({ account: mover.account, debtUsd: mover.debt_usd });
     }
-    bars.push({ account: mover.account, debtUsd: mover.debt_usd });
   }
 
   let maxDebtUsd = 0n;
@@ -165,6 +213,7 @@ export function flipRanking(engine: LabRunBookEngine): FlipRanking {
     unbarrable,
     maxDebtUsd: maxDebtUsd.toString(),
     rankingContradiction,
+    barsRefused,
   };
 }
 
@@ -174,18 +223,31 @@ export function flipRanking(engine: LabRunBookEngine): FlipRanking {
  */
 export function flipTakeaway(model: FlipView, shown: number): string {
   const { cells } = model;
+  const tail = "No total of flipped debt is served, so none is claimed.";
+  // r90 F1: the reverse-flow arm — zero flips in, some flip back.
+  if (cells.flipsToEligible === 0) {
+    return (
+      `This scenario flips no accounts to liquidation-eligible, while ` +
+      `${String(cells.flipsToHealthy)} ${cells.flipsToHealthy === 1 ? "flips" : "flip"} back to ` +
+      `healthy — the served flow is the reverse one. ${tail}`
+    );
+  }
   const flipNoun = cells.flipsToEligible === 1 ? "account" : "accounts";
   const back =
     cells.flipsToHealthy === 0
       ? ""
       : ` while ${String(cells.flipsToHealthy)} ${cells.flipsToHealthy === 1 ? "flips" : "flip"} back to healthy`;
+  // r90 F3: the page holds SERVED ROWS — the drawing claim lives with the
+  // bars, because a null-debt row is on the page and draws nothing.
   const window =
     shown < cells.flipsToEligible
-      ? `the ${String(shown)} largest by flipped debt are drawn below`
-      : `all ${String(shown)} are drawn below, ranked by flipped debt`;
+      ? `the ${String(shown)} largest by flipped debt are on this page`
+      : shown === 1
+        ? `the 1 flip is on this page`
+        : `all ${String(shown)} are on this page`;
   return (
     `This scenario flips ${String(cells.flipsToEligible)} ${flipNoun} to liquidation-eligible` +
-    `${back} — ${window}. No total of flipped debt is served, so none is claimed.`
+    `${back} — ${window}. ${tail}`
   );
 }
 
@@ -210,10 +272,14 @@ export function flipCellLabel(key: keyof Omit<FlipCells, "total">): string {
  */
 export function flipRefusedAsideLine(count: number): string {
   const noun = count === 1 ? "row" : "rows";
+  // r90 F4: the wire's refused count MIXES rows already inside the four
+  // cells (in-run, no comparator) with rows outside `accounts` entirely
+  // (never rebuilt), and serves no split — so this sentence claims cell
+  // membership for NOBODY and simply keeps the count beside the arithmetic.
   return (
-    `Beside the partition, not inside it: ${String(count)} refused ${noun} — the wire counts ` +
-    `rows with no usable comparator and rows it could not rebuild under one number, so they ` +
-    `belong to no cell and are never zero.`
+    `Beside the partition: ${String(count)} refused ${noun} — an unsplit mix of rows with no ` +
+    `usable comparator and rows never rebuilt; the wire serves no split, so no cell membership ` +
+    `is claimed and the count sits outside the partition arithmetic.`
   );
 }
 

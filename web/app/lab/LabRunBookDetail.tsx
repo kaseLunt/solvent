@@ -621,21 +621,40 @@ function LabFlipRanking({ engine }: { engine: LabRunBookEngine }) {
           style={{ display: "block" }}
           data-testid="flip-strip"
         >
-          {placed.map(
-            (segment) =>
-              segment.width > 0 && (
-                <rect
-                  key={segment.key}
-                  className={segment.cls}
-                  data-testid="flip-cell"
-                  data-cell={segment.key}
-                  data-count={String(segment.count)}
-                  x={segment.x}
-                  y={0}
-                  width={segment.width}
-                  height={FLIP_STRIP_H}
-                />
-              ),
+          {placed.map((segment) =>
+            segment.width > 0 ? (
+              <rect
+                key={segment.key}
+                className={segment.cls}
+                data-testid="flip-cell"
+                data-cell={segment.key}
+                data-count={String(segment.count)}
+                x={segment.x}
+                y={0}
+                width={segment.width}
+                height={FLIP_STRIP_H}
+              />
+            ) : segment.count > 0 ? (
+              // r90 F5 — PRESENCE, NOT SHARE: a positive cell whose share
+              // rounds below one pixel keeps a dot, exactly like the debt
+              // bars, so the legend and the picture never disagree about
+              // whether a population exists.
+              <circle
+                key={segment.key}
+                className={segment.cls}
+                data-testid="flip-cell-presence"
+                data-cell={segment.key}
+                data-count={String(segment.count)}
+                cx={Math.min(Math.max(segment.x, 2), FLIP_STRIP_W - 2)}
+                cy={FLIP_STRIP_H / 2}
+                r={PRESENCE_R}
+              >
+                <title>
+                  {`${String(segment.count)} accounts — a share too small to draw at one pixel ` +
+                    `on this strip. This dot marks presence and carries no length.`}
+                </title>
+              </circle>
+            ) : null,
           )}
         </svg>
         </div>
@@ -655,6 +674,15 @@ function LabFlipRanking({ engine }: { engine: LabRunBookEngine }) {
           </span>
         )}
       </div>
+      {/* r90 F2: a window with an unlicensed verdict refuses the BARS,
+              visibly — the ledger below still shows each row's own verdict. */}
+      {model.barsRefused !== null && (
+        <div className={styles.stateSlot}>
+          <span className={styles.dumbbellContradiction} data-testid="flip-bars-refused">
+            {model.barsRefused}
+          </span>
+        </div>
+      )}
       {model.bars.length > 0 && (
         <div className={styles.chartScroll} data-testid="flip-frame">
           <svg

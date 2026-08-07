@@ -540,17 +540,22 @@ test("VIEW 4: an unmoved book draws NOTHING — no chart, no population sentence
   await expect(aave.getByTestId("dumbbell-census")).toHaveCount(0);
 });
 
-/** r88/r89/view-5 doctoring shape: only the fields the negatives below mutate. */
+/** r88/r89/r90/view-5 doctoring shape: only the fields the negatives below mutate. */
 interface DoctoredRunBook {
   engines: {
     engine: string;
+    movers: { became_eligible: boolean | null }[];
+    movers_total: number;
+    newly_eligible_accounts: number;
     before: {
       accounts: number;
+      eligible_accounts: number;
       hf_histogram: { wad_scale: string; refused_count: number };
       collateral_by_asset: { symbol: string | null; unpriced: boolean }[];
     };
     after: {
       accounts: number;
+      eligible_accounts: number;
       hf_histogram: { wad_scale: string; refused_count: number };
       collateral_by_asset: { symbol: string | null; unpriced: boolean }[];
     };
@@ -622,8 +627,8 @@ test("VIEW 5: the four-cell partition, its named aside, and the sized flip bars 
   const takeaway = dm.getByTestId("flip-takeaway");
   await expect(takeaway).toBeVisible();
   await expect(takeaway).toHaveText(
-    "This scenario flips 1 account to liquidation-eligible — all 1 are drawn below, ranked by " +
-      "flipped debt. No total of flipped debt is served, so none is claimed.",
+    "This scenario flips 1 account to liquidation-eligible — the 1 flip is on this page. " +
+      "No total of flipped debt is served, so none is claimed.",
   );
 
   // The FOUR cells partition the run's 3 accounts exactly; the legend carries
@@ -641,8 +646,10 @@ test("VIEW 5: the four-cell partition, its named aside, and the sized flip bars 
   // Finding 2's aside: refused rides BESIDE the partition, never as a cell.
   const aside = dm.getByTestId("flip-refused-aside");
   await expect(aside).toBeVisible();
-  await expect(aside).toContainText("Beside the partition, not inside it: 1 refused row");
-  await expect(aside).toContainText("belong to no cell and are never zero");
+  await expect(aside).toContainText("Beside the partition: 1 refused row");
+  // r90 F4: the sentence claims cell membership for NOBODY — the wire's
+  // count mixes two populations and serves no split.
+  await expect(aside).toContainText("no cell membership is claimed");
 
   // ONE SOURCE: one bar per table row, carrying the exact money register.
   await expect(dm.getByTestId("flip-bar-row")).toHaveCount(1);
@@ -718,4 +725,50 @@ test("r89: a CONTRADICTORY collateral row never renders its money, and the sum w
   await expect(dm.getByTestId("runbook-collateral-reading-after")).toContainText(
     "assets sum to",
   );
+});
+
+test("r90: a positive partition cell too small for a pixel keeps a PRESENCE dot on the strip", async ({
+  page,
+}) => {
+  // DERIVED CASE: one flip among 1,000 accounts — round(0.38px) = 0, and a
+  // legend saying 1 beside a strip showing nothing would be two answers.
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook;
+  for (const engine of body.engines) {
+    if (engine.engine !== "debt_manager") continue;
+    engine.before.accounts = 1000;
+    engine.after.accounts = 1000;
+    engine.before.eligible_accounts = 46;
+    engine.after.eligible_accounts = 47;
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const dm = page.locator('[data-testid="runbook-movers"][data-engine="debt_manager"]');
+  const presence = dm.locator('[data-testid="flip-cell-presence"][data-cell="flipsToEligible"]');
+  await expect(presence).toHaveCount(1);
+  await expect(presence).toHaveAttribute("data-count", "1");
+  // The legend and the strip agree: 1 flip exists, drawn as presence.
+  await expect(dm.getByTestId("flip-legend")).toContainText("1 flipped to eligible");
+  await expect(dm.getByTestId("flip-strip")).toHaveCount(1);
+});
+
+test("r90: a shown mover without a true verdict refuses the BARS visibly — the partition stands", async ({
+  page,
+}) => {
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook;
+  for (const engine of body.engines) {
+    if (engine.engine !== "debt_manager") continue;
+    for (const mover of engine.movers) mover.became_eligible = false;
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const dm = page.locator('[data-testid="runbook-movers"][data-engine="debt_manager"]');
+  const refused = dm.getByTestId("flip-bars-refused");
+  await expect(refused).toBeVisible();
+  await expect(refused).toContainText("VERDICT CONTRADICTION");
+  await expect(dm.getByTestId("flip-bars")).toHaveCount(0);
+  await expect(dm.getByTestId("flip-bar")).toHaveCount(0);
+  // The partition's inputs are the welded counts — it still renders.
+  await expect(dm.getByTestId("flip-strip")).toHaveCount(1);
+  // And the ledger still shows the row with its own verdict.
+  await expect(dm.getByTestId("runbook-mover-flip")).toHaveText("no");
 });
