@@ -455,3 +455,87 @@ test("COLLIDING COLLATERAL ROWS survive a rerun: counted and not-counted stay th
     page.getByTestId("runbook-collateral-reading-before").first(),
   ).toContainText("1 asset sums to $12,000");
 });
+
+// ---------------------------------------------------------------------------
+// VIEW 4 — the Aave mover dumbbells (views spec view 4 + critic Finding 8)
+
+test("VIEW 4: the dumbbells render as a WINDOW onto the census, boundary marked, table as ledger", async ({
+  page,
+}) => {
+  await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
+
+  const aave = page.locator('[data-testid="runbook-movers"][data-engine="aave_v3_etherfi"]');
+
+  // Finding 8, VISIBLE (never a fold descendant): the population sentence
+  // names movement-not-danger and the count the pool does not serve.
+  const population = aave.getByTestId("dumbbell-population");
+  await expect(population).toBeVisible();
+  await expect(population).toHaveText(
+    "A drop is movement, not danger: 1 counts every account whose health factor fell at all " +
+      "— under a price shock, most of the borrowing book — and the pool serves no count of " +
+      "accounts that crossed 1.00.",
+  );
+
+  // The census STATE line, visible before the picture: buckets + no-debt +
+  // refused = rows the run FACED (2 here, MORE than `accounts` — the refused
+  // row was never rebuilt and is in neither side's accounts).
+  const census = aave.getByTestId("dumbbell-census");
+  await expect(census).toBeVisible();
+  await expect(census).toHaveText(
+    "A window onto the run's own census: 1 bucketed on both sides + 0 no-debt (unbounded " +
+      "health factor, excluded from movers by construction) + 1 refused = 2 rows this run faced.",
+  );
+
+  // ONE SOURCE: every dumbbell row has its ledger row in the table below —
+  // same count, same account.
+  const chartRows = aave.getByTestId("dumbbell-row");
+  await expect(chartRows).toHaveCount(1);
+  await expect(aave.getByTestId("runbook-mover")).toHaveCount(1);
+  await expect(chartRows.first()).toHaveAttribute("data-crossed", "true");
+
+  // The boundary at 1.00 is marked EXPLICITLY, and this shock's crossing row
+  // ends in the liquidatable register: after-dot below one, before-dot not.
+  await expect(aave.getByTestId("dumbbell-boundary")).toHaveCount(1);
+  await expect(aave.locator('[data-testid="dumbbell-tick"][data-boundary="true"]')).toContainText(
+    "1.00",
+  );
+  await expect(aave.getByTestId("dumbbell-before")).toHaveAttribute("data-below-one", "false");
+  await expect(aave.getByTestId("dumbbell-after")).toHaveAttribute("data-below-one", "true");
+  await expect(aave.getByTestId("dumbbell-eligible-region")).toHaveCount(1);
+
+  // The window note is window-scoped BY SENTENCE and visible.
+  const windowNote = aave.getByTestId("dumbbell-window-note");
+  await expect(windowNote).toBeVisible();
+  await expect(windowNote).toContainText("a fact about this window");
+  await expect(windowNote).toContainText("the pool serves none");
+
+  // The method line states the log axis and the strictly-below law.
+  await expect(aave.getByTestId("dumbbell-method")).toContainText("strictly below 1.00");
+  await expect(aave.getByTestId("dumbbell-method")).toContainText("LOG");
+
+  // VOCABULARY LAW: the Debt Manager speaks flips, not wads — no dumbbells,
+  // no wad-population sentence on its arm.
+  const dm = page.locator('[data-testid="runbook-movers"][data-engine="debt_manager"]');
+  await expect(dm.getByTestId("runbook-dumbbells")).toHaveCount(0);
+  await expect(dm.getByTestId("dumbbell-population")).toHaveCount(0);
+});
+
+test("VIEW 4: an unmoved book draws NOTHING — no chart, no population sentence, stated in words", async ({
+  page,
+}) => {
+  await runScenario(
+    page,
+    "weeth_market_depeg_oracles_held",
+    fixture("run-book.weeth_market_depeg_oracles_held.json"),
+  );
+
+  const aave = page.locator('[data-testid="runbook-movers"][data-engine="aave_v3_etherfi"]');
+  // Zero movement renders as the disclosure SENTENCE (pinned elsewhere) — a
+  // dumbbell chart with no rows would be a picture of nothing pretending to
+  // be a fact, and a population sentence over zero would qualify a count
+  // that does not exist.
+  await expect(aave.getByTestId("runbook-movers-disclosure")).toBeVisible();
+  await expect(aave.getByTestId("runbook-dumbbells")).toHaveCount(0);
+  await expect(aave.getByTestId("dumbbell-population")).toHaveCount(0);
+  await expect(aave.getByTestId("dumbbell-census")).toHaveCount(0);
+});

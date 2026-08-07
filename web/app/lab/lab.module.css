@@ -824,6 +824,55 @@
   shape-rendering: crispEdges;
 }
 
+/* VIEW 4 (mover dumbbells) — the boundary and the below-1.00 dots are the
+   only crit ink; the connector is MOVEMENT, not danger, and stays neutral. */
+.dumbbellLine {
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+}
+
+.dumbbellBefore {
+  fill: var(--bg);
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+}
+
+.dumbbellBeforeEligible {
+  fill: var(--bg);
+  stroke: var(--crit);
+  stroke-width: 1.5;
+}
+
+.dumbbellAfter {
+  fill: var(--accent);
+}
+
+.dumbbellAfterEligible {
+  fill: var(--crit);
+}
+
+.dumbbellBoundary {
+  stroke: var(--crit);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.dumbbellBoundaryLabel {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  fill: var(--crit);
+}
+
+.dumbbellRegion {
+  fill: var(--crit-bg);
+  opacity: 0.5;
+}
+
+.dumbbellContradiction {
+  color: var(--crit);
+}
+
 .histAside {
   display: flex;
   gap: var(--sp-4);

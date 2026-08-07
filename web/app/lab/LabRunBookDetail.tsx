@@ -26,7 +26,7 @@
 //     paraphrasing a caveat is how a caveat stops working.
 
 import type { LabRunBookEngine, RunBookAggregate } from "@/lib/runbook";
-import { EM_DASH, renderNullableDecimal } from "@/lib/format";
+import { EM_DASH, renderNullableDecimal, truncateAddress } from "@/lib/format";
 import { sharePercent, shareBarWidth } from "@/lib/book-format";
 import {
   RISK_BAND_METHOD,
@@ -36,6 +36,15 @@ import {
   riskBandRefusedRow,
 } from "@/lib/book-copy";
 import { labUsd } from "./frontierView";
+import {
+  DUMBBELL_METHOD,
+  dumbbellCensusLine,
+  dumbbellPosition,
+  dumbbellUnplottableLine,
+  dumbbellWindowLine,
+  moverDumbbells,
+  moverPopulationLine,
+} from "./moverDumbbells";
 import {
   collateralDisclosure,
   collateralReadingLine,
@@ -63,6 +72,15 @@ const AXIS_H = 20;
 /** Same law as the Book's: the floor is on the MARKER, never on the quantity. */
 const PRESENCE_MIN = 1;
 const PRESENCE_R = 1.5;
+
+// VIEW 4 (mover dumbbells) — authored geometry, RENDERED CSS px (LAW-3): the
+// frame scrolls below this width rather than scaling 12px text down.
+const DUMB_LABEL_W = 110;
+const DUMB_PLOT_W = 380;
+const DUMB_ROW_H = 26;
+const DUMB_AXIS_H = 26;
+const DUMB_PAD = 8;
+const DUMB_R = 4;
 
 // ---------------------------------------------------------------------------
 // B1 — the BEFORE/AFTER histogram pair
@@ -336,6 +354,162 @@ function MoverRow({ engine, mover }: { engine: LabRunBookEngine; mover: LabRunBo
   );
 }
 
+// ---------------------------------------------------------------------------
+// B2b — VIEW 4: the mover dumbbells (Aave arm only)
+//
+// The chart is a WINDOW onto the histogram census above it, and it says so in
+// a visible STATE line before any dot is drawn (R6/R7). Geometry comes from
+// `moverDumbbells`, where every below-1.00 verdict is a bigint compare against
+// the wad scale; the ONLY float here is the log pixel position (LAW-4). The
+// movers table below is this chart's LEDGER — same rows, same order, exact
+// unrounded wads — so no number exists only in a hover title (LAW-5).
+
+function LabMoverDumbbells({ engine }: { engine: LabRunBookEngine }) {
+  const model = moverDumbbells(engine);
+  if (model.kind !== "chart") return null;
+
+  const plotLeft = DUMB_LABEL_W + 6;
+  const width = plotLeft + DUMB_PLOT_W + 16;
+  const plotBottom = model.rows.length * DUMB_ROW_H + 4;
+  const height = plotBottom + DUMB_AXIS_H;
+  const xOf = (wad: string) =>
+    plotLeft +
+    DUMB_PAD +
+    Math.round(
+      dumbbellPosition(wad, model.domainMinWad, model.domainMaxWad) * (DUMB_PLOT_W - 2 * DUMB_PAD),
+    );
+  const xBoundary = xOf(model.scaleWad);
+  // Tint only territory the chart actually draws below 1.00 — when the whole
+  // domain sits at or above the boundary there is no such territory, and an
+  // 8px inset painted crit would claim one.
+  const drawsBelowBoundary = BigInt(model.domainMinWad) < BigInt(model.scaleWad);
+  const windowLine = dumbbellWindowLine(model);
+  const hf = (wad: string) => renderNullableDecimal(wad, { decimals: 18 });
+
+  return (
+    <div data-testid="runbook-dumbbell-block">
+      {/* ---- SLOT 2: STATE — what the window sits inside, BEFORE the picture
+              (R6). The census line may not collapse (R7); a contradiction in
+              the served census replaces it and is never smoothed over. ---- */}
+      <div className={styles.stateSlot} data-testid="dumbbell-state">
+        {model.censusContradiction !== null ? (
+          <span className={styles.dumbbellContradiction} data-testid="dumbbell-census-contradiction">
+            {model.censusContradiction}
+          </span>
+        ) : (
+          <span data-testid="dumbbell-census">{dumbbellCensusLine(model.census)}</span>
+        )}
+        {model.unplottable.length > 0 && (
+          <span data-testid="dumbbell-unplottable">
+            {dumbbellUnplottableLine(model.unplottable.length)}
+          </span>
+        )}
+        {windowLine !== null && <span data-testid="dumbbell-window-note">{windowLine}</span>}
+      </div>
+      {model.rows.length > 0 && (
+        <div className={styles.chartScroll} data-testid="dumbbell-frame">
+          <svg
+            width={width}
+            height={height}
+            viewBox={`0 0 ${String(width)} ${String(height)}`}
+            role="img"
+            aria-label={`before-to-after health factor per shown mover on ${engine.engine}, log axis, liquidation boundary at 1.00`}
+            style={{ display: "block" }}
+            data-testid="runbook-dumbbells"
+          >
+            {drawsBelowBoundary && (
+              <rect
+                className={styles.dumbbellRegion}
+                data-testid="dumbbell-eligible-region"
+                x={plotLeft}
+                y={2}
+                width={Math.max(0, xBoundary - plotLeft)}
+                height={plotBottom - 2}
+              >
+                <title>liquidatable territory: the pool liquidates strictly below 1.00 on the wad</title>
+              </rect>
+            )}
+            {model.ticks.map((tick) => {
+              const x = xOf(tick.wad);
+              return (
+                <g key={tick.wad} data-testid="dumbbell-tick" data-boundary={String(tick.boundary)}>
+                  <line
+                    className={tick.boundary ? styles.dumbbellBoundary : styles.histBaseline}
+                    data-testid={tick.boundary ? "dumbbell-boundary" : undefined}
+                    x1={x}
+                    x2={x}
+                    y1={2}
+                    y2={plotBottom}
+                    opacity={tick.boundary ? 1 : 0.35}
+                  />
+                  <text
+                    className={tick.boundary ? styles.dumbbellBoundaryLabel : styles.histAxisLabel}
+                    x={x}
+                    y={plotBottom + 14}
+                    textAnchor="middle"
+                  >
+                    {tick.label}
+                  </text>
+                </g>
+              );
+            })}
+            {model.rows.map((row, index) => {
+              const y = index * DUMB_ROW_H + DUMB_ROW_H / 2 + 4;
+              const xBefore = xOf(row.beforeWad);
+              const xAfter = xOf(row.afterWad);
+              return (
+                <g
+                  key={row.account}
+                  data-testid="dumbbell-row"
+                  data-account={row.account}
+                  data-crossed={String(row.crossed)}
+                >
+                  <text className={styles.histLabel} x={DUMB_LABEL_W} y={y + 4} textAnchor="end">
+                    {truncateAddress(row.account)}
+                  </text>
+                  <line
+                    className={styles.dumbbellLine}
+                    x1={xBefore}
+                    x2={xAfter}
+                    y1={y}
+                    y2={y}
+                  />
+                  <circle
+                    className={row.beforeBelowOne ? styles.dumbbellBeforeEligible : styles.dumbbellBefore}
+                    data-testid="dumbbell-before"
+                    data-below-one={String(row.beforeBelowOne)}
+                    cx={xBefore}
+                    cy={y}
+                    r={DUMB_R}
+                  />
+                  <circle
+                    className={row.afterBelowOne ? styles.dumbbellAfterEligible : styles.dumbbellAfter}
+                    data-testid="dumbbell-after"
+                    data-below-one={String(row.afterBelowOne)}
+                    cx={xAfter}
+                    cy={y}
+                    r={DUMB_R}
+                  >
+                    <title>
+                      {`${row.account}: ${hf(row.beforeWad)} before, ${hf(row.afterWad)} after, ` +
+                        `drop ${hf(row.dropWad)} — exact wads in the table below`}
+                    </title>
+                  </circle>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      )}
+      {/* ---- SLOT 6: METHOD for the chart — the scale, the only float, and
+              the strictly-below law, stated on the page. ---- */}
+      <p className={styles.methodLine} data-testid="dumbbell-method">
+        {DUMBBELL_METHOD}
+      </p>
+    </div>
+  );
+}
+
 export function LabRunBookMovers({ engine }: { engine: LabRunBookEngine }) {
   const isWadEngine = engine.before.hf_histogram.comparator === "hf_wad";
   return (
@@ -354,6 +528,18 @@ export function LabRunBookMovers({ engine }: { engine: LabRunBookEngine }) {
       <p className={styles.answerLine} data-testid="runbook-movers-disclosure">
         {moversDisclosure(engine)}
       </p>
+      {/* ---- Finding 8 (views spec): on Aave the count above is MOVEMENT,
+              not danger, and the pool serves no crossed-1.00 count. That
+              sentence rides the ANSWER, visible whether or not the chart
+              below can draw. ---- */}
+      {isWadEngine && engine.movers_total > 0 && (
+        <p className={styles.answerLine} data-testid="dumbbell-population">
+          {moverPopulationLine(engine.movers_total)}
+        </p>
+      )}
+      {/* ---- SLOT 4: VISUAL — VIEW 4's dumbbells; the table below stays as
+              this chart's LEDGER, exact and unrounded. ---- */}
+      {isWadEngine && <LabMoverDumbbells engine={engine} />}
       {engine.movers.length > 0 && (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
