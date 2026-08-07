@@ -897,6 +897,13 @@
   opacity: 0.85;
 }
 
+/* r91: a presence dot may sit ON a neighboring rectangle — the halo stroke
+   keeps it legible over any cell color. */
+.flipPresenceDot {
+  stroke: var(--bg);
+  stroke-width: 1.5;
+}
+
 .histAside {
   display: flex;
   gap: var(--sp-4);

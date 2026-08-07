@@ -746,6 +746,18 @@ test("r90: a positive partition cell too small for a pixel keeps a PRESENCE dot 
   const presence = dm.locator('[data-testid="flip-cell-presence"][data-cell="flipsToEligible"]');
   await expect(presence).toHaveCount(1);
   await expect(presence).toHaveAttribute("data-count", "1");
+  // r91 finding 3: the dot must be PAINTED, not merely present — every
+  // rectangle precedes it in document order, so SVG draws the dot on top of
+  // any full-height neighbor sharing its coordinate.
+  const painted = await dm
+    .getByTestId("flip-strip")
+    .evaluate((svg: SVGElement) => {
+      const children = Array.from(svg.children);
+      const lastRect = children.map((c) => c.tagName).lastIndexOf("rect");
+      const firstCircle = children.map((c) => c.tagName).indexOf("circle");
+      return firstCircle > lastRect;
+    });
+  expect(painted).toBe(true);
   // The legend and the strip agree: 1 flip exists, drawn as presence.
   await expect(dm.getByTestId("flip-legend")).toContainText("1 flipped to eligible");
   await expect(dm.getByTestId("flip-strip")).toHaveCount(1);
@@ -765,6 +777,10 @@ test("r90: a shown mover without a true verdict refuses the BARS visibly — the
   const refused = dm.getByTestId("flip-bars-refused");
   await expect(refused).toBeVisible();
   await expect(refused).toContainText("VERDICT CONTRADICTION");
+  // r91 finding 2: the takeaway makes NO window claim over a refused window —
+  // never "the 0 largest ... are on this page".
+  await expect(dm.getByTestId("flip-takeaway")).toContainText("no window claim is made");
+  await expect(dm.getByTestId("flip-takeaway")).not.toContainText("0 largest");
   await expect(dm.getByTestId("flip-bars")).toHaveCount(0);
   await expect(dm.getByTestId("flip-bar")).toHaveCount(0);
   // The partition's inputs are the welded counts — it still renders.

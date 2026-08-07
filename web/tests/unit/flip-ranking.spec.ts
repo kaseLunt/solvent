@@ -180,22 +180,59 @@ test("the takeaway names the gross, the counter-flow, the page — and the total
   // debt draws a bar — so the takeaway says "on this page", and the drawing
   // claim lives with the bars. "All 1 are drawn below" beside an unbarrable
   // row was two mutually exclusive sentences on one page.
-  expect(flipTakeaway(model, 1)).toBe(
+  expect(flipTakeaway(model)).toBe(
     "This scenario flips 1 account to liquidation-eligible — the 1 flip is on this page. " +
       "No total of flipped debt is served, so none is claimed.",
   );
-  // The truncation arm, live-book shaped: top 20 of 130 with 0 flips back.
+  // The truncation arm: one fully-served bar under a 130-flip population.
   const truncated = viewOf(dmClone());
   truncated.cells.flipsToEligible = 130;
-  expect(flipTakeaway(truncated, 20)).toBe(
-    "This scenario flips 130 accounts to liquidation-eligible — the 20 largest by flipped debt " +
+  expect(flipTakeaway(truncated)).toBe(
+    "This scenario flips 130 accounts to liquidation-eligible — the 1 largest by flipped debt " +
       "are on this page. No total of flipped debt is served, so none is claimed.",
   );
   // The counter-flow clause, when it exists, is named with the gross.
   const withBack = viewOf(dmClone());
   withBack.cells.flipsToEligible = 5;
   withBack.cells.flipsToHealthy = 3;
-  expect(flipTakeaway(withBack, 5)).toContain("while 3 flip back to healthy");
+  expect(flipTakeaway(withBack)).toContain("while 3 flip back to healthy");
+});
+
+test("r91: a window holding a NULL-DEBT row earns no ranking claim — capped or not", () => {
+  const engine = dmClone();
+  const base = engine.movers[0];
+  if (base === undefined) throw new Error("fixture invariant: one DM mover expected");
+  engine.movers = [
+    base,
+    { ...base, account: "0x8888888888888888888888888888888888888888", debt_usd: null },
+  ];
+  // CAPPED: 2 shown of 3 flips — the old arm called both "largest by
+  // flipped debt", debt-ranking a row with no served debt. The book is
+  // widened to 10 accounts so the partition itself stays lawful.
+  engine.before.accounts = 10;
+  engine.after.accounts = 10;
+  engine.movers_total = 3;
+  engine.newly_eligible_accounts = 3;
+  engine.after.eligible_accounts = engine.before.eligible_accounts + 3;
+  const line = flipTakeaway(viewOf(engine));
+  expect(line).toContain("the served window of 2 rows is on this page");
+  expect(line).not.toContain("largest by flipped debt");
+  // And the method line claims ranking only where every row carries a debt.
+  expect(FLIP_METHOD).toContain("ranked only where every row carries a served debt");
+  expect(FLIP_METHOD).not.toContain("served largest-debt ranking");
+});
+
+test("r91: a verdict-refused window makes NO window claim — never `the 0 largest`", () => {
+  const engine = dmClone();
+  const base = engine.movers[0];
+  if (base === undefined) throw new Error("fixture invariant: one DM mover expected");
+  engine.movers = [{ ...base, became_eligible: false }];
+  const model = viewOf(engine);
+  expect(model.barsRefused).not.toBeNull();
+  const line = flipTakeaway(model);
+  expect(line).toContain("no window claim is made");
+  expect(line).not.toContain("0 largest");
+  expect(line).not.toContain("on this page");
 });
 
 test("r90: a REVERSE-FLOW run is a view, never `none` — the counter-flow is the whole point", () => {
@@ -219,7 +256,7 @@ test("r90: a REVERSE-FLOW run is a view, never `none` — the counter-flow is th
     total: 10,
   });
   expect(model.bars).toHaveLength(0);
-  expect(flipTakeaway(model, 0)).toBe(
+  expect(flipTakeaway(model)).toBe(
     "This scenario flips no accounts to liquidation-eligible, while 1 flips back to healthy — " +
       "the served flow is the reverse one. No total of flipped debt is served, so none is claimed.",
   );
@@ -289,5 +326,5 @@ test("the kind gates and the method line", () => {
   expect(flipCellLabel("stayedNotEligible")).toBe("stayed not eligible");
   expect(FLIP_METHOD).toContain("became_eligible");
   expect(FLIP_METHOD).toContain("disclosure, not a comparator");
-  expect(FLIP_METHOD).toContain("a window");
+  expect(FLIP_METHOD).toContain("window onto the flips");
 });

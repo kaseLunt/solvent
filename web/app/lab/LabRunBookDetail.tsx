@@ -575,7 +575,6 @@ function LabFlipRanking({ engine }: { engine: LabRunBookEngine }) {
   }
 
   const { cells } = model;
-  const shown = model.bars.length + model.unbarrable.length;
   const segments = [
     { key: "flipsToEligible", count: cells.flipsToEligible, cls: styles.flipCellEligible },
     { key: "flipsToHealthy", count: cells.flipsToHealthy, cls: styles.flipCellBack },
@@ -604,7 +603,7 @@ function LabFlipRanking({ engine }: { engine: LabRunBookEngine }) {
       {/* ---- SLOT 3 (supplement): the flip story in one sentence, with the
               unserved total NAMED rather than implied. ---- */}
       <p className={styles.answerLine} data-testid="flip-takeaway">
-        {flipTakeaway(model, shown)}
+        {flipTakeaway(model)}
       </p>
       {/* ---- SLOT 2: STATE — the partition, its legend, and every aside,
               BEFORE the bars (R6/R7). ---- */}
@@ -621,42 +620,55 @@ function LabFlipRanking({ engine }: { engine: LabRunBookEngine }) {
           style={{ display: "block" }}
           data-testid="flip-strip"
         >
-          {placed.map((segment) =>
-            segment.width > 0 ? (
-              <rect
-                key={segment.key}
-                className={segment.cls}
-                data-testid="flip-cell"
-                data-cell={segment.key}
-                data-count={String(segment.count)}
-                x={segment.x}
-                y={0}
-                width={segment.width}
-                height={FLIP_STRIP_H}
-              />
-            ) : segment.count > 0 ? (
-              // r90 F5 — PRESENCE, NOT SHARE: a positive cell whose share
-              // rounds below one pixel keeps a dot, exactly like the debt
-              // bars, so the legend and the picture never disagree about
-              // whether a population exists.
-              <circle
-                key={segment.key}
-                className={segment.cls}
-                data-testid="flip-cell-presence"
-                data-cell={segment.key}
-                data-count={String(segment.count)}
-                cx={Math.min(Math.max(segment.x, 2), FLIP_STRIP_W - 2)}
-                cy={FLIP_STRIP_H / 2}
-                r={PRESENCE_R}
-              >
-                <title>
-                  {`${String(segment.count)} accounts — a share too small to draw at one pixel ` +
-                    `on this strip. This dot marks presence and carries no length.`}
-                </title>
-              </circle>
-            ) : null,
+          {/* r91 finding 3: rectangles first, presence dots AFTER — SVG
+              paints later elements on top, so a full-height neighbor can no
+              longer erase a dot; coincident dots step right until distinct. */}
+          {placed.map(
+            (segment) =>
+              segment.width > 0 && (
+                <rect
+                  key={segment.key}
+                  className={segment.cls}
+                  data-testid="flip-cell"
+                  data-cell={segment.key}
+                  data-count={String(segment.count)}
+                  x={segment.x}
+                  y={0}
+                  width={segment.width}
+                  height={FLIP_STRIP_H}
+                />
+              ),
           )}
-        </svg>
+          {(() => {
+            const usedX: number[] = [];
+            return placed.map((segment) => {
+              if (segment.width > 0 || segment.count === 0) return null;
+              let cx = Math.min(Math.max(segment.x, 2), FLIP_STRIP_W - 2);
+              while (usedX.some((used) => Math.abs(used - cx) < 5)) cx += 6;
+              usedX.push(cx);
+              return (
+                // r90 F5 — PRESENCE, NOT SHARE: a positive cell whose share
+                // rounds below one pixel keeps a dot, so the legend and the
+                // picture never disagree about whether a population exists.
+                <circle
+                  key={segment.key}
+                  className={`${segment.cls} ${styles.flipPresenceDot}`}
+                  data-testid="flip-cell-presence"
+                  data-cell={segment.key}
+                  data-count={String(segment.count)}
+                  cx={cx}
+                  cy={FLIP_STRIP_H / 2}
+                  r={PRESENCE_R}
+                >
+                  <title>
+                    {`${String(segment.count)} accounts — a share too small to draw at one pixel ` +
+                      `on this strip. This dot marks presence and carries no length.`}
+                  </title>
+                </circle>
+              );
+            });
+          })()}
+                  </svg>
         </div>
         <span data-testid="flip-legend">
           {segments

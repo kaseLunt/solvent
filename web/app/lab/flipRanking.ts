@@ -221,7 +221,7 @@ export function flipRanking(engine: LabRunBookEngine): FlipRanking {
  * The view's answer line: the gross flips, the counter-flow, the net — and
  * the claim it may NOT make, named. Nothing here totals the shown bars.
  */
-export function flipTakeaway(model: FlipView, shown: number): string {
+export function flipTakeaway(model: FlipView): string {
   const { cells } = model;
   const tail = "No total of flipped debt is served, so none is claimed.";
   // r90 F1: the reverse-flow arm — zero flips in, some flip back.
@@ -237,18 +237,25 @@ export function flipTakeaway(model: FlipView, shown: number): string {
     cells.flipsToHealthy === 0
       ? ""
       : ` while ${String(cells.flipsToHealthy)} ${cells.flipsToHealthy === 1 ? "flips" : "flip"} back to healthy`;
-  // r90 F3: the page holds SERVED ROWS — the drawing claim lives with the
-  // bars, because a null-debt row is on the page and draws nothing.
+  const head =
+    `This scenario flips ${String(cells.flipsToEligible)} ${flipNoun} to liquidation-eligible${back}`;
+  // r91 finding 2: a refused window makes NO window claim — "the 0 largest
+  // are on this page" beside a visible ledger row was two answers.
+  if (model.barsRefused !== null) {
+    return `${head} — the shown window's verdicts are contradicted below, so no window claim is made. ${tail}`;
+  }
+  const shown = model.bars.length + model.unbarrable.length;
+  // r91 finding 1: a window holding a null-debt row earns NO ranking claim —
+  // "largest by flipped debt" cannot describe a row with no served debt.
   const window =
-    shown < cells.flipsToEligible
-      ? `the ${String(shown)} largest by flipped debt are on this page`
-      : shown === 1
-        ? `the 1 flip is on this page`
-        : `all ${String(shown)} are on this page`;
-  return (
-    `This scenario flips ${String(cells.flipsToEligible)} ${flipNoun} to liquidation-eligible` +
-    `${back} — ${window}. ${tail}`
-  );
+    model.unbarrable.length > 0
+      ? `the served window of ${String(shown)} rows is on this page`
+      : shown < cells.flipsToEligible
+        ? `the ${String(shown)} largest by flipped debt are on this page`
+        : shown === 1
+          ? `the 1 flip is on this page`
+          : `all ${String(shown)} are on this page`;
+  return `${head} — ${window}. ${tail}`;
 }
 
 /** One partition cell, in reader words, for the strip's legend row. */
@@ -295,6 +302,7 @@ export function flipUnbarrableLine(count: number): string {
 /** SLOT 6 for the flip ranking. */
 export const FLIP_METHOD =
   "Bars: the debt that became eligible per shown flip, at the Debt Manager's own USD decimals, " +
-  "longest bar = largest shown flip. The rows are the served largest-debt ranking — a window, " +
-  "never the whole of the flips — and the verdict is the served became_eligible flag; the " +
-  "maxBorrowLT/borrowings rationals beside it are a disclosure, not a comparator.";
+  "longest bar = largest shown flip. The rows are the server's own window onto the flips — " +
+  "never the whole of them, and ranked only where every row carries a served debt — and the " +
+  "verdict is the served became_eligible flag; the maxBorrowLT/borrowings rationals beside it " +
+  "are a disclosure, not a comparator.";
