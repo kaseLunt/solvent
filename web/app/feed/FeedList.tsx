@@ -253,6 +253,11 @@ export function FeedList({ events, mode, ledger, empty, valueDecimals = {} }: Fe
   }
 
   const { timed, untimed, orderViolated } = splitUntimedTail(events);
+  // r79: under ORDERING DRIFT the tail slice contains the smuggled TIMED
+  // rows too (wire order is preserved for rendering), so the divider's
+  // count must tally rows actually missing header time — never the slice
+  // length, which would state a false count exactly when drift bites.
+  const untimedCount = untimed.filter((event) => event.block_time === null).length;
   return (
     <div className={styles.feed}>
       {timed.map((event) => (
@@ -270,8 +275,8 @@ export function FeedList({ events, mode, ledger, empty, valueDecimals = {} }: Fe
                 its two hazards — the COUNT and the never-invented clause —
                 both visible with the fold closed. The full ordering rationale
                 lives in the counted fold. */}
-            <b>UNTIMED TAIL</b> · {String(untimed.length)} row
-            {untimed.length === 1 ? "" : "s"} without custodied header time. A timestamp is
+            <b>UNTIMED TAIL</b> · {String(untimedCount)} row
+            {untimedCount === 1 ? "" : "s"} without custodied header time. A timestamp is
             never invented; each row shows its block number.
             <details className={styles.dividerFold} data-testid="untimed-divider-forensics">
               <summary>1 ordering note</summary>

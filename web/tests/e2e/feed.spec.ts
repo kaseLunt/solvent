@@ -343,6 +343,17 @@ test("ordering drift (W-3L 430): the alert stays OUTSIDE the fold, and the takea
   await page.goto("/feed");
   await expect(page.getByTestId("feed-row")).toHaveCount(3);
 
+  // r79: the divider counts rows ACTUALLY missing header time — the tail
+  // slice holds two rows here (the untimed borrow + the smuggled timed
+  // liquidation), and printing the slice length would tell an honest
+  // reader "2 rows without custodied header time" when only one lacks it.
+  await expect(
+    page
+      .getByTestId("untimed-divider")
+      .getByText("1 row without custodied header time", { exact: false })
+      .first(),
+  ).toBeVisible();
+
   // The drift alert is VISIBLE and is not a descendant of the divider's
   // fold — a hazard never collapses (the r73 placement law).
   const alert = page.getByTestId("untimed-order-violation");
