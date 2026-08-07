@@ -50,6 +50,22 @@ export function EndpointCard({ op, baseUrl }: { op: ContractOperation; baseUrl: 
         testId={`curl-${op.operationId}`}
       />
 
+      {/* W-3L (inventory 488): the response codes a caller must handle sit
+          ABOVE the happy-path sample — the non-2xx vocabulary is the part
+          that costs a caller correctness, and it may not trail the fold. */}
+      <div className={styles.responses} data-testid={`responses-${op.operationId}`}>
+        {op.responses.map((response) => (
+          <span
+            key={response.code}
+            className={`${styles.responseChip} ${response.code.startsWith("2") ? "" : styles.responseChipErr}`}
+            title={response.description}
+          >
+            {response.code}
+            {response.ref !== null ? ` · ${response.ref}` : ""}
+          </span>
+        ))}
+      </div>
+
       {op.sse ? (
         <p className={styles.sseNote}>
           text/event-stream · no JSON sample exists (or is invented) for a stream. Event names:
@@ -67,19 +83,6 @@ export function EndpointCard({ op, baseUrl }: { op: ContractOperation; baseUrl: 
           />
         </details>
       )}
-
-      <div className={styles.responses}>
-        {op.responses.map((response) => (
-          <span
-            key={response.code}
-            className={`${styles.responseChip} ${response.code.startsWith("2") ? "" : styles.responseChipErr}`}
-            title={response.description}
-          >
-            {response.code}
-            {response.ref !== null ? ` · ${response.ref}` : ""}
-          </span>
-        ))}
-      </div>
     </section>
   );
 }

@@ -118,3 +118,24 @@ test("the page cross-links to the Proof Center, where the manifest renders", asy
   await expect(page).toHaveURL(/\/proof$/);
   await expect(page.getByTestId("proof-subject")).toBeVisible();
 });
+
+test("W-3L (488): the response-code chips sit ABOVE the sample fold — the error vocabulary never trails the happy path", async ({
+  page,
+}) => {
+  await quiet(page);
+  await page.goto("/developers");
+
+  const card = page.getByTestId("endpoint-getBook");
+  const chips = card.getByTestId("responses-getBook");
+  await expect(chips).toBeVisible();
+  // The non-2xx vocabulary is rendered in the chips, visible with the
+  // sample fold CLOSED.
+  await expect(chips).toContainText("503");
+
+  const chipsBox = await chips.boundingBox();
+  const sampleBox = await card.locator("summary").first().boundingBox();
+  if (chipsBox === null || sampleBox === null) {
+    throw new Error("expected laid-out chips and sample summary");
+  }
+  expect(chipsBox.y + chipsBox.height).toBeLessThanOrEqual(sampleBox.y + 1);
+});
