@@ -581,3 +581,30 @@
   font-size: var(--fs-caption);
   color: var(--ink-2);
 }
+
+/* ---- W-3L INS-B: card takeaway/method + ledger folds ---- */
+
+.cardTakeaway {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 72ch;
+  margin: 6px 0 2px;
+}
+
+.cardMethod {
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+  max-width: 72ch;
+  margin: 0 0 8px;
+}
+
+.ledgerFold {
+  margin-top: 8px;
+}
+
+.ledgerFold summary {
+  cursor: pointer;
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}

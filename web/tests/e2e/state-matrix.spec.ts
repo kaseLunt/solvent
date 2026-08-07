@@ -581,10 +581,11 @@ const MATRIX: Cell[] = [
       await expect(
     page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
   ).toBeVisible();
-      // No fake freshness: the stale verdict is its OWN visible state,
-      // alongside the fresh one — never silently normalized.
+      // No fake freshness: the stale verdict is its OWN visible state — a
+      // HAZARD outside the fold (W-3L INS-B); the fresh input is forensic
+      // and stays behind the counted ledger until opened.
       await expect(page.getByTestId("price-verdict").filter({ hasText: "stale" })).toBeVisible();
-      await expect(page.getByTestId("price-verdict").filter({ hasText: "fresh" })).toBeVisible();
+      await expect(page.getByTestId("price-verdict").filter({ hasText: "fresh" })).not.toBeVisible();
     },
   },
   {

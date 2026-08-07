@@ -62,8 +62,14 @@ test("found: the position layout renders, with the stale price verdict visible",
   await expect(page.getByTestId("position-aave_v3_etherfi")).toBeVisible();
   await expect(page.getByTestId("position-debt_manager")).toBeVisible();
 
-  // The stale verdict is its OWN state — a chip, not a hidden formatting choice.
+  // W-3L INS-B — the hazard split, both directions: the STALE verdict is a
+  // hazard and renders OUTSIDE the fold with no click; the FRESH input is
+  // forensic ledger and appears only when the fold opens.
   await expect(page.getByTestId("price-verdict").filter({ hasText: "stale" })).toBeVisible();
+  await expect(page.getByTestId("price-verdict").filter({ hasText: "fresh" })).not.toBeVisible();
+  // The fixture's fresh input is the DM card's — its fold is the one that
+  // reveals it.
+  await page.getByTestId("position-forensics-debt_manager").locator("summary").click();
   await expect(page.getByTestId("price-verdict").filter({ hasText: "fresh" })).toBeVisible();
 });
 
@@ -388,4 +394,81 @@ test("r74 — the activity takeaway disclaims the untimed tail on the rendered p
       `row(s) follow, in an order that is not chronology`,
   );
   await expect(takeaway).not.toContainText("loaded for this account, newest first");
+});
+
+// ---------------------------------------------------------------------------
+// W-3L INS-B — the position card's three layers on the rendered page.
+// ---------------------------------------------------------------------------
+
+test("INS-B: each engine's takeaway speaks its own comparator, and never the other's", async ({
+  page,
+}) => {
+  await mockApi(page, ADDRESS_FOUND);
+  await page.goto(`/inspector/${FOUND_ADDR}`);
+  const aave = page.getByTestId("position-takeaway-aave_v3_etherfi");
+  await expect(aave).toContainText("HF");
+  await expect(aave).toContainText("collateral against");
+  await expect(aave).not.toContainText("maxBorrowLT");
+  const dm = page.getByTestId("position-takeaway-debt_manager");
+  await expect(dm).toContainText("(strict)");
+  await expect(dm).toContainText("maxBorrowLT");
+  await expect(dm).not.toContainText("HF");
+});
+
+test("INS-B: the lawful formula folds behind its named law; the REFUSED substitution never folds", async ({
+  page,
+}) => {
+  await mockApi(page, ADDRESS_FOUND);
+  await page.goto(`/inspector/${FOUND_ADDR}`);
+  // Lawful arm: the pre is inside a fold naming the engine's law.
+  const aaveCard = page.getByTestId("position-aave_v3_etherfi");
+  await expect(aaveCard.getByTestId("formula-block")).not.toBeVisible();
+  await expect(aaveCard.getByTestId("formula-fold-aave_v3_etherfi").locator("summary")).toContainText(
+    "law: the Aave rev-3 wadDiv composite",
+  );
+  await aaveCard.getByTestId("formula-fold-aave_v3_etherfi").locator("summary").click();
+  await expect(aaveCard.getByTestId("formula-block")).toBeVisible();
+
+  // REFUSED arm (documented single-purpose mutation of the committed body):
+  // the substitution renders in the ALWAYS-OPEN register — no fold exists.
+  const refused = structuredClone(ADDRESS_FOUND);
+  const target = refused.positions.find((p) => p.engine === "aave_v3_etherfi");
+  if (target === undefined) throw new Error("fixture lost its aave position");
+  target.status = "refused";
+  target.refusal = {
+    code: "G1",
+    detail: "price input missing at compute time",
+    note: "documented single-purpose mutation of the committed body",
+  };
+  await mockApi(page, refused);
+  await page.reload();
+  const refusedCard = page.getByTestId("position-aave_v3_etherfi");
+  await expect(refusedCard.getByTestId("formula-block")).toBeVisible();
+  await expect(refusedCard.getByTestId("formula-block")).toContainText("REFUSED · G1");
+  await expect(refusedCard.getByTestId("formula-fold-aave_v3_etherfi")).toHaveCount(0);
+  await expect(refusedCard.getByTestId("position-takeaway-aave_v3_etherfi")).toContainText(
+    "REFUSED (G1) · no verdict is served",
+  );
+});
+
+test("INS-B: the proof card leads with the LIVE-vs-PROOF disclaimer; safe rows are counted-forensic", async ({
+  page,
+}) => {
+  await mockApi(page, ADDRESS_FOUND);
+  await page.goto(`/inspector/${FOUND_ADDR}`);
+  const aaveCard = page.getByTestId("position-aave_v3_etherfi");
+  // The takeaway is visible with NO click — the sentence the Proof Center
+  // split depends on.
+  await expect(aaveCard.getByTestId("proof-takeaway")).toBeVisible();
+  await expect(aaveCard.getByTestId("proof-takeaway")).toContainText(
+    "LIVE · WATERMARKED, not PROOF · EXACT @ PIN",
+  );
+  // Safe provenance (marks, batch, none-unacked reorg) is behind the counted
+  // fold; the fixture carries no hazard, so nothing crit renders outside.
+  const fold = aaveCard.getByTestId("proof-forensics");
+  await expect(fold.locator("summary")).toContainText("proof row(s)");
+  await expect(aaveCard.getByText("none unacked")).not.toBeVisible();
+  await fold.locator("summary").click();
+  await expect(aaveCard.getByText("none unacked")).toBeVisible();
+  await expect(aaveCard.getByText("Balances mark")).toBeVisible();
 });

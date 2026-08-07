@@ -6,7 +6,7 @@
 
 import { expect, test } from "@playwright/test";
 import type { AddressLookup } from "@solvent/client";
-import { activityTakeaway, lookupTakeaway } from "../../lib/inspector-lines";
+import { activityTakeaway, lookupTakeaway, positionMethodLine, positionTakeaway } from "../../lib/inspector-lines";
 
 const base = { batch: { id: 7 } };
 const lookup = (partial: Record<string, unknown>): AddressLookup =>
@@ -86,5 +86,55 @@ test.describe("r74 — activityTakeaway", () => {
         "their order is not chronology.",
     );
     expect(line).not.toContain("newest first");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W-3L INS-B — positionTakeaway / positionMethodLine: engine-conditional,
+// never shared vocabulary, refusal never invents a verdict.
+// ---------------------------------------------------------------------------
+
+test.describe("W-3L INS-B — positionTakeaway", () => {
+  const base = {
+    refused: false,
+    refusalCode: null,
+    verdict: "not liquidatable",
+    hfDisplay: "1.043",
+    totalCollateral: "8,224.70437455",
+    totalDebt: "104.95027",
+    debt: "$219.80",
+    maxBorrowLt: "$305.11",
+  };
+
+  test("aave: verdict · HF · the two totals — no DM vocabulary", () => {
+    const line = positionTakeaway({ ...base, engine: "aave_v3_etherfi" });
+    expect(line).toBe(
+      "not liquidatable · HF 1.043 · 8,224.70437455 collateral against 104.95027 debt",
+    );
+    expect(line).not.toContain("maxBorrowLT");
+    expect(line).not.toContain("strict");
+  });
+
+  test("DM: strict boolean comparands — never an HF", () => {
+    const line = positionTakeaway({ ...base, engine: "debt_manager" });
+    expect(line).toBe("not liquidatable (strict) · debt $219.80 vs maxBorrowLT $305.11");
+    expect(line).not.toContain("HF");
+  });
+
+  test("refused: the refusal IS the takeaway; no verdict, no numbers", () => {
+    const line = positionTakeaway({ ...base, engine: "aave_v3_etherfi", refused: true, refusalCode: "G1" });
+    expect(line).toBe("REFUSED (G1) · no verdict is served for this position");
+    expect(line).not.toContain("HF");
+    expect(line).not.toContain("collateral");
+  });
+
+  test("methodLine: each engine its own comparator; outside the sealed set, no claim", () => {
+    expect(positionMethodLine("aave_v3_etherfi", 8)).toBe(
+      "comparator: the engine's own wad HF — liquidatable iff strictly below 1e18 · values in the engine's own 8-dec unit",
+    );
+    expect(positionMethodLine("debt_manager", 6)).toBe(
+      "comparator: the engine's strict boolean — liquidatable iff borrowings exceed maxBorrowLT (equality healthy) · values in the engine's own 6-dec unit",
+    );
+    expect(positionMethodLine("engine_x", 6)).toContain("not asserted here");
   });
 });

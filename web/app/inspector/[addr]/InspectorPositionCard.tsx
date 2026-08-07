@@ -46,6 +46,7 @@ import { NO_PRICE_PATH_LABEL, noPricePathTitle } from "@/lib/liq-distance";
 import { hfSeverity } from "@/lib/severity";
 import type { ChainEvent, ParamChange } from "@/lib/inspector-data";
 import { ExplainButton } from "@/components/EvidenceDrawer";
+import { positionMethodLine, positionTakeaway } from "@/lib/inspector-lines";
 import styles from "../inspector.module.css";
 
 const WARN_DISCLOSURE = "warn band <1.1, set for display and not by the engine";
@@ -461,6 +462,22 @@ export function InspectorPositionCard({
             Position · <EngineChip engine={position.engine} /> <AddressMono address={position.account} copy={false} />
             {position.status === "refused" && <RefusedTag reason={position.refusal?.code ?? "unnamed"} />}
           </h4>
+          {/* W-3L INS-B: the card's takeaway and one-line method — composed
+              from the SAME display strings the rows below render. */}
+          <p className={styles.cardTakeaway} data-testid={`position-takeaway-${position.engine}`}>
+            {positionTakeaway({
+              engine: position.engine,
+              refused: position.status === "refused",
+              refusalCode: position.refusal?.code ?? null,
+              verdict,
+              hfDisplay,
+              totalCollateral,
+              totalDebt,
+              debt: money(position.borrowings, { decimals: position.value_decimals, prefix: "$" }),
+              maxBorrowLt: money(position.max_borrow_lt, { decimals: position.value_decimals, prefix: "$" }),
+            })}
+          </p>
+          <p className={styles.cardMethod}>{positionMethodLine(position.engine, position.value_decimals)}</p>
           <div className={styles.kv}>
             {/* verdict / HF */}
             {isDm ? (
@@ -570,50 +587,102 @@ export function InspectorPositionCard({
               </span>
             </div>
 
-            {/* legs, prices, params, flags, liquidation price */}
-            {position.legs.map((leg) => renderLegRows(leg))}
-            {position.price_inputs.map((input, index) => renderPriceRow(input, index))}
-            {position.legs.map((leg) => renderParamRows(leg))}
-            {renderCollateralFlagRows()}
+            {/* W-3L INS-B: the ledger splits on the HAZARD line. A price
+                input whose verdict is not `fresh`, or that carries no
+                chain-asserted as-of, stays OUTSIDE the fold — a stale price
+                behind a fold is exactly the D-013 wrong reading. Params stay
+                out while the timeline is unavailable (that fallback is a
+                hazard). Everything else — legs, fresh prices, lawful params,
+                collateral flags — is the forensic ledger, counted. The
+                liquidation-price row (with its already-breached and
+                no-price-path arms) stays visible. */}
+            {position.price_inputs.map((input, index) =>
+              input.verdict !== "fresh" || input.source_as_of === null
+                ? renderPriceRow(input, index)
+                : null,
+            )}
+            {paramChanges === null && position.legs.map((leg) => renderParamRows(leg))}
             {renderLiquidationPriceRow()}
           </div>
+          <details
+            className={styles.ledgerFold}
+            data-testid={`position-forensics-${position.engine}`}
+          >
+            <summary>
+              full ledger: {String(position.legs.length)} leg(s) ·{" "}
+              {String(
+                position.price_inputs.filter(
+                  (input) => input.verdict === "fresh" && input.source_as_of !== null,
+                ).length,
+              )}{" "}
+              fresh price input(s) · params · collateral flags
+            </summary>
+            <div className={styles.kv}>
+              {position.legs.map((leg) => renderLegRows(leg))}
+              {position.price_inputs.map((input, index) =>
+                input.verdict === "fresh" && input.source_as_of !== null
+                  ? renderPriceRow(input, index)
+                  : null,
+              )}
+              {paramChanges !== null && position.legs.map((leg) => renderParamRows(leg))}
+              {renderCollateralFlagRows()}
+            </div>
+          </details>
 
-          {/* -------- the formula block: the engine's OWN law, this position's numbers -------- */}
-          <pre className={styles.formula} data-testid="formula-block">
-            {isDm ? dmFormula(position) : aaveFormula(position)}
-          </pre>
+          {/* -------- the formula block: the engine's OWN law, this position's
+              numbers. W-3L INS-B: the lawful substitution is the forensic
+              archetype — a method line naming the law, the <pre> behind it.
+              The REFUSED substitution renders in the ALWAYS-OPEN register: a
+              refusal that only appears when a reader opens the formula is a
+              hidden refusal. -------- */}
+          {position.status === "refused" ? (
+            <pre className={styles.formula} data-testid="formula-block">
+              {isDm ? dmFormula(position) : aaveFormula(position)}
+            </pre>
+          ) : (
+            <details className={styles.ledgerFold} data-testid={`formula-fold-${position.engine}`}>
+              <summary>
+                {isDm
+                  ? "law: the DM strict boolean, this position's numbers substituted"
+                  : "law: the Aave rev-3 wadDiv composite, this position's numbers substituted"}
+              </summary>
+              <pre className={styles.formula} data-testid="formula-block">
+                {isDm ? dmFormula(position) : aaveFormula(position)}
+              </pre>
+            </details>
+          )}
         </div>
 
         {/* -------- proof card -------- */}
         <div className={styles.card}>
           <h4 className={styles.cardTitle}>Proof of inputs</h4>
+          {/* W-3L INS-B: the most important sentence was last and dim — the
+              LIVE-vs-PROOF disclaimer is now the card's takeaway, never
+              collapsible (the whole Proof Center split depends on it). */}
+          <p className={styles.cardTakeaway} data-testid="proof-takeaway">
+            this view is LIVE · WATERMARKED, not PROOF · EXACT @ PIN — reconcile welds are
+            published by /v1/evidence (Proof Center).
+          </p>
           <div className={styles.kv}>
-            <div className={styles.kvRow}>
-              <span className={styles.k}>Marks</span>
-              <span className={styles.v}>
-                <MarksStamp marks={marks} />
-              </span>
-            </div>
-            <div className={styles.kvRow}>
-              <span className={styles.k}>Balances mark</span>
-              <span className={`${styles.v} ${styles.vOk}`}>✓ {formatBlock(position.as_of.balances_block)}</span>
-            </div>
-            <div className={styles.kvRow}>
-              <span className={styles.k}>Params mark</span>
-              <span className={`${styles.v} ${styles.vOk}`}>✓ {formatBlock(position.as_of.params_block)}</span>
-            </div>
-            <div className={styles.kvRow}>
-              <span className={styles.k}>Sweep mark</span>
-              {isDm ? (
-                position.as_of.sweep_block > 0 ? (
-                  <span className={`${styles.v} ${styles.vOk}`}>✓ {formatBlock(position.as_of.sweep_block)}</span>
+            {/* Hazard arms stay OUTSIDE the fold: a missing watermark, unacked
+                epochs, and the never-swept state are disclosures, not
+                provenance. Their safe twins live in the counted fold below. */}
+            {isDm && position.as_of.sweep_block <= 0 && (
+              <div className={styles.kvRow}>
+                <span className={styles.k}>Sweep mark</span>
+                <span className={`${styles.v} ${styles.vCrit}`}>∅ never swept</span>
+              </div>
+            )}
+            {(unackedEpochs === null || unackedEpochs > 0) && (
+              <div className={styles.kvRow}>
+                <span className={styles.k}>Reorg epochs</span>
+                {unackedEpochs === null ? (
+                  <span className={`${styles.v} ${styles.vCrit}`}>no watermark for this engine</span>
                 ) : (
-                  <span className={`${styles.v} ${styles.vCrit}`}>∅ never swept</span>
-                )
-              ) : (
-                <span className={`${styles.v} ${styles.vDim}`}>n/a · engine has no sweeper</span>
-              )}
-            </div>
+                  <span className={`${styles.v} ${styles.vCrit}`}>{String(unackedEpochs)} unacked</span>
+                )}
+              </div>
+            )}
             <div className={styles.kvRow}>
               <span className={styles.k}>Price custody</span>
               <span className={styles.v}>
@@ -638,28 +707,56 @@ export function InspectorPositionCard({
                 {sources.length > 0 && <span className={styles.vDim}>· {sources.join(" · ")}</span>}
               </span>
             </div>
-            <div className={styles.kvRow}>
-              <span className={styles.k}>Reorg epochs</span>
-              {unackedEpochs === null ? (
-                <span className={`${styles.v} ${styles.vCrit}`}>no watermark for this engine</span>
-              ) : unackedEpochs <= 0 ? (
-                <span className={`${styles.v} ${styles.vOk}`}>none unacked</span>
-              ) : (
-                <span className={`${styles.v} ${styles.vCrit}`}>{String(unackedEpochs)} unacked</span>
-              )}
-            </div>
-            <div className={styles.kvRow}>
-              <span className={styles.k}>Batch</span>
-              <span className={styles.v}>{String(batch.id)}</span>
-            </div>
-            <div className={styles.kvRow}>
-              <span className={styles.k}>Welds</span>
-              <span className={`${styles.v} ${styles.vDim}`}>
-                reconcile welds are published by /v1/evidence (Proof Center). This view is
-                LIVE · WATERMARKED, not PROOF · EXACT @ PIN
-              </span>
-            </div>
           </div>
+          <details className={styles.ledgerFold} data-testid="proof-forensics">
+            <summary>
+              {String(
+                4 +
+                  (unackedEpochs !== null && unackedEpochs <= 0 ? 1 : 0) +
+                  (isDm && position.as_of.sweep_block > 0 ? 1 : 0) +
+                  (!isDm ? 1 : 0),
+              )}{" "}
+              proof row(s)
+            </summary>
+            <div className={styles.kv}>
+              <div className={styles.kvRow}>
+                <span className={styles.k}>Marks</span>
+                <span className={styles.v}>
+                  <MarksStamp marks={marks} />
+                </span>
+              </div>
+              <div className={styles.kvRow}>
+                <span className={styles.k}>Balances mark</span>
+                <span className={`${styles.v} ${styles.vOk}`}>✓ {formatBlock(position.as_of.balances_block)}</span>
+              </div>
+              <div className={styles.kvRow}>
+                <span className={styles.k}>Params mark</span>
+                <span className={`${styles.v} ${styles.vOk}`}>✓ {formatBlock(position.as_of.params_block)}</span>
+              </div>
+              {isDm && position.as_of.sweep_block > 0 && (
+                <div className={styles.kvRow}>
+                  <span className={styles.k}>Sweep mark</span>
+                  <span className={`${styles.v} ${styles.vOk}`}>✓ {formatBlock(position.as_of.sweep_block)}</span>
+                </div>
+              )}
+              {!isDm && (
+                <div className={styles.kvRow}>
+                  <span className={styles.k}>Sweep mark</span>
+                  <span className={`${styles.v} ${styles.vDim}`}>n/a · engine has no sweeper</span>
+                </div>
+              )}
+              {unackedEpochs !== null && unackedEpochs <= 0 && (
+                <div className={styles.kvRow}>
+                  <span className={styles.k}>Reorg epochs</span>
+                  <span className={`${styles.v} ${styles.vOk}`}>none unacked</span>
+                </div>
+              )}
+              <div className={styles.kvRow}>
+                <span className={styles.k}>Batch</span>
+                <span className={styles.v}>{String(batch.id)}</span>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
     </div>
