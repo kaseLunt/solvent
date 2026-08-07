@@ -447,6 +447,66 @@ function ProbeRecordsCard({ manifest }: { manifest: EvidenceManifest }) {
   );
 }
 
+// r81: the stampline derives from the SAME live-status derivation the head
+// and card use — never raw substrate. Under a contradiction-demoted
+// manifest (wire no_batch beside a non-null substrate) a raw-substrate
+// branch kept a batch pin inline while the head said NO SERVABLE BATCH —
+// two mutually exclusive answers on one page.
+//
+// W-3L (inventory 474): the shared keepOpen split — the batch pin is
+// identity and stays inline; the em-dash batch/key pins under a no-batch
+// status are hazards and never fold; a crit-toned receipt pin stays
+// inline by tone.
+function ProofStampline({ manifest }: { manifest: EvidenceManifest }) {
+  const live = liveSubjectStatus(manifest);
+  return (
+    <Stampline collapse>
+      <StampItem
+        label="batch"
+        value={live.kind === "serving" ? `#${String(live.substrate.batch_id)}` : EM_DASH}
+        tone={live.kind === "serving" ? "default" : "dim"}
+        keepOpen
+      />
+      <StampItem
+        label="key"
+        keepOpen={live.kind !== "serving"}
+        value={
+          live.kind === "serving" ? (
+            <Ident
+              value={live.substrate.materialization_key}
+              copyLabel="copy materialization key from stampline"
+            />
+          ) : (
+            EM_DASH
+          )
+        }
+        tone={live.kind === "serving" ? "default" : "dim"}
+        note={
+          live.kind === "serving" ? undefined : "(no servable batch, and nothing fabricated)"
+        }
+      />
+      <StampItem
+        label="commit"
+        value={manifest.commit ?? EM_DASH}
+        tone={manifest.commit === null ? "dim" : "default"}
+      />
+      <StampItem
+        label="receipt"
+        value={
+          manifest.reconcile === null
+            ? "absent"
+            : `${manifest.reconcile.result} · ${String(manifest.reconcile.gated_exact)}/${String(manifest.reconcile.gated_rows)}`
+        }
+        tone={
+          manifest.reconcile !== null && proofSubjectStatus(manifest).kind === "accepted"
+            ? "ok"
+            : "crit"
+        }
+      />
+    </Stampline>
+  );
+}
+
 export function ProofSurface() {
   const [state, setState] = useState<ProofState>({ phase: "loading" });
   const [descriptor, setDescriptor] = useState<EvidenceDescriptor | null>(null);
@@ -555,57 +615,7 @@ export function ProofSurface() {
             </pre>
           )}
 
-          {/* W-3L (inventory 474): the shared keepOpen split — the batch
-              pin is identity and stays inline; the em-dash batch/key pins
-              under a no-batch manifest are hazards and never fold; a
-              crit-toned receipt pin stays inline by tone. */}
-          <Stampline collapse>
-            <StampItem
-              label="batch"
-              value={
-                state.manifest.substrate === null
-                  ? EM_DASH
-                  : `#${String(state.manifest.substrate.batch_id)}`
-              }
-              tone={state.manifest.substrate === null ? "dim" : "default"}
-              keepOpen
-            />
-            <StampItem
-              label="key"
-              keepOpen={state.manifest.substrate === null}
-              value={
-                state.manifest.substrate === null ? (
-                  EM_DASH
-                ) : (
-                  <Ident
-                    value={state.manifest.substrate.materialization_key}
-                    copyLabel="copy materialization key from stampline"
-                  />
-                )
-              }
-              tone={state.manifest.substrate === null ? "dim" : "default"}
-              note={state.manifest.substrate === null ? "(no servable batch, and nothing fabricated)" : undefined}
-            />
-            <StampItem
-              label="commit"
-              value={state.manifest.commit ?? EM_DASH}
-              tone={state.manifest.commit === null ? "dim" : "default"}
-            />
-            <StampItem
-              label="receipt"
-              value={
-                state.manifest.reconcile === null
-                  ? "absent"
-                  : `${state.manifest.reconcile.result} · ${String(state.manifest.reconcile.gated_exact)}/${String(state.manifest.reconcile.gated_rows)}`
-              }
-              tone={
-                state.manifest.reconcile !== null &&
-                proofSubjectStatus(state.manifest).kind === "accepted"
-                  ? "ok"
-                  : "crit"
-              }
-            />
-          </Stampline>
+          <ProofStampline manifest={state.manifest} />
         </>
       )}
 

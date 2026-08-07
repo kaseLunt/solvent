@@ -337,6 +337,35 @@ test("W-3L: probe records — the count is the takeaway; paths fold counted; the
   );
 });
 
+test("r81: the stampline derives from the DEMOTED live status — never raw substrate", async ({
+  page,
+}) => {
+  // The committed example with ONE documented delta: the wire claims
+  // no_batch while substrate stays non-null — the contradiction state
+  // liveSubjectStatus deliberately demotes to no-batch. Every batch answer
+  // on the page must agree: NO SERVABLE BATCH, and nothing fabricated —
+  // a stampline branching on raw substrate kept a batch pin inline here,
+  // two mutually exclusive answers on one page.
+  const doctored = structuredClone(EVIDENCE_MANIFEST);
+  doctored.live_subject = {
+    status: "no_batch",
+    reason: "wire claims no_batch beside a non-null substrate",
+  };
+  await mockApi(page, doctored);
+  await page.goto("/proof");
+
+  await expect(page.getByTestId("live-status")).toContainText("NO SERVABLE BATCH");
+  await expect(page.getByTestId("proof-head-takeaway")).toContainText("NO SERVABLE BATCH");
+
+  const split = page.getByTestId("stampline-split");
+  await expect(
+    split.getByText("(no servable batch, and nothing fabricated)"),
+  ).toBeVisible();
+  await expect(split.getByText("#1", { exact: true })).toHaveCount(0);
+  // The key appears NOWHERE rendered — absence is absence.
+  await expect(page.getByText(REAL_KEY)).toHaveCount(0);
+});
+
 test("W-3L: the stampline splits — identity inline, ok pins counted, crit and no-batch pins never fold", async ({
   page,
 }) => {
