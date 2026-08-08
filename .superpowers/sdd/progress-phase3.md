@@ -3954,3 +3954,52 @@ The Scenario Lab's first half went three-layer at 5698e8c, integrator-direct, pe
 ## 2026-08-07 — W-3L conversions VI: Lab B + Developers — THE THREE-LAYER PROGRAM CLOSES (round 87, R87 SHIP)
 
 The inventory's last two items, both small and both landed integrator-direct in one round. W-3L-LAB-B (327a107) closed the Lab: a survey-first pass discovered that inventory items 180-192 were ALREADY at the bar — the original W-3L slots wave had promoted the batch header, stated the DELTA-ONLY basis once as the grid's method (cells shrunk to the net count, batch pins moved into rendered text under a documented LAW-5 ruling), and split the legend with a documented ruling AGAINST the inventory (SUPERSEDED stays open: a supersession is hazard-register content, and the rollout carves no exception for the sentence that defines it) — so only 194-199 was real work. The run column's up-to-three stacked footnote spans (the rerun-failed banner, the attempt-changed note, the definition-changed refresh affordance) now compose into ONE settlement line per row: every piece keeps its testid, its data provenance and its full sentence — all 31 pins across eight fix-spec files (r8/r12/r13/r14/r15/r16/r17/tornado) stayed green untouched — with the pieces flowing inline on interpunct joints, the cohort-membership gate on the refresh remedy preserved verbatim, and a clean row rendering no settlement line at all. W-3L-DEV (e3d3bf4) made the inventory's one named change to the reference page: the response-code chips — the non-2xx vocabulary that costs a caller correctness — hoisted ABOVE the 200-sample fold, pinned by geometry. Both landings mutation-verified (the unwrapped container and the chips-below-the-fold each killed at their own law) and eyes-on at 1440/900 (the Lab against the live wire with a doctored re-run 503: the result held at batch #14160 while the failure read as one composed sentence beside it). R87 SHIP over both commits in one round: predicates preserved exactly, the wrapper cannot render empty, chips moved without loss, both laws discriminating. OPS ON THE RECORD: the integrator claim lease expired overnight and the scope-gate BLOCKED code commits until the renewal landed as an ISOLATED roadmap-only commit (18627ff) — the expired-claim cleanup-transition rule is real and the renewal procedure is now banked. THE PROGRAM CLOSES: every surface in docs/specs/2026-08-04-three-layer-inventory.md — Book, Inspector, Scenario Lab, Observatory, Feed, Proof Center, Developers — now leads with a computed takeaway, keeps every hazard outside its folds, and counts what it hides. Six arcs, rounds 68-87 spanned the bank hardening plus the five conversion arcs; the takeaway grammar (mode-honest claims, declared-vs-realized verbs, one-source welds) and the placement law (visible + not-a-descendant + counted, visibility-asserted per r75) are the program's residue, applied now by default to anything new. Tallies at e3d3bf4: web 1275 -> 1276/1277 (+1 pre-existing skip). Live: :8080 api-r65meta (1.8.0), :3111 at e3d3bf4. Remaining in the train: the five Codex-program views (headroom exposure ladder, Pareto/concentration, incremental stress exposure, Aave mover dumbbells, DM flip ranking, bad-debt rate — feasibility banked d900de4), then THE DEPLOY GATE LAST, per the owner.
+
+## 2026-08-07/08 — VIEWS PROGRAM, ARC 1: the run-book trio SHIPS (rounds 88–97)
+
+The seven-views program opened against the 2026-08-04 feasibility audit and its
+completeness critic (all ten corrections binding). The first arc converted the
+three views the Lab's run-book surface already feeds: VIEW 4 (Aave mover
+dumbbells), VIEW 5 (DM flip ranking), VIEW 7 (bad-debt rate). Suite 1277 → 1342
+(1341 passed + 1 pre-existing skip, count-verified every landing); 47 mutants,
+each killed at its own assertion in isolation.
+
+**VIEW 4 — f6e3a9f + 8bc1244, rounds r88–r89 SHIP.** Log HF axis (pixels only;
+every below-1.00 verdict bigint on the exact wad — the one-wei kill test),
+boundary always on-axis, census as visible STATE honest about the
+two-population refused count, Finding-8 population line ("a drop is movement,
+not danger"), unplottables named. r88 taught the SCALE WELD (the served
+wad_scale is welded against the definitional 1e18, both sides + comparator,
+refusing visibly on drift) and CENSUS-BEFORE-EMPTY-EXIT — a law VIEW 5 then
+inherited at design time.
+
+**VIEW 5 — 2b2b1de/0fe1727/14525d4/2801535/56422e7, rounds r89–r94 SHIP.**
+Four-cell flip partition (refused as NAMED ASIDE per critic F2 — never a fifth
+cell), sized flip bars, welds before every exit. Five rounds compressed the
+findings ladder from structural (a reverse-flow run swallowed whole; bars
+ignoring became_eligible) through copy licensing ("the 0 largest are on this
+page"; debt-ranking a null-debt row) down to paint order (presence dots
+occluded by their own neighbor rects) — each fix landing red-then-green with
+the defect string received verbatim in the kill.
+
+**Collateral weld — in 2b2b1de, r89 class sweep → r90 DISCHARGED.** r89's
+validation-after-empty-exit class sweep found the collateral reading line
+repeating the contract's reconciliation claim without adding the column, and a
+value+unpriced row blessed as counted money. The disclosure gained a
+CONTRADICTORY arm (refusal register, money never rendered) and the reading
+line gained the BigInt sum weld. The wrong unit law that had PINNED the defect
+("a value present outranks the flag") was re-lawed, not deleted.
+
+**VIEW 7 — 851032e/b7c7000/9312637, rounds r95–r97 SHIP.** In-envelope
+baseline (critic F3), exact bigint tenths, UNDEFINED-never-0%, surfaced
+0-denominator contradiction, "<0.1%" never a computed-zero costume, named
+$1,000 dust floor suppressing weight never numbers. The live book served the
+audit's own hazard on first render: "100.0% of $0.000046 eligible" — DUST, no
+bar. r95–r96 hardened the visual grammar: saturation disclosed at the 100% cap
+(»100% mark with its own gutter), below-pixel titles split by fact, and the
+e2e upgraded from DOM presence to rendered bounding-box containment.
+
+Residue now standing law: a chart's claim vocabulary (ranked/largest/crossed)
+must be LICENSED by the model state that justifies it, and every disclosure
+must survive its own viewport. AC-51 and AC-54 both caught new-surface defects
+automatically — the acceptance net pays rent.
