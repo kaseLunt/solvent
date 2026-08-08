@@ -612,6 +612,10 @@ export function LabBadDebtRate({ engine }: { engine: LabRunBookEngine }) {
           {sides.map(({ name, side }, index) => {
             const y = index * RATE_ROW_H + 2;
             const barWidth = rateBarWidth(side);
+            const tenths = side.kind === "rate" ? BigInt(side.percentTenths) : 0n;
+            // r95: saturation is DISCLOSED — 150% and 200% must never read as
+            // the same bar as 100% without a mark saying the scale ended.
+            const overflow = side.kind === "rate" && !side.dust && tenths > 1000n;
             return (
               <g key={name} data-testid="rate-row" data-side={name}>
                 <text className={styles.histLabel} x={RATE_LABEL_W} y={y + 11} textAnchor="end">
@@ -622,11 +626,27 @@ export function LabBadDebtRate({ engine }: { engine: LabRunBookEngine }) {
                     className={styles.flipBar}
                     data-testid="rate-bar"
                     data-side={name}
+                    data-overflow={String(overflow)}
                     x={RATE_LABEL_W + 6}
                     y={y + 3}
                     width={barWidth}
                     height={RATE_ROW_H - 8}
                   />
+                )}
+                {overflow && (
+                  <text
+                    className={styles.dumbbellBoundaryLabel}
+                    data-testid="rate-overflow"
+                    data-side={name}
+                    x={RATE_LABEL_W + 10 + RATE_BAR_MAX}
+                    y={y + 11}
+                  >
+                    »100%
+                    <title>
+                      the rate exceeds 100% and the bar is capped at the 100% scale — the exact
+                      figure is in the sentence above
+                    </title>
+                  </text>
                 )}
                 {side.kind === "rate" && !side.dust && barWidth === 0 && BigInt(side.badUsd) > 0n && (
                   <circle
@@ -636,7 +656,13 @@ export function LabBadDebtRate({ engine }: { engine: LabRunBookEngine }) {
                     cy={y + RATE_ROW_H / 2}
                     r={PRESENCE_R}
                   >
-                    <title>a rate under 0.1 percent over real bad debt — presence, not length</title>
+                    {/* r95: 0.1%–0.2% rounds below a pixel WITHOUT being
+                        sub-tenth — the two facts get two different titles. */}
+                    <title>
+                      {tenths === 0n
+                        ? "a rate under 0.1 percent over real bad debt — presence, not length"
+                        : "a nonzero rate too small to draw at one pixel on this scale — the exact rate is in the sentence above"}
+                    </title>
                   </circle>
                 )}
               </g>

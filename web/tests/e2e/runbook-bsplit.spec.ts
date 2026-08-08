@@ -918,3 +918,69 @@ test("VIEW 7: a DUST denominator keeps its number and loses its bar", async ({ p
   // The bar is suppressed — no full-height red over four dollars.
   await expect(aave.locator('[data-testid="rate-bar"][data-side="after"]')).toHaveCount(0);
 });
+
+test("r95: a rate above 100% is DISCLOSED at the cap — 200% never reads as 100%", async ({
+  page,
+}) => {
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook & {
+    engines: {
+      engine: string;
+      before: { bad_debt_usd: string; eligible_debt_usd: string };
+      after: { bad_debt_usd: string; eligible_debt_usd: string };
+    }[];
+  };
+  for (const engine of body.engines as unknown as {
+    engine: string;
+    before: { bad_debt_usd: string; eligible_debt_usd: string };
+    after: { bad_debt_usd: string; eligible_debt_usd: string };
+  }[]) {
+    if (engine.engine !== "debt_manager") continue;
+    // before: exactly 100% of a real (non-dust) denominator; after: 200%.
+    engine.before.bad_debt_usd = "4620000000";
+    engine.before.eligible_debt_usd = "4620000000";
+    engine.after.bad_debt_usd = "9240000000";
+    engine.after.eligible_debt_usd = "4620000000";
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const dm = page.locator('[data-testid="runbook-rate"][data-engine="debt_manager"]');
+  // Both bars exist and are capped-equal in LENGTH — but only the >100% row
+  // carries the saturation mark and the overflow attribute.
+  await expect(dm.locator('[data-testid="rate-bar"][data-side="before"]')).toHaveAttribute(
+    "data-overflow",
+    "false",
+  );
+  await expect(dm.locator('[data-testid="rate-bar"][data-side="after"]')).toHaveAttribute(
+    "data-overflow",
+    "true",
+  );
+  await expect(dm.locator('[data-testid="rate-overflow"][data-side="after"]')).toHaveCount(1);
+  await expect(dm.locator('[data-testid="rate-overflow"][data-side="before"]')).toHaveCount(0);
+  await expect(dm.getByTestId("rate-after")).toContainText("200.0%");
+});
+
+test("r95: a 0.1% rate below one pixel is NOT called sub-tenth — two facts, two titles", async ({
+  page,
+}) => {
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook & {
+    engines: { engine: string; before: { bad_debt_usd: string } }[];
+  };
+  for (const engine of body.engines as unknown as {
+    engine: string;
+    before: { bad_debt_usd: string };
+  }[]) {
+    if (engine.engine !== "debt_manager") continue;
+    // 4620000 / 4620000000 = exactly 1 tenth (0.1%) — 0.24px, rounds to zero.
+    engine.before.bad_debt_usd = "4620000";
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const dm = page.locator('[data-testid="runbook-rate"][data-engine="debt_manager"]');
+  await expect(dm.getByTestId("rate-before")).toContainText("0.1% of");
+  const title = await dm
+    .locator('[data-testid="rate-presence"]')
+    .first()
+    .evaluate((el) => el.querySelector("title")?.textContent ?? "");
+  expect(title).toContain("too small to draw at one pixel");
+  expect(title).not.toContain("under 0.1 percent");
+});
