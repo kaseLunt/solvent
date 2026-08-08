@@ -954,7 +954,23 @@ test("r95: a rate above 100% is DISCLOSED at the cap — 200% never reads as 100
     "data-overflow",
     "true",
   );
-  await expect(dm.locator('[data-testid="rate-overflow"][data-side="after"]')).toHaveCount(1);
+  // r96: the disclosure must be RENDERED, not merely present — exact text,
+  // the cap named in its title, and the whole label inside the viewport.
+  const overflowMark = dm.locator('[data-testid="rate-overflow"][data-side="after"]');
+  await expect(overflowMark).toHaveCount(1);
+  await expect(overflowMark).toContainText("»100%");
+  const contained = await overflowMark.evaluate((el) => {
+    const svg = el.closest("svg");
+    if (svg === null) return { fits: false, title: "" };
+    const box = el.getBoundingClientRect();
+    const frame = svg.getBoundingClientRect();
+    return {
+      fits: box.right <= frame.right + 0.5 && box.left >= frame.left - 0.5,
+      title: el.querySelector("title")?.textContent ?? "",
+    };
+  });
+  expect(contained.fits).toBe(true);
+  expect(contained.title).toContain("capped at the 100% scale");
   await expect(dm.locator('[data-testid="rate-overflow"][data-side="before"]')).toHaveCount(0);
   await expect(dm.getByTestId("rate-after")).toContainText("200.0%");
 });

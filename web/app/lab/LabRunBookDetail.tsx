@@ -577,7 +577,11 @@ export function LabBadDebtRate({ engine }: { engine: LabRunBookEngine }) {
     { name: "before" as const, side: model.before },
     { name: "after" as const, side: model.after },
   ];
-  const width = RATE_LABEL_W + RATE_BAR_MAX + 16;
+  // r96: the right gutter EXISTS FOR the »100% saturation mark — a disclosure
+  // clipped by its own viewport is no disclosure.
+  // r96: the right gutter EXISTS FOR the »100% saturation mark — a disclosure
+  // clipped by its own viewport is no disclosure.
+  const width = RATE_LABEL_W + RATE_BAR_MAX + 66;
   return (
     <section
       className={styles.subPanel}
