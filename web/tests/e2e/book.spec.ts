@@ -614,8 +614,8 @@ test("VIEWS 1+2: completeness and the floor lead, the curve accumulates, every s
   // FIRST, visibly — and the Book's DEFAULT dust step composes a real $1
   // floor onto every walked request, so the takeaway names it.
   await expect(panel.getByTestId("concentration-takeaway-aave_v3_etherfi")).toHaveText(
-    "Walked all 2 rows of batch #1 on aave_v3_etherfi; every walked request carried the $1 " +
-      "value floor — rows under it are not in this census.",
+    "Walked all 2 of the 2 qualifying rows of batch #1 on aave_v3_etherfi; every walked " +
+      "request carried the $1 value floor — rows under it are not in this census.",
   );
   // F7: the refused row is a NAMED aside, member of no cell.
   const asides = panel.getByTestId("curve-asides-aave_v3_etherfi");
@@ -633,7 +633,10 @@ test("VIEWS 1+2: completeness and the floor lead, the curve accumulates, every s
     "The walked book sums to $6,000 across 1 borrower; 1 row carries no positive debt figure " +
       "and sits outside both sides of every share.",
   );
-  await expect(panel.getByTestId("pareto-tier-line")).toHaveText("top 1 holds 100.0% ($6,000)");
+  // r100: every share carries BOTH absolutes — numerator AND denominator.
+  await expect(panel.getByTestId("pareto-tier-line")).toHaveText(
+    "top 1 holds 100.0% ($6,000 of $6,000)",
+  );
   // Methods carry the two no-lie clauses.
   await expect(panel.getByTestId("curve-method-aave_v3_etherfi")).toContainText(
     "bands plus asides always equal the rows walked",
@@ -658,6 +661,27 @@ test("VIEWS 1+2: a walk still in flight draws NOTHING — a partial vector is no
   await expect(panel.getByTestId("concentration-walking-aave_v3_etherfi")).toContainText(
     "a partial vector is not a book",
   );
+  await expect(panel.getByTestId("curve-table-aave_v3_etherfi")).toHaveCount(0);
+  await expect(panel.getByTestId("pareto-tier-line")).toHaveCount(0);
+});
+
+test("r100: a PREMATURE terminal page never draws a partial vector as the book", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK);
+  // DERIVED NEGATIVE: the first page claims total_positions 2 but ends the
+  // cursor — one row arrived, the server counted two. "phase: full" alone is
+  // not completeness.
+  const premature = structuredClone(POSITIONS_AAVE_PAGE_1) as { next_cursor: string | null };
+  premature.next_cursor = null;
+  await page.route("**/v1/positions*", (route) => fulfillJson(route, premature));
+  await openBook(page);
+
+  const panel = page.getByTestId("concentration-aave_v3_etherfi");
+  const short = panel.getByTestId("concentration-short-aave_v3_etherfi");
+  await expect(short).toBeVisible();
+  await expect(short).toContainText("WALK CONTRADICTION");
+  await expect(short).toContainText("1 rows but the server counted 2");
   await expect(panel.getByTestId("curve-table-aave_v3_etherfi")).toHaveCount(0);
   await expect(panel.getByTestId("pareto-tier-line")).toHaveCount(0);
 });

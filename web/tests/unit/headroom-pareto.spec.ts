@@ -76,6 +76,7 @@ function makeRow(options: { debt?: string | null; headroom?: RowHeadroom } = {})
 
 test("VIEW 1: the curve accumulates the bands tightest-first and welds the partition", () => {
   const rows = [
+    makeRow({ headroom: hr(3200000000n, 4200000000n) }), // breached (−31.3%)
     makeRow({ headroom: atPercent(1) }), // [0,2)
     makeRow({ headroom: atPercent(7.5) }), // [5,10)
     makeRow({ headroom: atPercent(7.5), debt: "5000000000" }), // [5,10), $50
@@ -85,12 +86,25 @@ test("VIEW 1: the curve accumulates the bands tightest-first and welds the parti
   const bins = buildRiskBins(rows);
   const curve = headroomCurve(bins);
   if (curve.kind !== "view") throw new Error(`expected a view, got ${curve.kind}`);
+  // r100: CUMULATIVE rows wear CUMULATIVE labels — an interval label on a
+  // running total reads exclusive bands into inclusive numbers.
+  const first = curve.cells[0];
+  if (first === undefined) throw new Error("curve invariant");
+  expect(first.label).toBe("breached");
+  expect(first.cumulativeAccounts).toBe(1);
+  const under2 = curve.cells[1];
+  if (under2 === undefined) throw new Error("curve invariant");
+  expect(under2.label).toBe("under 2%");
+  // MEMBERSHIP: the breached row is INSIDE "under 2%" — that is what
+  // cumulative means, and what the old interval label denied.
+  expect(under2.cumulativeAccounts).toBe(2);
   // Cumulative accounts are monotone and end at the banded population.
   const last = curve.cells[curve.cells.length - 1];
   if (last === undefined) throw new Error("curve invariant");
-  expect(last.cumulativeAccounts).toBe(4);
-  // Σ debt accumulates exactly: 150+150+50+150 = $500 at 8dp.
-  expect(last.cumulativeDebt).toBe("50000000000");
+  expect(last.label).toBe("all banded rows");
+  expect(last.cumulativeAccounts).toBe(5);
+  // Σ debt accumulates exactly: 150×4 + 50 = $650 at 8dp.
+  expect(last.cumulativeDebt).toBe("65000000000");
   for (let i = 1; i < curve.cells.length; i++) {
     const prev = curve.cells[i - 1];
     const next = curve.cells[i];
@@ -101,7 +115,7 @@ test("VIEW 1: the curve accumulates the bands tightest-first and welds the parti
   // The asides ride, named — and the admissible-set sentence is present.
   expect(curve.asides.noDebt).toBe(1);
   expect(curveAsidesLine(curve)).toContain("outside BOTH curves");
-  expect(curve.total).toBe(5);
+  expect(curve.total).toBe(6);
 });
 
 test("VIEW 1: a census that does not close REFUSES the curve (derived negative)", () => {

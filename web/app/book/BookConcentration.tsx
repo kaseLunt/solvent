@@ -92,6 +92,21 @@ export function BookConcentration({
     );
   }
 
+  // r100: a terminal page proves only that the cursor ended. "Walked all"
+  // needs the server's own count to agree — a premature terminal page must
+  // never draw a partial vector as the book.
+  if (state.total !== null && rows.length !== state.total) {
+    return (
+      <section className={styles.panel} data-testid={`concentration-${engine}`}>
+        <p className={styles.incrementsContradiction} data-testid={`concentration-short-${engine}`}>
+          {`WALK CONTRADICTION: the cursor ended after ${String(rows.length)} rows but the ` +
+            `server counted ${String(state.total)} qualifying — the vector is not the book, ` +
+            `so no concentration claim is made.`}
+        </p>
+      </section>
+    );
+  }
+
   const curve = headroomCurve(bins);
   const pareto = paretoView(rows, bins.decimals);
   const batchId = state.batch.id;
@@ -100,7 +115,11 @@ export function BookConcentration({
     <section className={styles.panel} data-testid={`concentration-${engine}`}>
       {/* ---- SLOT 3: the takeaway — completeness and the floor, FIRST. ---- */}
       <p className={styles.answerLine} data-testid={`concentration-takeaway-${engine}`}>
-        {`Walked all ${String(rows.length)} rows of batch #${String(batchId)} on ${engine}; ${floorClause}.`}
+        {state.total === null
+          ? `Walked ${String(rows.length)} rows of batch #${String(batchId)} on ${engine} — the ` +
+            `server stated no qualifying total, so completeness rests on the cursor alone; ${floorClause}.`
+          : `Walked all ${String(rows.length)} of the ${String(state.total)} qualifying rows of ` +
+            `batch #${String(batchId)} on ${engine}; ${floorClause}.`}
       </p>
 
       {/* ---- VIEW 1: cumulative headroom ledger. ---- */}
@@ -154,9 +173,9 @@ export function BookConcentration({
           {!pareto.dust && (
             <div className={styles.chartScroll} data-testid={`pareto-frame-${engine}`}>
               <svg
-                width={SHARE_BAR_MAX + 320}
+                width={SHARE_BAR_MAX + 560}
                 height={pareto.tiers.length * SHARE_ROW_H + 4}
-                viewBox={`0 0 ${String(SHARE_BAR_MAX + 320)} ${String(pareto.tiers.length * SHARE_ROW_H + 4)}`}
+                viewBox={`0 0 ${String(SHARE_BAR_MAX + 560)} ${String(pareto.tiers.length * SHARE_ROW_H + 4)}`}
                 role="img"
                 aria-label={`share of ${engine} walked debt held by the largest borrowers, on an absolute 0 to 100 percent axis`}
                 style={{ display: "block" }}
@@ -184,7 +203,7 @@ export function BookConcentration({
                         y={y + 12}
                         data-testid="pareto-tier-line"
                       >
-                        {`top ${String(tier.n)} hold${tier.n === 1 ? "s" : ""} ${paretoShareLabel(tier.shareTenths)} (${money(tier.topDebt, pareto.decimals)})`}
+                        {`top ${String(tier.n)} hold${tier.n === 1 ? "s" : ""} ${paretoShareLabel(tier.shareTenths)} (${money(tier.topDebt, pareto.decimals)} of ${money(pareto.totalDebt, pareto.decimals)})`}
                       </text>
                     </g>
                   );
@@ -196,7 +215,7 @@ export function BookConcentration({
             <ul data-testid={`pareto-dust-list-${engine}`}>
               {pareto.tiers.map((tier) => (
                 <li key={tier.n} className={styles.methodLine} data-testid="pareto-tier-line">
-                  {`top ${String(tier.n)} hold${tier.n === 1 ? "s" : ""} ${paretoShareLabel(tier.shareTenths)} (${money(tier.topDebt, pareto.decimals)})`}
+                  {`top ${String(tier.n)} hold${tier.n === 1 ? "s" : ""} ${paretoShareLabel(tier.shareTenths)} (${money(tier.topDebt, pareto.decimals)} of ${money(pareto.totalDebt, pareto.decimals)})`}
                 </li>
               ))}
             </ul>

@@ -46,6 +46,19 @@ export type HeadroomCurve =
       decimals: number;
     };
 
+/**
+ * r100: a CUMULATIVE row must not wear an INTERVAL label. The band label
+ * "2–5%" names an interval; this row holds everything under its right edge
+ * (breached included), so the cumulative label says so — and the terminal
+ * row names the whole banded population rather than "≥50%".
+ */
+export function cumulativeLabel(bandLabel: string, terminal: boolean): string {
+  if (terminal) return "all banded rows";
+  const dash = bandLabel.indexOf("–");
+  if (dash === -1) return bandLabel; // "breached" leads, an interval of its own
+  return `under ${bandLabel.slice(dash + 1)}`;
+}
+
 export function headroomCurve(bins: RiskBinsResult): HeadroomCurve {
   // THE PARTITION WELD (F7): bands + asides must name every walked row.
   const banded = bins.bandTotals.reduce((sum, band) => sum + band.count, 0);
@@ -62,11 +75,13 @@ export function headroomCurve(bins: RiskBinsResult): HeadroomCurve {
   const cells: CurveCell[] = [];
   let accounts = 0;
   let debt = 0n;
-  for (const band of bins.bandTotals) {
+  for (let index = 0; index < bins.bandTotals.length; index++) {
+    const band = bins.bandTotals[index];
+    if (band === undefined) continue;
     accounts += band.count;
     debt += band.debt;
     cells.push({
-      label: band.label,
+      label: cumulativeLabel(band.label, index === bins.bandTotals.length - 1),
       cumulativeAccounts: accounts,
       cumulativeDebt: debt.toString(),
     });

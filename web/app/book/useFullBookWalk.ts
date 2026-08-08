@@ -78,7 +78,17 @@ export type FullBookWalkState =
       total: number | null;
       batchId: number | null;
     }
-  | { phase: "full"; rows: PositionRow[]; batch: Batch }
+  | {
+      phase: "full";
+      rows: PositionRow[];
+      batch: Batch;
+      /**
+       * r100: the LAST page's served `total_positions` — a terminal page is
+       * only proof the cursor ended, not that every qualifying row arrived.
+       * Consumers weld rows.length against this before claiming "walked all".
+       */
+      total: number | null;
+    }
   | {
       /**
        * The book re-materialized faster than one walk of it completes. Not a
@@ -197,7 +207,12 @@ export function useFullBookWalk({ engine, minValue, enabled }: FullBookWalkParam
             pageCount += 1;
             acc.push(...response.positions.map(toPositionRow));
             if (response.next_cursor === null) {
-              setState({ phase: "full", rows: acc, batch: response.batch });
+              setState({
+                phase: "full",
+                rows: acc,
+                batch: response.batch,
+                total: response.total_positions,
+              });
               return;
             }
             setState({
