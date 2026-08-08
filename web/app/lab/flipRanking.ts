@@ -248,7 +248,10 @@ export function flipTakeaway(model: FlipView): string {
   // r91 finding 1: a window holding a null-debt row earns NO ranking claim —
   // "largest by flipped debt" cannot describe a row with no served debt.
   const window =
-    model.unbarrable.length > 0
+    // r93: the "largest" claim needs BOTH a fully-barrable window AND the
+    // served ranking holding its own rule — once the order contradicts
+    // largest-first, unseen rows may outrank the shown ones.
+    model.unbarrable.length > 0 || model.rankingContradiction !== null
       ? `the served window of ${String(shown)} rows is on this page`
       : shown < cells.flipsToEligible
         ? `the ${String(shown)} largest by flipped debt are on this page`

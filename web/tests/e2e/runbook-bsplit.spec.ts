@@ -544,7 +544,7 @@ test("VIEW 4: an unmoved book draws NOTHING — no chart, no population sentence
 interface DoctoredRunBook {
   engines: {
     engine: string;
-    movers: { became_eligible: boolean | null }[];
+    movers: { account: string; became_eligible: boolean | null; debt_usd: string | null }[];
     movers_total: number;
     newly_eligible_accounts: number;
     before: {
@@ -827,4 +827,35 @@ test("r92: multiple sub-pixel cells at the RIGHT EDGE stay inside the strip, dis
   }
   // Pairwise distinct — coincident dots are one dot in the reader's eye.
   expect(new Set(centers).size).toBe(3);
+});
+
+test("r93: a contradicted ranking never announces `largest first` — not even to a screen reader", async ({
+  page,
+}) => {
+  // DERIVED NEGATIVE: a second served row carries MORE debt than the first —
+  // the served order breaks its own largest-first rule.
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook;
+  for (const engine of body.engines) {
+    if (engine.engine !== "debt_manager") continue;
+    const base = engine.movers[0];
+    if (base === undefined) throw new Error("fixture invariant: one DM mover expected");
+    engine.movers = [
+      base,
+      { ...base, account: "0x9999999999999999999999999999999999999999", debt_usd: "9000000000" },
+    ];
+    engine.movers_total = 2;
+    engine.newly_eligible_accounts = 2;
+    engine.before.accounts = 10;
+    engine.after.accounts = 10;
+    engine.after.eligible_accounts += 1; // net 2 over the fixture's before side
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const dm = page.locator('[data-testid="runbook-movers"][data-engine="debt_manager"]');
+  await expect(dm.getByTestId("flip-ranking-contradiction")).toBeVisible();
+  const label = await dm.getByTestId("flip-bars").getAttribute("aria-label");
+  expect(label).toContain("in served order");
+  expect(label).not.toContain("largest first");
+  // And the takeaway retreated to the neutral arm with the contradiction.
+  await expect(dm.getByTestId("flip-takeaway")).not.toContainText("largest by flipped debt");
 });

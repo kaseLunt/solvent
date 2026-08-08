@@ -174,6 +174,28 @@ test("a served order that breaks its own largest-first rule is SURFACED, never r
   expect(model.maxDebtUsd).toBe("9000000000");
 });
 
+test("r93: a TRUNCATED contradictory window is never called `the N largest`", () => {
+  // Once the served order breaks its own largest-first rule, unseen rows may
+  // outrank the shown ones — the takeaway retreats to the neutral arm.
+  const engine = dmClone();
+  const base = engine.movers[0];
+  if (base === undefined) throw new Error("fixture invariant: one DM mover expected");
+  engine.before.accounts = 10;
+  engine.after.accounts = 10;
+  engine.movers = [
+    base, // 1500000000
+    { ...base, account: "0x9999999999999999999999999999999999999999", debt_usd: "9000000000" },
+  ];
+  engine.movers_total = 3; // truncated: 2 shown of 3
+  engine.newly_eligible_accounts = 3;
+  engine.after.eligible_accounts = engine.before.eligible_accounts + 3;
+  const model = viewOf(engine);
+  expect(model.rankingContradiction).not.toBeNull();
+  const line = flipTakeaway(model);
+  expect(line).toContain("the served window of 2 rows is on this page");
+  expect(line).not.toContain("largest by flipped debt");
+});
+
 test("the takeaway names the gross, the counter-flow, the page — and the total it may NOT claim", () => {
   const model = viewOf(dmClone());
   // r90 F3 RE-LAW: the page holds SERVED ROWS, and only a row with a served
@@ -219,9 +241,12 @@ test("r91: a window holding a NULL-DEBT row earns no ranking claim — capped or
   expect(line).not.toContain("largest by flipped debt");
   // And the method line claims ranking only where every row carries a debt.
   expect(FLIP_METHOD).toContain("ranked only where every row carries a served debt");
-  // r92: the longest-bar claim is scoped to rows WITH a served debt — an
-  // unknowable is outranked by nothing.
-  expect(FLIP_METHOD).toContain("among rows carrying a served debt");
+  // r92/r93: the COMPLETE longest-bar sentence is pinned — a partial pin let
+  // a wrong method (missing debt ranked as zero) stay green.
+  expect(FLIP_METHOD).toContain(
+    "longest bar = the largest flip among rows carrying a served debt (a row without one " +
+      "draws no bar and is outranked by nothing).",
+  );
   expect(FLIP_METHOD).not.toContain("longest bar = largest shown flip");
   expect(FLIP_METHOD).not.toContain("served largest-debt ranking");
 });

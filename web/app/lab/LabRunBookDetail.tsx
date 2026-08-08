@@ -711,7 +711,13 @@ function LabFlipRanking({ engine }: { engine: LabRunBookEngine }) {
             height={barsHeight}
             viewBox={`0 0 ${String(barsWidth)} ${String(barsHeight)}`}
             role="img"
-            aria-label={`flipped debt per shown account on ${engine.engine}, largest first`}
+            aria-label={
+              // r93: "largest first" is a claim about the SERVED order, and
+              // it is made only while that order obeys its own rule.
+              model.rankingContradiction === null
+                ? `flipped debt per shown account on ${engine.engine}, largest first`
+                : `flipped debt per shown account on ${engine.engine}, in served order — the ranking rule is contradicted, see the note above`
+            }
             style={{ display: "block" }}
             data-testid="flip-bars"
           >
