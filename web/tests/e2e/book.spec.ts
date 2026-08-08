@@ -685,3 +685,69 @@ test("r100: a PREMATURE terminal page never draws a partial vector as the book",
   await expect(panel.getByTestId("curve-table-aave_v3_etherfi")).toHaveCount(0);
   await expect(panel.getByTestId("pareto-tier-line")).toHaveCount(0);
 });
+
+test("r101: tier absolutes are DISCRIMINATING — unequal numerator and denominator, pinned exact", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK);
+  // Two positive-debt borrowers on one terminal page: $6,000 and $200. The
+  // one-borrower fixture could not tell the two slots apart ($6,000 of
+  // $6,000) — this pair can.
+  const base = structuredClone(POSITIONS_AAVE_PAGE_1) as {
+    positions: { account: string; total_debt: string | null }[];
+    next_cursor: string | null;
+    total_positions: number;
+  };
+  const first = base.positions[0];
+  if (first === undefined) throw new Error("fixture invariant: a computed row expected");
+  const second = structuredClone(first);
+  second.account = "0x9999999999999999999999999999999999999999";
+  second.total_debt = "20000000000"; // $200 @ 8dp
+  base.positions = [first, second];
+  base.next_cursor = null;
+  base.total_positions = 2;
+  await page.route("**/v1/positions*", (route) => fulfillJson(route, base));
+  await openBook(page);
+
+  const panel = page.getByTestId("concentration-aave_v3_etherfi");
+  // 6000/6200 = 96.7% truncated tenths; the two dollar figures DIFFER.
+  await expect(panel.getByTestId("pareto-tier-line").first()).toHaveText(
+    "top 1 holds 96.7% ($6,000 of $6,200)",
+  );
+  await expect(panel.getByTestId("pareto-tier-line").last()).toHaveText(
+    "top 2 hold 100.0% ($6,200 of $6,200)",
+  );
+});
+
+test("r101: the DUST arm prints the same discriminating absolutes, list-form, no bars", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK);
+  // $0.50 + $0.20 — a $0.70 book, far under the named $1,000 floor.
+  const base = structuredClone(POSITIONS_AAVE_PAGE_1) as {
+    positions: { account: string; total_debt: string | null }[];
+    next_cursor: string | null;
+    total_positions: number;
+  };
+  const first = base.positions[0];
+  if (first === undefined) throw new Error("fixture invariant: a computed row expected");
+  first.total_debt = "50000000";
+  const second = structuredClone(first);
+  second.account = "0x8888888888888888888888888888888888888888";
+  second.total_debt = "20000000";
+  base.positions = [first, second];
+  base.next_cursor = null;
+  base.total_positions = 2;
+  await page.route("**/v1/positions*", (route) => fulfillJson(route, base));
+  await openBook(page);
+
+  const panel = page.getByTestId("concentration-aave_v3_etherfi");
+  await expect(panel.getByTestId("pareto-denominator-aave_v3_etherfi")).toContainText("DUST");
+  // 50/70 = 71.4% truncated; numerator and denominator both print, unequal.
+  await expect(panel.getByTestId("pareto-tier-line").first()).toHaveText(
+    "top 1 holds 71.4% ($0.5 of $0.7)",
+  );
+  // The visual weight is gone: list form, no SVG bars.
+  await expect(panel.getByTestId("pareto-bars-aave_v3_etherfi")).toHaveCount(0);
+  await expect(panel.getByTestId("pareto-dust-list-aave_v3_etherfi")).toHaveCount(1);
+});
