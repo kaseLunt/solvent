@@ -23,7 +23,8 @@
 //     every step names its own ×a → ×b and nothing assumes uniform spacing.
 //   - PER ENGINE ONLY; an engine absent from every point makes no claim.
 
-import { type Waterfall } from "@solvent/client";
+import { formatUnits, type Waterfall } from "@solvent/client";
+import { groupDecimalString } from "../../lib/book-format";
 import { factorTimesLabel } from "./waterfallView";
 
 interface EnginePoint {
@@ -154,6 +155,21 @@ export function incrementAccountsClause(step: IncrementStep): string {
   if (step.newlyEligible === 0) return "no account first crossed at this step";
   const noun = step.newlyEligible === 1 ? "account" : "accounts";
   return `${String(step.newlyEligible)} ${noun} first crossed at this step`;
+}
+
+/**
+ * r98: the bar scale is PER ENGINE and says so — equal lengths across panels
+ * are not equal dollars, and the anchor value is printed rather than implied.
+ */
+export function incrementScaleClause(maxIncreaseUsd: string, usdDecimals: number): string {
+  if (BigInt(maxIncreaseUsd) === 0n) {
+    return "Every increase in this window is $0, so no bar is drawn.";
+  }
+  const anchor = `$${groupDecimalString(formatUnits(maxIncreaseUsd, usdDecimals, { trim: true }))}`;
+  return (
+    `Bars are scaled to this engine's own largest increase (${anchor}) — ` +
+    `engine panels share no scale.`
+  );
 }
 
 /** SLOT 6 for the increments block. */

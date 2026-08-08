@@ -115,14 +115,14 @@ test("the series STOPS before a server-named violation — and only for the name
   expect(dm.stopped).not.toBeNull();
   expect(dm.stopped).toContain("monotonicity violation");
   expect(dm.stopped).toContain("stops before that point");
-  // The OTHER engine's series is not the named one and runs the full grid.
-  const aave = stressIncrements(waterfall, "aave_v3_etherfi");
-  if (aave.kind === "view") {
-    expect(aave.stopped).toBeNull();
-  } else {
-    // The fixture may not serve aave on every point; absence is lawful.
-    expect(aave.kind === "absent" || aave.kind === "single").toBe(true);
-  }
+  // r98 RE-LAW: the OTHER engine runs the FULL grid — asserted on its steps,
+  // not merely on the absence of a stop sentence. The fixture serves aave at
+  // all six points, so a truncated or empty lawful-looking prefix is a FAIL.
+  const aave = viewOf(waterfall, "aave_v3_etherfi");
+  expect(aave.stopped).toBeNull();
+  expect(aave.steps).toHaveLength(5);
+  expect(aave.steps[0]?.fromTimes).toBe("×1.00");
+  expect(aave.steps[4]?.toTimes).toBe("×0.50");
 });
 
 test("a DISORDERED grid refuses — between-step readings need a descending grid", () => {

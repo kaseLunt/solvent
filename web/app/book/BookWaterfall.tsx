@@ -38,6 +38,7 @@ import { formatUnits } from "@solvent/client";
 import {
   STRESS_INC_METHOD,
   incrementAccountsClause,
+  incrementScaleClause,
   stressIncrements,
   type IncrementStep,
 } from "./stressIncrements";
@@ -271,17 +272,30 @@ function BookStressIncrements({ waterfall, engine }: { waterfall: Waterfall; eng
     maxIncrease === 0n
       ? 0
       : Number((BigInt(step.debtIncreaseUsd) * BigInt(INC_BAR_MAX)) / maxIncrease);
+  // r98: the label gutter is sized from the LONGEST factor pair actually
+  // printed — the grid is env-configurable and a full-precision factor is
+  // lawful, so a fixed gutter would clip served step boundaries.
+  const labelChars = model.steps.reduce(
+    (longest, step) => Math.max(longest, step.fromTimes.length + 1 + step.toTimes.length),
+    0,
+  );
+  const labelWidth = Math.max(INC_LABEL_W, Math.ceil(labelChars * 7.5) + 6);
   // The value gutter fits the LONGEST row sentence whole (r96's law: a value
   // clipped by its own viewport is not disclosed) — the frame scrolls on
   // narrow panels instead.
-  const width = INC_LABEL_W + INC_BAR_MAX + 480;
+  const width = labelWidth + INC_BAR_MAX + 480;
   const height = model.steps.length * INC_ROW_H + 4;
+  const firstStep = model.steps[0];
+  const scaleClause =
+    firstStep === undefined
+      ? null
+      : incrementScaleClause(maxIncrease.toString(), firstStep.usdDecimals);
 
   return (
     <div data-testid={`waterfall-increments-${engine}`}>
       <p className={styles.answerLine} data-testid={`increments-caption-${engine}`}>
         Between neighboring sampled points: the INCREASE in eligible debt, and the accounts that
-        first crossed there.
+        first crossed there.{scaleClause === null ? "" : ` ${scaleClause}`}
       </p>
       {model.steps.length > 0 && (
         <div className={styles.chartScroll} data-testid={`increments-frame-${engine}`}>
@@ -290,7 +304,7 @@ function BookStressIncrements({ waterfall, engine }: { waterfall: Waterfall; eng
             height={height}
             viewBox={`0 0 ${String(width)} ${String(height)}`}
             role="img"
-            aria-label={`eligible-debt increases between neighboring waterfall points for ${engine}`}
+            aria-label={`eligible-debt increases between neighboring waterfall points for ${engine}; bar lengths are normalized to this engine's own largest increase and share no scale with other engines`}
             style={{ display: "block" }}
             data-testid={`increments-bars-${engine}`}
           >
@@ -302,7 +316,7 @@ function BookStressIncrements({ waterfall, engine }: { waterfall: Waterfall; eng
                 <g key={step.toTimes} data-testid="increment-row" data-engine={engine}>
                   <text
                     className={styles.incrementsLabel}
-                    x={INC_LABEL_W}
+                    x={labelWidth}
                     y={y + 12}
                     textAnchor="end"
                   >
@@ -312,7 +326,7 @@ function BookStressIncrements({ waterfall, engine }: { waterfall: Waterfall; eng
                     <rect
                       className={styles.incrementsBar}
                       data-testid="increment-bar"
-                      x={INC_LABEL_W + 6}
+                      x={labelWidth + 6}
                       y={y + 4}
                       width={barPixels}
                       height={INC_ROW_H - 9}
@@ -322,7 +336,7 @@ function BookStressIncrements({ waterfall, engine }: { waterfall: Waterfall; eng
                     <circle
                       className={styles.incrementsBar}
                       data-testid="increment-presence"
-                      cx={INC_LABEL_W + 6 + INC_PRESENCE_R}
+                      cx={labelWidth + 6 + INC_PRESENCE_R}
                       cy={y + INC_ROW_H / 2}
                       r={INC_PRESENCE_R}
                     >
@@ -334,7 +348,7 @@ function BookStressIncrements({ waterfall, engine }: { waterfall: Waterfall; eng
                   )}
                   <text
                     className={styles.incrementsValue}
-                    x={INC_LABEL_W + 12 + INC_BAR_MAX}
+                    x={labelWidth + 12 + INC_BAR_MAX}
                     y={y + 12}
                     data-testid="increment-value"
                   >

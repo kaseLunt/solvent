@@ -549,3 +549,51 @@ test("VIEW 3: the series STOPS before a server-named monotonicity violation, sta
   await expect(stopped).toContainText("monotonicity violation");
   await expect(stopped).toContainText("stops before that point");
 });
+
+test("r98: the bar scale is DISCLOSED per engine, and lawful full-precision factors are never clipped", async ({
+  page,
+}) => {
+  // DERIVED CASE: an uneven, full-precision descending grid — lawful under
+  // the env-configurable grid — whose factor labels are far wider than any
+  // fixed gutter. The served step boundaries must render whole.
+  const body = structuredClone(BOOK) as unknown as {
+    waterfall: { points: { index: number; factor: string }[] };
+  };
+  const factors = [
+    "1000000000000000000",
+    "999999999999999999",
+    "999999999999999998",
+    "700000000000000000",
+    "600000000000000000",
+    "500000000000000000",
+  ];
+  body.waterfall.points.forEach((point, index) => {
+    const factor = factors[index];
+    if (factor !== undefined) point.factor = factor;
+  });
+  await mockBook(page, body);
+  await mockPositions(page);
+  await openBook(page);
+
+  const dm = page.getByTestId("waterfall-increments-debt_manager");
+  // Finding 1: the normalization disclosure rides the visible caption. On
+  // this all-zero fixture the honest arm is the no-bar sentence.
+  await expect(dm.getByTestId("increments-caption-debt_manager")).toContainText(
+    "Every increase in this window is $0, so no bar is drawn.",
+  );
+  // Finding 2: every factor label's box sits inside its own SVG viewport.
+  const contained = await dm
+    .getByTestId("increments-bars-debt_manager")
+    .evaluate((svg: SVGElement) => {
+      const frame = svg.getBoundingClientRect();
+      return Array.from(svg.querySelectorAll("text")).every((text) => {
+        const box = text.getBoundingClientRect();
+        return box.left >= frame.left - 0.5 && box.right <= frame.right + 0.5;
+      });
+    });
+  expect(contained).toBe(true);
+  // The full-precision step is named whole on the page.
+  await expect(dm.getByTestId("increment-row").nth(1)).toContainText(
+    "×0.999999999999999999→×0.999999999999999998",
+  );
+});
