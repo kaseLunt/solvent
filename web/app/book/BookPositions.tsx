@@ -122,6 +122,7 @@ import {
 } from "./dust";
 import { toPositionRow, type PositionRow } from "./positionRow";
 import { BookRiskMap } from "./BookRiskMap";
+import { BookConcentration } from "./BookConcentration";
 import { useFullBookWalk } from "./useFullBookWalk";
 import { NO_PRICE_PATH_LABEL, noPricePathLegendFor, pricePathDetail } from "@/lib/liq-distance";
 import { WARN_BAND_DISCLOSURE } from "./warnBand";
@@ -978,6 +979,16 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
           walk={fullWalk}
           dustStep={dustActive ? (dust as ActiveDustStep) : null}
           onBook={mapOnBook}
+        />
+      </div>
+
+      {/* ---- VIEWS 1+2: the SAME walk, accumulated and ranked. ---- */}
+      <div style={{ marginBottom: "var(--sp-3)" }}>
+        <BookConcentration
+          engine={engine}
+          walk={fullWalk}
+          minValue={minValue}
+          valueDecimals={valueDecimals}
         />
       </div>
 

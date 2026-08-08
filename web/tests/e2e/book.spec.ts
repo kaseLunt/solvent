@@ -597,3 +597,67 @@ test("r98: the bar scale is DISCLOSED per engine, and lawful full-precision fact
     "×0.999999999999999999→×0.999999999999999998",
   );
 });
+
+// ---------------------------------------------------------------------------
+// VIEWS 1+2 — cumulative headroom + Pareto over the SAME hoisted walk
+// (views spec views 1/2 + critic Findings 5/6/7).
+
+test("VIEWS 1+2: completeness and the floor lead, the curve accumulates, every share carries its absolutes", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK);
+  await mockPositions(page);
+  await openBook(page);
+
+  const panel = page.getByTestId("concentration-aave_v3_etherfi");
+  // F6 + view-1 notes: the walk's completeness and the floor state render
+  // FIRST, visibly — and the Book's DEFAULT dust step composes a real $1
+  // floor onto every walked request, so the takeaway names it.
+  await expect(panel.getByTestId("concentration-takeaway-aave_v3_etherfi")).toHaveText(
+    "Walked all 2 rows of batch #1 on aave_v3_etherfi; every walked request carried the $1 " +
+      "value floor — rows under it are not in this census.",
+  );
+  // F7: the refused row is a NAMED aside, member of no cell.
+  const asides = panel.getByTestId("curve-asides-aave_v3_etherfi");
+  await expect(asides).toBeVisible();
+  await expect(asides).toContainText("1 refused (withheld upstream)");
+  await expect(asides).toContainText("outside BOTH curves");
+  // The one computed row (HF 1.08 → 7.4% headroom, $6,000) accumulates: the
+  // tightest cells hold nothing, the deepest cell holds the whole book.
+  const cells = panel.getByTestId("curve-cell");
+  await expect(cells.first()).toContainText("$0");
+  await expect(panel.getByTestId("curve-table-aave_v3_etherfi")).toContainText("$6,000");
+  // VIEW 2: the denominator is the walk's own Σ, the excluded row counted
+  // beside it, and the single tier reaches it exactly.
+  await expect(panel.getByTestId("pareto-denominator-aave_v3_etherfi")).toHaveText(
+    "The walked book sums to $6,000 across 1 borrower; 1 row carries no positive debt figure " +
+      "and sits outside both sides of every share.",
+  );
+  await expect(panel.getByTestId("pareto-tier-line")).toHaveText("top 1 holds 100.0% ($6,000)");
+  // Methods carry the two no-lie clauses.
+  await expect(panel.getByTestId("curve-method-aave_v3_etherfi")).toContainText(
+    "bands plus asides always equal the rows walked",
+  );
+  await expect(panel.getByTestId("pareto-method-aave_v3_etherfi")).toContainText(
+    "never compared across engines",
+  );
+});
+
+test("VIEWS 1+2: a walk still in flight draws NOTHING — a partial vector is not a book", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK);
+  // The first positions page never resolves: the walk stays in `walking`.
+  await page.route("**/v1/positions*", () => {
+    /* hold the request open */
+  });
+  await openBook(page);
+
+  const panel = page.getByTestId("concentration-aave_v3_etherfi");
+  await expect(panel.getByTestId("concentration-walking-aave_v3_etherfi")).toBeVisible();
+  await expect(panel.getByTestId("concentration-walking-aave_v3_etherfi")).toContainText(
+    "a partial vector is not a book",
+  );
+  await expect(panel.getByTestId("curve-table-aave_v3_etherfi")).toHaveCount(0);
+  await expect(panel.getByTestId("pareto-tier-line")).toHaveCount(0);
+});
