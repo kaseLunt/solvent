@@ -638,3 +638,29 @@
   gap: var(--sp-3);
   align-items: baseline;
 }
+
+/* ---- VIEW 3: waterfall step increments ---- */
+
+.incrementsLabel {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--ink-2);
+}
+
+.incrementsValue {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--ink);
+}
+
+.incrementsBar {
+  fill: var(--accent);
+  opacity: 0.85;
+}
+
+.incrementsContradiction {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--crit);
+  margin: 0 0 6px;
+}

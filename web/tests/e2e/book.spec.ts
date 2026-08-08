@@ -500,3 +500,52 @@ test("a network failure keeps the transport strip WITH retry — the one honest 
   const table = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
   await expect(table).toContainText("0xAAaA…0001");
 });
+
+// ---------------------------------------------------------------------------
+// VIEW 3 — step increments between neighboring sampled points (views spec
+// view 3 + critic Finding 9).
+
+test("VIEW 3: the increment rows keep the two claims apart, with computed zeros staying zeros", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK);
+  await mockPositions(page);
+  await openBook(page);
+
+  const dm = page.getByTestId("waterfall-increments-debt_manager");
+  await expect(dm.getByTestId("increments-caption-debt_manager")).toBeVisible();
+  await expect(dm.getByTestId("increments-caption-debt_manager")).toContainText(
+    "INCREASE in eligible debt",
+  );
+  // Five steps on the six-point fixture grid, each named by ITS OWN factors.
+  await expect(dm.getByTestId("increment-row")).toHaveCount(5);
+  await expect(dm.getByTestId("increment-value").first()).toHaveText(
+    "+$0 · no account first crossed at this step",
+  );
+  // A flat book draws NO bars and NO presence dots — zero is a computed zero.
+  await expect(dm.getByTestId("increment-bar")).toHaveCount(0);
+  await expect(dm.getByTestId("increment-presence")).toHaveCount(0);
+  // The method line keeps the entry claim off the dollar figure.
+  const method = dm.getByTestId("increments-method-debt_manager");
+  await expect(method).toContainText("never called the debt that became eligible");
+  await expect(method).toContainText("never differenced");
+  // No stop, no refusal on the honest fixture.
+  await expect(dm.getByTestId("increments-stopped-debt_manager")).toHaveCount(0);
+  await expect(page.getByTestId("increments-refused-debt_manager")).toHaveCount(0);
+});
+
+test("VIEW 3: the series STOPS before a server-named monotonicity violation, stated in words", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK_MONOTONICITY_VIOLATION);
+  await mockPositions(page);
+  await openBook(page);
+
+  const dm = page.getByTestId("waterfall-increments-debt_manager");
+  // The violation is named at index 2: only the first step survives.
+  await expect(dm.getByTestId("increment-row")).toHaveCount(1);
+  const stopped = dm.getByTestId("increments-stopped-debt_manager");
+  await expect(stopped).toBeVisible();
+  await expect(stopped).toContainText("monotonicity violation");
+  await expect(stopped).toContainText("stops before that point");
+});

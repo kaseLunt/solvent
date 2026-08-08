@@ -34,6 +34,13 @@ import {
   waterfallForensicsSummary,
   WATERFALL_SECTION_NOTE,
 } from "@/lib/book-copy";
+import { formatUnits } from "@solvent/client";
+import {
+  STRESS_INC_METHOD,
+  incrementAccountsClause,
+  stressIncrements,
+  type IncrementStep,
+} from "./stressIncrements";
 import {
   buildWaterfallSteps,
   factorTimesLabel,
@@ -171,6 +178,8 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
                     {allDust}
                   </p>
                 )}
+                {/* ---- VIEW 3: the consecutive-difference reading. ---- */}
+                <BookStressIncrements waterfall={waterfall} engine={engine} />
               </div>
             </div>
           );
@@ -222,5 +231,129 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
         </p>
       </details>
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// VIEW 3 — step increments between neighboring sampled points.
+//
+// The two claims stay APART on the page exactly as they do in the model: the
+// dollar figure is an INCREASE (entry plus re-measurement drift on the
+// already-latched set), and only the account count says "first crossed". A
+// refused model renders its reason in the contradiction register; a stopped
+// series states the stop; forbidden series are simply not here.
+
+const INC_LABEL_W = 110;
+const INC_BAR_MAX = 150;
+const INC_ROW_H = 20;
+const INC_PRESENCE_R = 1.5;
+
+function incrementUsd(step: IncrementStep): string {
+  return `$${groupDecimalString(formatUnits(step.debtIncreaseUsd, step.usdDecimals, { trim: true }))}`;
+}
+
+function BookStressIncrements({ waterfall, engine }: { waterfall: Waterfall; engine: string }) {
+  const model = stressIncrements(waterfall, engine);
+  if (model.kind === "absent" || model.kind === "single") return null;
+  if (model.kind === "refused") {
+    return (
+      <p className={styles.incrementsContradiction} data-testid={`increments-refused-${engine}`}>
+        {model.reason}
+      </p>
+    );
+  }
+  let maxIncrease = 0n;
+  for (const step of model.steps) {
+    const value = BigInt(step.debtIncreaseUsd);
+    if (value > maxIncrease) maxIncrease = value;
+  }
+  const barWidth = (step: IncrementStep) =>
+    maxIncrease === 0n
+      ? 0
+      : Number((BigInt(step.debtIncreaseUsd) * BigInt(INC_BAR_MAX)) / maxIncrease);
+  // The value gutter fits the LONGEST row sentence whole (r96's law: a value
+  // clipped by its own viewport is not disclosed) — the frame scrolls on
+  // narrow panels instead.
+  const width = INC_LABEL_W + INC_BAR_MAX + 480;
+  const height = model.steps.length * INC_ROW_H + 4;
+
+  return (
+    <div data-testid={`waterfall-increments-${engine}`}>
+      <p className={styles.answerLine} data-testid={`increments-caption-${engine}`}>
+        Between neighboring sampled points: the INCREASE in eligible debt, and the accounts that
+        first crossed there.
+      </p>
+      {model.steps.length > 0 && (
+        <div className={styles.chartScroll} data-testid={`increments-frame-${engine}`}>
+          <svg
+            width={width}
+            height={height}
+            viewBox={`0 0 ${String(width)} ${String(height)}`}
+            role="img"
+            aria-label={`eligible-debt increases between neighboring waterfall points for ${engine}`}
+            style={{ display: "block" }}
+            data-testid={`increments-bars-${engine}`}
+          >
+            {model.steps.map((step, index) => {
+              const y = index * INC_ROW_H + 2;
+              const barPixels = barWidth(step);
+              const subPixel = BigInt(step.debtIncreaseUsd) > 0n && barPixels < 1;
+              return (
+                <g key={step.toTimes} data-testid="increment-row" data-engine={engine}>
+                  <text
+                    className={styles.incrementsLabel}
+                    x={INC_LABEL_W}
+                    y={y + 12}
+                    textAnchor="end"
+                  >
+                    {step.fromTimes}→{step.toTimes}
+                  </text>
+                  {barPixels > 0 && (
+                    <rect
+                      className={styles.incrementsBar}
+                      data-testid="increment-bar"
+                      x={INC_LABEL_W + 6}
+                      y={y + 4}
+                      width={barPixels}
+                      height={INC_ROW_H - 9}
+                    />
+                  )}
+                  {subPixel && (
+                    <circle
+                      className={styles.incrementsBar}
+                      data-testid="increment-presence"
+                      cx={INC_LABEL_W + 6 + INC_PRESENCE_R}
+                      cy={y + INC_ROW_H / 2}
+                      r={INC_PRESENCE_R}
+                    >
+                      <title>
+                        a nonzero increase too small to draw at one pixel on this scale — the
+                        exact figure is beside the bar
+                      </title>
+                    </circle>
+                  )}
+                  <text
+                    className={styles.incrementsValue}
+                    x={INC_LABEL_W + 12 + INC_BAR_MAX}
+                    y={y + 12}
+                    data-testid="increment-value"
+                  >
+                    {`+${incrementUsd(step)} · ${incrementAccountsClause(step)}`}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      )}
+      {model.stopped !== null && (
+        <p className={styles.incrementsContradiction} data-testid={`increments-stopped-${engine}`}>
+          {model.stopped}
+        </p>
+      )}
+      <p className={styles.methodLine} data-testid={`increments-method-${engine}`}>
+        {STRESS_INC_METHOD}
+      </p>
+    </div>
   );
 }
