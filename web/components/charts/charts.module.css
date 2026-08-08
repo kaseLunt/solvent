@@ -430,3 +430,10 @@
   font-size: 12px;
   color: var(--ink);
 }
+
+/* Sentence columns wrap INSIDE the ledger instead of forcing the whole
+   table into a horizontal scroll tunnel — a sentence is not a number. */
+.mapLedgerTable .wrapCell {
+  white-space: normal;
+  min-width: 180px;
+}

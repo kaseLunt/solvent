@@ -19,6 +19,7 @@
 
 import { formatUnits } from "@solvent/client";
 import { groupDecimalString } from "@/lib/book-format";
+import { EngineChip } from "@/components/EngineChip";
 import type { FullBookWalk } from "./useFullBookWalk";
 import { buildRiskBins } from "./riskBins";
 import { CURVE_METHOD, curveAsidesLine, headroomCurve } from "./headroomCurve";
@@ -36,6 +37,29 @@ const SHARE_ROW_H = 20;
 
 function money(value: string, decimals: number): string {
   return `$${groupDecimalString(formatUnits(value, decimals, { trim: true }))}`;
+}
+
+
+/** OWNER PASS (pre-deploy): the house panel shell — head + padded body —
+ *  which this panel had skipped, leaving its content flush on the border. */
+function ConcentrationShell({
+  engine,
+  children,
+}: {
+  engine: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={styles.panel} data-testid={`concentration-${engine}`}>
+      <div className={styles.panelHead}>
+        <EngineChip engine={engine} />
+        <span className={styles.comparator}>
+          concentration &amp; cumulative headroom &middot; one walk, this engine&apos;s own USD
+        </span>
+      </div>
+      <div className={styles.panelBody}>{children}</div>
+    </section>
+  );
 }
 
 export function BookConcentration({
@@ -63,32 +87,32 @@ export function BookConcentration({
 
   if (state.phase === "walking" || state.phase === "idle") {
     return (
-      <section className={styles.panel} data-testid={`concentration-${engine}`}>
+      <ConcentrationShell engine={engine}>
         <p className={styles.methodLine} data-testid={`concentration-walking-${engine}`}>
           Concentration and cumulative headroom wait for the full walk — a partial vector is
           not a book.
         </p>
-      </section>
+      </ConcentrationShell>
     );
   }
   if (state.phase === "outpaced") {
     return (
-      <section className={styles.panel} data-testid={`concentration-${engine}`}>
+      <ConcentrationShell engine={engine}>
         <p className={styles.incrementsContradiction} data-testid={`concentration-outpaced-${engine}`}>
           The book re-materialized {String(state.supersessions)} time
           {state.supersessions === 1 ? "" : "s"} while being walked — no single batch was ever
           fully in hand, so no concentration claim is made.
         </p>
-      </section>
+      </ConcentrationShell>
     );
   }
   if (state.phase === "failed" || rows === null || bins === null) {
     return (
-      <section className={styles.panel} data-testid={`concentration-${engine}`}>
+      <ConcentrationShell engine={engine}>
         <p className={styles.incrementsContradiction} data-testid={`concentration-failed-${engine}`}>
           The walk failed before the book was fully in hand, so no concentration claim is made.
         </p>
-      </section>
+      </ConcentrationShell>
     );
   }
 
@@ -97,13 +121,13 @@ export function BookConcentration({
   // never draw a partial vector as the book.
   if (state.total !== null && rows.length !== state.total) {
     return (
-      <section className={styles.panel} data-testid={`concentration-${engine}`}>
+      <ConcentrationShell engine={engine}>
         <p className={styles.incrementsContradiction} data-testid={`concentration-short-${engine}`}>
           {`WALK CONTRADICTION: the cursor ended after ${String(rows.length)} rows but the ` +
             `server counted ${String(state.total)} qualifying — the vector is not the book, ` +
             `so no concentration claim is made.`}
         </p>
-      </section>
+      </ConcentrationShell>
     );
   }
 
@@ -112,7 +136,7 @@ export function BookConcentration({
   const batchId = state.batch.id;
 
   return (
-    <section className={styles.panel} data-testid={`concentration-${engine}`}>
+    <ConcentrationShell engine={engine}>
       {/* ---- SLOT 3: the takeaway — completeness and the floor, FIRST. ---- */}
       <p className={styles.answerLine} data-testid={`concentration-takeaway-${engine}`}>
         {state.total === null
@@ -132,20 +156,20 @@ export function BookConcentration({
           <p className={styles.methodLine} data-testid={`curve-asides-${engine}`}>
             {curveAsidesLine(curve)}
           </p>
-          <table className={styles.table} data-testid={`curve-table-${engine}`}>
+          <table className={styles.curveTable} data-testid={`curve-table-${engine}`}>
             <thead>
               <tr>
                 <th>within</th>
-                <th className={styles.num}>accounts</th>
-                <th className={styles.num}>Σ debt</th>
+                <th className={styles.curveNum}>accounts</th>
+                <th className={styles.curveNum}>Σ debt</th>
               </tr>
             </thead>
             <tbody>
               {curve.cells.map((cell) => (
                 <tr key={cell.label} data-testid="curve-cell">
                   <td>{cell.label}</td>
-                  <td className={styles.num}>{cell.cumulativeAccounts}</td>
-                  <td className={styles.num} data-testid="curve-debt">
+                  <td className={styles.curveNum}>{cell.cumulativeAccounts}</td>
+                  <td className={styles.curveNum} data-testid="curve-debt">
                     {money(cell.cumulativeDebt, curve.decimals)}
                   </td>
                 </tr>
@@ -225,6 +249,6 @@ export function BookConcentration({
           </p>
         </div>
       )}
-    </section>
+    </ConcentrationShell>
   );
 }

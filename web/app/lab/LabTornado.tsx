@@ -178,7 +178,24 @@ function TornadoPanel({ engine, entries }: { engine: string; entries: readonly P
 
   const longestId = drawable.reduce((max, row) => Math.max(max, row.scenarioId.length), 0);
   const gutter = Math.min(longestId, 34) * chPx + 12;
-  const innerWidth = Math.max(width - gutter - PLOT_PAD_RIGHT, 80);
+  // OWNER PASS (pre-deploy): every drawn bar carries its EXACT signed delta
+  // at a fixed right-aligned column — a bar normalized to its own panel's
+  // maximum says nothing on its own (with one scenario it is ALWAYS full
+  // width). The column's width is measured from the longest string actually
+  // printed, and the plot shrinks by it, so a bar can never run under its
+  // own label.
+  const valueById = new Map(
+    entries.map((entry) => [
+      entry.scenarioId,
+      renderSignedUsdAmount(entry.summary.eligible_debt_delta_usd, decimals),
+    ]),
+  );
+  const longestValue = drawable.reduce(
+    (max, row) => Math.max(max, (valueById.get(row.scenarioId) ?? "").length),
+    0,
+  );
+  const valueAllowance = drawable.length > 0 ? longestValue * chPx + 14 : 0;
+  const innerWidth = Math.max(width - gutter - PLOT_PAD_RIGHT - valueAllowance, 80);
   const bars: TornadoBarInput[] = drawable;
   const geometry = tornadoBarGeometry(bars, innerWidth);
   const height = HEAD_H + geometry.bars.length * ROW_H + 6;
@@ -262,7 +279,9 @@ function TornadoPanel({ engine, entries }: { engine: string; entries: readonly P
                       data-engine={engine}
                       data-negative={bar.negative ? "true" : "false"}
                       data-floored={bar.floored ? "true" : "false"}
-                    />
+                    >
+                      <title>{`${bar.scenarioId}: ${valueById.get(bar.scenarioId) ?? ""} — exact strings in the ledger below`}</title>
+                    </rect>
                   ) : (
                     // A TRUE zero under a reached shock is a real finding about
                     // the book: it draws no ink (a zero-length rect would still
@@ -278,6 +297,19 @@ function TornadoPanel({ engine, entries }: { engine: string; entries: readonly P
                       data-engine={engine}
                     >
                       measured zero
+                    </text>
+                  )}
+                  {bar.width > 0 && (
+                    <text
+                      className={chart.axisLabel}
+                      x={width - PLOT_PAD_RIGHT}
+                      y={labelY}
+                      textAnchor="end"
+                      data-testid="tornado-bar-value"
+                      data-scenario-id={bar.scenarioId}
+                      data-engine={engine}
+                    >
+                      {valueById.get(bar.scenarioId) ?? ""}
                     </text>
                   )}
                 </g>
@@ -680,12 +712,12 @@ function TornadoResult({
                     <td className={chart.mapLedgerNum}>
                       {renderUsdAmount(engine.total_debt_usd_before, engine.usd_decimals)}
                     </td>
-                    <td>{movementSentence(engine)}</td>
+                    <td className={chart.wrapCell}>{movementSentence(engine)}</td>
                     <td>{result.shock_reach.reach}</td>
-                    <td>{heldCauseSentence(result)}</td>
+                    <td className={chart.wrapCell}>{heldCauseSentence(result)}</td>
                     {/* R57 item 5 — the out_of_model clause, on every row whose
                         committed definition carries entries. */}
-                    <td data-testid="tornado-out-of-model">
+                    <td className={chart.wrapCell} data-testid="tornado-out-of-model">
                       {outOfModelClause(result.scenario_id)}
                     </td>
                   </tr>

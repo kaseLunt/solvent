@@ -664,3 +664,30 @@
   color: var(--crit);
   margin: 0 0 6px;
 }
+
+/* ---- VIEWS 1+2: the concentration panel's own ledger table ---- */
+
+.curveTable {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  margin: var(--sp-3) 0;
+}
+
+.curveTable th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+  padding: 2px 22px 4px 0;
+}
+
+.curveTable td {
+  padding: 3px 22px 3px 0;
+}
+
+.curveTable th.curveNum,
+.curveTable td.curveNum {
+  text-align: right;
+}
