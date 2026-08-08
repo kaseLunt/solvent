@@ -859,3 +859,62 @@ test("r93: a contradicted ranking never announces `largest first` — not even t
   // And the takeaway retreated to the neutral arm with the contradiction.
   await expect(dm.getByTestId("flip-takeaway")).not.toContainText("largest by flipped debt");
 });
+
+// ---------------------------------------------------------------------------
+// VIEW 7 — bad debt as a share of eligible debt (views spec view 7 + F3/F4)
+
+test("VIEW 7: the rate pair renders per engine — absolutes riding, UNDEFINED never 0%", async ({
+  page,
+}) => {
+  await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
+
+  // The Debt Manager's two real rates, exact truncated tenths.
+  const dm = page.locator('[data-testid="runbook-rate"][data-engine="debt_manager"]');
+  await expect(dm.getByTestId("rate-before")).toHaveText(
+    "before the shock: 14.2% of $4,620 eligible is bad debt ($659.603961).",
+  );
+  await expect(dm.getByTestId("rate-after")).toHaveText(
+    "after the shock: 30.1% of $6,120 eligible is bad debt ($1,847.722773).",
+  );
+  await expect(dm.getByTestId("rate-bar")).toHaveCount(2);
+
+  // Aave's 0/0 before side is UNDEFINED — stated, with NO bar; the after
+  // side is a real rate with a bar.
+  const aave = page.locator('[data-testid="runbook-rate"][data-engine="aave_v3_etherfi"]');
+  const before = aave.getByTestId("rate-before");
+  await expect(before).toBeVisible();
+  await expect(before).toContainText("no eligible debt to measure against");
+  await expect(before).toContainText("UNDEFINED");
+  // The disclaimer names the two costumes it refuses — and no rate precedes it.
+  await expect(before).toContainText("not 0% and not 100%");
+  await expect(before).not.toContainText("% of");
+  await expect(aave.locator('[data-testid="rate-bar"][data-side="before"]')).toHaveCount(0);
+  await expect(aave.locator('[data-testid="rate-bar"][data-side="after"]')).toHaveCount(1);
+
+  // The method names the arithmetic, the dust law, and the no-pooling law.
+  await expect(dm.getByTestId("rate-method")).toContainText("never a float");
+  await expect(dm.getByTestId("rate-method")).toContainText("never pooled");
+});
+
+test("VIEW 7: a DUST denominator keeps its number and loses its bar", async ({ page }) => {
+  // DERIVED CASE: the audit's own live hazard — 100% of $4.10 eligible.
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as DoctoredRunBook & {
+    engines: { after: { bad_debt_usd: string; eligible_debt_usd: string } }[];
+  };
+  for (const engine of (body as DoctoredRunBook).engines) {
+    if (engine.engine !== "aave_v3_etherfi") continue;
+    const after = engine.after as unknown as { bad_debt_usd: string; eligible_debt_usd: string };
+    after.bad_debt_usd = "410000000";
+    after.eligible_debt_usd = "410000000";
+  }
+  await runScenario(page, "eth_minus_30", JSON.stringify(body));
+
+  const aave = page.locator('[data-testid="runbook-rate"][data-engine="aave_v3_etherfi"]');
+  const line = aave.getByTestId("rate-after");
+  await expect(line).toBeVisible();
+  await expect(line).toContainText("100.0% of $4.1 eligible");
+  await expect(line).toContainText("DUST");
+  await expect(line).toContainText("the number stands, the visual weight does not");
+  // The bar is suppressed — no full-height red over four dollars.
+  await expect(aave.locator('[data-testid="rate-bar"][data-side="after"]')).toHaveCount(0);
+});

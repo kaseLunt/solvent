@@ -94,6 +94,7 @@ import {
 } from "./labPanelLines";
 import {
   LabRunBookCollateral,
+  LabBadDebtRate,
   LabRunBookHistogramPair,
   LabRunBookMovers,
 } from "./LabRunBookDetail";
@@ -225,6 +226,7 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
       <LabRunBookTransition engine={engine} />
       <LabRunBookMovers engine={engine} />
       <LabRunBookCollateral engine={engine} />
+      <LabBadDebtRate engine={engine} />
       {engine.market_realization !== null && (
         <>
           <HfsUnchangedBanner realization={engine.market_realization} />

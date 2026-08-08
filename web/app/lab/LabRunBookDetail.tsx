@@ -36,6 +36,7 @@ import {
   riskBandRefusedRow,
 } from "@/lib/book-copy";
 import { labUsd } from "./frontierView";
+import { RATE_METHOD, badDebtRate, rateSideLine, type BadDebtRateSide } from "./badDebtRate";
 import {
   FLIP_METHOD,
   flipCellLabel,
@@ -548,6 +549,106 @@ function LabMoverDumbbells({ engine }: { engine: LabRunBookEngine }) {
         {DUMBBELL_METHOD}
       </p>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// B2d — VIEW 7: bad debt as a share of eligible debt, before and after
+//
+// Both sides come from THIS response (critic F3: the envelope's own before
+// side IS the baseline — no cross-batch read exists here). The rate is exact
+// bigint tenths; each sentence carries its absolutes; a dust denominator
+// keeps its NUMBER and loses its BAR; undefined and contradiction arms draw
+// nothing and say why. Per engine only — the two books are never pooled.
+
+const RATE_BAR_MAX = 240;
+const RATE_LABEL_W = 60;
+const RATE_ROW_H = 18;
+
+function rateBarWidth(side: BadDebtRateSide): number {
+  if (side.kind !== "rate" || side.dust) return 0;
+  const tenths = Number(side.percentTenths);
+  return Math.round((Math.min(tenths, 1000) / 1000) * RATE_BAR_MAX);
+}
+
+export function LabBadDebtRate({ engine }: { engine: LabRunBookEngine }) {
+  const model = badDebtRate(engine);
+  const sides = [
+    { name: "before" as const, side: model.before },
+    { name: "after" as const, side: model.after },
+  ];
+  const width = RATE_LABEL_W + RATE_BAR_MAX + 16;
+  return (
+    <section
+      className={styles.subPanel}
+      data-testid="runbook-rate"
+      data-engine={engine.engine}
+      aria-label={`bad debt as a share of eligible debt on ${engine.engine}`}
+    >
+      <p className={styles.panelTitle}>Bad debt as a share of eligible debt</p>
+      {/* ---- SLOT 3: ANSWER — one sentence per side, absolutes riding. ---- */}
+      {sides.map(({ name, side }) => (
+        <p
+          key={name}
+          className={side.kind === "contradiction" ? styles.dumbbellContradiction : styles.answerLine}
+          data-testid={`rate-${name}`}
+        >
+          {rateSideLine(side, name, engine.usd_decimals)}
+        </p>
+      ))}
+      {/* ---- SLOT 4: VISUAL — a bar only where the rate is REAL and its
+              denominator is not dust; the sentence always carries the number,
+              so a suppressed bar hides no fact. ---- */}
+      <div className={styles.chartScroll} data-testid="rate-frame">
+        <svg
+          width={width}
+          height={sides.length * RATE_ROW_H + 4}
+          viewBox={`0 0 ${String(width)} ${String(sides.length * RATE_ROW_H + 4)}`}
+          role="img"
+          aria-label={`bad-debt rate bars for ${engine.engine}; a dust or undefined side draws no bar`}
+          style={{ display: "block" }}
+          data-testid="rate-bars"
+        >
+          {sides.map(({ name, side }, index) => {
+            const y = index * RATE_ROW_H + 2;
+            const barWidth = rateBarWidth(side);
+            return (
+              <g key={name} data-testid="rate-row" data-side={name}>
+                <text className={styles.histLabel} x={RATE_LABEL_W} y={y + 11} textAnchor="end">
+                  {name}
+                </text>
+                {barWidth > 0 && (
+                  <rect
+                    className={styles.flipBar}
+                    data-testid="rate-bar"
+                    data-side={name}
+                    x={RATE_LABEL_W + 6}
+                    y={y + 3}
+                    width={barWidth}
+                    height={RATE_ROW_H - 8}
+                  />
+                )}
+                {side.kind === "rate" && !side.dust && barWidth === 0 && BigInt(side.badUsd) > 0n && (
+                  <circle
+                    className={styles.histPresence}
+                    data-testid="rate-presence"
+                    cx={RATE_LABEL_W + 6 + PRESENCE_R}
+                    cy={y + RATE_ROW_H / 2}
+                    r={PRESENCE_R}
+                  >
+                    <title>a rate under 0.1 percent over real bad debt — presence, not length</title>
+                  </circle>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      {/* ---- SLOT 6: METHOD. ---- */}
+      <p className={styles.methodLine} data-testid="rate-method">
+        {RATE_METHOD}
+      </p>
+    </section>
   );
 }
 
