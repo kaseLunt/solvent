@@ -39,6 +39,7 @@ import { expect, test } from "@playwright/test";
 import {
   AGE_UNKNOWN_REFRESH_FAILED,
   AGE_UNKNOWN_REFRESHING,
+  AGE_UNKNOWN_RUN_AGAIN,
   batchFreshnessLineUnknown,
   batchFreshnessStamp,
   batchFreshnessStampUnknown,
@@ -324,6 +325,25 @@ test("exhaustion changes the STATEMENT, not the refusal — and keeps the data",
   expect(batchFreshnessStampUnknown(BATCH, true)).toBe(
     "#5 · computed 2026-07-29T10:00:00Z · age UNKNOWN since resume · refresh failed, data retained",
   );
+});
+
+test("p1b-6 item 8: the RUN-AGAIN arm — a surface that wires no repair may not claim one", () => {
+  // VOCABULARY ADDITION (ledgered for the Phase 3 clarity review): the Lab's
+  // address stress is reader-dispatched and wires NO repair, so on a blind
+  // resume both existing arms would lie there — "refreshing" claims work not
+  // in flight, and "refresh failed, data retained" reports an attempt never
+  // made. The third arm states the one true discharge: run again.
+  expect(AGE_UNKNOWN_RUN_AGAIN).toBe("age UNKNOWN since resume · run again to refresh");
+  // Same register core as the two arms above — the reader's eye parses all
+  // three the same way; only the tail clause differs.
+  expect(AGE_UNKNOWN_RUN_AGAIN.startsWith("age UNKNOWN since resume · ")).toBe(true);
+  // No repair claim in either direction, no age token, no staleness verdict.
+  expect(AGE_UNKNOWN_RUN_AGAIN).not.toContain("refreshing");
+  expect(AGE_UNKNOWN_RUN_AGAIN).not.toContain("failed");
+  expect(AGE_UNKNOWN_RUN_AGAIN).not.toContain("old");
+  // The ribbon keeps its TWO phrases — the addition is the Lab's alone.
+  expect(unknownAgePhrase(false)).toBe(AGE_UNKNOWN_REFRESHING);
+  expect(unknownAgePhrase(true)).toBe(AGE_UNKNOWN_REFRESH_FAILED);
 });
 
 test("the unknown stamp mirrors the known stamp — same shape, refusal in the age's slot", () => {

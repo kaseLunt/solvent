@@ -39,6 +39,7 @@ import {
   STRESS_INC_METHOD,
   incrementAccountsClause,
   incrementScaleClause,
+  incrementStepValues,
   stressIncrements,
   type IncrementStep,
 } from "./stressIncrements";
@@ -263,15 +264,22 @@ function BookStressIncrements({ waterfall, engine }: { waterfall: Waterfall; eng
       </p>
     );
   }
-  let maxIncrease = 0n;
-  for (const step of model.steps) {
-    const value = BigInt(step.debtIncreaseUsd);
-    if (value > maxIncrease) maxIncrease = value;
+  // p1b-6 item 6: the bar geometry reads every step value ONCE, through the
+  // sanctioned wire path (incrementStepValues) — the three bare `BigInt(...)`
+  // reads it replaces would each coerce a malformed value into a zero-length
+  // bar. A value that cannot be read refuses in the model's own
+  // contradiction register instead.
+  const stepValues = incrementStepValues(model.steps);
+  if (stepValues.kind === "refused") {
+    return (
+      <p className={styles.incrementsContradiction} data-testid={`increments-refused-${engine}`}>
+        {stepValues.reason}
+      </p>
+    );
   }
-  const barWidth = (step: IncrementStep) =>
-    maxIncrease === 0n
-      ? 0
-      : Number((BigInt(step.debtIncreaseUsd) * BigInt(INC_BAR_MAX)) / maxIncrease);
+  const maxIncrease = stepValues.max;
+  const barWidth = (value: bigint) =>
+    maxIncrease === 0n ? 0 : Number((value * BigInt(INC_BAR_MAX)) / maxIncrease);
   // r98: the label gutter is sized from the LONGEST factor pair actually
   // printed — the grid is env-configurable and a full-precision factor is
   // lawful, so a fixed gutter would clip served step boundaries.
@@ -308,10 +316,10 @@ function BookStressIncrements({ waterfall, engine }: { waterfall: Waterfall; eng
             style={{ display: "block" }}
             data-testid={`increments-bars-${engine}`}
           >
-            {model.steps.map((step, index) => {
+            {stepValues.rows.map(({ step, value }, index) => {
               const y = index * INC_ROW_H + 2;
-              const barPixels = barWidth(step);
-              const subPixel = BigInt(step.debtIncreaseUsd) > 0n && barPixels < 1;
+              const barPixels = barWidth(value);
+              const subPixel = value > 0n && barPixels < 1;
               return (
                 <g key={step.toTimes} data-testid="increment-row" data-engine={engine}>
                   <text

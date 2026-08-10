@@ -81,14 +81,30 @@ export function InspectorSurface({ addr }: { addr: string }) {
   // navigation).
   const [addressResult, setAddressResult] = useState<{ for: string; state: AddressState } | null>(null);
   const [historyResult, setHistoryResult] = useState<{ for: string; state: HistoryState } | null>(null);
-  const [paramsByEngine, setParamsByEngine] = useState<Record<string, ParamChange[]>>({});
-  const [paramsErrors, setParamsErrors] = useState<Record<string, string>>({});
+  // p1b-6 fix 5: params results (and their errors) carry the address they
+  // answer FOR — the same `{for: addr, …}` binding the lookup and history
+  // states above use. They used to accumulate keyed by engine alone, relying
+  // on App Router remount semantics to keep addresses apart; a future reuse
+  // of this component across addresses could have leaked one address's
+  // param rows into another's cards.
+  const [paramsResult, setParamsResult] = useState<{
+    for: string;
+    byEngine: Record<string, ParamChange[]>;
+  } | null>(null);
+  const [paramsErrorResult, setParamsErrorResult] = useState<{
+    for: string;
+    byEngine: Record<string, string>;
+  } | null>(null);
   const [evidence, setEvidence] = useState<EvidenceDescriptor | null>(null);
 
   const addressState: AddressState =
     addressResult !== null && addressResult.for === addr ? addressResult.state : { status: "loading" };
   const historyState: HistoryState =
     historyResult !== null && historyResult.for === addr ? historyResult.state : { status: "loading" };
+  const paramsByEngine: Record<string, ParamChange[]> =
+    paramsResult !== null && paramsResult.for === addr ? paramsResult.byEngine : {};
+  const paramsErrors: Record<string, string> =
+    paramsErrorResult !== null && paramsErrorResult.for === addr ? paramsErrorResult.byEngine : {};
 
   // --- the position lookup (via @solvent/client's sealed outcome union) ---
   //
@@ -216,13 +232,24 @@ export function InspectorSurface({ addr }: { addr: string }) {
       fetchParams(solventBaseUrl(), { engine }, controller.signal).then(
         (response) => {
           if (cancelled) return;
-          setParamsByEngine((previous) => ({ ...previous, [engine]: response.params }));
+          // Accumulate per engine WITHIN this address only: a map built for
+          // another address is not a base to spread from (p1b-6 fix 5).
+          setParamsResult((previous) => ({
+            for: addr,
+            byEngine: {
+              ...(previous !== null && previous.for === addr ? previous.byEngine : {}),
+              [engine]: response.params,
+            },
+          }));
         },
         (cause: unknown) => {
           if (cancelled) return;
-          setParamsErrors((previous) => ({
-            ...previous,
-            [engine]: cause instanceof Error ? cause.message : String(cause),
+          setParamsErrorResult((previous) => ({
+            for: addr,
+            byEngine: {
+              ...(previous !== null && previous.for === addr ? previous.byEngine : {}),
+              [engine]: cause instanceof Error ? cause.message : String(cause),
+            },
           }));
         },
       );
@@ -231,7 +258,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
       cancelled = true;
       controller.abort();
     };
-  }, [readyLookup]);
+  }, [readyLookup, addr]);
 
   // --- address activity (cursor-paged) ---
   const fetchActivityPage = useCallback(
@@ -246,10 +273,22 @@ export function InspectorSurface({ addr }: { addr: string }) {
     [addr],
   );
   const activity = useCursorPages<ChainEvent, string>(fetchActivityPage);
-  const { loadMore: loadActivity } = activity;
+  const { loadMore: loadActivity, reset: resetActivity } = activity;
+  // p1b-6 fix 5: the activity walk is BOUND to the address it pages for —
+  // the cursor hook owns the accumulated rows, so the `{for: addr}` keying
+  // the other states use is expressed here as an explicit drop-and-restart
+  // BEFORE the first page of a new address: an address change resets the
+  // walk (aborting any in-flight page; the hook's epoch discards a late
+  // one), so a component reuse across addresses can never append one
+  // address's activity rows to another's list.
+  const activityForRef = useRef<string | null>(null);
   useEffect(() => {
+    if (activityForRef.current !== addr) {
+      activityForRef.current = addr;
+      resetActivity();
+    }
     if (valid) loadActivity();
-  }, [valid, loadActivity]);
+  }, [addr, valid, loadActivity, resetActivity]);
 
   const closeEvidence = useCallback(() => {
     setEvidence(null);
@@ -378,7 +417,15 @@ export function InspectorSurface({ addr }: { addr: string }) {
         </>
       )}
 
-      <InspectorHistory state={historyState} />
+      {/* p1b-6 fix 4: the position lookup's batch travels down so the history
+          section can WELD the two vantages — its own newest batch vs the
+          batch the position above was read at — whenever they differ. */}
+      <InspectorHistory
+        state={historyState}
+        positionBatchId={
+          addressState.status === "ready" ? addressState.lookup.response.batch.id : null
+        }
+      />
 
       <InspectorActivity
         events={activity.rows}

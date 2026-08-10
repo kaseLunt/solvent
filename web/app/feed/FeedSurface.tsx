@@ -93,10 +93,18 @@ export function FeedSurface() {
 
   const resetRef = useRef<() => void>(() => undefined);
 
+  // p1b-6 fix 2: the envelope echo and the refusal are PER-WALK facts, and
+  // both used to be written before useCursorPages' epoch check could rule the
+  // page stale — a page resolving concurrently with `restartWalk()` therefore
+  // wrote the OLD scope's filter echo under the NEW walk's controls. The
+  // hook now hands each dispatch an `isCurrent` predicate (the same epoch its
+  // own rows are gated on), and every setter here is gated on it: a stale
+  // walk's page may still resolve, but it no longer gets to describe this one.
   const fetchPage = useCallback(
     async (
       cursor: string | null,
       signal: AbortSignal,
+      isCurrent: () => boolean,
     ): Promise<CursorPage<FeedChainEvent, string>> => {
       try {
         const page = await fetchFeedPage(
@@ -106,11 +114,13 @@ export function FeedSurface() {
           PAGE_LIMIT,
           signal,
         );
-        setEnvelope({ filter: page.filter, limit: page.limit });
-        setRefusal(null);
+        if (isCurrent()) {
+          setEnvelope({ filter: page.filter, limit: page.limit });
+          setRefusal(null);
+        }
         return { rows: page.events, nextCursor: page.next_cursor };
       } catch (cause) {
-        if (cause instanceof InspectorFetchError && cause.status === 400) {
+        if (cause instanceof InspectorFetchError && cause.status === 400 && isCurrent()) {
           // The service refused the request (e.g. a cursor minted for the
           // other ordering mode). Its own words render; the walk stops until
           // the user restarts from page one.

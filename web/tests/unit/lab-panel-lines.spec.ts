@@ -62,6 +62,7 @@ import {
   shockFlagTally,
   statePairRowLabel,
   statesBitIdentical,
+  stressStateHfInfo,
   type RunBookEngineFacts,
 } from "../../app/lab/labPanelLines";
 import { MINUS_SIGN } from "../../lib/book-format";
@@ -639,4 +640,32 @@ test("r89: collateralGroupAnswer names a CONTRADICTORY row and withholds the all
   expect(line).toContain("CONTRADICTORY");
   expect(line).toContain("counted in no total here");
   expect(line).not.toContain("Every holding on both sides carries a counted value");
+});
+
+// ---------------------------------------------------------------------------
+// p1b-6 item 9 — stressStateHfInfo (LabScenarioDetail's hfInfo, moved here
+// for the wire guard): the wad passes the wire Decimal contract before it is
+// read. The old bare reads meant a malformed wad either threw in formatUnits
+// (route boundary took the page) or coerced BigInt("") into ratio 0.0.
+// ---------------------------------------------------------------------------
+
+test("p1b-6: a malformed wad renders the null-display arm — never a coerced 0.0, never a fallback", () => {
+  // The wad slot is PUBLISHED but unreadable — the guard refuses the pair
+  // outright rather than falling back to num/den (a published-but-broken
+  // primary is a refusal, not an invitation to substitute).
+  const malformed: RefinedStressState = { ...DM_STATE, health_factor_wad: "" };
+  expect(stressStateHfInfo(malformed)).toEqual({ display: null, ratio: null });
+
+  // The discriminating positive: a lawful wad renders full 18-decimal
+  // exactness untrimmed, ratio at display precision.
+  const wad: RefinedStressState = { ...DM_STATE, health_factor_wad: "1080000000000000000" };
+  const info = stressStateHfInfo(wad);
+  expect(info.display).toBe("1.080000000000000000");
+  expect(info.ratio).toBeCloseTo(1.08, 9);
+
+  // The DM's exact-rational arm is untouched: verbatim num / den.
+  const dm = stressStateHfInfo(DM_STATE);
+  expect(dm.display).toBe(
+    `${DM_STATE.health_factor_num ?? "?"} / ${DM_STATE.health_factor_den ?? "?"}`,
+  );
 });

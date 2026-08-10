@@ -25,6 +25,7 @@
 
 import { formatUnits, type Waterfall } from "@solvent/client";
 import { groupDecimalString } from "../../lib/book-format";
+import { wireBigInt } from "../../lib/wireGuard";
 import { factorTimesLabel } from "./waterfallView";
 
 interface EnginePoint {
@@ -64,7 +65,24 @@ export function stressIncrements(waterfall: Waterfall, engine: string): StressIn
     const prev = points[i - 1];
     const next = points[i];
     if (prev === undefined || next === undefined) continue;
-    if (next.index <= prev.index || BigInt(next.factor) >= BigInt(prev.factor)) {
+    // p1b-6 item 6: the factors pass the wire Decimal contract BEFORE they
+    // are compared — `BigInt("")` is a silent 0n, which SLIPPED THROUGH this
+    // weld (0n descends below any positive factor) and then rendered a
+    // garbage step label. A malformed factor is the grid refusal, never a
+    // coerced comparison.
+    const prevFactor = wireBigInt(prev.factor);
+    const nextFactor = wireBigInt(next.factor);
+    if (prevFactor === null || nextFactor === null) {
+      return {
+        kind: "refused",
+        reason:
+          `GRID CONTRADICTION: a served factor is outside the wire Decimal contract ` +
+          `(index ${String(prev.index)} factor "${prev.factor}", index ${String(next.index)} ` +
+          `factor "${next.factor}") — no between-step reading exists on a grid that cannot ` +
+          `be read.`,
+      };
+    }
+    if (next.index <= prev.index || nextFactor >= prevFactor) {
       return {
         kind: "refused",
         reason:
@@ -122,8 +140,23 @@ export function stressIncrements(waterfall: Waterfall, engine: string): StressIn
           `computable across two scales.`,
       };
     }
-    const delta =
-      BigInt(b.at.cumulative_debt_eligible_usd) - BigInt(a.at.cumulative_debt_eligible_usd);
+    // p1b-6 item 6: the cumulative series passes the wire Decimal contract
+    // before any difference exists — a coerced `BigInt("")` on side `a` made
+    // the whole cumulative look like an increase (a measured-zero costume),
+    // and on side `b` it faked a decrease the server never asserted.
+    const bCumulative = wireBigInt(b.at.cumulative_debt_eligible_usd);
+    const aCumulative = wireBigInt(a.at.cumulative_debt_eligible_usd);
+    if (bCumulative === null || aCumulative === null) {
+      return {
+        kind: "refused",
+        reason:
+          `SERIES CONTRADICTION: a served cumulative eligible debt between ` +
+          `${factorTimesLabel(a.factor, waterfall.grid_scale)} and ` +
+          `${factorTimesLabel(b.factor, waterfall.grid_scale)} is outside the wire Decimal ` +
+          `contract — no increment is computable from a number that cannot be read.`,
+      };
+    }
+    const delta = bCumulative - aCumulative;
     if (delta < 0n) {
       return {
         kind: "refused",
@@ -160,9 +193,15 @@ export function incrementAccountsClause(step: IncrementStep): string {
 /**
  * r98: the bar scale is PER ENGINE and says so — equal lengths across panels
  * are not equal dollars, and the anchor value is printed rather than implied.
+ *
+ * p1b-6 item 6: null when the anchor is outside the wire Decimal contract —
+ * the caller's existing no-clause arm (no scale sentence renders). The old
+ * bare `BigInt("")` coerced a malformed anchor into the "$0, no bar" claim.
  */
-export function incrementScaleClause(maxIncreaseUsd: string, usdDecimals: number): string {
-  if (BigInt(maxIncreaseUsd) === 0n) {
+export function incrementScaleClause(maxIncreaseUsd: string, usdDecimals: number): string | null {
+  const max = wireBigInt(maxIncreaseUsd);
+  if (max === null) return null;
+  if (max === 0n) {
     return "Every increase in this window is $0, so no bar is drawn.";
   }
   const anchor = `$${groupDecimalString(formatUnits(maxIncreaseUsd, usdDecimals, { trim: true }))}`;
@@ -170,6 +209,38 @@ export function incrementScaleClause(maxIncreaseUsd: string, usdDecimals: number
     `Bars are scaled to this engine's own largest increase (${anchor}) — ` +
     `engine panels share no scale.`
   );
+}
+
+/**
+ * The steps' bar values, read ONCE through the sanctioned wire path (p1b-6
+ * item 6). `stressIncrements` only ever emits contract-valid strings, but the
+ * component's bar geometry read them back through three bare `BigInt(...)`
+ * calls — a refactor routing wire strings there would coerce `""` into a
+ * zero-length bar. Refused (the component's existing contradiction register)
+ * rather than coerced; `max` is the per-engine bar anchor.
+ */
+export type IncrementStepValues =
+  | { kind: "ok"; rows: readonly { step: IncrementStep; value: bigint }[]; max: bigint }
+  | { kind: "refused"; reason: string };
+
+export function incrementStepValues(steps: readonly IncrementStep[]): IncrementStepValues {
+  const rows: { step: IncrementStep; value: bigint }[] = [];
+  let max = 0n;
+  for (const step of steps) {
+    const value = wireBigInt(step.debtIncreaseUsd);
+    if (value === null) {
+      return {
+        kind: "refused",
+        reason:
+          `SERIES CONTRADICTION: the increase between ${step.fromTimes} and ${step.toTimes} ` +
+          `is outside the wire Decimal contract — no bar is drawn from a number that cannot ` +
+          `be read.`,
+      };
+    }
+    rows.push({ step, value });
+    if (value > max) max = value;
+  }
+  return { kind: "ok", rows, max };
 }
 
 /** SLOT 6 for the increments block. */

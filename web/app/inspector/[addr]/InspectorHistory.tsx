@@ -92,10 +92,36 @@ const HISTORY_FALLBACK_WIDTH = 560;
 /** The reference line's value: HF 1.0 — always inside the drawn domain. */
 const HF_REFERENCE_VALUE = 1;
 
-export function InspectorHistory({ state }: { state: HistoryState }) {
+export function InspectorHistory({
+  state,
+  positionBatchId = null,
+}: {
+  state: HistoryState;
+  /** The batch the position lookup above was read at, when it has settled. */
+  positionBatchId?: number | null;
+}) {
+  // p1b-6 fix 4: the history walks its OWN endpoint and is served from its
+  // own vantage batch (`response.batch` — the newest-batch field the wire
+  // carries for this response; recorded decision). When that differs from
+  // the batch the position above was read at — e.g. a fresh batch landed
+  // between the two fetches — the two sections are quietly describing two
+  // different worlds, and the seam is STATED rather than left for the reader
+  // to reconstruct from stamplines. Rendered only on a real mismatch.
+  const weldBatchId =
+    state.status === "ready" &&
+    positionBatchId !== null &&
+    state.lookup.response.batch.id !== positionBatchId
+      ? state.lookup.response.batch.id
+      : null;
   return (
     <section data-testid="hf-history">
       <div className={styles.sectionHead}>{HISTORY_SECTION_HEAD}</div>
+      {weldBatchId !== null && positionBatchId !== null && (
+        <p className="mono dim" data-testid="history-batch-weld">
+          history window newest batch #{String(weldBatchId)} · position read at batch #
+          {String(positionBatchId)}
+        </p>
+      )}
       {state.status === "loading" && <p className="mono dim">loading history…</p>}
       {state.status === "error" && (
         <div className={`${styles.stateCard} ${styles.stateRefused}`}>

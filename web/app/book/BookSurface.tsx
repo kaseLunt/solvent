@@ -93,6 +93,12 @@ export function BookSurface() {
       .book(controller.signal)
       .then(
         (book) => {
+          // p1b-6 fix 1: the SAME supersession law the failure arm below has
+          // carried since W-UX — an aborted request was replaced by a newer
+          // one, which reports for itself. Without this mirror, a superseded
+          // success that had already left the wire could land its stale book
+          // (and receipt) OVER the newer request's answer.
+          if (controller.signal.aborted) return false;
           bookBatchRef.current = book.batch.id;
           setState({ phase: "ok", book });
           return true;

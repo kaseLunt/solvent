@@ -33,6 +33,7 @@ import {
   POSITIONS_DM_PAGE_1,
 } from "../fixtures/book";
 import { ADDRESS_FOUND, EVENTS, FOUND_ADDR, HISTORY, PARAMS } from "../fixtures/inspector";
+import { OBSERVATORY_SERIES_AAVE } from "../fixtures/observatory";
 
 const API = "http://localhost:8080";
 
@@ -537,5 +538,211 @@ test.describe("p1b-5 · stress results carry their full identity", () => {
     await input.fill(STRESS_ADDR);
     await expect(page.getByTestId("lab-result-address")).toContainText("batch #1");
     await expect(page.getByTestId("lab-result-age")).toHaveText("0s old");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p1b-6 · the identity gap audit closes (Task 6): abort symmetry, scoped
+// feed echoes, the observatory's verbatim as-of, the history batch weld,
+// and the Lab arms' computed-at + run-again register.
+//
+// Mock shapes reused from the sections above (mockCold/mockStress/runStress,
+// mockInspector, observatory.spec.ts's series route). Every corruption or
+// variant is a structuredClone of a committed fixture with its documented
+// change(s) at the site.
+// ---------------------------------------------------------------------------
+
+type HistoryBody = typeof HISTORY;
+
+/** mockInspector with a CALLER-CHOSEN history body (the weld needs both vantages). */
+async function mockInspectorHistory(page: Page, history: HistoryBody) {
+  await page.route("**/v1/stream*", (route) => route.abort());
+  await page.route("**/v1/params*", (route) => route.fulfill({ json: PARAMS, headers: CORS }));
+  await page.route("**/v1/events*", (route) => route.fulfill({ json: EVENTS, headers: CORS }));
+  await page.route("**/v1/address/*/history*", (route) =>
+    route.fulfill({ json: history, headers: CORS }),
+  );
+  await page.route("**/v1/address/*", (route) =>
+    route.fulfill({ json: ADDRESS_FOUND, headers: CORS }),
+  );
+}
+
+test.describe("p1b-6 · the identity gap audit closes", () => {
+  test("fix 2: a stale walk's page cannot write its filter echo over the current walk's", async ({
+    page,
+  }) => {
+    // THE RACE, made deterministic. A response that has FULLY ARRIVED (stream
+    // closed, bytes buffered) before restartWalk()'s abort fires is not
+    // rejected by that abort — the page-side continuation still runs, AFTER
+    // the reset, and used to write the OLD scope's filter echo under the NEW
+    // walk's controls. The init-script shim below models exactly that
+    // closed-stream case: it detaches the first types=borrow request from
+    // the abort signal and holds its resolution under the test's control, so
+    // the stale continuation runs strictly AFTER walk B's echo rendered.
+    await page.route("**/v1/stream**", (route) => route.abort());
+    await page.route(`${API}/v1/events*`, (route) => {
+      // The wire's echo mirrors each request's own types param — two scopes,
+      // two DISTINGUISHABLE echoes, from one committed body.
+      const typesParam = new URL(route.request().url()).searchParams.get("types");
+      const body = structuredClone(EVENTS);
+      body.filter = {
+        ...body.filter,
+        types: (typesParam === null ? [] : typesParam.split(",")) as typeof body.filter.types,
+      };
+      body.next_cursor = null;
+      return route.fulfill({ json: body, headers: CORS });
+    });
+    await page.addInitScript(() => {
+      const w = window as unknown as { __releaseHeldEvents: (() => void) | null };
+      w.__releaseHeldEvents = null;
+      const realFetch = window.fetch.bind(window);
+      let held = false;
+      window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        if (
+          !held &&
+          url.includes("/v1/events") &&
+          url.includes("types=borrow") &&
+          !url.includes("%2C")
+        ) {
+          held = true;
+          // Detached from the abort signal: the closed-stream case, where an
+          // abort arriving after full receipt has nothing left to reject.
+          const settled = realFetch(url, { ...init, signal: null });
+          await new Promise<void>((resolve) => {
+            w.__releaseHeldEvents = resolve;
+          });
+          return settled;
+        }
+        return realFetch(input, init);
+      }) as typeof window.fetch;
+    });
+
+    await page.goto("/feed");
+    const foot = page.getByTestId("feed-foot");
+    // The initial cross-engine walk settles first (its own echo: types all).
+    await expect(foot).toContainText("types all");
+
+    const chips = page.getByTestId("type-chips");
+    // Filter change ONE: walk A (types=borrow) — its page is HELD by the shim.
+    const requestA = page.waitForRequest(
+      (request) => request.url().includes("types=borrow") && !request.url().includes("%2C"),
+    );
+    await chips.getByRole("button", { name: "borrow", exact: true }).click();
+    await requestA;
+    // Filter change TWO, rapidly after: walk B (types=borrow,repay), answered.
+    await chips.getByRole("button", { name: "repay", exact: true }).click();
+    await expect(foot).toContainText("types borrow,repay");
+
+    // Release walk A's held page: its continuation runs AFTER the reset that
+    // dropped its walk. The envelope echo must keep naming the SECOND scope.
+    await page.evaluate(() => {
+      (window as unknown as { __releaseHeldEvents: (() => void) | null }).__releaseHeldEvents?.();
+    });
+    await page.waitForTimeout(300); // the stale continuation gets its turn
+    await expect(foot).toContainText("types borrow,repay");
+    // The stale echo's own spelling (types borrow · since_block …) may not
+    // stand anywhere in the foot.
+    await expect(foot).not.toContainText("types borrow ·");
+  });
+
+  test("fix 3: the observatory head states the wire's own served_at verbatim", async ({
+    page,
+  }) => {
+    // The rollup envelope carries served_at but NO age_seconds (recorded
+    // decision): no anchored age exists, no tick runs, and a browser-clock
+    // age would violate freshness law 1. The wire's own instant renders
+    // verbatim at the head.
+    await page.route("**/v1/stream**", (route) => route.abort());
+    await page.route("**/v1/observatory/series*", (route) =>
+      route.fulfill({ json: OBSERVATORY_SERIES_AAVE, headers: CORS }),
+    );
+    await page.goto("/observatory");
+    await expect(page.getByTestId("observatory-as-of")).toHaveText(
+      `as of ${OBSERVATORY_SERIES_AAVE.served_at}`,
+    );
+  });
+
+  test("fix 4: the history section welds its vantage to the position's batch when they differ", async ({
+    page,
+  }) => {
+    // The COMMITTED fixtures already differ: the history example is served
+    // from batch 2 while the address example's lookup batch is 1 — exactly
+    // the fresh-batch-between-two-fetches seam the weld exists to state.
+    await mockInspector(page, ADDRESS_FOUND);
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    await expect(page.getByTestId("history-batch-weld")).toHaveText(
+      `history window newest batch #${String(HISTORY.batch.id)} · position read at batch #${String(ADDRESS_FOUND.batch.id)}`,
+    );
+  });
+
+  test("fix 4: matching batches render NO weld — the line exists only for a real seam", async ({
+    page,
+  }) => {
+    // Single documented change to the committed history fixture, one purpose
+    // (the no-seam arm): its vantage batch re-pinned to the lookup's batch id
+    // (2 → 1), so the two sections describe one world.
+    const history = structuredClone(HISTORY);
+    history.batch.id = ADDRESS_FOUND.batch.id;
+    await mockInspectorHistory(page, history);
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    // Anchor on the SETTLED history card first, so the zero-count below is a
+    // statement about the ready state rather than about a loading gap.
+    await expect(page.getByTestId("history-frame-aave_v3_etherfi")).toBeVisible();
+    await expect(page.getByTestId("history-batch-weld")).toHaveCount(0);
+  });
+
+  test("item 7: the not-found stress arm states the batch computed_at verbatim", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    // Two documented changes serving ONE purpose (the not-found arm): found
+    // false with an empty scenario set — the definitive negative the
+    // contract licenses (lookup_complete true, nothing withheld, so
+    // lookup() refines to not-found).
+    const body = structuredClone(STRESS_200);
+    body.found = false;
+    body.scenarios = [];
+    await mockStress(page, body);
+    await page.goto("/lab");
+    await page.getByTestId("mode-address").click();
+    const input = page.getByTestId("lab-address-input");
+    const button = page.getByTestId("run-stress-button");
+    await expect(async () => {
+      await input.fill(STRESS_ADDR);
+      await expect(button).toBeEnabled({ timeout: 250 });
+    }).toPass();
+    await button.click();
+    await expect(page.getByTestId("lab-not-found")).toBeVisible();
+    // Canon §05: identity + computed-at + age. The clause mirrors the found
+    // arm's LabBatchStamp wording, from the same envelope, verbatim.
+    await expect(page.getByTestId("lab-result-computed")).toHaveText(
+      `batch ${String(STRESS_200.batch.id)} · computed ${STRESS_200.batch.computed_at}`,
+    );
+  });
+
+  test("item 8: the Lab age's blind resume says RUN AGAIN — never a refresh it never attempted", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    await mockStress(page, STRESS_200);
+    await runStress(page);
+    await expect(page.getByTestId("lab-result-age")).toHaveText("0s old");
+    // A BLIND resume by freshness.ts's own definition: definitive lifecycle
+    // evidence (a recorded departure, then a visible return) whose clock
+    // deltas the coalescing window refuses — dispatched synthetically within
+    // seconds of the receipt, so neither clock certifies an interval. The
+    // tracker reads only event.type + document.visibilityState.
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("pagehide"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    // No repair is wired on this surface (the run is reader-dispatched), so
+    // the register's third arm renders: not "refreshing" (no work is in
+    // flight), not "refresh failed" (nothing was attempted) — run again.
+    await expect(page.getByTestId("lab-result-age")).toHaveText(
+      "age UNKNOWN since resume · run again to refresh",
+    );
   });
 });

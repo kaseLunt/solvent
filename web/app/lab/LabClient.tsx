@@ -38,7 +38,7 @@ import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { getSolventClient } from "@/lib/api";
 import { isAddress, renderLookupOutcome } from "@/lib/format";
-import { humanAge, unknownAgePhrase } from "@/lib/freshness";
+import { AGE_UNKNOWN_RUN_AGAIN, humanAge } from "@/lib/freshness";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { resultReceipt, stressResultIdentity } from "@/lib/resultIdentity";
 import { LabBatchStamp } from "./LabBatchStamp";
@@ -343,12 +343,15 @@ export function LabClient() {
                     {settledIdentityLine(phase.addr, phase.result)}
                   </p>
                   {/* p1b-5: the anchored age, never the frozen wire number —
-                      and on a blind resume the unknown register (the
-                      snapshot-chip composition: `age UNKNOWN since resume ·
-                      …`), never an understated "Xs old". */}
+                      and on a blind resume the unknown register, never an
+                      understated "Xs old". p1b-6 item 8: this surface WIRES
+                      NO REPAIR (the run is reader-dispatched), so the phrase
+                      is the register's run-again arm — "refresh failed, data
+                      retained" reported an attempt never made, and
+                      "refreshing" would claim work not in flight. */}
                   <p data-testid="lab-result-age" className={styles.resultAge}>
                     {age.unresolved
-                      ? unknownAgePhrase(age.refreshFailed)
+                      ? AGE_UNKNOWN_RUN_AGAIN
                       : `${humanAge(age.seconds ?? phase.result.response.batch.age_seconds)} old`}
                   </p>
                   <StressResult
@@ -387,6 +390,16 @@ function StressResult({
         <div className={styles.emptyState} data-testid="lab-not-found">
           {renderLookupOutcome(result.outcome)} · a definitive negative: every engine was
           available to be consulted and none carries this account in the batch.
+          {/* p1b-6 item 7: the canon §05 face carries identity + computed-at
+              + age. The identity/age lines above this component cover the
+              first and last; the found arm's LabBatchStamp carried the
+              middle, and these arms carried nothing — the clause renders
+              here in the stamp's own words (`computed {computed_at}`,
+              verbatim). */}
+          <p className="mono dim" data-testid="lab-result-computed">
+            batch {String(result.response.batch.id)} · computed{" "}
+            {result.response.batch.computed_at}
+          </p>
         </div>
       );
     case "unknowable":
@@ -401,6 +414,13 @@ function StressResult({
               </div>
             ))}
           </div>
+          {/* p1b-6 item 7: same computed-at clause as the not-found arm —
+              an unknowable is still an answer read AT a batch, and the batch
+              states when it was computed. */}
+          <p className="mono dim" data-testid="lab-result-computed">
+            batch {String(result.response.batch.id)} · computed{" "}
+            {result.response.batch.computed_at}
+          </p>
         </div>
       );
     case "found":

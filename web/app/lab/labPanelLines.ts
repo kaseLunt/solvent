@@ -14,6 +14,7 @@
 
 import {
   compareRatio,
+  formatUnits,
   type RefinedProjection,
   type RefinedScenario,
   type RefinedScenarioResult,
@@ -25,6 +26,7 @@ import {
   renderSignedUsdAmount,
   renderUsdAmount,
 } from "../../lib/book-format";
+import { isWireDecimal } from "../../lib/wireGuard";
 
 // ---------------------------------------------------------------------------
 // LabRealization — the market-realization axis.
@@ -208,6 +210,39 @@ export function statePairRowLabel(engine: string): string {
   if (engine === "aave_v3_etherfi") return "health factor";
   if (engine === "debt_manager") return "borrow headroom (disclosure)";
   return "served value";
+}
+
+/**
+ * The state pair's served ratio, display + geometry (formerly LabScenarioDetail's
+ * module-private `hfInfo`; moved here for the p1b-6 item 9 guard + its pin).
+ *
+ * p1b-6 item 9: the wad passes the wire Decimal contract BEFORE it is read —
+ * the old bare reads meant a malformed wad either threw in `formatUnits`
+ * (the route boundary replaced the whole page) or coerced through
+ * `BigInt("")` into a 0.0 ratio wearing a real number's clothes. Malformed
+ * routes to the module's existing no-display arm: `{ display: null, ratio:
+ * null }`, which SeverityHF renders as its em-dash treatment — never a value.
+ */
+export function stressStateHfInfo(
+  state: RefinedStressState,
+): { display: string | null; ratio: number | null } {
+  if (state.health_factor_wad !== null) {
+    if (!isWireDecimal(state.health_factor_wad)) return { display: null, ratio: null };
+    return {
+      // Full 18-decimal exactness, untrimmed: bit-identity must be VISIBLE.
+      display: formatUnits(state.health_factor_wad, 18),
+      ratio: Number(BigInt(state.health_factor_wad)) / 1e18,
+    };
+  }
+  if (state.health_factor_num !== null && state.health_factor_den !== null) {
+    const num = Number(state.health_factor_num);
+    const den = Number(state.health_factor_den);
+    return {
+      display: `${state.health_factor_num} / ${state.health_factor_den}`,
+      ratio: Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : null,
+    };
+  }
+  return { display: null, ratio: null };
 }
 
 // ---------------------------------------------------------------------------

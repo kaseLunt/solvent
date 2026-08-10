@@ -668,6 +668,21 @@ export function unknownAgePhrase(refreshFailed: boolean): string {
 }
 
 /**
+ * The register's THIRD arm (p1b-6 item 8, VOCABULARY ADDITION — recorded in
+ * the ledger for the Phase 3 clarity review): the age line for a surface that
+ * WIRES NO REPAIR because its result is a reader-dispatched run, not an
+ * ambient read (the Lab's address stress — the p1b-5 sanctioned decision).
+ *
+ * On a blind resume there, no refresh is attempted, so both existing arms
+ * would lie: "refreshing" claims work that is not in flight, and "refresh
+ * failed, data retained" reports an attempt never made. This arm states what
+ * IS true — the age is unknown, and the one discharge is the reader running
+ * again. Same composed shape as the two arms above (`age` + the register
+ * core); used ONLY in the Lab result-age path — the ribbon keeps its two.
+ */
+export const AGE_UNKNOWN_RUN_AGAIN = "age UNKNOWN since resume · run again to refresh";
+
+/**
  * `batchFreshnessStamp` with the age REFUSED rather than stated (Wave R6).
  * Same shape, same separators, same verbatim `computed_at` — the reader's eye
  * lands in the same place and finds a refusal instead of a number.

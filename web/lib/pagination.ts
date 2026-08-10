@@ -32,7 +32,19 @@ export interface CursorPages<Row> {
 }
 
 export function useCursorPages<Row, C>(
-  fetchPage: (cursor: C | null, signal: AbortSignal) => Promise<CursorPage<Row, C>>,
+  fetchPage: (
+    cursor: C | null,
+    signal: AbortSignal,
+    /**
+     * p1b-6 fix 2: TRUE while the walk this page was dispatched for is still
+     * the current one. The epoch check inside this hook protects only the
+     * hook's OWN state (rows/cursor); a caller that mirrors per-page envelope
+     * facts into its own state (e.g. the Feed's filter echo) must gate those
+     * writes on this predicate, or a page resolving concurrently with
+     * `reset()` writes a stale echo the hook cannot retract.
+     */
+    isCurrent: () => boolean,
+  ) => Promise<CursorPage<Row, C>>,
 ): CursorPages<Row> {
   const [rows, setRows] = useState<readonly Row[]>([]);
   const [hasMore, setHasMore] = useState(true);
@@ -53,7 +65,7 @@ export function useCursorPages<Row, C>(
     setLoading(true);
     setError(null);
 
-    fetchPage(cursorRef.current, controller.signal).then(
+    fetchPage(cursorRef.current, controller.signal, () => epoch === epochRef.current).then(
       (page) => {
         if (epoch !== epochRef.current) return; // reset() raced this response
         controllerRef.current = null;

@@ -19,10 +19,25 @@
 // Relative imports (not the @/ alias): exercised by the unit specs under
 // Playwright's transpiler as well as by Next.
 
+import { EM_DASH } from "../../lib/format";
 import type { LabRunBookEngine, RunBookAggregate } from "../../lib/runbook";
-import { malformedFields, wireBigInt, type FieldCheck } from "../../lib/wireGuard";
+import { isWireDecimal, malformedFields, wireBigInt, type FieldCheck } from "../../lib/wireGuard";
 import { belowOneLanes, crossingCounts, readTransitions } from "./labTransition";
 import { labUsd } from "./frontierView";
+
+/**
+ * The DM mover row's num/den cell (p1b-6 item 9). The p1b-2 classifier
+ * validates the mover WAD fields and `debt_usd` but not `hf_before_num/den`
+ * or `hf_after_num/den`, so a malformed rational reached the row VERBATIM —
+ * raw garbage rendered as an exact disclosure. A side outside the wire
+ * Decimal contract renders the row's existing not-applicable treatment (the
+ * em dash), never the raw bytes; null stays the engine's own statement.
+ */
+export function moverRatioDisplay(num: string | null, den: string | null): string {
+  if (num === null || den === null) return EM_DASH;
+  if (!isWireDecimal(num) || !isWireDecimal(den)) return EM_DASH;
+  return `${num} / ${den}`;
+}
 
 /**
  * Σ of bucket counts whose whole range sits at-or-below the wad scale — or

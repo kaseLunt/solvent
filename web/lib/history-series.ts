@@ -42,6 +42,7 @@
 import { formatUnits, type HealthFactor } from "@solvent/client";
 import type { AddressHistoryEngine, AddressHistoryPoint } from "./inspector-data";
 import { EM_DASH, formatBlock } from "./format";
+import { wireBigInt } from "./wireGuard";
 
 export type HistoryEntryKind =
   | "computed"
@@ -84,9 +85,15 @@ export function displayRatio(hf: HealthFactor): number | null {
     return Number.isFinite(n) ? n : null;
   }
   if (hf.num !== null && hf.den !== null) {
-    const den = BigInt(hf.den);
-    if (den === 0n) return null;
-    const scaled = (BigInt(hf.num) * 10_000n) / den;
+    // p1b-6 item 6: num/den pass the wire Decimal contract before any ratio
+    // exists — the bare `BigInt("")` this replaces coerced a malformed num
+    // into a plotted 0.0 point (a silent wrong chart point). Null routes to
+    // the module's existing no-point gap arm, never to a value.
+    const den = wireBigInt(hf.den);
+    if (den === null || den === 0n) return null;
+    const num = wireBigInt(hf.num);
+    if (num === null) return null;
+    const scaled = (num * 10_000n) / den;
     const n = Number(scaled) / 10_000;
     return Number.isFinite(n) ? n : null;
   }

@@ -253,3 +253,36 @@ test.describe("W-3L — historyTakeaway", () => {
     expect(historyTakeaway(series, "aave_v3_etherfi")).toBe(allGapFrameText(tally));
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-6 item 6 — the coercion residue in displayRatio. `BigInt("")` is a
+// silent 0n: a malformed num plotted a 0.0 chart point (a silent wrong
+// display). Malformed now routes to the module's existing no-point gap arm.
+// ---------------------------------------------------------------------------
+
+test("p1b-6: a malformed num or den yields NO ratio — \"\" is never a plotted 0.0", () => {
+  const base = COMPUTED.health_factor;
+  if (base === null) throw new Error("fixture invariant: computed point carries an hf");
+  expect(displayRatio({ ...base, wad: null, num: "" })).toBeNull();
+  expect(displayRatio({ ...base, wad: null, den: "" })).toBeNull();
+  // The guard admits only the wire Decimal contract — the committed pair
+  // still computes (the discriminating positive).
+  expect(displayRatio({ ...base, wad: null })).toBe(1.08);
+});
+
+test("p1b-6: a point whose num is malformed enters the series as a GAP, never a value", () => {
+  const point = {
+    ...COMPUTED,
+    health_factor:
+      COMPUTED.health_factor === null
+        ? null
+        : { ...COMPUTED.health_factor, wad: null, num: "" },
+  };
+  const series = buildHistorySeries({ ...ENGINE, points: [point] });
+  expect(series.values).toEqual([null]);
+  expect(series.entries[0]?.kind).toBe("unpublished");
+  // The gap carries a reason, and the display is the em-dash register —
+  // never "0" and never a plausible ratio.
+  expect(series.entries[0]?.display).not.toBe("0");
+  expect(series.entries[0]?.value).toBeNull();
+});

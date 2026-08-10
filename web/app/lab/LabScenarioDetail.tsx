@@ -1,5 +1,4 @@
 import {
-  formatUnits,
   type AppliedShock,
   type HeldFlat,
   type RefinedScenario,
@@ -25,6 +24,7 @@ import {
   shockFlagTally,
   statePairRowLabel,
   statesBitIdentical,
+  stressStateHfInfo,
 } from "./labPanelLines";
 import styles from "./lab.module.css";
 
@@ -42,27 +42,11 @@ export function FactorText({ num, den }: { num: number | string; den: number | s
   );
 }
 
-function hfInfo(state: RefinedStressState): { display: string | null; ratio: number | null } {
-  if (state.health_factor_wad !== null) {
-    return {
-      // Full 18-decimal exactness, untrimmed: bit-identity must be VISIBLE.
-      display: formatUnits(state.health_factor_wad, 18),
-      ratio: Number(BigInt(state.health_factor_wad)) / 1e18,
-    };
-  }
-  if (state.health_factor_num !== null && state.health_factor_den !== null) {
-    const num = Number(state.health_factor_num);
-    const den = Number(state.health_factor_den);
-    return {
-      display: `${state.health_factor_num} / ${state.health_factor_den}`,
-      ratio: Number.isFinite(num) && Number.isFinite(den) && den > 0 ? num / den : null,
-    };
-  }
-  return { display: null, ratio: null };
-}
-
 function StateCell({ state }: { state: RefinedStressState }) {
-  const { display, ratio } = hfInfo(state);
+  // p1b-6 item 9: `hfInfo` moved to labPanelLines (stressStateHfInfo) and
+  // gained the wire-Decimal guard on the wad arm — malformed renders the
+  // null-display arm (SeverityHF's em dash), never a coerced 0.0 or a throw.
+  const { display, ratio } = stressStateHfInfo(state);
   return (
     <SeverityHF
       verdict={state.eligible ? "liquidatable" : "not-liquidatable"}

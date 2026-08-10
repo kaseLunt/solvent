@@ -104,6 +104,11 @@ function EngineSeriesView({ engine }: { engine: ObservatoryEngine }) {
     const controller = new AbortController();
     fetchObservatorySeries(solventBaseUrl(), { engine }, controller.signal)
       .then((response) => {
+        // p1b-6 fix 3: abort symmetry — the failure arm below has refused to
+        // report for a superseded request since W4; the success arm now
+        // refuses too, so a response landing after unmount/supersession
+        // cannot set state for a view that no longer asked.
+        if (controller.signal.aborted) return;
         const axis = buildBucketAxis(response);
         setState({ phase: "ok", response, axis });
         // Default selection: the newest bucket backed by a wire row, so the
@@ -207,6 +212,16 @@ function ObservatoryBody({
           source: observatoryTakeaway, rendered verbatim. */}
       <p className={styles.takeaway} data-testid="observatory-takeaway">
         {observatoryTakeaway(response, axis)}
+      </p>
+
+      {/* p1b-6 fix 3 (recorded decision): the rollup envelope carries
+          `served_at` but NO `age_seconds` (openapi ObservatorySeriesResponse),
+          so there is no wire age to anchor and no tick to run — computing one
+          from the browser clock is forbidden by freshness law 1. What the
+          wire DID say renders VERBATIM, at the head instead of only inside
+          the collapsed stampline. */}
+      <p className={styles.asOf} data-testid="observatory-as-of">
+        as of {response.served_at}
       </p>
 
       {newest !== null && (

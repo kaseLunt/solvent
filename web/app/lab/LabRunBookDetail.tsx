@@ -60,6 +60,7 @@ import {
   collateralReadingLine,
   collateralRowKey,
   histogramShiftReadingLine,
+  moverRatioDisplay,
   moversDisclosure,
 } from "./labRunBookLines";
 import {
@@ -323,8 +324,10 @@ export function LabRunBookHistogramPair({ engine }: { engine: LabRunBookEngine }
 function MoverRow({ engine, mover }: { engine: LabRunBookEngine; mover: LabRunBookEngine["movers"][number] }) {
   const wad = (value: string | null) =>
     value === null ? EM_DASH : renderNullableDecimal(value, { decimals: 18 });
-  const ratio = (num: string | null, den: string | null) =>
-    num === null || den === null ? EM_DASH : `${num} / ${den}`;
+  // p1b-6 item 9: the num/den cell goes through the guarded composer — the
+  // p1b-2 classifier does not cover the rational fields, so a malformed side
+  // rendered raw here. Malformed now renders the row's em-dash treatment.
+  const ratio = moverRatioDisplay;
   const isWadEngine = engine.before.hf_histogram.comparator === "hf_wad";
 
   return (

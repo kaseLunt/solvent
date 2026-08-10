@@ -46,6 +46,7 @@ import {
   histogramShiftHead,
   histogramShiftReadingLine,
   measuredCount,
+  moverRatioDisplay,
   moversDisclosure,
 } from "../../app/lab/labRunBookLines";
 import { readTransitions } from "../../app/lab/labTransition";
@@ -1007,4 +1008,23 @@ test("p1b-1: a malformed total_collateral_usd refuses the sentence instead of th
   expect(line).toContain("total_collateral_usd");
   expect(line).toContain("outside the wire decimal contract");
   expect(line).not.toContain("$16");
+});
+
+// ---------------------------------------------------------------------------
+// p1b-6 item 9 — the DM mover row's num/den cell. The p1b-2 classifier
+// validates the mover WAD fields and debt_usd but not the rational pair, so
+// a malformed side reached the row verbatim: raw garbage rendered as an
+// exact disclosure.
+// ---------------------------------------------------------------------------
+
+test("p1b-6: moverRatioDisplay refuses a malformed side with the row's em dash — raw bytes never render", () => {
+  // Null stays the engine's own statement (not applicable).
+  expect(moverRatioDisplay(null, "4620000000")).toBe("—");
+  expect(moverRatioDisplay("4200000000", null)).toBe("—");
+  // Malformed is the em dash too — never the raw bytes.
+  expect(moverRatioDisplay("", "4620000000")).toBe("—");
+  expect(moverRatioDisplay("4200000000", "not-a-decimal")).toBe("—");
+  expect(moverRatioDisplay("0x10", "4620000000")).toBe("—");
+  // The discriminating positive: a lawful pair renders verbatim.
+  expect(moverRatioDisplay("4200000000", "4620000000")).toBe("4200000000 / 4620000000");
 });

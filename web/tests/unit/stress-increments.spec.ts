@@ -20,7 +20,10 @@ import type { Waterfall } from "@solvent/client";
 import {
   STRESS_INC_METHOD,
   incrementAccountsClause,
+  incrementScaleClause,
+  incrementStepValues,
   stressIncrements,
+  type IncrementStep,
 } from "../../app/book/stressIncrements";
 import { BOOK, BOOK_MONOTONICITY_VIOLATION } from "../fixtures/book";
 
@@ -146,4 +149,67 @@ test("the method keeps the two claims apart and names the forbidden series", () 
   expect(STRESS_INC_METHOD).toContain("never called the debt that became eligible");
   expect(STRESS_INC_METHOD).toContain("never differenced");
   expect(STRESS_INC_METHOD).toContain("nothing here assumes even spacing");
+});
+
+// ---------------------------------------------------------------------------
+// p1b-6 item 6 — the coercion residue. `BigInt("")` is a silent 0n; every
+// wire read below now goes through wireBigInt and a malformed value routes
+// to the module's own refusal arm, never to a coerced number.
+// ---------------------------------------------------------------------------
+
+test("p1b-6: a malformed factor REFUSES the grid — \"\" is never read as a lawfully-descending 0", () => {
+  const waterfall = waterfallClone();
+  // DERIVED NEGATIVE: the LAST point's factor emptied. The old bare BigInt
+  // coerced "" to 0n, which DESCENDS below every positive factor — the grid
+  // weld passed silently and the step label rendered garbage.
+  const last = waterfall.points[waterfall.points.length - 1];
+  if (last === undefined) throw new Error("fixture invariant");
+  last.factor = "";
+  const reason = refusedOf(waterfall, "debt_manager");
+  expect(reason).toContain("GRID CONTRADICTION");
+  expect(reason).toContain("wire Decimal contract");
+});
+
+test("p1b-6: a malformed cumulative REFUSES — \"\" is never the zero side of a difference", () => {
+  const waterfall = waterfallClone();
+  // DERIVED NEGATIVE: one point's cumulative emptied. Coerced to 0n it made
+  // the next step's whole cumulative look like an increase (a measured-zero
+  // costume) — the committed fixture's flat zeros would have yielded a view.
+  const at = waterfall.points[1]?.engines.find((e) => e.engine === "debt_manager");
+  if (at === undefined) throw new Error("fixture invariant");
+  at.cumulative_debt_eligible_usd = "";
+  const reason = refusedOf(waterfall, "debt_manager");
+  expect(reason).toContain("SERIES CONTRADICTION");
+  expect(reason).toContain("wire Decimal contract");
+});
+
+test("p1b-6: incrementStepValues refuses a malformed increase — never a zero-length bar", () => {
+  const step: IncrementStep = {
+    fromTimes: "×1.00",
+    toTimes: "×0.90",
+    newlyEligible: 0,
+    debtIncreaseUsd: "",
+    usdDecimals: 6,
+  };
+  const refused = incrementStepValues([step]);
+  expect(refused.kind).toBe("refused");
+  if (refused.kind === "refused") {
+    expect(refused.reason).toContain("wire Decimal contract");
+    expect(refused.reason).toContain("×1.00");
+  }
+  const ok = incrementStepValues([{ ...step, debtIncreaseUsd: "5" }]);
+  expect(ok.kind).toBe("ok");
+  if (ok.kind === "ok") {
+    expect(ok.max).toBe(5n);
+    expect(ok.rows.map((row) => row.value)).toEqual([5n]);
+  }
+});
+
+test("p1b-6: a malformed scale anchor yields NO clause — never the \"$0, no bar\" claim", () => {
+  // The old bare BigInt("") === 0n took the zero arm: a body nobody could
+  // read rendered as the positive claim that every increase is $0.
+  expect(incrementScaleClause("", 6)).toBeNull();
+  expect(incrementScaleClause("0", 6)).toBe(
+    "Every increase in this window is $0, so no bar is drawn.",
+  );
 });

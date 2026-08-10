@@ -768,7 +768,7 @@ Task list:
 - [x] Task 3 — SetRunEngineSummary classifier + tornado malformed arm (p1b-3)
 - [x] Task 4 — FactorPrice entry guard (p1b-4)
 - [x] Task 5 — result-identity module + address-mode completion (p1b-5)
-- [ ] Task 6 — five-gap race/identity audit close
+- [x] Task 6 — five-gap race/identity audit close (p1b-6)
 - [ ] Task 7 — close + Codex round
 
 ### p1b-0 · wave config + honest route refusal (Task 0)
@@ -1655,3 +1655,176 @@ against current HEAD (12 → 14 specs in the file).
 - `npm run lint:css`: clean. `npm run typecheck`: clean.
 - `npm run lint` (eslint .): 0 errors (one pre-existing LabBookPanel
   warning, untouched); `npx eslint` on the touched spec + config: clean.
+
+### p1b-6 · the identity gap audit closes (Task 6)
+
+The §5 audit's remaining rows plus four controller additions (items 6–9),
+each small and independently pinned. Commit `fix(web): p1b-6 …`.
+
+**The five brief fixes**
+
+1. **Book success-arm abort check** (`BookSurface.tsx` `loadBook`): the
+   failure arm has carried `controller.signal.aborted → return false` since
+   W-UX; the success arm now mirrors it, so a superseded success that had
+   already left the wire cannot land its stale book (and receipt) over the
+   newer request's answer. Review-verified + suite-green (the brief's
+   sanctioned arm: no e2e race simulation is cheap here); book.spec 15/15.
+2. **Feed envelope-echo race** (`pagination.ts` + `FeedSurface.tsx`):
+   `useCursorPages` now hands every dispatch an `isCurrent()` predicate —
+   the SAME epoch its own rows are gated on — and the Feed gates all three
+   per-walk setters (`setEnvelope`, both `setRefusal` sites) on it. Two-arg
+   callers (BookPositions, Inspector activity) are untouched: fewer params
+   remain assignable. Red-first e2e (below) + mutation kill M2.
+3. **Observatory abort symmetry + as-of** (`ObservatorySurface.tsx`): the
+   success arm gains the failure arm's abort check; and the head renders
+   `as of {served_at}` VERBATIM (`observatory-as-of`, the `.asOf` register).
+   **Recorded decision:** the rollup envelope carries `served_at` but NO
+   `age_seconds` (openapi `ObservatorySeriesResponse`), so there is no wire
+   age to anchor and no tick runs — `useAnchoredAgeSeconds` is NOT called,
+   because the only age it could compute would come from the browser clock
+   (freshness law 1 forbids it). The wire's own instant renders verbatim
+   instead, promoted from the collapsed stampline to the head.
+4. **Inspector history batch-weld** (`InspectorSurface.tsx` →
+   `InspectorHistory.tsx` `positionBatchId` prop): when the history
+   response's own vantage batch differs from the batch the position lookup
+   was read at, a dim mono one-liner under the section head states the seam:
+   `history window newest batch #X · position read at batch #Y`
+   (`history-batch-weld`, rendered ONLY on mismatch). **Recorded decision:**
+   the wire's newest-batch field for this response is its vantage
+   `response.batch.id` (`AddressHistoryResponse.batch` — the newest servable
+   batch the window was read AT; the response enumerates no other
+   window-level newest). The weld therefore compares the two responses'
+   vantages, which is exactly the two-worlds seam a fresh batch landing
+   between the two fetches produces. The committed fixtures already differ
+   (history example batch 2, address example batch 1), so the visible-arm
+   e2e runs on committed bytes verbatim; the no-seam arm re-pins the history
+   vantage to the lookup's id (2 → 1, one documented change).
+5. **Inspector params/activity explicit keying** (`InspectorSurface.tsx`):
+   `paramsByEngine`/`paramsErrors` now live as `{for: addr, byEngine}` —
+   the lookup/history binding pattern — derived empty whenever `for` is not
+   the current address, and the accumulate spread refuses a base map built
+   for another address. **Recorded decision (activity):** the cursor hook
+   OWNS the accumulated rows, so the `{for: addr}` keying is expressed there
+   as an explicit drop-and-restart — `activityForRef` + `reset()` BEFORE the
+   first page of a new address (abort in-flight, epoch discards a late
+   page). Behaviorally equivalent to keyed state for every reader of
+   `activity.rows`, and no longer dependent on App Router remount semantics.
+   Review-verified + inspector.spec 21/21.
+
+**Controller items**
+
+- **Item 6 — book-surface coercion residue.** All named sites re-anchored
+  (numbers had drifted) and routed through `wireBigInt` to each module's
+  EXISTING refusal/na arm:
+  - `stressIncrements.ts` grid weld (was :67): a malformed factor refuses
+    (GRID CONTRADICTION naming the wire contract) — the coerced 0n used to
+    PASS the weld (0 descends) and render a garbage step label;
+  - `stressIncrements.ts` delta (was :126): malformed cumulative refuses
+    (SERIES CONTRADICTION) — `""` on side `a` was a measured-zero costume;
+  - `incrementScaleClause` (was :165): returns **null** on a malformed
+    anchor (the caller's existing no-clause arm) — `BigInt("")` used to take
+    the `$0, no bar` claim;
+  - `history-series.ts` `displayRatio` (:87/:89): num/den through
+    `wireBigInt`; malformed → null → the existing unpublished-gap arm
+    (`hf.num: ""` used to PLOT a 0.0 point — the silent wrong display);
+  - `BookWaterfall.tsx` (was :268/:274/:314): the three bare `BigInt(step)`
+    reads replaced by ONE pass through the new
+    `stressIncrements.incrementStepValues` (paired step+bigint rows, max) —
+    refused renders the panel's existing `increments-refused-{engine}`
+    contradiction register. Model-produced strings are valid by
+    construction today; the guard makes that invariant structural and
+    unit-pinned rather than incidental.
+  - NOTE (scoped out, deliberately): `displayRatio`'s WAD arm
+    (`formatUnits(hf.wad, 18)`) and `displayHf` were not named by the
+    controller and are unchanged — a malformed wad there throws into the
+    p1b-0 route boundary rather than coercing. Candidate for the Phase 3
+    residue sweep.
+  - NOTE: a malformed num/den routes to the module's existing unpublished
+    arm, whose title reads "carries neither wad nor num/den" — for a
+    malformed (not absent) pair the wording is approximate. Controller
+    mandated the existing arm; wording refinement left for Phase 3 clarity.
+- **Item 7 — computed_at on the not-found/unknowable stress arms.** Both
+  arms now render `batch {id} · computed {computed_at}` (verbatim, the
+  LabBatchStamp clause's own words) as `lab-result-computed`, closing the
+  canon §05 face (identity + computed-at + age) for the non-found outcomes.
+- **Item 8 — the run-again register (VOCABULARY ADDITION, for the Phase 3
+  clarity review).** New constant in `freshness.ts` beside the two existing
+  arms: `AGE_UNKNOWN_RUN_AGAIN = "age UNKNOWN since resume · run again to
+  refresh"` — same register core (`age UNKNOWN since resume · ` + tail).
+  Used ONLY in the Lab result-age path, which wires NO repair (the p1b-5
+  sanctioned decision: a reader-dispatched run is not re-run uninvited).
+  There the old rendering was `refresh failed, data retained` — an attempt
+  never made; "refreshing" would equally claim work not in flight. The
+  ribbon and every other surface keep the two existing phrases, byte-pinned.
+- **Item 9 — both candidates fixed (neither exceeded the 30-line bound).**
+  - `LabScenarioDetail.tsx:50`: module-private `hfInfo` MOVED to
+    `labPanelLines.stressStateHfInfo` (the pure-module home its pin needs)
+    + wire-Decimal guard on the wad arm → the existing null-display arm
+    (SeverityHF's em-dash treatment). A published-but-malformed wad refuses
+    outright — it does NOT fall back to num/den.
+  - `LabRunBookDetail.tsx:355-356`: the mover num/den cell goes through new
+    `labRunBookLines.moverRatioDisplay` — malformed renders the row's
+    existing EM_DASH na treatment, never raw bytes. (Verified: the p1b-2
+    classifier covers the mover WAD fields + debt_usd but NOT
+    `hf_before/after_num/den`, so the raw render was reachable through a
+    classifier-passing response.)
+
+**Red-first evidence** (logs at repo root, untracked as usual; source
+stashed → pre-fix build → new tests run → stash popped):
+
+- `web-3819-p1b6-red-unit.log` — four specs die at collection (missing
+  exports: `AGE_UNKNOWN_RUN_AGAIN`, `stressStateHfInfo`,
+  `moverRatioDisplay`, `incrementStepValues`).
+- `web-3819-p1b6-red-unit-history.log` — history-series alone: **2 failed /
+  17 passed**; `displayRatio({num:""})` returned **0** and the series
+  PLOTTED the point — the exact silent-zero defect.
+- `web-3819-p1b6-red-e2e.log` — **5 failed / 1 passed**: the feed race
+  rendered the STALE echo (`types borrow ·` standing over the borrow,repay
+  walk — the received string is in the log), no `observatory-as-of`, no
+  weld line, no `lab-result-computed`, and the blind resume said "refresh
+  failed, data retained". The one pre-fix pass is fix 4's count-0 arm
+  (trivially green with no weld anywhere; its red lives in the visible arm,
+  and mutation M3 proves the count-0 pin bites).
+- The feed race e2e is DETERMINISTIC, not a sleep-race: an init-script shim
+  holds the first `types=borrow` response's resolution under test control
+  and detaches it from the abort signal — modeling the real closed-stream
+  case where an abort arriving after full receipt has nothing left to
+  reject — then releases it strictly AFTER the second walk's echo rendered.
+
+**Mutation kills** (each in isolation, each reverted, final tree rebuilt):
+
+- **M1 · item 6** — `displayRatio` reverted to bare `BigInt`
+  (`web-3819-p1b6-mutM1-unit.log`): KILLED at exactly the two p1b-6
+  history-series pins (2 failed / 17 passed).
+  `npx playwright test -c tests/playwright.p1b.config.ts --project=unit
+  tests/unit/history-series.spec.ts`; discriminating assertion:
+  `displayRatio({…, num: ""})` must be null, received 0.
+- **M2 · fix 2** — the `isCurrent()` gate removed from FeedSurface's
+  setters (`web-3819-p1b6-mutM2-e2e.log`): KILLED at exactly the race pin
+  (1 failed / 5 passed). `… --project=e2e -g "p1b-6"`; assertion: the foot
+  echo still names `types borrow,repay` after the held stale page releases.
+- **M3 · fix 4** — weld condition inverted `!==`→`===`
+  (`web-3819-p1b6-mutM3-e2e.log`): KILLED at BOTH fix-4 pins — including
+  the count-0 pin, per the brief (2 failed / 4 passed).
+- **M4 · item 7** — the not-found computed clause removed
+  (`web-3819-p1b6-mutM4-e2e.log`): KILLED at exactly the item-7 pin
+  (1 failed / 5 passed); assertion: `lab-result-computed` toHaveText
+  `batch 1 · computed 2026-07-29T10:00:00Z` (derived from fixture bytes).
+- **M5 · item 8** — LabClient reverted to the "refresh failed, data
+  retained" phrase (`web-3819-p1b6-mutM5-e2e.log`): KILLED at exactly the
+  item-8 pin (1 failed / 5 passed); assertion: `lab-result-age` toHaveText
+  `age UNKNOWN since resume · run again to refresh` after a synthetic
+  pagehide→focus blind resume.
+
+**Verification (final tree)**
+
+- `npm run typecheck` — completely clean. `npm run lint:css` — clean.
+- `npx eslint` on all 15 touched source files + 6 touched specs — clean.
+- Targeted (`web-3819-p1b6-targeted.log`): book + observatory + inspector +
+  feed + lab + p0-fixes + p1b-fixes e2e → **140/140 green**.
+- Full p1b suite (fresh build, `tests/playwright.p1b.config.ts`, port
+  3819): **1537 passed, 1 skipped, 0 failed (40.1s)**
+  (`web-3819-p1b6-full-final.log`) — suite 1523 → 1538 (+15: unit +9
+  [stress-increments 4, history-series 2, freshness-blind-resume 1,
+  lab-panel-lines 1, lab-runbook-lines 1], e2e +6 [p1b-6 describe]); same
+  single pre-existing styleguide skip.
