@@ -169,7 +169,8 @@ export function LabClient() {
   // decision): an address stress is a reader-DISPATCHED run, not an ambient
   // read, so on a blind resume this surface does not re-run the stress
   // uninvited — the age enters the unknown register immediately, in its
-  // "refresh failed, data retained" form, and only a new run restates it.
+  // run-again arm (AGE_UNKNOWN_RUN_AGAIN, p1b-6 item 8: "refresh failed"
+  // would report an attempt never made), and only a new run restates it.
   const age = useAnchoredAgeSeconds(
     phase.status === "done"
       ? resultReceipt(

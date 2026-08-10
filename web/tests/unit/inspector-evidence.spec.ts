@@ -152,6 +152,10 @@ test("the drawer refuses an entry-level null (prices: [null]) without throwing",
   const wire = structuredClone(aaveWire);
   if (wire.liquidation_price === null) throw new Error("fixture invariant: aave lp expected");
   wire.liquidation_price.prices = [null as never];
+  // p1b-8: the wire's own `reason` rides the unreadable row too — the card
+  // arm and the not-established row both expose it, and the drawer's
+  // unreadable boundary row was the one register that dropped it.
+  wire.liquidation_price.reason = "solver detail the wire itself served";
   const text = drawerText(wire);
   // the entry's own malformed row, by index — nothing read off it
   expect(text).toContain("prices[0]");
@@ -160,6 +164,7 @@ test("the drawer refuses an entry-level null (prices: [null]) without throwing",
   // "not established" states the solve published nothing; here the solve
   // published something nobody can read.
   expect(text).toContain("unreadable");
+  expect(text).toContain("solver detail the wire itself served");
   expect(text).not.toContain("not established");
   expect(text).not.toContain("still HEALTHY");
 });

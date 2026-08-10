@@ -359,7 +359,10 @@ export function liquidationPriceEvidence(
                     label: "boundary",
                     value:
                       `unreadable — the served entry is malformed (${first.fields.join(", ")}), ` +
-                      "so its numbers are not read and no exact-price health claim is made",
+                      "so its numbers are not read and no exact-price health claim is made" +
+                      // p1b-8: the wire's own `reason` rides this row too — the
+                      // card arm and the not-established row both expose it.
+                      (lp.reason !== undefined && lp.reason !== "" ? ` · ${lp.reason}` : ""),
                     tone: "warn" as const,
                   },
                 ]

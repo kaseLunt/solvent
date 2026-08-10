@@ -1911,7 +1911,13 @@ sourced from this ledger alone (no task-2 report exists, by record).
      `Number("")` coerces to 0, so a malformed num/den pair can still yield
      a plausible ratio (the WAD arm is wire-guarded; the num/den arm is
      not). The p1b-6 fix guarded the wad arm the controller named; the
-     num/den arm is residue.
+     num/den arm is residue. — FIXED in the final wave (p1b-8, this
+     commit): the arm now rides the same `isWireDecimal` guard as its wad
+     sibling, red-first pinned in lab-panel-lines.spec.ts; off the residue
+     sweep.
+   - `stableBoundaryScenarios` (labPanelLines.ts:278-281) bare `BigInt`
+     over shock factors — `""` coerces to `0n` mis-ordering the boundary
+     group, `"-"` throws to the route boundary; ordering-only.
    - The unpublished-gap title's "carries neither wad nor num/den" wording —
      approximate for a malformed (vs absent) pair; controller mandated the
      existing arm, wording refinement deferred.

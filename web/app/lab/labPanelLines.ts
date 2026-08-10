@@ -235,6 +235,13 @@ export function stressStateHfInfo(
     };
   }
   if (state.health_factor_num !== null && state.health_factor_den !== null) {
+    // p1b-8 — the num/den pair rides the SAME wire guard as the wad arm above
+    // (mirrors labRunBookLines' moverRatioDisplay): `Number("")` coerces to 0,
+    // so the unguarded arm rendered a garbage display (`" / 300"`) and
+    // laundered a 0.0 ratio into SeverityHF. A malformed pair is a refusal.
+    if (!isWireDecimal(state.health_factor_num) || !isWireDecimal(state.health_factor_den)) {
+      return { display: null, ratio: null };
+    }
     const num = Number(state.health_factor_num);
     const den = Number(state.health_factor_den);
     return {

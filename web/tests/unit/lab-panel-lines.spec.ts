@@ -669,3 +669,31 @@ test("p1b-6: a malformed wad renders the null-display arm — never a coerced 0.
     `${DM_STATE.health_factor_num ?? "?"} / ${DM_STATE.health_factor_den ?? "?"}`,
   );
 });
+
+// ---------------------------------------------------------------------------
+// p1b-8 — stressStateHfInfo's num/den arm rides the SAME wire guard as its
+// wad arm (and as labRunBookLines' moverRatioDisplay): `Number("")` coerces
+// to 0, so the unguarded arm rendered a garbage display (`" / 300"`) and
+// laundered a 0.0 ratio into SeverityHF — a fabricated catastrophic HF.
+// A malformed pair is a refusal, never a zero.
+// ---------------------------------------------------------------------------
+
+test("p1b-8: a malformed num/den pair renders the null arm — never a coerced 0.0 ratio", () => {
+  // num slot malformed: without the guard Number("") === 0 made ratio 0.0
+  // (a plausible catastrophic HF) and display " / <den>".
+  const badNum: RefinedStressState = {
+    ...DM_STATE,
+    health_factor_wad: null,
+    health_factor_num: "",
+  };
+  expect(stressStateHfInfo(badNum)).toEqual({ display: null, ratio: null });
+
+  // den slot malformed, symmetric: the display side leaked "<num> / " even
+  // where the den>0 check already nulled the ratio.
+  const badDen: RefinedStressState = {
+    ...DM_STATE,
+    health_factor_wad: null,
+    health_factor_den: "",
+  };
+  expect(stressStateHfInfo(badDen)).toEqual({ display: null, ratio: null });
+});
