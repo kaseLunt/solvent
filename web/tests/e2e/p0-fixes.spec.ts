@@ -785,16 +785,20 @@ test.describe("p0-9 · codex round 2", () => {
 });
 
 test.describe("p0-5 · snapshot chip", () => {
-  test("a FRESH batch still shows its age beside the live badge", async ({ page }) => {
+  test("a FRESH batch still shows its age beside the connected chip", async ({ page }) => {
     const harness = await mockPostureWithBatchAge(page, 42); // snapshot frame, age_seconds 42
     try {
       await page.goto("/book");
       const header = page.getByRole("banner");
-      await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible(); // badge untouched
+      // p1a-4: a genuinely open stream is the CONNECTED chip — the retired
+      // LIVE · WATERMARKED badge's honest successor over this same harness.
+      await expect(header.getByText("STREAM CONNECTED")).toBeVisible();
+      await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
       const chip = header.getByTestId("ribbon-snapshot");
       await expect(chip).toBeVisible();
-      await expect(chip).toContainText("42s old");
-      await expect(chip).toContainText("snapshot #");
+      await expect(chip).toContainText("42s");
+      // The batch identity is its own chip now — still always on screen.
+      await expect(header.getByTestId("ribbon-batch")).toContainText("BATCH #");
     } finally {
       await harness.close();
     }
@@ -804,8 +808,10 @@ test.describe("p0-5 · snapshot chip", () => {
     const harness = await mockPostureWithBatchAge(page, 65_532);
     try {
       await page.goto("/book");
+      // p1a-4: 65,532s is past the DM sweep worst case, so the precision pin
+      // rides the CRITICAL chip — the age is still `18h 12m`, never `18h`.
       await expect(page.getByRole("banner").getByTestId("ribbon-snapshot")).toContainText(
-        "18h 12m old",
+        "18h 12m",
       );
       // old suffix retired
       await expect(page.getByRole("banner").getByTestId("ribbon-batch-age")).toHaveCount(0);

@@ -52,10 +52,13 @@ for (const surface of SURFACES) {
     // The active tab is marked.
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
 
-    // The integrity ribbon slot renders an HONEST state: either a real
-    // watermark vector (LIVE · WATERMARKED) or the truth about the stream.
+    // The appbar renders an HONEST state chip from the canon vocabulary
+    // (p1a-4): the stream's own posture — CONNECTED included — or the
+    // service's NO SERVABLE BATCH statement. LIVE · WATERMARKED is retired.
     await expect(
-      header.getByText(/LIVE · WATERMARKED|STREAM · (CONNECTING|RECONNECTING|AWAITING BASE|CLOSED)|NO SERVABLE BATCH/),
+      header.getByText(
+        /STREAM (CONNECTED|CONNECTING|RECONNECTING|AWAITING BASE|CLOSED|NO BATCH)|NO SERVABLE BATCH/,
+      ),
     ).toBeVisible();
   });
 }

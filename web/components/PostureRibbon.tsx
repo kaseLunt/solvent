@@ -1,27 +1,80 @@
 "use client";
 
+import type { Batch } from "@solvent/client";
 import { usePosture, usePostureRefresh } from "@/lib/posture";
 import { formatBlock } from "@/lib/format";
-import { snapshotChip, snapshotChipUnknown, staleSinceReading } from "@/lib/freshness";
+import { snapshotChipParts, snapshotChipUnknown, staleSinceReading } from "@/lib/freshness";
+import { freshnessTier } from "@/lib/freshnessTiers";
+import { useMetaConstants, type MetaConstantsSource } from "@/lib/meta";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { ribbonEmptyPosture, ribbonStreamPosture } from "@/lib/stream-posture";
-import { Ribbon, type RibbonAsOf } from "./Ribbon";
+import {
+  Ribbon,
+  type RibbonAsOf,
+  type RibbonCoverage,
+  type RibbonSnapshotChip,
+} from "./Ribbon";
 import styles from "./ribbon.module.css";
 
 /**
- * The header's Ribbon slot, fed by the global stream posture.
+ * The header's appbar slot, fed by the global stream posture (canon §10,
+ * p1a-4).
  *
- * `LIVE · WATERMARKED` is rendered ONLY when the CURRENT connection is open
- * with its base delivered, over the batch's REAL watermark vector (per-engine
- * `@last_block`, sweep presence). Otherwise it renders the stream's actual
- * state — CONNECTING / RECONNECTING / AWAITING BASE / CLOSED / NO BATCH — with
- * the retained batch and its age still on screen. Never a pretend liveness.
+ * Each truth renders as its OWN chip: the stream's posture (CONNECTED only
+ * when the CURRENT connection is open with its base delivered — Wave R7's
+ * law, unchanged), the snapshot's age with its SLA tier, the batch identity,
+ * and the engine coverage — with the raw watermark vector in the "Data
+ * status →" popover. `LIVE · WATERMARKED` is retired: a connected stream and
+ * a stale snapshot are both true, and both show, separately.
  */
+
+/**
+ * The disclosure the snapshot chip carries when the tier thresholds are the
+ * BUILT-IN fallback rather than `/v1/meta`'s constants (p1a-3's provider,
+ * source `"fallback"`) — a threshold the page invented must never impersonate
+ * one the pipeline stated. The arm is reachable on any unreachable or
+ * refused meta read, including before the one meta round-trip resolves.
+ */
+export const TIER_FALLBACK_DISCLOSURE =
+  "thresholds from built-in fallback — /v1/meta unavailable";
+
+/** The chip's base title — the age's subject, and the two-subjects law. */
+function snapshotTitle(batchId: number, source: MetaConstantsSource | null): string {
+  const base =
+    `snapshot freshness — how old served batch #${String(batchId)} is; ` +
+    "the chip beside this is the stream connection, a separate statement";
+  return source === "fallback" ? `${base} · ${TIER_FALLBACK_DISCLOSURE}` : base;
+}
+
+/**
+ * The coverage chip's HONEST derivation from the batch envelope.
+ *
+ * `watermarks` is the stamp vector — one entry per engine the batch binds —
+ * and `refused_engines` names every engine whose WHOLE book is withheld
+ * (schema: it exists on the summary precisely because `refused_count` counts
+ * position rows and is zero for an engine withheld with no accounts behind
+ * it). So: total = stamped engines, answered = stamped − withheld.
+ *
+ * RENDERED ONLY WHEN UNAMBIGUOUS: if the wire ever names a refused engine
+ * that carries no stamp, the arithmetic above has no honest denominator and
+ * the chip is withheld entirely rather than invented (ledgered §p1a-4 as a
+ * Track B envelope gap). An empty stamp vector cannot occur on a served
+ * batch (completeness requires ≥1 stamp) but is refused here for the same
+ * reason.
+ */
+function ribbonCoverage(batch: Batch): RibbonCoverage | null {
+  const stamped = batch.watermarks.map((stamp) => stamp.engine);
+  if (stamped.length === 0) return null;
+  const withheld = [...new Set(batch.refused_engines)];
+  if (withheld.some((engine) => !stamped.includes(engine))) return null;
+  return { answered: stamped.length - withheld.length, total: stamped.length, withheld };
+}
+
 export function PostureRibbon() {
   const posture = usePosture();
   // Wave R3 (round-10 MEDIUM): the wire age ANCHORED at receipt and advanced
-  // on a minute tick, so the stale-batch suffix ENGAGES while the tab is open
-  // instead of testing a number frozen just short of the threshold. Called
+  // on a minute tick, so the freshness statement ENGAGES while the tab is
+  // open instead of testing a number frozen at receipt. Called
   // unconditionally, above every early return — hooks are not conditional.
   //
   // Wave R5 (round-12 MEDIUM): the anchor is keyed to the STREAM RECEIPT that
@@ -30,18 +83,18 @@ export function PostureRibbon() {
   // under the old value test it inherited #6's anchor and rendered #7 as old as
   // the batch it replaced.
   //
-  // Wave R6 (round-13 MEDIUM 1): AND IT HAS A REPAIR PATH NOW. The ribbon owns
+  // Wave R6 (round-13 MEDIUM 1): AND IT HAS A REPAIR PATH NOW. The appbar owns
   // no fetch — its batch arrives on the stream — so when a blind resume left
   // the age unmeasurable it could do nothing but wait for the publishing loop
-  // to speak. A stream that is healthy but QUIET never does, and the ribbon
-  // went on rendering `LIVE · WATERMARKED` with no stale suffix over data hours
-  // old, for as long as the understated age stayed inside the hour threshold.
-  //
-  // `refresh` is a stream TEARDOWN AND REOPEN (lib/posture.tsx), which obliges
-  // the server to re-deliver the base snapshot the contract promises on every
-  // connection — and that snapshot's `served_at` is a new receipt, which is the
-  // only thing that discharges an unknown age.
+  // to speak. `refresh` is a stream TEARDOWN AND REOPEN (lib/posture.tsx),
+  // which obliges the server to re-deliver the base snapshot the contract
+  // promises on every connection — and that snapshot's `served_at` is a new
+  // receipt, which is the only thing that discharges an unknown age.
   const refreshPosture = usePostureRefresh();
+
+  // The tier constants — runtime-derived from /v1/meta, or the DISCLOSED
+  // fallback (lib/meta.tsx). Provider mounted in app/layout.tsx (p1a-4).
+  const meta = useMetaConstants();
 
   // ---------------------------------------------------------------------
   // TWO AGES, ONE AT A TIME (Wave R7, round-15 finding 3).
@@ -73,9 +126,10 @@ export function PostureRibbon() {
           receiptId: posture.unavailableReceiptId,
         }
       : null,
-    // THE SAME REPAIR AS THE LIVE BRANCH. The ribbon owns no fetch here either:
-    // the only way to get a new statement about the service's staleness is to
-    // reconnect and let the contract's snapshot-on-connect answer.
+    // THE SAME REPAIR AS THE LIVE BRANCH. The appbar owns no fetch here
+    // either: the only way to get a new statement about the service's
+    // staleness is to reconnect and let the contract's snapshot-on-connect
+    // answer.
     refreshPosture,
   );
 
@@ -97,55 +151,69 @@ export function PostureRibbon() {
         });
       }
     }
-    // Phase 0 fix 5: LIVE describes the STREAM; the snapshot chip describes
-    // the BATCH — and it is ALWAYS rendered, at every age, as its own element
-    // beside the badge. The >1h-only suffix this replaces let a live
-    // connection over a stale-but-inside-the-hour batch read as fresh data.
-    //
-    // Wave R6's arbitration is preserved one-to-one: while the age is
-    // UNRESOLVED the computed chip is not built at all. `snapshotChip` is a
-    // function of a number the page has just admitted it does not have —
-    // feeding it the understated one would restate the round-13 defect — and
-    // there is no honest stale claim to substitute, because staleness is not
-    // what the page knows. So the chip carries the refusal instead, and only
-    // a new receipt discharges it.
-    //
-    // WAVE R7 (round-15 finding 4): AND THE BADGE ITSELF IS NOW DERIVED FROM
-    // THE CONNECTION. Having a batch was never evidence that the stream is up —
-    // the batch is RETAINED across a teardown on purpose — so after `refresh()`
-    // a hung or failed reconnect used to leave LIVE painted indefinitely. The
-    // posture below is the only thing that can paint it, and it asks the
-    // current connection. The data, the watermark vector and the age
-    // disclosure (including the unknown register) all stay exactly where they
-    // were: losing the connection must not also cost the reader their book.
+    // THE SNAPSHOT CHIP, TIERED (p1a-4). Wave R6's arbitration is preserved
+    // one-to-one: while the age is UNRESOLVED the computed chip is not built
+    // at all — `snapshotChipParts` is a function of a number the page has
+    // just admitted it does not have, and `freshnessTier` deliberately has no
+    // null arm. The unknown register renders instead (dashed, no tier word,
+    // no tier color), and only a new receipt discharges it. When the age IS
+    // known, the tier is computed from the SAME anchored seconds the chip
+    // prints, under the /v1/meta constants (or the disclosed fallback), so
+    // severity and text can never disagree.
+    const batchId = posture.batch.id;
+    let snapshot: RibbonSnapshotChip;
+    if (age.unresolved) {
+      snapshot = {
+        parts: snapshotChipUnknown(batchId, age.refreshFailed),
+        tier: null,
+        // No tier is computed over an unknown age, so no threshold source is
+        // disclosed either — the refusal is the whole statement.
+        title: snapshotTitle(batchId, null),
+      };
+    } else {
+      const seconds = age.seconds ?? posture.batch.age_seconds;
+      const tier = freshnessTier(seconds, meta.constants);
+      snapshot = {
+        parts: snapshotChipParts(batchId, seconds, tier),
+        tier,
+        title: snapshotTitle(batchId, meta.source),
+      };
+    }
+    // WAVE R7 (round-15 finding 4), UNCHANGED IN LAW: the stream chip is
+    // derived from the CURRENT connection — having a batch was never evidence
+    // that the stream is up. p1a-4 only changed the reward: a proven-open
+    // stream is the CONNECTED chip (accent, never green), not a liveness
+    // badge over the data. The data, the watermark vector (now in the
+    // popover) and the age disclosure all stay: losing the connection must
+    // not also cost the reader their book.
     return (
       <Ribbon
         mode="stream"
         posture={ribbonStreamPosture(streamState, hasBase)}
         asOfs={asOfs}
         superseded={posture.batch.supersession.superseded}
-        snapshot={
-          age.unresolved
-            ? snapshotChipUnknown(posture.batch.id, age.refreshFailed)
-            : snapshotChip(posture.batch.id, age.seconds ?? posture.batch.age_seconds)
-        }
+        snapshot={snapshot}
+        batchId={batchId}
+        coverage={ribbonCoverage(posture.batch)}
       />
     );
   }
 
   if (unavailable !== null) {
-    // The server's OWN statement, kept verbatim — and now aged honestly. The
+    // The server's OWN statement, kept verbatim — and aged honestly. The
     // seconds are the ANCHORED ones (they tick, they are clamped, they never
     // run backwards); `staleSinceReading` refuses to state them at all while a
     // blind resume stands over this frame, which is the round-15 finding.
+    // p1a-4 re-skins the badge as the crit-register chip the canon's
+    // unavailable branch calls for; the reading beside it is untouched.
     const stale = staleSinceReading(
       staleAge.seconds === null ? null : Math.floor(staleAge.seconds),
       staleAge.unresolved,
       staleAge.refreshFailed,
     );
     return (
-      <span className={styles.ribbon}>
-        <span className={`${styles.badge} ${styles.degraded}`}>NO SERVABLE BATCH</span>
+      <div className={styles.appbar}>
+        <span className={`${styles.chip} ${styles.cCrit}`}>NO SERVABLE BATCH</span>
         {stale !== null && (
           <span
             className={styles.asOf}
@@ -154,21 +222,12 @@ export function PostureRibbon() {
             {stale.label} <b className={styles.warn}>{stale.value}</b>
           </span>
         )}
-      </span>
+      </div>
     );
   }
 
   // No renderable batch and no statement about why: say what the stream is
-  // doing. A LIVE connection holding nothing is not `LIVE · WATERMARKED` —
-  // there are no watermarks to be live over.
-  const empty = ribbonEmptyPosture(streamState, hasBase);
-  return (
-    <span className={styles.ribbon}>
-      <span
-        className={`${styles.badge} ${empty.tone === "down" ? styles.down : styles.waiting}`}
-      >
-        {empty.label}
-      </span>
-    </span>
-  );
+  // doing. A CONNECTED chip holding nothing renders STREAM NO BATCH — there
+  // are no watermarks to be connected over.
+  return <Ribbon mode="stream" posture={ribbonEmptyPosture(streamState, hasBase)} asOfs={[]} />;
 }

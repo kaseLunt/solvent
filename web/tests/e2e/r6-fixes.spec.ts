@@ -204,22 +204,24 @@ test("(1) THE ROUND-13 RIBBON DEFECT: an idle stream + two blind clocks no longe
   // qualification for the green chip — which is precisely the defect R7 closes.
   // What the ribbon claims about the CONNECTION changed; what it claims about
   // the BATCH (this test's subject, every assertion below) did not.
-  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
+  await expect(header.getByText("STREAM RECONNECTING")).toBeVisible();
   await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
-  // Phase 0 fix 5: the chip states 130s exactly ("2m old") instead of falling
+  // Phase 0 fix 5: the chip states 130s exactly ("2m") instead of falling
   // silent inside the hour — and correctly ONE connection: the clock is
   // paused, so the stream's reconnect backoff never fires and this is a
-  // genuinely idle stream rather than a re-snapshotting one.
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 2m old");
+  // genuinely idle stream rather than a re-snapshotting one. p1a-4: 130s is
+  // ten seconds past the two-sample rule, so the chip wears AGING.
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 2m · AGING");
   expect(connections).toBe(1);
 
   await blindWake(page);
 
-  // THE FIX. The ribbon stops claiming anything about the age: the computed
-  // reading is not rendered (the understated "2m old" would be the defect
-  // exactly), and the ONE chip carries a refusal instead.
+  // THE FIX. The appbar stops claiming anything about the age: the computed
+  // reading is not rendered (the understated "2m" would be the defect
+  // exactly), and the ONE chip carries a refusal instead — no tier word, no
+  // tier color, because an unknown age has no tier.
   await expect(page.getByTestId("ribbon-snapshot")).toHaveText(
-    `snapshot #1 · ${REFRESHING}`,
+    `SNAPSHOT ${REFRESHING}`,
   );
   await expect(page.getByTestId("ribbon-snapshot")).toHaveCount(1);
   // NOT A STALENESS CLAIM: the page does not know the batch is old, only that
@@ -238,15 +240,16 @@ test("(1) THE ROUND-13 RIBBON DEFECT: an idle stream + two blind clocks no longe
   // reconnect that had not answered, which is finding 4 in one line. Two
   // subjects, two statements, and now BOTH are true: the connection is being
   // re-established, and the age of the batch it is holding is unknown.
-  await expect(header.getByText("STREAM · CONNECTING")).toBeVisible();
+  await expect(header.getByText("STREAM CONNECTING")).toBeVisible();
   await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
   await expect(page.getByTestId("ribbon-snapshot")).toContainText("age UNKNOWN");
 
   // THE REPAIR LANDS. A new receipt — and a new receipt is the only thing that
-  // discharges an unknown age. The reading the ribbon could not compute a
-  // moment ago is computable again: 10930s → "3h 2m", in humanAge precision.
+  // discharges an unknown age. The reading the appbar could not compute a
+  // moment ago is computable again: 10930s → "3h 2m", in humanAge precision —
+  // and past the sweep worst case, so it wears the CRITICAL register.
   releaseRepair();
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 3h 2m old");
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 3h 2m · CRITICAL");
   await expect(page.getByTestId("ribbon-snapshot")).not.toContainText("UNKNOWN");
   // ONE reconnect for this repair, and it is still the only one: the successful
   // attempt ended the schedule.
@@ -304,20 +307,20 @@ test("(1) THE RIBBON'S REPAIR IS BOUNDED: one reconnect per step, then it stops 
   // WAVE R7: the body ended, so the stream is closed and parked on its backoff.
   // See the note on the previous test — LIVE is now a claim about the CURRENT
   // connection, and this mock never gives it one.
-  await expect(page.getByRole("banner").getByText("STREAM · RECONNECTING")).toBeVisible();
+  await expect(page.getByRole("banner").getByText("STREAM RECONNECTING")).toBeVisible();
   expect(connections).toBe(1);
 
   await blindWake(page);
 
   // ATTEMPT 1 — immediate, at the reconcile itself.
   await expect.poll(() => connections).toBe(2);
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText(`snapshot #1 · ${REFRESHING}`);
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText(`SNAPSHOT ${REFRESHING}`);
 
   // ATTEMPT 2 and ATTEMPT 3 — the bounded schedule, one reconnect each. No
   // polling loop: each step is armed only when the previous attempt has been
   // given up on.
   await advanceUntil(page, () => connections, 3);
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText(`snapshot #1 · ${REFRESHING}`);
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText(`SNAPSHOT ${REFRESHING}`);
   await advanceUntil(page, () => connections, 4);
 
   // The third attempt gets the same patience as the other two and spends it.
@@ -327,7 +330,7 @@ test("(1) THE RIBBON'S REPAIR IS BOUNDED: one reconnect per step, then it stops 
   // statement — and it still does not claim the batch is stale, because the
   // page still does not know that. It knows it could not find out.
   await expect(page.getByTestId("ribbon-snapshot")).toHaveText(
-    `snapshot #1 · ${REFRESH_FAILED}`,
+    `SNAPSHOT ${REFRESH_FAILED}`,
   );
   await expect(page.getByTestId("ribbon-snapshot")).not.toContainText("old");
   // AND IT IS A BOUND: those ten seconds produced no fourth attempt. The stream
@@ -337,13 +340,13 @@ test("(1) THE RIBBON'S REPAIR IS BOUNDED: one reconnect per step, then it stops 
   // describes the STREAM, which really is connected" — but every reconnect in
   // this test is HELD by the mock with no response, so the stream is not
   // connected at all; the ribbon was painting LIVE from the retained batch
-  // alone. That is finding 4 exactly. The badge now states the truth, and the
+  // alone. That is finding 4 exactly. The chip now states the truth, and the
   // reader is told BOTH facts: the connection is still being attempted, and the
   // age of the data they are holding could not be restored.
-  await expect(page.getByRole("banner").getByText("STREAM · CONNECTING")).toBeVisible();
+  await expect(page.getByRole("banner").getByText("STREAM CONNECTING")).toBeVisible();
   await expect(page.getByRole("banner").getByText("LIVE · WATERMARKED")).toHaveCount(0);
   await expect(page.getByTestId("ribbon-snapshot")).toHaveText(
-    `snapshot #1 · ${REFRESH_FAILED}`,
+    `SNAPSHOT ${REFRESH_FAILED}`,
   );
 
   releaseAll();
@@ -563,8 +566,8 @@ test("A CLOCK-CERTIFIED RESUME NEVER SHOWS THE UNKNOWN REGISTER", async ({ page 
   const line = page.getByTestId("book-freshness");
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 59m ago");
   // Phase 0 fix 5: the chip states the sub-hour age exactly instead of
-  // withholding it until the threshold.
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 59m old");
+  // withholding it until the threshold. p1a-4: 3550s wears the STALE tier.
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 59m · STALE");
 
   // AN ORDINARY SLEEP WITH AN HONEST WALL CLOCK: five hours the recompute can
   // ADD, in full. This is R4's case and it stays R4's case — the evidence is
@@ -577,7 +580,7 @@ test("A CLOCK-CERTIFIED RESUME NEVER SHOWS THE UNKNOWN REGISTER", async ({ page 
   // be a false alarm over an age the page can state exactly, and a register
   // that cries wolf on every ordinary sleep is a register nobody reads.
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 5h 59m ago");
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 5h 59m old");
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 5h 59m · CRITICAL");
   await expect(page.getByTestId("ribbon-snapshot")).not.toContainText("UNKNOWN");
   await expect(page.getByTestId("book-stamp-freshness")).not.toContainText("UNKNOWN");
 });

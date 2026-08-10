@@ -18,6 +18,8 @@
 //
 // Pinned by tests/unit/freshness.spec.ts.
 
+import type { FreshnessTier } from "./freshnessTiers";
+
 /**
  * A wire age in seconds as `{X}h {Y}m` — the coarse human form the stampline
  * and the head line carry. Under an hour it degrades to `{Y}m`, and under a
@@ -704,15 +706,84 @@ export function batchFreshnessLineUnknown(batch: FreshnessBatch, refreshFailed: 
 // pins moved to tests/unit/freshness-tiers.spec.ts.
 // ---------------------------------------------------------------------------
 
-// Phase 0 fix 5: the always-on snapshot chip. Replaced the retired suffix's
-// >1h gate — freshness is stated at EVERY age, in humanAge precision, as its
-// own element beside the connection badge (never inside it).
-export function snapshotChip(batchId: number, ageSeconds: number): string {
-  return `snapshot #${String(batchId)} · ${humanAge(ageSeconds)} old`;
+// ---------------------------------------------------------------------------
+// THE SNAPSHOT CHIP, STRUCTURED (p1a-4 — the canon appbar, build-contract §10
+// / §05–§06). Phase 0's `snapshot #N · Xs old` string becomes PARTS the
+// appbar composes: a sans `SNAPSHOT` label, a mono age value, and the SLA
+// tier word riding after a middot. The batch identity moved to its own
+// `BATCH #N` chip, so the id is no longer part of this chip's TEXT — it is
+// carried in the parts for the chip's title, where the age still names its
+// subject.
+//
+// Rendered: `SNAPSHOT 42s` (fresh — measured ink, NO tier word, no green) ·
+// `SNAPSHOT 4m 12s · AGING` · `SNAPSHOT 22m · STALE` · `SNAPSHOT 18h 12m ·
+// CRITICAL` — and, under a blind resume, the unknown register's EXACT
+// existing sentence: `SNAPSHOT age UNKNOWN since resume · refreshing`.
+//
+// PRECISION IS HOUSE LAW: the age is `humanAge` output (`18h 12m`), not the
+// canon specimens' compact `18h` — a cosmetic divergence, recorded in the
+// ledger (§p1a-4). The tier vocabulary deliberately contains neither "old"
+// (the unknown register's negative pins) nor "UNKNOWN" (the known register's).
+// ---------------------------------------------------------------------------
+
+/**
+ * The tier's rendered word. FRESH is null BY DESIGN: "measured ink · no
+ * signal · no green" — freshness is the absence of a warning, not a verdict
+ * to celebrate (canon §06).
+ */
+export const SNAPSHOT_TIER_WORD: Record<FreshnessTier, string | null> = {
+  fresh: null,
+  aging: "AGING",
+  stale: "STALE",
+  critical: "CRITICAL",
+};
+
+/** What the appbar's snapshot chip is made of. */
+export interface SnapshotChipParts {
+  /** The chip's sans label. */
+  readonly label: "SNAPSHOT";
+  /**
+   * The batch the age describes — for the chip's TITLE. Its rendered text
+   * identity lives on the `BATCH #N` chip beside this one.
+   */
+  readonly batchId: number;
+  /** Mono value: the humanAge of a known age, or the unknown-register sentence. */
+  readonly age: string;
+  /** `AGING` / `STALE` / `CRITICAL`; null for FRESH and for the unknown register. */
+  readonly tierWord: string | null;
 }
 
-export function snapshotChipUnknown(batchId: number, refreshFailed: boolean): string {
-  return `snapshot #${String(batchId)} · age ${unknownSincePhrase(refreshFailed)}`;
+/**
+ * The chip for a KNOWN age. The tier is the caller's — computed by
+ * `freshnessTier` (lib/freshnessTiers.ts) from the SAME anchored seconds
+ * rendered here, so severity and text can never disagree.
+ */
+export function snapshotChipParts(
+  batchId: number,
+  ageSeconds: number,
+  tier: FreshnessTier,
+): SnapshotChipParts {
+  return {
+    label: "SNAPSHOT",
+    batchId,
+    age: humanAge(ageSeconds),
+    tierWord: SNAPSHOT_TIER_WORD[tier],
+  };
+}
+
+/**
+ * The chip while the age is UNKNOWN (Wave R6's register, byte-identical
+ * sentences). No tier word — an unknown age has no tier, not a small one —
+ * and the caller renders the unknown register's dashed chip, never any
+ * tier's color.
+ */
+export function snapshotChipUnknown(batchId: number, refreshFailed: boolean): SnapshotChipParts {
+  return {
+    label: "SNAPSHOT",
+    batchId,
+    age: unknownAgePhrase(refreshFailed),
+    tierWord: null,
+  };
 }
 
 // ---------------------------------------------------------------------------

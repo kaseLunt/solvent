@@ -176,24 +176,25 @@ test("(1) THE RIBBON ENGAGES POST-RESUME: a slept-through threshold is still cro
   // base delivered — and this mock satisfies neither, so the badge names the
   // connection it has. The age assertions below are untouched: the batch and
   // its disclosure are RETAINED across the dead connection.
-  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
+  await expect(header.getByText("STREAM RECONNECTING")).toBeVisible();
   await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
   // Phase 0 fix 5: the chip is ALWAYS visible — the sub-hour age is stated
-  // exactly, not withheld until a threshold.
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 59m old");
+  // exactly, not withheld until a threshold. p1a-4: 3550s wears STALE.
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 59m · STALE");
 
   // Five hours of suspend: the interval never ran, `performance.now()` never
   // advanced. THE DEFECT was that the rendered age could never move from here —
   // the chip still shows the pre-suspend reading until the resume reconciles.
   await page.clock.setSystemTime(new Date(T0.getTime() + 5 * 3_600_000));
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 59m old");
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 59m · STALE");
 
   await dispatchResume(page);
-  // 3550s + 5h certified by the wall clock = 21550s → humanAge "5h 59m".
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 5h 59m old");
+  // 3550s + 5h certified by the wall clock = 21550s → humanAge "5h 59m" —
+  // past the sweep worst case, so the tier escalates to CRITICAL with it.
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 5h 59m · CRITICAL");
   // Two subjects, two statements, both true: the stream's real posture, and the
   // age of the batch it delivered before it hung up.
-  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
+  await expect(header.getByText("STREAM RECONNECTING")).toBeVisible();
 });
 
 test("(1) NEVER DECREASES: a wall clock stepped BACKWARDS cannot rewind the rendered age", async ({

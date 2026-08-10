@@ -1,60 +1,92 @@
-/* Integrity Ribbon + posture chip + degradation banner.
- * Derived from the mockup's .live chip and .titlebar vocabulary. */
+/* The canon APPBAR (build-contract §10, p1a-4) + the proof ribbon + the
+ * degradation banner. Chips per canon §05/§06: sans 12px uppercase state
+ * words, mono embedded values, outline-first — a fill is the top escalation
+ * register only. */
 
-.ribbon {
+.appbar {
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
-  font-family: var(--mono);
-  font-size: var(--fs-badge);
-  letter-spacing: var(--track-label);
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  font-family: var(--sans);
+  font-size: var(--t-floor);
+  color: var(--ink-2);
+}
+
+/* ---- the chip family (canon §05 chip shapes) ---- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-family: var(--sans);
+  font-size: var(--t-floor);
+  font-weight: 600;
+  letter-spacing: var(--track-refused);
+  text-transform: uppercase;
   color: var(--ink-2);
   white-space: nowrap;
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--panel);
+/* Embedded values are mono, never uppercase, tabular. */
+.chip .val {
+  font-family: var(--mono);
+  font-size: var(--t-mono-floor);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
 }
 
-.badge.live {
-  color: var(--ok);
-  border-color: var(--ok);
-}
-
-.badge.proof {
-  color: var(--accent);
+/* Text always uses the -text grade; borders keep the fill/glyph chroma. */
+.cAccent {
+  color: var(--accent-text);
   border-color: var(--accent);
 }
 
-/* The snapshot chip (Phase 0 fix 5): the batch's own freshness statement,
-   ALWAYS visible as a sibling of the stream badge — the muted tone the old
-   in-badge suffix carried, simply moved out of the badge so connection state
-   and snapshot freshness are two elements, never one green sentence implying
-   fresh numbers. Severity styling arrives with the Phase 1 SLA. */
-.snapshot {
-  color: var(--ink-3);
-}
-
-.badge.waiting {
-  color: var(--ink-3);
-  border-style: dashed;
-}
-
-.badge.degraded {
-  color: var(--warn);
+.cWarn {
+  color: var(--warn-text);
   border-color: var(--warn);
 }
 
-.badge.down {
-  color: var(--crit);
+/* Outline-first: coral text + border, NO fill. */
+.cCrit {
+  color: var(--crit-text);
   border-color: var(--crit);
+}
+
+/* The one escalation fill — critical comparators and critical age only. */
+.cCritFill {
+  color: var(--crit-text);
+  border-color: var(--crit);
+  background: var(--crit-bg);
+}
+
+.cQuiet {
+  color: var(--ink-2);
+  border-color: var(--line);
+}
+
+/* The unknown register: dashed, never any tier's color. */
+.cUnknown {
+  color: var(--ink-2);
+  border-color: var(--ink-3);
+  border-style: dashed;
+}
+
+/* 1×16px divider between appbar chips. */
+.sep {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
 }
 
 .dot {
@@ -82,7 +114,54 @@
   }
 }
 
-/* The watermark VECTOR: one chip per named as-of. Never a single fake block. */
+/* ---- the Data status popover (canon §10: raw block heights and poll marks
+ * live HERE, not in the bar). A native disclosure; the panel is an overlay —
+ * the one place elevation is lawful. ---- */
+
+.dataStatus {
+  position: relative;
+  margin-left: auto;
+}
+
+.dataStatusLink {
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: var(--t-floor);
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+
+.dataStatusLink::-webkit-details-marker {
+  display: none;
+}
+
+.dataStatusLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dataStatusPanel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 240px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  font-family: var(--mono);
+  font-size: var(--t-mono-sm);
+  white-space: nowrap;
+}
+
+/* The watermark VECTOR: one line per named as-of. Never a single fake block. */
 .asOf {
   color: var(--ink-3);
 }
@@ -93,19 +172,48 @@
 }
 
 .asOf b.ok {
-  color: var(--ok);
+  color: var(--ok-text);
 }
 
 .asOf b.warn {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .asOf b.crit {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 .asOf b.dim {
   color: var(--ink-3);
+}
+
+/* ---- the proof ribbon (mode="proof", unchanged register) ---- */
+
+.ribbon {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+
+.badge.proof {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* ---- degradation banner ---- */

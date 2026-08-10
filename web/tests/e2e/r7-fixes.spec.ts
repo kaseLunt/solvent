@@ -488,10 +488,13 @@ test("(4) A HUNG RECONNECT NEVER LEAVES LIVE PAINTED — and the base frame is w
     await page.goto("/book?engine=aave_v3_etherfi");
 
     const header = page.getByRole("banner");
-    // A GENUINELY LIVE CONNECTION: open, and its base delivered. This is the
-    // only condition under which the green chip is honest, and it is the only
-    // place in the suite where it can be observed at all.
-    await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+    // A GENUINELY OPEN CONNECTION: open, and its base delivered. This is the
+    // only condition under which the CONNECTED chip is honest (p1a-4: the
+    // retired LIVE badge's successor — accent, never green), and it is one of
+    // the few places in the suite where it can be observed at all.
+    await expect(header.getByText("STREAM CONNECTED")).toBeVisible();
+    // p1a-4: the raw watermark heights live in the Data status popover now.
+    await header.getByTestId("ribbon-data-status").click();
     await expect(header.getByText("@25,635,618")).toBeVisible();
     await expect(page.getByTestId("ribbon-batch-age")).toHaveCount(0);
     expect(harness.connections()).toBe(1);
@@ -502,22 +505,24 @@ test("(4) A HUNG RECONNECT NEVER LEAVES LIVE PAINTED — and the base frame is w
     await blindWake(page);
     await expect.poll(() => harness.connections()).toBe(2);
 
-    // THE FIX. Connection 2 is open and has delivered nothing, so LIVE is
-    // withdrawn and the ribbon names the posture it actually has. THE OLD
-    // BEHAVIOUR was `LIVE · WATERMARKED` here, indefinitely, over a stream that
+    // THE FIX. Connection 2 is open and has delivered nothing, so CONNECTED
+    // is withdrawn and the appbar names the posture it actually has. THE OLD
+    // BEHAVIOUR was the healthy badge here, indefinitely, over a stream that
     // never came back.
-    await expect(header.getByText("STREAM · AWAITING BASE")).toBeVisible();
+    await expect(header.getByText("STREAM AWAITING BASE")).toBeVisible();
     await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
 
     // AND THE READER KEEPS EVERYTHING ELSE. The watermark vector, the batch,
     // and the age disclosure all stay exactly where they were — losing the
     // connection must not also cost the reader their book, and the age is
-    // disclosed as UNKNOWN rather than as the understated number.
+    // disclosed as UNKNOWN rather than as the understated number. (The
+    // popover was opened above and holds across re-renders — the vector is
+    // still on offer through a dead connection.)
     await expect(header.getByText("@25,635,618")).toBeVisible();
     // Phase 0 fix 5: the disclosure moved onto the always-visible snapshot
     // chip (`ribbon-snapshot`); the unknown register's phrase is unchanged.
     await expect(page.getByTestId("ribbon-snapshot")).toHaveText(
-      `snapshot #1 · age ${REFRESHING}`,
+      `SNAPSHOT age ${REFRESHING}`,
     );
     await expect(page.getByRole("table", { name: "positions for aave_v3_etherfi" })).toBeVisible();
 
@@ -530,11 +535,13 @@ test("(4) A HUNG RECONNECT NEVER LEAVES LIVE PAINTED — and the base frame is w
     if (held === null) throw new Error("the reconnect never reached the server");
     held.write(snapshotFrame("2026-07-29T13:00:15Z", THREE_HOURS_MS / 1000 + 130));
 
-    await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+    await expect(header.getByText("STREAM CONNECTED")).toBeVisible();
     // The new receipt discharges the unknown age in the same breath, and the
-    // suffix the ribbon could not compute a moment ago says three hours.
-    // Phase 0 fix 5: the chip, in humanAge precision — 10930s → "3h 2m".
-    await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 3h 2m old");
+    // reading the appbar could not compute a moment ago says three hours.
+    // Phase 0 fix 5: humanAge precision — 10930s → "3h 2m" — and p1a-4: past
+    // the sweep worst case, the CRITICAL register, BESIDE the connected chip:
+    // both true, both shown, neither laundering the other.
+    await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 3h 2m · CRITICAL");
     await expect(page.getByTestId("ribbon-batch-age-unknown")).toHaveCount(0);
     // ONE reconnect for this repair: the successful attempt ended the schedule.
     expect(harness.connections()).toBe(2);
@@ -566,29 +573,34 @@ test("(4) A SERVER THAT HANGS UP TAKES LIVE WITH IT — and nothing else", async
     await page.goto("/book?engine=aave_v3_etherfi");
 
     const header = page.getByRole("banner");
-    await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+    await expect(header.getByText("STREAM CONNECTED")).toBeVisible();
     await expect(page.getByTestId("ribbon-batch-age")).toHaveCount(0);
 
     // THE SERVER HANGS UP. Nothing about the reader's data changed; only the
     // connection did.
     first.response?.end();
 
-    // LIVE IS WITHDRAWN — this is a live→dead transition observed for real,
-    // which is the state the finding says must never keep the green chip.
+    // CONNECTED IS WITHDRAWN — this is a live→dead transition observed for
+    // real, which is the state the finding says must never keep the healthy
+    // chip.
+    await expect(header.getByText("STREAM CONNECTED")).toHaveCount(0);
     await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
     await expect(
-      header.getByText(/STREAM · (RECONNECTING|CONNECTING|AWAITING BASE|CLOSED)/),
+      header.getByText(/STREAM (RECONNECTING|CONNECTING|AWAITING BASE|CLOSED)/),
     ).toBeVisible();
 
-    // AND NOTHING ELSE IS TAKEN. The watermark vector is still the batch's, the
-    // table is still the reader's, and the batch AGE still ticks and still
-    // engages its threshold — a dead connection is not a reason to stop telling
-    // the reader how old their data is.
+    // AND NOTHING ELSE IS TAKEN. The watermark vector is still the batch's
+    // (p1a-4: on offer through the Data status popover), the table is still
+    // the reader's, and the batch AGE still ticks and still engages its
+    // threshold — a dead connection is not a reason to stop telling the
+    // reader how old their data is.
+    await header.getByTestId("ribbon-data-status").click();
     await expect(header.getByText("@25,635,618")).toBeVisible();
     await expect(page.getByRole("table", { name: "positions for aave_v3_etherfi" })).toBeVisible();
     await page.clock.fastForward(60_000);
-    // Phase 0 fix 5: the chip, in humanAge precision — 3610s → "1h 0m".
-    await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 1h 0m old");
+    // Phase 0 fix 5: the chip, in humanAge precision — 3610s → "1h 0m",
+    // wearing STALE (past the ceiling, inside the sweep worst case).
+    await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 1h 0m · STALE");
     await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
   } finally {
     await harness.close();

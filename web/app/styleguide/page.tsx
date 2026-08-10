@@ -9,7 +9,8 @@ import { RefusedTag } from "@/components/RefusedTag";
 import { ProjectionBadge } from "@/components/ProjectionBadge";
 import { Stampline, StampItem } from "@/components/Stampline";
 import { Ribbon } from "@/components/Ribbon";
-import { STREAM_RECONNECTING } from "@/lib/stream-posture";
+import { STREAM_CONNECTED, STREAM_RECONNECTING } from "@/lib/stream-posture";
+import { snapshotChipParts } from "@/lib/freshness";
 import { DataTable, type Column } from "@/components/DataTable";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { Scatter } from "@/components/charts/Scatter";
@@ -278,11 +279,21 @@ export default function StyleguidePage() {
       </section>
 
       <section className={styles.section} data-testid="sg-ribbon">
-        <h2>Ribbon · two modes, watermark VECTOR, never one fake block</h2>
+        <h2>Appbar · each truth its own chip; watermark VECTOR in the popover</h2>
+        {/* p1a-4: the canon appbar — STREAM CONNECTED is an accent chip
+            (posture, not health, never green) and the snapshot chip carries
+            the SLA tier of the age it states. */}
         <div className={styles.row}>
           <Ribbon
             mode="stream"
-            posture={{ live: true }}
+            posture={{ label: STREAM_CONNECTED, tone: "accent" }}
+            snapshot={{
+              parts: snapshotChipParts(18251, 48, "fresh"),
+              tier: "fresh",
+              title: "specimen — snapshot freshness of batch #18251",
+            }}
+            batchId={18251}
+            coverage={{ answered: 2, total: 2, withheld: [] }}
             asOfs={[
               { label: "aave_v3", value: "@25,641,730" },
               { label: "debt_manager", value: "@25,641,712" },
@@ -293,20 +304,30 @@ export default function StyleguidePage() {
         <div className={styles.row}>
           <Ribbon
             mode="stream"
-            posture={{ live: true }}
+            posture={{ label: STREAM_CONNECTED, tone: "accent" }}
             superseded
+            snapshot={{
+              parts: snapshotChipParts(18251, 300, "aging"),
+              tier: "aging",
+              title: "specimen — an AGING snapshot beside a SUPERSEDED flag",
+            }}
+            batchId={18251}
             asOfs={[{ label: "aave_v3", value: "@25,641,730" }]}
           />
         </div>
-        {/* Wave R7 — the SAME retained data under a dead connection. LIVE is a
-            claim about the socket, so it is not made here; the book is not
-            taken away for it either. */}
+        {/* Wave R7 — the SAME retained data under a dead connection. The
+            socket's own word is a chip; the book is not taken away for it. */}
         <div className={styles.row}>
           <Ribbon
             mode="stream"
-            posture={{ live: false, label: STREAM_RECONNECTING, tone: "waiting" }}
+            posture={{ label: STREAM_RECONNECTING, tone: "warn" }}
+            snapshot={{
+              parts: snapshotChipParts(18251, 10_930, "critical"),
+              tier: "critical",
+              title: "specimen — critical age under a reconnecting stream",
+            }}
+            batchId={18251}
             asOfs={[{ label: "aave_v3", value: "@25,641,730" }]}
-            snapshot="snapshot #18251 · 3h 2m old"
           />
         </div>
         <div className={styles.row}>

@@ -1427,7 +1427,7 @@ Task list:
 - [x] Task 2 — stylelint: the structural floor (p1a-2)
 - [x] Task 3 — freshness tier machinery (pure) + meta constants provider
       (p1a-3)
-- [ ] Task 4 — THE MIGRATION WAVE: canon appbar + tiered chip (badge
+- [x] Task 4 — THE MIGRATION WAVE: canon appbar + tiered chip (badge
       retirement) (p1a-4)
 - [ ] Task 5 — shared component kit (verdict banner, exact affordance,
       chips, states) (p1a-5)
@@ -1734,6 +1734,217 @@ green 11/11 after the two modules landed.
 - `npm run typecheck`: clean. `npm run lint` (eslint .): clean, zero
   warnings. `npm run lint:css`: clean. `npx eslint` on the 7 touched
   files: clean.
+
+### p1a-4 · THE MIGRATION WAVE — canon appbar + tiered chip (Task 4)
+
+The header's one-badge vocabulary becomes the canon appbar
+(build-contract §10): `STREAM <state>` chip · `SNAPSHOT <age> · <TIER>`
+chip · `BATCH #id` chip · `COVERAGE n/n ENGINES` chip · a native
+`<details>` "Data status →" popover carrying the raw watermark as-ofs.
+`LIVE · WATERMARKED` is RETIRED (house law 3: a healthy transport must
+not launder a stale analysis). Commit `feat(web): p1a-4 the appbar
+states each truth separately - stream, snapshot tier, batch, coverage;
+LIVE·WATERMARKED is retired`.
+
+**Production changes (7 files)**
+
+- `web/lib/stream-posture.ts` — the vocabulary re-cut: `STREAM
+  CONNECTED` (accent) / `STREAM CONNECTING` / `STREAM RECONNECTING`
+  (warn) / `STREAM CLOSED` (down) / `STREAM AWAITING BASE` / `STREAM NO
+  BATCH` (waiting = the dashed unknown register). Middots dropped — the
+  canon chip is sans uppercase with no interior punctuation; the
+  exported constant NAMES are unchanged, so the spec's identity pins
+  survive by import. THE `live: true` ARM RETIRES: `RibbonStreamPosture`
+  is now uniformly `{ label, tone }` — a liveness claim is
+  unrepresentable, and CONNECTED is just another chip. R7's law (open
+  AND base-delivered) is byte-for-byte the same test.
+- `web/lib/freshness.ts` — `snapshotChip` (string) →
+  `snapshotChipParts(batchId, ageSeconds, tier)` returning `{ label:
+  "SNAPSHOT", batchId, age, tierWord }` with `SNAPSHOT_TIER_WORD`
+  (fresh → null — "measured ink · no signal · no green"; AGING / STALE /
+  CRITICAL). `snapshotChipUnknown` keeps its signature, returns the same
+  parts shape with the EXACT R6 sentences in the age slot and tierWord
+  null. The batch id left the chip TEXT (the BATCH chip owns identity)
+  and survives in the parts for the chip's title.
+- `web/components/Ribbon.tsx` — the stream branch renders the appbar:
+  chip family classes per canon §05/§06 (c-accent / c-warn / c-crit
+  outline / c-crit-fill / c-quiet / c-unknown dashed), 1×16px seps, the
+  Data status popover (native `<details>`, panel is an overlay — the one
+  lawful `--shadow`). New props: `snapshot: { parts, tier|null, title }`,
+  `batchId`, `coverage`. Proof mode untouched.
+- `web/components/PostureRibbon.tsx` — tier from
+  `freshnessTier(anchoredSeconds, useMetaConstants().constants)`; R6's
+  unknown arbitration preserved one-to-one (unresolved → unknown chip,
+  no tier computed, no tier color). `TIER_FALLBACK_DISCLOSURE` =
+  "thresholds from built-in fallback — /v1/meta unavailable" appended to
+  the chip title when `source === "fallback"` (task-3 carry-in wording —
+  the arm is reachable, not "unreachable": any failed/refused meta read,
+  including before the round-trip resolves). Unavailable branch: `NO
+  SERVABLE BATCH` is a c-crit chip; the `stale for` reading beside it is
+  UNTOUCHED (its pins prove it). Empty branch renders through the same
+  chip path via `ribbonEmptyPosture`.
+- `web/components/ribbon.module.css` — the chip family (all font-sizes
+  `var(--t-floor)` / `var(--t-mono-floor)`; text colors always the
+  `-text` grade), appbar frame, sep, popover; `.badge.proof` + banner
+  classes kept; `.live/.waiting/.down/.degraded/.snapshot` deleted
+  (zero consumers).
+- `web/app/layout.tsx` — `MetaConstantsProvider` mounted inside
+  `PostureProvider` (one /v1/meta ask per tab).
+- `web/app/styleguide/page.tsx` — sg-ribbon specimens moved to the new
+  API (STREAM CONNECTED accent chip, tiered snapshot specimens);
+  full rebuild remains Task 6.
+
+**Coverage chip derivation (READ from the envelope, decision recorded)**:
+`total` = `batch.watermarks.length` (the stamp vector — one entry per
+engine the batch binds; served batches require ≥ 1 stamp);
+`withheld` = deduped `batch.refused_engines` (schema: "engines whose
+WHOLE book is withheld", present on the summary precisely because
+`refused_count` counts position rows); `answered = total − withheld`.
+Warn variant + `· <wire names> WITHHELD` when answered < total.
+RENDERED ONLY WHEN UNAMBIGUOUS: if a refused engine carries no stamp
+the chip is withheld entirely rather than invented — **Track B envelope
+gap, ledgered**: `refused_engines` is `string[]` with no structural
+binding to the stamp vector.
+
+**Cosmetic divergence, ledgered**: canon §06 specimens print compact
+ages (`SNAPSHOT 18h · CRITICAL`); production keeps `humanAge` precision
+(`SNAPSHOT 18h 12m · CRITICAL`) — precision is house law (p0-5 pinned
+"hours+minutes, not a coarse suffix"). Canon §10 shows `COVERAGE 2/2`;
+the chip renders §05 dimension 3's fuller `COVERAGE 2/2 ENGINES`.
+
+**Red-first evidence**: the five-test `p1a-4 · the canon appbar`
+describe (p1a-fixes.spec.ts) written and run against the pre-migration
+build: 5/5 failed (`web-3820-p1a4-red.log`) — missing testids, old chip
+text, badge still painted, popover absent.
+
+**THE MIGRATION TABLE — header vocabulary pins (pin-map §1; line
+numbers are pre-migration)**
+
+| Site | Old assertion | New assertion |
+|---|---|---|
+| shell.spec.ts:58 (×6 routes) | regex `LIVE · WATERMARKED\|STREAM · (CONNECTING\|RECONNECTING\|AWAITING BASE\|CLOSED)\|NO SERVABLE BATCH` | regex `STREAM (CONNECTED\|CONNECTING\|RECONNECTING\|AWAITING BASE\|CLOSED\|NO BATCH)\|NO SERVABLE BATCH` |
+| p0-fixes:793 | `LIVE · WATERMARKED` visible (real held-open SSE) | `STREAM CONNECTED` visible + `LIVE · WATERMARKED` count 0 (added) |
+| r3:193 / r3:208 | `STREAM · RECONNECTING` visible | `STREAM RECONNECTING` visible |
+| r3:194 | `LIVE · WATERMARKED` count 0 | KEPT byte-identical (retirement guard) |
+| r4:179 / r4:196 | `STREAM · RECONNECTING` visible | `STREAM RECONNECTING` visible |
+| r4:180 | count 0 | KEPT |
+| r6:207 / r6:307 | `STREAM · RECONNECTING` visible | `STREAM RECONNECTING` visible |
+| r6:241 / r6:343 | `STREAM · CONNECTING` visible | `STREAM CONNECTING` visible |
+| r6:208 / 242 / 344 | count 0 | KEPT |
+| r7:317 / 332 / 382 | `NO SERVABLE BATCH` visible | KEPT (re-skinned as c-crit chip, same text) |
+| r7:494 | `LIVE · WATERMARKED` visible (genuinely open server) | `STREAM CONNECTED` visible |
+| r7:509 | `STREAM · AWAITING BASE` visible | `STREAM AWAITING BASE` visible |
+| r7:533 | `LIVE · WATERMARKED` visible again on base frame | `STREAM CONNECTED` visible |
+| r7:569 | `LIVE · WATERMARKED` visible before hang-up | `STREAM CONNECTED` visible (+ new `STREAM CONNECTED` count-0 after hang-up) |
+| r7:580 | regex `STREAM · (RECONNECTING\|CONNECTING\|AWAITING BASE\|CLOSED)` | same set, middot dropped |
+| r7:383 / 510 / 578 / 592 | count 0 | KEPT |
+| state-matrix:1080 / 1110 | regex `STREAM · (…)` | middot dropped |
+| state-matrix:1082 / 1112 / 1151 | count 0 | KEPT |
+| state-matrix:1126 / 1150 | `NO SERVABLE BATCH` visible / count 0 | KEPT |
+
+Every `LIVE · WATERMARKED` count-0 pin is KEPT with the retired string —
+they are now the permanent resurrection guards (mutation ii's kill
+sites alongside the CONNECTED pins).
+
+**Retargeted @-payload pins (INTO the popover — the tests open it)**:
+state-matrix:1096 (sse-snapshot) and :1149 (sse-recovered), r7:495
+(before wake), r7:516 (through the dead connection — the popover's DOM
+open state holds across re-renders, which is itself now exercised),
+r7:587 (after hang-up, opened there). Each is preceded by a
+`ribbon-data-status` click; p1a-fixes additionally pins the DEMOTION
+(`@25,635,618` hidden while the popover is closed).
+
+**THE MIGRATION TABLE — snapshot-chip pins (pin-map §2)**
+
+| Site | Old | New |
+|---|---|---|
+| unit freshness-snapshot (5 exact string pins) | `"snapshot #18251 · 42s old"` / `5m` / `18h 12m` + 2 unknown sentences | structured-parts pins: `{label:"SNAPSHOT", batchId, age, tierWord}` at 42s/fresh·null, 300s/aging·AGING, 3550s/stale·STALE, 65532s/critical·CRITICAL + unknown parts (exact sentences, tierWord null) + NEW tier-vocabulary fence (no "old", no "UNKNOWN" in any tier word; fresh is null) |
+| unit freshness-blind-resume:363-371 ("THE CHIP IS NEVER SILENT") | `snapshotChipUnknown(7,·)` full strings | `.age` = exact sentences, `.tierWord` null (new law: no tier over a refusal), `/\d+h old/` guard on `.age` |
+| r3:198 | `snapshot #1 · 59m old` | `SNAPSHOT 59m · STALE` |
+| r3:203 | `snapshot #1 · 1h 0m old` | `SNAPSHOT 1h 0m · STALE` |
+| r4:183 / 189 | `snapshot #1 · 59m old` | `SNAPSHOT 59m · STALE` |
+| r4:193 | `snapshot #1 · 5h 59m old` | `SNAPSHOT 5h 59m · CRITICAL` |
+| r6:213 | `snapshot #1 · 2m old` | `SNAPSHOT 2m · AGING` (130s is past the two-sample rule) |
+| r6:221-223 / 314 / 320 | `` `snapshot #1 · ${REFRESHING}` `` | `` `SNAPSHOT ${REFRESHING}` `` (local literal r6:54 unchanged — the sentence survives byte-identical) |
+| r6:329-331 / 345-347 | `` `snapshot #1 · ${REFRESH_FAILED}` `` | `` `SNAPSHOT ${REFRESH_FAILED}` `` |
+| r6:249 | `snapshot #1 · 3h 2m old` | `SNAPSHOT 3h 2m · CRITICAL` |
+| r6:567 | `snapshot #1 · 59m old` | `SNAPSHOT 59m · STALE` |
+| r6:580 | `snapshot #1 · 5h 59m old` | `SNAPSHOT 5h 59m · CRITICAL` |
+| r7:519-521 | `` `snapshot #1 · age ${REFRESHING}` `` | `` `SNAPSHOT age ${REFRESHING}` `` (local literal r7:59 unchanged) |
+| r7:537 | `snapshot #1 · 3h 2m old` | `SNAPSHOT 3h 2m · CRITICAL` |
+| r7:591 | `snapshot #1 · 1h 0m old` | `SNAPSHOT 1h 0m · STALE` |
+| p0:796 | `toContainText("42s old")` | `toContainText("42s")` (chip carries no "old") |
+| p0:797 | `toContainText("snapshot #")` | `ribbon-batch` `toContainText("BATCH #")` (identity moved to its chip) |
+| p0:807 | `toContainText("18h 12m old")` | `toContainText("18h 12m")` (precision pin survives on the CRITICAL chip) |
+
+Negative pins KEPT unchanged and still binding: r6:224 (exactly one
+chip), r6:227/332 (no "old" in the unknown register), r6:243
+(`age UNKNOWN` contained), r6:250/581 (no "UNKNOWN" in the known
+register), blind-resume:301-308 (no digits/"stale"/"old" in unknown
+sentences), p0:811 + r7:496/570 (`ribbon-batch-age` retired), r7:538
+(`ribbon-batch-age-unknown` count 0). `stale-since.spec.ts` and all
+`batchFreshnessLine/Stamp` pins: zero movement (their producers are
+untouched).
+
+**stream-posture.spec.ts** — identity pins survived via constants; the
+shape pins moved with the type: "EXACTLY ONE pair is live" → "EXACTLY
+ONE pair is CONNECTED" (label === STREAM_CONNECTED, still `["open/true"]`),
+tone pins waiting→warn for connecting/reconnecting, NEW accent-register
+pin for CONNECTED, and the three not-contain-LIVE guards now sweep BOTH
+`ribbonStreamPosture` and `ribbonEmptyPosture` labels across every
+(state × hasBase) pair — all pass with the new vocabulary (no label
+contains "LIVE").
+
+**SUPERSEDED**: the header badge had ZERO pins; it is now a c-warn chip
+and GAINED its first pin (p1a-fixes: visible + warn-text/warn resolved
+colors, driven by `supersession.superseded = true` on the stream
+fixture).
+
+**Out of scope, untouched (verified)**: the 11 page-surface
+LIVE·WATERMARKED / NO SERVABLE BATCH / SERVING echoes (inspector:464,
+proof.spec ×5, state-matrix:340/1029, book:374, unit
+inspector-evidence:33, proof-evidence:237, tornado-lines:277),
+`web/lib/evidence.ts` producers, DegradationBanner, RouteRefusal,
+error.tsx, the Lab's `lab-result-age` "Xs old" register (p1b vocabulary,
+different surface).
+
+### Proof of gate + mutation kills (p1a-4)
+
+Three mutants, each built and run in isolation, each reverted
+(revert verified by grep for the mutation residue + the final-tree
+full-suite rerun):
+
+- **M1 · tier styling never applied** (`TIER_CLASS` all → `cQuiet`;
+  `web-3820-p1a4-mutM1.log`): KILLED at exactly the tier-register pin —
+  p1a-fixes "tier styling is computed from the ratified bounds"
+  (resolved --warn-text ≠ --ink-2 at the AGING step). 1 failed /
+  8 passed in the file.
+- **M2 · LIVE · WATERMARKED resurrected in the accent arm**
+  (`web-3820-p1a4-mutM2.log`): KILLED at 4 pins across 3 files —
+  p1a-fixes "STREAM CONNECTED … never LIVE", p0-fixes p0-5 (CONNECTED
+  visible), r7 (4) ×2 (CONNECTED visible; the count-0 guards in the
+  same tests fire on the same render). 4 failed / 29 passed.
+- **M3 · popover omits the as-ofs** (`asOfs.slice(0, 0)`;
+  `web-3820-p1a4-mutM3.log`): KILLED at the 5 retargeted watermark
+  pins — p1a-fixes popover test, state-matrix sse-snapshot +
+  sse-recovered, r7 (4) ×2. 6 failed / 53 passed (the 6th, r7 (3)'s
+  `connections` poll, is a parallel-load flake unrelated to the
+  mutation — green in both final-tree full runs).
+
+### Closing counts (p1a-4)
+
+- Suite: 1575 → **1582 tests** (+5 e2e `p1a-4 · the canon appbar`,
+  +1 unit stream-posture accent-register pin, +1 unit
+  freshness-snapshot tier-vocabulary fence; base = p1a-3's 1574 passed
+  + 1 skipped).
+- Full p1a run (final tree, fresh `npm run build`, port 3820):
+  **1581 passed, 1 skipped, 0 failed (35.3s)**
+  (`web-3820-p1a4-final-full.log`) — same single pre-existing
+  styleguide skip; zero movement in untouched specs.
+- `npm run typecheck`: clean. `npm run lint`: clean, zero warnings.
+  `npm run lint:css`: clean (the new chip CSS is all `var(--t-*)`).
+- Red-first: 5/5 new appbar pins failed pre-implementation
+  (`web-3820-p1a4-red.log`).
 
 ### p1b-6 · the identity gap audit closes (Task 6)
 

@@ -190,22 +190,23 @@ test("(2) THE RIBBON ENGAGES: the stale-batch suffix appears on the crossing", a
   // qualification for the green chip; painting LIVE over a closed connection is
   // the defect R7 fixes. It now names the connection it actually has — and the
   // BATCH AGE, which is this test's real subject, renders beside it unchanged.
-  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
+  await expect(header.getByText("STREAM RECONNECTING")).toBeVisible();
   await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
   // Phase 0 fix 5 INVERTED THIS PIN DELIBERATELY: the snapshot chip is ALWAYS
   // visible, so a sub-hour age is STATED exactly rather than withheld until a
   // threshold crossing (the cross-page brief: "Always show the age").
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 59m old");
+  // p1a-4: 3550s is past the price ceiling — the chip wears the STALE tier.
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 59m · STALE");
 
   // The batch really does become an hour old while the tab is open, and the
-  // ribbon now says so — the defect was that it never could.
+  // appbar now says so — the defect was that it never could.
   await page.clock.fastForward(60_000);
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 1h 0m old");
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 1h 0m · STALE");
   // TWO SUBJECTS, TWO STATEMENTS, both still true and both still rendered: the
   // stream's own posture, and the age of the batch it last delivered. Losing
   // the connection does not cost the reader the fact that their data is old —
   // which is the disclosure this whole wave exists to keep on screen.
-  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
+  await expect(header.getByText("STREAM RECONNECTING")).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------

@@ -1,24 +1,28 @@
-import type { RibbonStreamPosture } from "@/lib/stream-posture";
+import type { FreshnessTier } from "@/lib/freshnessTiers";
+import type { SnapshotChipParts } from "@/lib/freshness";
+import type { RibbonPostureTone, RibbonStreamPosture } from "@/lib/stream-posture";
 import styles from "./ribbon.module.css";
 
-// The integrity Ribbon — spec §3.6. Two modes, rendered distinctly:
+// The integrity APPBAR — canon build-contract §10, landed by p1a-4. Two modes:
 //
-//   mode="stream"        the stream posture over a watermark VECTOR of named
-//                        as-ofs (per-engine stamps, sweep age, …). There is
-//                        deliberately NO single-block prop: a global "live at
-//                        block N" does not exist in this system and cannot be
-//                        rendered by this component.
+//   mode="stream"        the canon appbar: each truth its OWN chip —
+//                        STREAM <state> · SNAPSHOT <age> · <TIER> ·
+//                        BATCH #id · COVERAGE n/n (· SUPERSEDED) — with the
+//                        raw watermark VECTOR of named as-ofs demoted into a
+//                        native "Data status →" popover. There is still NO
+//                        single-block prop: a global "live at block N" does
+//                        not exist in this system and cannot be rendered.
 //
-//   PROOF · EXACT @ PIN  reconcile-welded numbers at an exact pin.
+//   PROOF · EXACT @ PIN  reconcile-welded numbers at an exact pin (unchanged).
 //
-// WAVE R7 (Codex round-15 finding 4) — `LIVE · WATERMARKED` IS A CLAIM, AND
-// THIS COMPONENT NO LONGER MAKES IT ON ITS OWN. The mode used to be called
-// "live", and having a batch to render was the whole qualification for painting
-// the green chip; the ribbon therefore went on saying LIVE over a connection
-// that had been torn down and never came back. The mode is now "stream" and it
-// takes a `posture` the caller must have DERIVED from the current connection
-// (lib/stream-posture.ts). A ribbon with data and a dead socket renders the
-// data under the socket's own word.
+// WAVE R7 made liveness a claim about the CURRENT connection; p1a-4 retires
+// the PRIZE for that claim. The audited `LIVE · WATERMARKED` single badge is
+// gone: "a connected stream and an 18-hour snapshot are both true — both
+// always show, separately" (canon §05). The stream chip renders the posture
+// the caller derived (lib/stream-posture.ts) in the posture's own register —
+// accent when connected, never green — and the snapshot chip beside it wears
+// the SLA tier of the age it states, so a healthy transport can never launder
+// a stale analysis (house law 3).
 
 export interface RibbonAsOf {
   /** The input's name, e.g. "aave_v3", "debt_manager", "sweep". */
@@ -28,35 +32,59 @@ export interface RibbonAsOf {
   tone?: "default" | "ok" | "warn" | "crit" | "dim";
 }
 
+/** The snapshot chip: its composed parts, its tier, and its full title. */
+export interface RibbonSnapshotChip {
+  /** From `snapshotChipParts` / `snapshotChipUnknown` (lib/freshness.ts). */
+  readonly parts: SnapshotChipParts;
+  /**
+   * The SLA tier of the stated age — styles the chip per canon §06 (fresh →
+   * quiet, aging → warn, stale → crit outline, critical → crit fill). `null`
+   * is the UNKNOWN register: dashed, never any tier's color, because an
+   * unknown age has no tier, not a small one.
+   */
+  readonly tier: FreshnessTier | null;
+  /** The chip's explanatory title (includes the fallback-thresholds disclosure). */
+  readonly title: string;
+}
+
+/**
+ * The coverage chip's honest derivation, computed by the caller from the
+ * batch envelope (see PostureRibbon). `answered < total` renders the warn
+ * variant with the withheld engines NAMED — counts reconcile visibly, no
+ * silent shrinkage (canon §05 dimension 3).
+ */
+export interface RibbonCoverage {
+  readonly answered: number;
+  readonly total: number;
+  /** Wire names of engines whose whole book is withheld on this batch. */
+  readonly withheld: readonly string[];
+}
+
 export type RibbonProps =
   | {
       mode: "stream";
       /**
-       * Wave R7 — WHAT THE CURRENT CONNECTION IS DOING, derived by the caller
-       * from `streamState` + `hasBase`. `{ live: true }` is the only value that
-       * paints `LIVE · WATERMARKED`; every other value paints the stream's own
-       * word over the SAME retained data, because a reader losing their
-       * connection must not also lose their book.
+       * WHAT THE CURRENT CONNECTION IS DOING, derived by the caller from
+       * `streamState` + `hasBase` (lib/stream-posture.ts). Every posture is a
+       * chip — CONNECTED included — because a reader losing their connection
+       * must not also lose their book, and a healthy socket must not be
+       * allowed to imply a fresh batch.
        */
       posture: RibbonStreamPosture;
-      /** The watermark vector. Every entry names its own as-of. */
-      asOfs: readonly RibbonAsOf[];
-      /** Current batch is superseded — render the warning inline. */
-      superseded?: boolean;
       /**
-       * Phase 0 fix 5 — the snapshot chip, e.g. `snapshot #18251 · 18h 12m old`
-       * or, under a blind resume, `snapshot #18251 · age UNKNOWN since resume ·
-       * refreshing`.
-       *
-       * TWO SUBJECTS, TWO ELEMENTS: `LIVE · WATERMARKED` describes the STREAM
-       * (it really is connected and delivering). This chip describes the BATCH
-       * the stream is carrying — and it is ALWAYS visible, at every age, as its
-       * own element BESIDE the badge rather than a >1h-only suffix inside it.
-       * Conflating the two — or letting the age fall silent below a threshold —
-       * is how a live connection over a stale batch reads as fresh data.
-       * Severity styling arrives with the Phase 1 SLA.
+       * The watermark vector. Every entry names its own as-of. Rendered
+       * INSIDE the "Data status →" popover — raw block heights and poll
+       * marks are not bar chrome (canon §10).
        */
-      snapshot?: string;
+      asOfs: readonly RibbonAsOf[];
+      /** Current batch is superseded — a warn-register chip. */
+      superseded?: boolean;
+      /** The batch's freshness statement, always visible at every age. */
+      snapshot?: RibbonSnapshotChip;
+      /** The served batch's identity chip: `BATCH #id`. */
+      batchId?: number;
+      /** The engine-coverage chip; null/omitted when underivable (ledgered). */
+      coverage?: RibbonCoverage | null;
     }
   | {
       mode: "proof";
@@ -65,6 +93,22 @@ export type RibbonProps =
       /** e.g. "reconcile 12/12 exact". */
       detail?: string;
     };
+
+/** Posture tone → canon chip register (see stream-posture.ts's tone doc). */
+const TONE_CLASS: Record<RibbonPostureTone, string | undefined> = {
+  accent: styles.cAccent,
+  warn: styles.cWarn,
+  waiting: styles.cUnknown,
+  down: styles.cCrit,
+};
+
+/** SLA tier → canon chip register (§06: outline-first, fill = escalation). */
+const TIER_CLASS: Record<FreshnessTier, string | undefined> = {
+  fresh: styles.cQuiet,
+  aging: styles.cWarn,
+  stale: styles.cCrit,
+  critical: styles.cCritFill,
+};
 
 export function Ribbon(props: RibbonProps) {
   if (props.mode === "proof") {
@@ -76,41 +120,100 @@ export function Ribbon(props: RibbonProps) {
     );
   }
 
-  // The badge's tone is the posture's, not the payload's: the ok/green chip is
-  // reachable ONLY through `live: true`, and the pulsing dot — which is the
-  // thing an eye reads as "data is arriving" — goes with it.
   const { posture } = props;
-  const toneClass = posture.live
-    ? styles.live
-    : posture.tone === "down"
-      ? styles.down
-      : styles.waiting;
+  const snapshot = props.snapshot;
+  const coverage = props.coverage ?? null;
   return (
-    <span className={styles.ribbon}>
-      <span className={`${styles.badge} ${toneClass}`}>
-        {posture.live && <i className={`${styles.dot} ${styles.pulse}`} aria-hidden />}
-        {posture.live ? "LIVE · WATERMARKED" : posture.label}
+    <div className={styles.appbar}>
+      <span
+        className={`${styles.chip} ${TONE_CLASS[posture.tone]}`}
+        data-testid="ribbon-stream"
+        title="the stream connection's own posture — a separate statement from the snapshot's age beside it"
+      >
+        {posture.tone === "accent" && <i className={`${styles.dot} ${styles.pulse}`} aria-hidden />}
+        {posture.label}
       </span>
-      {props.snapshot ? (
-        <span
-          data-testid="ribbon-snapshot"
-          className={styles.snapshot}
-          title="snapshot freshness — how old the served batch is; the badge beside this is the stream connection, a separate statement"
-        >
-          {props.snapshot}
-        </span>
-      ) : null}
-      {props.superseded === true && (
-        <span className={`${styles.badge} ${styles.degraded}`}>SUPERSEDED</span>
+      {snapshot !== undefined && (
+        <>
+          <i className={styles.sep} aria-hidden />
+          <span
+            data-testid="ribbon-snapshot"
+            className={`${styles.chip} ${
+              snapshot.tier === null ? styles.cUnknown : TIER_CLASS[snapshot.tier]
+            }`}
+            title={snapshot.title}
+          >
+            {snapshot.parts.label} <span className={styles.val}>{snapshot.parts.age}</span>
+            {snapshot.parts.tierWord !== null && <> · {snapshot.parts.tierWord}</>}
+          </span>
+        </>
       )}
-      {props.asOfs.map((asOf) => (
-        <span key={asOf.label} className={styles.asOf}>
-          {asOf.label}{" "}
-          <b className={asOf.tone !== undefined && asOf.tone !== "default" ? styles[asOf.tone] : undefined}>
-            {asOf.value}
-          </b>
-        </span>
-      ))}
-    </span>
+      {props.batchId !== undefined && (
+        <>
+          <i className={styles.sep} aria-hidden />
+          <span
+            className={`${styles.chip} ${styles.cQuiet}`}
+            data-testid="ribbon-batch"
+            title="the served batch's identity — its freshness is the SNAPSHOT chip's statement"
+          >
+            BATCH <span className={styles.val}>#{String(props.batchId)}</span>
+          </span>
+        </>
+      )}
+      {coverage !== null && (
+        <>
+          <i className={styles.sep} aria-hidden />
+          <span
+            className={`${styles.chip} ${
+              coverage.answered < coverage.total ? styles.cWarn : styles.cQuiet
+            }`}
+            data-testid="ribbon-coverage"
+            title={
+              coverage.withheld.length > 0
+                ? `engines answering on this batch — withheld: ${coverage.withheld.join(", ")}`
+                : "engines answering on this batch — every stamped engine answered"
+            }
+          >
+            COVERAGE{" "}
+            <span className={styles.val}>
+              {String(coverage.answered)}/{String(coverage.total)}
+            </span>{" "}
+            ENGINES
+            {coverage.withheld.length > 0 && (
+              <>
+                {" "}
+                · <span className={styles.val}>{coverage.withheld.join(", ")}</span> WITHHELD
+              </>
+            )}
+          </span>
+        </>
+      )}
+      {props.superseded === true && (
+        <span className={`${styles.chip} ${styles.cWarn}`}>SUPERSEDED</span>
+      )}
+      {props.asOfs.length > 0 && (
+        <details className={styles.dataStatus}>
+          <summary className={styles.dataStatusLink} data-testid="ribbon-data-status">
+            Data status →
+          </summary>
+          <div className={styles.dataStatusPanel} data-testid="ribbon-data-status-panel">
+            {props.asOfs.map((asOf) => (
+              <span key={asOf.label} className={styles.asOf}>
+                {asOf.label}{" "}
+                <b
+                  className={
+                    asOf.tone !== undefined && asOf.tone !== "default"
+                      ? styles[asOf.tone]
+                      : undefined
+                  }
+                >
+                  {asOf.value}
+                </b>
+              </span>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
   );
 }

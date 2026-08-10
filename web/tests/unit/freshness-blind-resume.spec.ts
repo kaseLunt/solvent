@@ -358,15 +358,19 @@ test("THE CHIP IS NEVER SILENT while the age is unknown", () => {
   // (p1a-3 re-anchor: the old vehicle for this law — `ribbonBatchAgeSuffix`,
   // null at 130s, and `ribbonBatchAgeUnknown` filling its slot — is RETIRED
   // with the >1h gate. The law itself SURVIVES on the always-on snapshot
-  // chip, which renders at EVERY age and so has no silent register at all.)
+  // chip, which renders at EVERY age and so has no silent register at all.
+  // p1a-4 made the chip STRUCTURED; the register's sentences are unchanged,
+  // byte for byte, in the parts' age slot.)
   // The unknown chip cannot be null: there is no input that silences it.
-  expect(snapshotChipUnknown(7, false)).toBe(
-    "snapshot #7 · age UNKNOWN since resume · refreshing",
+  expect(snapshotChipUnknown(7, false).age).toBe("age UNKNOWN since resume · refreshing");
+  expect(snapshotChipUnknown(7, true).age).toBe(
+    "age UNKNOWN since resume · refresh failed, data retained",
   );
-  expect(snapshotChipUnknown(7, true)).toBe(
-    "snapshot #7 · age UNKNOWN since resume · refresh failed, data retained",
-  );
+  // An unknown age has no tier, not a small one — the chip may not wear any
+  // tier's word (or color) over a refusal to state.
+  expect(snapshotChipUnknown(7, false).tierWord).toBeNull();
+  expect(snapshotChipUnknown(7, true).tierWord).toBeNull();
   // And it is not a staleness verdict wearing a new coat — no hour count is
   // implied, because none is known.
-  expect(snapshotChipUnknown(7, false)).not.toMatch(/\d+h old/);
+  expect(snapshotChipUnknown(7, false).age).not.toMatch(/\d+h old/);
 });
