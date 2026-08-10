@@ -15,6 +15,7 @@
 import type { Batch, PriceInput, RefinedLeg, RefinedPosition, Stamp } from "@solvent/client";
 import type { components } from "@solvent/client";
 import { EM_DASH, formatBlock, renderNullableDecimal } from "./format";
+import { classifyFactorPrice } from "./factorPriceGuard";
 import { liqBonusEvidenceValue, paramPercent, paramScaleNote } from "./params-format";
 import { noPricePathTitle } from "./liq-distance";
 
@@ -298,18 +299,41 @@ export function liquidationPriceEvidence(
   // `prices` into the same absent-boundary arm the row uses — no rows to
   // list, boundary not established, the wire's `reason` still exposed.
   const servedPrices = lp !== null && Array.isArray(lp.prices) ? lp.prices : [];
-  const first = servedPrices[0];
-  const boundaryEstablished = first !== undefined && first.lowest_healthy_price !== null;
+  // p1b-4 (Codex r3 finding 2) — CLASSIFY EVERY ENTRY BEFORE ANY READ, each
+  // independently: `prices: [null]` (the p0-9 nil-pointer class one level
+  // down) threw a TypeError at the boundary check below, malformed decimal
+  // fields threw parseDecimal inside renderNullableDecimal, and an ABSENT
+  // price_decimals hit the no-scale branch — the RAW scaled integer rendered
+  // as a plausible drawer value (silent wrong display, the worst class).
+  // PER-ENTRY INDEPENDENCE: a bad entry renders its OWN malformed row (by
+  // index, nothing read off it) and never hides a good sibling; the BOUNDARY
+  // claim reads prices[0], so a malformed first entry gets its own
+  // unreadable arm — distinct from "not established", which states the solve
+  // published nothing, where this states it published something nobody may
+  // read.
+  const classifiedPrices = servedPrices.map((entry) => classifyFactorPrice(entry));
+  const first = classifiedPrices[0];
+  const boundaryEstablished =
+    first !== undefined && first.ok && first.entry.lowest_healthy_price !== null;
   const rows: EvidenceRow[] =
     lp === null
       ? [{ label: "health boundary price", value: "not published for this position", tone: "dim" }]
       : [
-          ...servedPrices.map((price) => ({
-            label: `lowest_healthy_price · ${price.asset.slice(0, 10)}…`,
-            value:
-              `${renderNullableDecimal(price.lowest_healthy_price, { decimals: price.price_decimals })} ` +
-              `(current ${renderNullableDecimal(price.current_price, { decimals: price.price_decimals })})`,
-          })),
+          ...classifiedPrices.map(
+            (classified, index): EvidenceRow =>
+              classified.ok
+                ? {
+                    label: `lowest_healthy_price · ${classified.entry.asset.slice(0, 10)}…`,
+                    value:
+                      `${renderNullableDecimal(classified.entry.lowest_healthy_price, { decimals: classified.entry.price_decimals })} ` +
+                      `(current ${renderNullableDecimal(classified.entry.current_price, { decimals: classified.entry.price_decimals })})`,
+                  }
+                : {
+                    label: `prices[${String(index)}]`,
+                    value: `malformed — not read (fields: ${classified.fields.join(", ")})`,
+                    tone: "warn" as const,
+                  },
+          ),
           ...(boundaryEstablished
             ? lp.boundary_is_healthy
               ? [
@@ -329,15 +353,25 @@ export function liquidationPriceEvidence(
                     tone: "warn" as const,
                   },
                 ]
-            : [
-                {
-                  label: "boundary",
-                  value:
-                    "not established — the solve published no boundary price on this axis" +
-                    (lp.reason !== undefined && lp.reason !== "" ? ` · ${lp.reason}` : ""),
-                  tone: "dim" as const,
-                },
-              ]),
+            : first !== undefined && !first.ok
+              ? [
+                  {
+                    label: "boundary",
+                    value:
+                      `unreadable — the served entry is malformed (${first.fields.join(", ")}), ` +
+                      "so its numbers are not read and no exact-price health claim is made",
+                    tone: "warn" as const,
+                  },
+                ]
+              : [
+                  {
+                    label: "boundary",
+                    value:
+                      "not established — the solve published no boundary price on this axis" +
+                      (lp.reason !== undefined && lp.reason !== "" ? ` · ${lp.reason}` : ""),
+                    tone: "dim" as const,
+                  },
+                ]),
           { label: "axis", value: lp.axis },
           {
             label: "solve",

@@ -32,6 +32,7 @@ import {
   POSITIONS_AAVE_PAGE_2,
   POSITIONS_DM_PAGE_1,
 } from "../fixtures/book";
+import { ADDRESS_FOUND, EVENTS, FOUND_ADDR, HISTORY, PARAMS } from "../fixtures/inspector";
 
 const API = "http://localhost:8080";
 
@@ -352,5 +353,93 @@ test.describe("p1b-2 · the classifier covers the whole engine subtree", () => {
     const dmPanel = page.locator('[data-testid="book-engine"][data-engine="debt_manager"]');
     await expect(dmPanel).not.toHaveAttribute("data-engine-outcome", "malformed");
     await expect(dmPanel.getByTestId("book-engine-answer")).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p1b-4 · factor-price entries are classified before they are read.
+//
+// Inspector mocks in p0-fixes.spec.ts's register (its mockInspectorFound,
+// parameterized over the address body): stream aborted, params/events/history
+// pinned from the typed TS fixtures, the address route answered with a
+// structuredClone of ADDRESS_FOUND carrying ONE documented contract
+// violation each — reproducing OBSERVED server classes (the p0-9 family:
+// cmd/api marshals Go nil pointers as JSON null; a version-skewed or partial
+// serializer omits fields).
+// ---------------------------------------------------------------------------
+
+type AddressBody = typeof ADDRESS_FOUND;
+
+async function mockInspector(page: Page, body: AddressBody) {
+  await page.route("**/v1/stream*", (route) => route.abort());
+  await page.route("**/v1/params*", (route) => route.fulfill({ json: PARAMS, headers: CORS }));
+  await page.route("**/v1/events*", (route) => route.fulfill({ json: EVENTS, headers: CORS }));
+  await page.route("**/v1/address/*/history*", (route) =>
+    route.fulfill({ json: HISTORY, headers: CORS }),
+  );
+  await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
+}
+
+test.describe("p1b-4 · factor-price entries are classified before they are read", () => {
+  test("an entry-level null (prices: [null]) renders the malformed register — the card stays live", async ({
+    page,
+  }) => {
+    // Single documented purpose: the entry-level-null arm. REPRODUCES the
+    // p0-9 serialization class one level down — cmd/api marshals a Go nil
+    // pointer as JSON null, and inside a served slice that is
+    // `prices: [null]`: contract-violating per api/openapi.yaml (FactorPrice
+    // is non-nullable in `prices`) but the same observed server family as
+    // p0-9's `prices: null`. `as never` marks the deliberate violation.
+    const body = structuredClone(ADDRESS_FOUND);
+    const aave = body.positions[0];
+    if (aave === undefined || aave.liquidation_price === null) {
+      throw new Error("fixture shape drifted");
+    }
+    aave.liquidation_price.prices = [null as never];
+    await mockInspector(page, body);
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    const card = page.getByTestId("position-aave_v3_etherfi");
+    // RENDERS-WITHOUT-CRASH PIN: with the guard absent (or its {ok: false}
+    // routed to the value arm), `lowest_healthy_price` is read off null, the
+    // TypeError reaches the route boundary and this card never paints — the
+    // visibility pin below dies first.
+    const row = card.getByTestId("boundary-malformed");
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("unreadable");
+    await expect(row).toContainText("malformed");
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+    // No health claim is invented over an unreadable entry.
+    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
+  });
+
+  test("a deleted price_decimals refuses — the RAW scaled integer never renders as a price", async ({
+    page,
+  }) => {
+    // Single documented purpose: the silent-raw-render arm (the WORST class:
+    // no throw, just a wrong number). Deleting the REQUIRED `price_decimals`
+    // (a version-skewed or partial serializer's shape, the same observed
+    // omission family) hits money()'s no-scale branch, which renders the RAW
+    // scaled integer "370370370371" — grouped to "370,370,370,371" — as a
+    // plausible boundary price.
+    const body = structuredClone(ADDRESS_FOUND);
+    const price = body.positions[0]?.liquidation_price?.prices[0];
+    if (price === undefined) throw new Error("fixture shape drifted");
+    delete (price as { price_decimals?: number }).price_decimals;
+    await mockInspector(page, body);
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    const card = page.getByTestId("position-aave_v3_etherfi");
+    await expect(card.getByText("Health boundary price")).toBeVisible();
+    // THE SILENT-RAW-RENDER KILL PINS, first — the fixture's raw
+    // lowest_healthy_price digits may not appear on the card in EITHER
+    // spelling: the wire's own digit-run, or money()'s grouped rendering of
+    // the same digits (the branch actually reached from the card).
+    await expect(card).not.toContainText("370370370371");
+    await expect(card).not.toContainText("370,370,370,371");
+    // The malformed register names the missing scale.
+    const row = card.getByTestId("boundary-malformed");
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("price_decimals");
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
   });
 });

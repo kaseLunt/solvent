@@ -128,3 +128,98 @@ test("the descriptor quotes the wire's own numbers for the HF law", () => {
   expect(values).toContain("6480000000000000");
   expect(values).toContain("6000000000000000");
 });
+
+// ---------------------------------------------------------------------------
+// p1b-4 (closes Codex r3 finding 2) — the drawer classifies EVERY FactorPrice
+// entry BEFORE it reads it. Post-p0-9 the defenses covered the array's
+// existence and the boundary's null-ness only; every entry read was trusted:
+// `prices: [null]` threw a TypeError at `first.lowest_healthy_price`, and an
+// ABSENT `price_decimals` made `renderNullableDecimal` return the RAW scaled
+// integer as a plausible number (silent wrong display — the worst class).
+// PER-ENTRY INDEPENDENCE, decided and pinned here: each entry is classified
+// independently; a bad entry renders its OWN malformed row and a good entry
+// renders normally — one bad entry never hides a good one, and a good first
+// entry's established boundary is never withdrawn by a bad second.
+// ---------------------------------------------------------------------------
+
+test("the drawer refuses an entry-level null (prices: [null]) without throwing", () => {
+  // structuredClone variant, single purpose: REPRODUCE the p0-9
+  // serialization class one level down — cmd/api marshals a Go nil pointer
+  // as JSON null, and inside a served slice that is `prices: [null]`:
+  // CONTRACT-VIOLATING per api/openapi.yaml (FactorPrice is non-nullable in
+  // `prices`) but the same observed server family as p0-9's `prices: null`.
+  // `as never` marks the deliberate violation.
+  const wire = structuredClone(aaveWire);
+  if (wire.liquidation_price === null) throw new Error("fixture invariant: aave lp expected");
+  wire.liquidation_price.prices = [null as never];
+  const text = drawerText(wire);
+  // the entry's own malformed row, by index — nothing read off it
+  expect(text).toContain("prices[0]");
+  expect(text).toContain("malformed");
+  // the boundary register is the UNREADABLE arm, not the not-established one:
+  // "not established" states the solve published nothing; here the solve
+  // published something nobody can read.
+  expect(text).toContain("unreadable");
+  expect(text).not.toContain("not established");
+  expect(text).not.toContain("still HEALTHY");
+});
+
+test("a missing price_decimals refuses — the RAW scaled integer never renders as a price", () => {
+  // structuredClone variant, single purpose: the silent-raw-render class.
+  // Deleting the REQUIRED `price_decimals` (a version-skewed or partial
+  // serializer's shape) hit renderNullableDecimal's no-scale branch, which
+  // returned the raw "370370370371" as a plausible drawer value. The guard
+  // must name the field and the raw digit-run must be ABSENT.
+  const wire = structuredClone(aaveWire);
+  const price = wire.liquidation_price?.prices[0];
+  if (price === undefined) throw new Error("fixture invariant: factor price expected");
+  delete (price as { price_decimals?: number }).price_decimals;
+  const text = drawerText(wire);
+  // THE KILL PIN: the fixture's raw scaled integer never appears as a value.
+  expect(text).not.toContain("370370370371");
+  expect(text).toContain("price_decimals");
+  expect(text).toContain("unreadable");
+  expect(text).not.toContain("still HEALTHY");
+});
+
+test("per-entry independence: a bad first entry does not hide a good second entry", () => {
+  // structuredClone variant, single purpose: the independence law, bad-first
+  // direction. Entry 0 is the entry-level null; entry 1 is the committed
+  // entry untouched. The good entry renders its normal row (label + scaled
+  // value); the bad one renders its own malformed row; no throw.
+  const wire = structuredClone(aaveWire);
+  if (wire.liquidation_price === null) throw new Error("fixture invariant: aave lp expected");
+  const good = wire.liquidation_price.prices[0];
+  if (good === undefined) throw new Error("fixture invariant: factor price expected");
+  wire.liquidation_price.prices = [null as never, good];
+  const text = drawerText(wire);
+  expect(text).toContain("prices[0]");
+  expect(text).toContain("malformed");
+  // the good entry's normal row: committed asset prefix + the scaled value
+  expect(text).toContain("lowest_healthy_price · 0xCd5fE23C…");
+  expect(text).toContain("3703.70370371");
+  // the BOUNDARY claim reads prices[0], which is unreadable — no health claim
+  expect(text).toContain("unreadable");
+  expect(text).not.toContain("still HEALTHY");
+});
+
+test("per-entry independence: a bad second entry is named without withdrawing the first's boundary", () => {
+  // structuredClone variant, single purpose: the independence law, bad-second
+  // direction. Entry 0 stays the committed entry (boundary established,
+  // boundary_is_healthy true); entry 1 carries ONE documented corruption
+  // (current_price: "" — outside the wire Decimal contract). The ceil
+  // disclosure still renders off the readable first entry; the second is
+  // refused by name.
+  const wire = structuredClone(aaveWire);
+  if (wire.liquidation_price === null) throw new Error("fixture invariant: aave lp expected");
+  const good = wire.liquidation_price.prices[0];
+  if (good === undefined) throw new Error("fixture invariant: factor price expected");
+  const bad = structuredClone(good);
+  bad.current_price = "";
+  wire.liquidation_price.prices = [good, bad];
+  const text = drawerText(wire);
+  expect(text).toContain("still HEALTHY");
+  expect(text).toContain("prices[1]");
+  expect(text).toContain("current_price");
+  expect(text).toContain("malformed");
+});

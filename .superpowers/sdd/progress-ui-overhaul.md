@@ -766,7 +766,7 @@ Task list:
 - [x] Task 1 — wire-guard module + BigInt coercion kill (p1b-1)
 - [x] Task 2 — full RunBookEngine classifier (p1b-2)
 - [x] Task 3 — SetRunEngineSummary classifier + tornado malformed arm (p1b-3)
-- [ ] Task 4 — FactorPrice entry guard
+- [x] Task 4 — FactorPrice entry guard (p1b-4)
 - [ ] Task 5 — result-identity module + address-mode completion
 - [ ] Task 6 — five-gap race/identity audit close
 - [ ] Task 7 — close + Codex round
@@ -1174,6 +1174,141 @@ sentence and state in those laws is UNCHANGED. No other pin moved; all
   served body.
 - `npm run typecheck`: completely clean.
 - `npx eslint` on all eight touched files: 0 errors, 0 warnings.
+
+### p1b-4 · FactorPrice entry guard (Task 4)
+
+Closes Codex round-3 finding 2. Post-p0-9 the Inspector's boundary
+defenses covered the ARRAY's existence and the boundary's null-ness only;
+every ENTRY read was trusted: `prices: [null]` (the p0-9 nil-pointer
+serialization class one level down) threw a TypeError at
+`first.lowest_healthy_price` (card :428, evidence.ts map :307-312) and
+the route boundary took the segment; malformed
+`lowest_healthy_price`/`current_price` (`"12.5"`, `""`) threw
+parseDecimal inside `money()`; a mis-shaped `price_decimals` threw
+assertScale; and an ABSENT `price_decimals` hit `money()`'s no-scale
+branch — the RAW scaled integer rendered as a plausible price with the
+health assertion attached ("Health boundary price 370,370,370,371 ·
+still healthy at exactly this price (ceil P*)", recorded live in the red
+run). Silent wrong display, the worst class: no throw for any boundary
+to catch.
+
+Delivered:
+- `web/lib/factorPriceGuard.ts` — `classifyFactorPrice(entry: unknown):
+  { ok: true; entry: FactorPrice } | { ok: false; fields: string[] }`,
+  sibling of `engineClassification.ts` (p1b-2) and
+  `setRunClassification.ts` (p1b-3): wireGuard primitives, checks in
+  wire read order, never throws, non-object entries named whole (as
+  `entry`), nullability mirrors the generated schema EXACTLY
+  (`price_floor`/`lowest_healthy_price` NullableDecimal — null is the
+  wire's own statement). `price_decimals` is REQUIRED by decision:
+  absent = malformed, NEVER the raw-render branch — the one corruption
+  that does not throw downstream is exactly the one the guard must
+  refuse. `{ok: true}` hands back the SAME object it judged (identity
+  pinned), so downstream reads see the wire's bytes.
+- `web/app/inspector/[addr]/InspectorPositionCard.tsx`
+  (`renderLiquidationPriceRow`) — `lp.prices[0]` is classified BEFORE
+  any property read; `{ok: false}` folds into the new
+  `boundary-malformed` arm, the not-established register's sibling
+  ("not established" states the solve published nothing; this arm states
+  it published something NOBODY MAY READ): fields named, `lp.reason`
+  still exposed inline, NO health assertion, no raw numbers. The
+  no-price-path badge does NOT render on this arm, by decision (recorded
+  in the arm's comment): a soft axis-scoped claim read off a payload the
+  entry just proved corrupt is a claim the arm exists to refuse. The
+  p0-8 not-established arm and the value arm are byte-preserved
+  (verdict/badge/chip rules untouched).
+- `web/lib/evidence.ts` (`liquidationPriceEvidence`) — EVERY entry is
+  classified independently before the per-entry map reads it: a good
+  entry renders its normal row, a bad one renders its own
+  `prices[i]` malformed row (nothing read off it); the BOUNDARY claim
+  reads prices[0], so a malformed first entry gets its own "unreadable"
+  boundary row (warn) — distinct from "not established" — and the
+  three-way ceil disclosure (p0-8) is unchanged for readable firsts.
+  PER-ENTRY INDEPENDENCE decided and pinned: one bad entry never hides
+  a good sibling, and a bad second never withdraws a good first's
+  established boundary.
+- `web/tests/unit/factor-price-guard.spec.ts` (12 tests) — skeleton is
+  the committed inspector fixture's own entry: clean + same-object-back
+  identity; schema-legal nulls stay statements; null / undefined /
+  non-object refuse whole; `"12.5"` boundary, `""` current, non-string
+  asset; price_decimals absent / -1 / 2.5 / 1001; multi-failure wire
+  read order.
+- `web/tests/unit/inspector-evidence.spec.ts` (+4) — drawer with
+  `prices: [null]` refuses without throwing (own malformed row, the
+  unreadable boundary arm, NOT "not established"); missing
+  price_decimals → the raw digit-run "370370370371" pinned ABSENT from
+  the drawer text; both independence directions.
+- `web/tests/e2e/p1b-fixes.spec.ts` (+2, p1b-4) — inspector mocks in
+  p0-fixes' register (mockInspectorFound parameterized over the body);
+  `prices: [null]` → card stays live, `boundary-malformed` visible, no
+  route refusal, no health claim; deleted `price_decimals` → the
+  silent-raw-render kill pins FIRST (`not.toContainText` on BOTH
+  spellings of the fixture's raw lowest_healthy_price digits —
+  "370370370371" and money()'s grouped "370,370,370,371", the branch
+  the card actually reaches), then the arm names `price_decimals`.
+
+No pin moved: all p0-8 boundary pins (p0-fixes.spec.ts:483-553), the
+p0-9 prices:null fold, and every prior inspector-evidence law survive
+byte-identical.
+
+### Red-first evidence
+
+- `factor-price-guard.spec.ts` before the module existed: run dies at
+  collection — `Cannot find module '…/web/lib/factorPriceGuard'`.
+- The 4 evidence pins against the UNFIXED drawer: `prices: [null]` →
+  `TypeError: Cannot read properties of null (reading
+  'lowest_healthy_price')` at evidence.ts:302 (twice — the [null] arm
+  and the bad-first independence arm); missing price_decimals → the
+  drawer text carried `lowest_healthy_price · 0xCd5fE23C…:
+  370370370371 (current 400000000000)` — the raw scaled integer as a
+  plausible value, caught verbatim; `""` current_price →
+  `DecimalFormatError` from parseDecimal via renderNullableDecimal at
+  evidence.ts:311.
+- The p1b-4 e2e against the UNFIXED build: (a) `prices: [null]` dead at
+  the `boundary-malformed` visibility pin (p1b-fixes.spec.ts:407) — the
+  TypeError took the segment and the card never painted the arm;
+  (b) deleted price_decimals dead at the grouped raw-digits absence pin
+  (p1b-fixes.spec.ts:437) — the page snapshot records the live defect:
+  "Health boundary price 370,370,370,371 · current weETH ≈
+  400,000,000,000 · still healthy at exactly this price (ceil P*)".
+  (The ungrouped spelling passed against the unfixed card — money()
+  groups — which is exactly why BOTH spellings are pinned.)
+
+### Mutation kills (p1b-4-M1, p1b-4-M2)
+
+- M1: the guard's `price_decimals` requirement dropped (absent passes:
+  `entry.price_decimals === undefined || isWireScale(…)`). Rebuild, the
+  p1b-4 e2e in isolation: KILLED at exactly the raw-digits absence pin
+  (p1b-fixes.spec.ts:437, the grouped spelling) — the admitted entry
+  reached `money()`'s no-scale branch and the raw integer re-wore the
+  price costume with the ceil-health sentence attached. The [null] test
+  stayed green (null entries still refused), isolating the kill to the
+  requirement dropped. Reverted; rebuilt.
+- M2: the card classifies but routes `{ok: false}` to the value arm
+  (malformed-arm branch disabled, value/not-established arms reading the
+  unclassified `first`). Rebuild, in isolation: the `prices: [null]`
+  test KILLED at exactly the `boundary-malformed` visibility pin
+  (p1b-fixes.spec.ts:407, element not found) — the raw read threw and
+  the card never painted; the deleted-decimals test killed at :437 too
+  (the routed entry raw-rendered). Reverted; final tree rebuilt and
+  re-verified.
+
+### Closing counts (p1b-4)
+
+- Track B suite: 1477 → **1495** (+18: factor-price-guard 12,
+  inspector-evidence 4, p1b-fixes 2).
+- Full run (final tree, `npm run build` + full p1b config, port 3819):
+  **1494 passed, 1 skipped, 0 failed (35.5s)** — the same single
+  pre-existing styleguide skip, no other movement.
+- Targeted (final tree): inspector.spec.ts + p0-fixes.spec.ts +
+  p1b-fixes.spec.ts → 43/43 e2e green (every p0-8 boundary pin
+  survives); factor-price-guard + inspector-evidence + wire-guard →
+  34/34 unit green.
+- Committed-fixture check (in-suite): the committed inspector entry
+  classifies CLEAN and comes back as the same object — the law refuses
+  no served body.
+- `npm run typecheck`: completely clean.
+- `npx eslint` on all six touched files: 0 errors, 0 warnings.
 
 ## Phase 1 Track A — foundation build
 

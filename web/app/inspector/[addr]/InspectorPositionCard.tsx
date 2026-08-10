@@ -40,6 +40,7 @@ import {
 } from "@/lib/evidence";
 import { displayHf, displayRatio } from "@/lib/history-series";
 import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "@/lib/format";
+import { classifyFactorPrice } from "@/lib/factorPriceGuard";
 import { groupDecimalString } from "@/lib/book-format";
 import { legParamsDisclosure, legParamsLine } from "@/lib/params-format";
 import { NO_PRICE_PATH_LABEL, noPricePathTitle } from "@/lib/liq-distance";
@@ -414,6 +415,38 @@ export function InspectorPositionCard({
        the solve published no boundary — and folds into the absent-boundary
        arm with `lp.reason` still exposed. */
     const first = Array.isArray(lp.prices) ? lp.prices[0] : undefined;
+    /* p1b-4 (Codex r3 finding 2) — CLASSIFY BEFORE ANY ENTRY READ. Post-p0-9
+       every entry property was still trusted: `prices: [null]` (the p0-9
+       nil-pointer serialization class, one level down) threw a TypeError
+       before either arm could render, malformed decimal fields threw inside
+       money(), and an ABSENT price_decimals hit money()'s no-scale branch —
+       the RAW scaled integer rendered as a plausible price (silent wrong
+       display, the worst class). `classifyFactorPrice` is the one law
+       consulted before the first property read; an {ok: false} entry folds
+       into this malformed-boundary refusal arm, the not-established
+       register's sibling: "not established" states the solve published
+       nothing on this axis — this arm states the solve published something
+       NOBODY MAY READ. Fields named, the wire's own `reason` still exposed,
+       NO health assertion, no raw numbers. The axis-scoped no-price-path
+       badge does NOT render here, by decision: a soft "no price path" claim
+       read off a payload the entry just proved corrupt is a claim this arm
+       exists to refuse. */
+    const classified = first === undefined ? undefined : classifyFactorPrice(first);
+    if (classified !== undefined && !classified.ok) {
+      return (
+        <div className={styles.kvRow}>
+          <span className={styles.k}>Health boundary price</span>
+          <span
+            className={`${styles.v} ${styles.vDim}`}
+            data-testid="boundary-malformed"
+            title="the served FactorPrice entry violates the wire contract (api/openapi.yaml), so its numbers are not read and no exact-price health claim is made."
+          >
+            unreadable — the served boundary entry is malformed ({classified.fields.join(", ")})
+            {lp.reason !== undefined && lp.reason !== "" ? ` · ${lp.reason}` : ""}
+          </span>
+        </div>
+      );
+    }
     /* P0-8 finding 1 — A BOUNDARY THAT DOES NOT EXIST MAY NOT BE CALLED
        HEALTHY. The wire legally serves `liquidation_price` with an EMPTY
        `prices` array (no-debt / no-factor solves) or with
@@ -425,7 +458,7 @@ export function InspectorPositionCard({
        `reason` inline. The diagnostic/already-breached chips are boundary
        QUALIFIERS, so they do not render beside a row that claims no
        boundary; the axis-scoped no-price-path badge keeps its R1 rule. */
-    if (first === undefined || first.lowest_healthy_price === null) {
+    if (classified === undefined || classified.entry.lowest_healthy_price === null) {
       return (
         <div className={styles.kvRow}>
           <span className={styles.k}>Health boundary price</span>
@@ -449,7 +482,8 @@ export function InspectorPositionCard({
         </div>
       );
     }
-    const value = money(first.lowest_healthy_price, { decimals: first.price_decimals });
+    const entry = classified.entry;
+    const value = money(entry.lowest_healthy_price, { decimals: entry.price_decimals });
     return (
       <div className={styles.kvRow}>
         <span className={styles.k}>Health boundary price</span>
@@ -467,7 +501,7 @@ export function InspectorPositionCard({
               current mark (the account can already be liquidatable with the
               mark far below the boundary). */}
           <span className={styles.vDim}>
-            {` · current ${symbolForAsset(first.asset)} ≈ ${money(first.current_price, { decimals: first.price_decimals })}`}
+            {` · current ${symbolForAsset(entry.asset)} ≈ ${money(entry.current_price, { decimals: entry.price_decimals })}`}
             {/* P0-8 finding 1 — the exact-price health assertion renders ONLY
                 when the wire itself asserts it (`boundary_is_healthy: true`).
                 A boundary the wire declines to certify keeps its number and
