@@ -714,6 +714,17 @@ export function ribbonBatchAgeSuffix(ageSeconds: number): string | null {
   return `· batch ${String(ageHours(ageSeconds))}h old`;
 }
 
+// Phase 0 fix 5: the always-on snapshot chip. Replaces ribbonBatchAgeSuffix's
+// >1h gate — freshness is stated at EVERY age, in humanAge precision, as its
+// own element beside the connection badge (never inside it).
+export function snapshotChip(batchId: number, ageSeconds: number): string {
+  return `snapshot #${String(batchId)} · ${humanAge(ageSeconds)} old`;
+}
+
+export function snapshotChipUnknown(batchId: number, refreshFailed: boolean): string {
+  return `snapshot #${String(batchId)} · age ${unknownSincePhrase(refreshFailed)}`;
+}
+
 // ---------------------------------------------------------------------------
 // THE UNAVAILABLE FRAME'S OWN AGE (Wave R7, Codex round-15 finding 3).
 //

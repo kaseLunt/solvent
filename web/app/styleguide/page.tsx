@@ -306,7 +306,7 @@ export default function StyleguidePage() {
             mode="stream"
             posture={{ live: false, label: STREAM_RECONNECTING, tone: "waiting" }}
             asOfs={[{ label: "aave_v3", value: "@25,641,730" }]}
-            batchAgeSuffix="· batch 3h old"
+            snapshot="snapshot #18251 · 3h 2m old"
           />
         </div>
         <div className={styles.row}>

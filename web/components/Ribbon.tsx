@@ -44,32 +44,19 @@ export type RibbonProps =
       /** Current batch is superseded — render the warning inline. */
       superseded?: boolean;
       /**
-       * Wave R1 item 3 — the batch-age suffix, e.g. `· batch 24h old`.
+       * Phase 0 fix 5 — the snapshot chip, e.g. `snapshot #18251 · 18h 12m old`
+       * or, under a blind resume, `snapshot #18251 · age UNKNOWN since resume ·
+       * refreshing`.
        *
-       * TWO SUBJECTS, TWO STATEMENTS: `LIVE · WATERMARKED` describes the
-       * STREAM (it really is connected and delivering). The suffix describes
-       * the BATCH the stream is carrying (it really is a day old). Conflating
-       * them is how a live connection over a stale batch reads as fresh data.
-       * Null renders nothing — an absent suffix is not a freshness claim
-       * beyond what LIVE already says.
+       * TWO SUBJECTS, TWO ELEMENTS: `LIVE · WATERMARKED` describes the STREAM
+       * (it really is connected and delivering). This chip describes the BATCH
+       * the stream is carrying — and it is ALWAYS visible, at every age, as its
+       * own element BESIDE the badge rather than a >1h-only suffix inside it.
+       * Conflating the two — or letting the age fall silent below a threshold —
+       * is how a live connection over a stale batch reads as fresh data.
+       * Severity styling arrives with the Phase 1 SLA.
        */
-      batchAgeSuffix?: string | null;
-      /**
-       * Wave R6 — the same slot, carrying a REFUSAL instead of a computed age:
-       * `· batch age UNKNOWN since resume · refreshing`.
-       *
-       * It exists because SILENCE in this slot reads as freshness. When a blind
-       * resume leaves the age unmeasurable, rendering nothing would be the
-       * round-13 defect exactly; rendering the understated `Xh old` would be a
-       * false claim; and rendering a stale verdict would be a different false
-       * claim, since the page does not know that either. So the slot says what
-       * is true: the age is not known right now.
-       *
-       * Mutually exclusive with `batchAgeSuffix` — the caller passes one or the
-       * other, never both, and this component renders the unknown first if it
-       * is somehow handed both.
-       */
-      batchAgeUnknown?: string | null;
+      snapshot?: string;
     }
   | {
       mode: "proof";
@@ -103,19 +90,16 @@ export function Ribbon(props: RibbonProps) {
       <span className={`${styles.badge} ${toneClass}`}>
         {posture.live && <i className={`${styles.dot} ${styles.pulse}`} aria-hidden />}
         {posture.live ? "LIVE · WATERMARKED" : posture.label}
-        {props.batchAgeUnknown !== undefined && props.batchAgeUnknown !== null ? (
-          <span className={styles.batchAgeUnknown} data-testid="ribbon-batch-age-unknown">
-            {props.batchAgeUnknown}
-          </span>
-        ) : (
-          props.batchAgeSuffix !== undefined &&
-          props.batchAgeSuffix !== null && (
-            <span className={styles.batchAge} data-testid="ribbon-batch-age">
-              {props.batchAgeSuffix}
-            </span>
-          )
-        )}
       </span>
+      {props.snapshot ? (
+        <span
+          data-testid="ribbon-snapshot"
+          className={styles.snapshot}
+          title="snapshot freshness — how old the served batch is; the badge beside this is the stream connection, a separate statement"
+        >
+          {props.snapshot}
+        </span>
+      ) : null}
       {props.superseded === true && (
         <span className={`${styles.badge} ${styles.degraded}`}>SUPERSEDED</span>
       )}

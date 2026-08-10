@@ -2,11 +2,7 @@
 
 import { usePosture, usePostureRefresh } from "@/lib/posture";
 import { formatBlock } from "@/lib/format";
-import {
-  ribbonBatchAgeSuffix,
-  ribbonBatchAgeUnknown,
-  staleSinceReading,
-} from "@/lib/freshness";
+import { snapshotChip, snapshotChipUnknown, staleSinceReading } from "@/lib/freshness";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { ribbonEmptyPosture, ribbonStreamPosture } from "@/lib/stream-posture";
 import { Ribbon, type RibbonAsOf } from "./Ribbon";
@@ -101,17 +97,18 @@ export function PostureRibbon() {
         });
       }
     }
-    // Wave R1 item 3: LIVE describes the STREAM; the suffix describes the
-    // BATCH. A batch older than an hour says so, in the dim register, right
-    // where the reader is being told the connection is live.
+    // Phase 0 fix 5: LIVE describes the STREAM; the snapshot chip describes
+    // the BATCH — and it is ALWAYS rendered, at every age, as its own element
+    // beside the badge. The >1h-only suffix this replaces let a live
+    // connection over a stale-but-inside-the-hour batch read as fresh data.
     //
-    // Wave R6: and while the age is UNRESOLVED the suffix is not computed at
-    // all. `ribbonBatchAgeSuffix` is a function of a number the page has just
-    // admitted it does not have — feeding it the understated one would put the
-    // ribbon back in the state the finding describes (silent, because the
-    // number is still inside the hour), and there is no honest stale claim to
-    // substitute, because staleness is not what the page knows. It knows only
-    // that it cannot say.
+    // Wave R6's arbitration is preserved one-to-one: while the age is
+    // UNRESOLVED the computed chip is not built at all. `snapshotChip` is a
+    // function of a number the page has just admitted it does not have —
+    // feeding it the understated one would restate the round-13 defect — and
+    // there is no honest stale claim to substitute, because staleness is not
+    // what the page knows. So the chip carries the refusal instead, and only
+    // a new receipt discharges it.
     //
     // WAVE R7 (round-15 finding 4): AND THE BADGE ITSELF IS NOW DERIVED FROM
     // THE CONNECTION. Having a batch was never evidence that the stream is up —
@@ -127,10 +124,11 @@ export function PostureRibbon() {
         posture={ribbonStreamPosture(streamState, hasBase)}
         asOfs={asOfs}
         superseded={posture.batch.supersession.superseded}
-        batchAgeSuffix={
-          age.unresolved ? null : ribbonBatchAgeSuffix(age.seconds ?? posture.batch.age_seconds)
+        snapshot={
+          age.unresolved
+            ? snapshotChipUnknown(posture.batch.id, age.refreshFailed)
+            : snapshotChip(posture.batch.id, age.seconds ?? posture.batch.age_seconds)
         }
-        batchAgeUnknown={age.unresolved ? ribbonBatchAgeUnknown(age.refreshFailed) : null}
       />
     );
   }

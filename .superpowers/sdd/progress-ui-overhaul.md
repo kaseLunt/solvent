@@ -165,3 +165,106 @@ Program spec: docs/specs/2026-08-09-ui-overhaul-program-design.md
   book-charts, chart-spec-v4, book e2e + history-copy, history-series,
   comparator-label unit — 164 passed. typecheck: only the pre-existing
   lab-runbook-lines.spec.ts(858) TS2322.
+
+### p0-5 snapshot chip (freshness.ts + Ribbon + PostureRibbon)
+- The change: snapshot freshness is its own ALWAYS-VISIBLE element
+  (`ribbon-snapshot`, `snapshot #<id> · <humanAge> old`) beside the stream
+  badge — never a >1h-only suffix inside it. Badge strings frozen and
+  untouched: `LIVE · WATERMARKED`, `STREAM · *`, `NO SERVABLE BATCH` pass
+  byte-identical in shell.spec.ts / state-matrix.spec.ts / r7-fixes.spec.ts.
+  R6's arbitration mirrored one-to-one: `unresolved` → `snapshotChipUnknown`
+  (refusal), else `snapshotChip(age.seconds ?? posture.batch.age_seconds)`;
+  only a new receipt discharges the unknown.
+- New pins: tests/unit/freshness-snapshot.spec.ts (2, brief verbatim);
+  p0-fixes.spec.ts p0-5 (2 e2e — the stream mock is r7-fixes.spec.ts's REAL
+  SSE-server mechanism, since `route.fulfill` ends the body and withdraws
+  LIVE; the fixture snapshot frame carries the controlled `batch.age_seconds`).
+- Testids retired: `ribbon-batch-age`, `ribbon-batch-age-unknown` →
+  `ribbon-snapshot`. Migrated pins, old→new (feed fixture batch id is 1):
+  - r3-fixes.spec.ts:196 `ribbon-batch-age` toHaveCount(0) [absence below 1h]
+    → `ribbon-snapshot` toHaveText "snapshot #1 · 59m old" (policy inverted
+    deliberately: always show).
+  - r3-fixes.spec.ts:201 toHaveText "· batch 1h old" → toHaveText
+    "snapshot #1 · 1h 0m old" (3610s through humanAge).
+  - r4-fixes.spec.ts:181 toHaveCount(0) → toHaveText "snapshot #1 · 59m old".
+  - r4-fixes.spec.ts:186 toHaveCount(0) [suspended, pre-resume] → toHaveText
+    "snapshot #1 · 59m old" (no timer fired; the chip holds the pre-suspend
+    reading until the resume reconciles).
+  - r4-fixes.spec.ts:189 toHaveText "· batch 5h old" → toHaveText
+    "snapshot #1 · 5h 59m old" (21550s through humanAge — the brief's sketch
+    guessed "5h 0m"; the fixture computes 5h 59m, matching the book line's
+    "5h 59m ago" beside it).
+  - r6-fixes.spec.ts:212 toHaveCount(0) → toHaveText "snapshot #1 · 2m old".
+  - r6-fixes.spec.ts:220 unknown toHaveText "· batch age UNKNOWN since resume
+    · refreshing" → toHaveText "snapshot #1 · age UNKNOWN since resume ·
+    refreshing" (register phrases unchanged, byte for byte).
+  - r6-fixes.spec.ts:223 `ribbon-batch-age` toHaveCount(0) → `ribbon-snapshot`
+    toHaveCount(1) (ONE chip carries the whole disclosure).
+  - r6-fixes.spec.ts:226 unknown not.toContainText("old") → chip
+    not.toContainText("old").
+  - r6-fixes.spec.ts:242 unknown toBeVisible → chip toContainText
+    "age UNKNOWN".
+  - r6-fixes.spec.ts:248 toHaveText "· batch 3h old" → toHaveText
+    "snapshot #1 · 3h 2m old" (10930s through humanAge).
+  - r6-fixes.spec.ts:249 unknown toHaveCount(0) → chip
+    not.toContainText("UNKNOWN").
+  - r6-fixes.spec.ts:313, :319 unknown toHaveText refreshing-register →
+    chip toHaveText "snapshot #1 · age UNKNOWN since resume · refreshing".
+  - r6-fixes.spec.ts:328 unknown toHaveText failed-register → chip toHaveText
+    "snapshot #1 · age UNKNOWN since resume · refresh failed, data retained".
+  - r6-fixes.spec.ts:331 `ribbon-batch-age` toHaveCount(0) → chip
+    not.toContainText("old").
+  - r6-fixes.spec.ts:344 unknown toHaveText failed-register → chip toHaveText
+    (as :328).
+  - r6-fixes.spec.ts:564 toHaveCount(0) → toHaveText "snapshot #1 · 59m old".
+  - r6-fixes.spec.ts:577 toHaveText "· batch 5h old" → toHaveText
+    "snapshot #1 · 5h 59m old".
+  - r6-fixes.spec.ts:578 unknown toHaveCount(0) → chip
+    not.toContainText("UNKNOWN").
+- DEVIATION (forced, ledgered): r7-fixes.spec.ts carries its own suffix pins
+  the task brief's "only r3/r4/r6 migrate" enumeration missed; retiring the
+  testids while leaving them would fail the file the brief requires to pass.
+  The minimal failing set migrated — BADGE-STRING PINS UNTOUCHED:
+  - r7-fixes.spec.ts:517 unknown toHaveText "· batch age UNKNOWN since resume
+    · refreshing" → chip toHaveText "snapshot #1 · age UNKNOWN since resume ·
+    refreshing".
+  - r7-fixes.spec.ts:534 toHaveText "· batch 3h old" → chip toHaveText
+    "snapshot #1 · 3h 2m old".
+  - r7-fixes.spec.ts:587 toHaveText "· batch 1h old" → chip toHaveText
+    "snapshot #1 · 1h 0m old".
+  - Left untouched and now VACUOUS (retired-testid toHaveCount(0), pass
+    trivially): r7-fixes.spec.ts:496, :535, :567. Flagged for cleanup when
+    r7-fixes is in a task's file list.
+- DEVIATION (forced, ledgered): app/styleguide/page.tsx:309 passed
+  `batchAgeSuffix="· batch 3h old"` to Ribbon — the prop removal is a compile
+  error, so the specimen migrated to `snapshot="snapshot #18251 · 3h 2m old"`.
+- Retirement DEFERRED: `ribbonBatchAgeSuffix`, `ribbonBatchAgeUnknown` (and
+  `RIBBON_STALE_BATCH_SECONDS`/`ageHours` they lean on) are retired from the
+  RENDER PATH (no component imports them) but NOT deleted:
+  find_referencing_symbols shows live consumers in tests/unit/freshness.spec.ts
+  (:83–87, :164–173), tests/unit/freshness-resume.spec.ts (:181–190) and
+  tests/unit/freshness-blind-resume.spec.ts (:344–353) — files outside Task
+  5's list, so the zero-consumers deletion condition is not met. Flag for the
+  task that owns those specs.
+- Styling note: the chip renders in the old suffix's muted tone (`.snapshot`,
+  --ink-3); the warn-coloured `.batchAgeUnknown` styling retires with its
+  slot, so the unknown register is currently muted too — severity styling
+  arrives with Phase 1's SLA (brief-directed).
+- Red runs recorded: unit spec failed at import (no export `snapshotChip`);
+  both p0-5 e2e tests failed at `ribbon-snapshot` element(s) not found (the
+  LIVE badge assertion passing beside them) before the wiring landed.
+- Mutation kills (each applied alone, rebuilt, run in isolation, reverted):
+  - Mutant A (`snapshotChip` returns "" at ≤3600s — the old policy
+    resurrected): KILLED in the p0-5 fresh-batch test at p0-fixes.spec.ts:477
+    chip toBeVisible. DIVERGENCE from the brief's predicted "42s old" kill,
+    recorded: an empty-string chip is falsy, so Ribbon renders no element at
+    all and the kill lands one assertion earlier, still in isolation.
+  - Mutant B (PostureRibbon passes `snapshotChip(...)` unconditionally,
+    ignoring `unresolved`): KILLED at r6-fixes.spec.ts:221, the chip's
+    `age UNKNOWN` toHaveText — received "snapshot #1 · 2m old", the
+    understated computed age. The brief's predicted assertion exactly.
+- Suite after reverts (rebuild + run): p0-fixes, shell, state-matrix,
+  r3-fixes, r4-fixes, r6-fixes, r7-fixes e2e + freshness-snapshot,
+  stream-posture, freshness-blind-resume unit — 110 passed, 1 pre-existing
+  skip (styleguide-not-compiled, shell.spec.ts). typecheck: only the
+  pre-existing lab-runbook-lines.spec.ts(858) TS2322.

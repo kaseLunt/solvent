@@ -514,8 +514,10 @@ test("(4) A HUNG RECONNECT NEVER LEAVES LIVE PAINTED — and the base frame is w
     // connection must not also cost the reader their book, and the age is
     // disclosed as UNKNOWN rather than as the understated number.
     await expect(header.getByText("@25,635,618")).toBeVisible();
-    await expect(page.getByTestId("ribbon-batch-age-unknown")).toHaveText(
-      `· batch age ${REFRESHING}`,
+    // Phase 0 fix 5: the disclosure moved onto the always-visible snapshot
+    // chip (`ribbon-snapshot`); the unknown register's phrase is unchanged.
+    await expect(page.getByTestId("ribbon-snapshot")).toHaveText(
+      `snapshot #1 · age ${REFRESHING}`,
     );
     await expect(page.getByRole("table", { name: "positions for aave_v3_etherfi" })).toBeVisible();
 
@@ -531,7 +533,8 @@ test("(4) A HUNG RECONNECT NEVER LEAVES LIVE PAINTED — and the base frame is w
     await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
     // The new receipt discharges the unknown age in the same breath, and the
     // suffix the ribbon could not compute a moment ago says three hours.
-    await expect(page.getByTestId("ribbon-batch-age")).toHaveText("· batch 3h old");
+    // Phase 0 fix 5: the chip, in humanAge precision — 10930s → "3h 2m".
+    await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 3h 2m old");
     await expect(page.getByTestId("ribbon-batch-age-unknown")).toHaveCount(0);
     // ONE reconnect for this repair: the successful attempt ended the schedule.
     expect(harness.connections()).toBe(2);
@@ -584,7 +587,8 @@ test("(4) A SERVER THAT HANGS UP TAKES LIVE WITH IT — and nothing else", async
     await expect(header.getByText("@25,635,618")).toBeVisible();
     await expect(page.getByRole("table", { name: "positions for aave_v3_etherfi" })).toBeVisible();
     await page.clock.fastForward(60_000);
-    await expect(page.getByTestId("ribbon-batch-age")).toHaveText("· batch 1h old");
+    // Phase 0 fix 5: the chip, in humanAge precision — 3610s → "1h 0m".
+    await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 1h 0m old");
     await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
   } finally {
     await harness.close();

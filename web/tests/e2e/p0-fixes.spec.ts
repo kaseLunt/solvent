@@ -23,6 +23,8 @@
 // (typed TS fixtures from tests/fixtures/inspector.ts).
 
 import { readFileSync } from "node:fs";
+import { createServer, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import {
@@ -31,6 +33,7 @@ import {
   POSITIONS_AAVE_PAGE_2,
   POSITIONS_DM_PAGE_1,
 } from "../fixtures/book";
+import { FEED_POSTURE_SNAPSHOT } from "../fixtures/feed";
 import { ADDRESS_FOUND, EVENTS, FOUND_ADDR, HISTORY, PARAMS } from "../fixtures/inspector";
 
 const API = "http://localhost:8080";
@@ -388,5 +391,108 @@ test.describe("p0-4 · engine-specific terminology", () => {
     await expect(
       page.getByText("maxBorrowLT/borrowings — a disclosure, not the engine's trigger"),
     ).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p0-5 · snapshot chip — snapshot freshness is its own ALWAYS-VISIBLE element
+// beside the stream badge, never a >1h-only suffix inside it (cross-page
+// brief: "Always show the age"). The stream mock is r7-fixes.spec.ts's
+// mechanism verbatim: a REAL SSE server whose connection is held open
+// (route.fulfill would end the body — a server hang-up — and withdraw LIVE),
+// delivering the committed fixture snapshot with a controlled
+// batch.age_seconds.
+// ---------------------------------------------------------------------------
+
+interface StreamHarness {
+  readonly url: string;
+  connections(): number;
+  close(): Promise<void>;
+}
+
+/** Start an SSE server whose connections are held open under the test's control. */
+async function startStreamServer(
+  onConnect: (connection: number, res: ServerResponse) => void,
+): Promise<StreamHarness> {
+  let count = 0;
+  const live = new Set<ServerResponse>();
+  const server: Server = createServer((_request, response) => {
+    count += 1;
+    live.add(response);
+    response.on("close", () => live.delete(response));
+    onConnect(count, response);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    url: `http://127.0.0.1:${String(port)}/v1/stream`,
+    connections: () => count,
+    close: async () => {
+      for (const response of live) response.destroy();
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+    },
+  };
+}
+
+/** Accept the connection, flush headers, deliver the base snapshot — OPEN and LIVE. */
+function openWithSnapshot(response: ServerResponse, ageSeconds: number): void {
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-store",
+    ...CORS,
+  });
+  const payload = structuredClone(FEED_POSTURE_SNAPSHOT);
+  if (payload.batch === null || payload.batch === undefined) {
+    throw new Error("fixture shape drifted");
+  }
+  payload.batch.age_seconds = ageSeconds;
+  response.write(`event: snapshot\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+
+/** A held-open stream serving the fixture snapshot at a chosen age, plus the book routes. */
+async function mockPostureWithBatchAge(page: Page, ageSeconds: number): Promise<StreamHarness> {
+  const harness = await startStreamServer((_connection, response) => {
+    openWithSnapshot(response, ageSeconds);
+  });
+  await page.route("**/v1/stream**", (route) => route.continue({ url: harness.url }));
+  await page.route("**/v1/book", (route) => json(route, JSON.stringify(BOOK)));
+  await page.route("**/v1/positions*", (route) =>
+    json(route, JSON.stringify(POSITIONS_AAVE_PAGE_1)),
+  );
+  return harness;
+}
+
+test.describe("p0-5 · snapshot chip", () => {
+  test("a FRESH batch still shows its age beside the live badge", async ({ page }) => {
+    const harness = await mockPostureWithBatchAge(page, 42); // snapshot frame, age_seconds 42
+    try {
+      await page.goto("/book");
+      const header = page.getByRole("banner");
+      await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible(); // badge untouched
+      const chip = header.getByTestId("ribbon-snapshot");
+      await expect(chip).toBeVisible();
+      await expect(chip).toContainText("42s old");
+      await expect(chip).toContainText("snapshot #");
+    } finally {
+      await harness.close();
+    }
+  });
+
+  test("an old batch reads in hours+minutes, not a coarse suffix", async ({ page }) => {
+    const harness = await mockPostureWithBatchAge(page, 65_532);
+    try {
+      await page.goto("/book");
+      await expect(page.getByRole("banner").getByTestId("ribbon-snapshot")).toContainText(
+        "18h 12m old",
+      );
+      // old suffix retired
+      await expect(page.getByRole("banner").getByTestId("ribbon-batch-age")).toHaveCount(0);
+    } finally {
+      await harness.close();
+    }
   });
 });

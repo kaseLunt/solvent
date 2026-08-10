@@ -192,13 +192,15 @@ test("(2) THE RIBBON ENGAGES: the stale-batch suffix appears on the crossing", a
   // BATCH AGE, which is this test's real subject, renders beside it unchanged.
   await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
   await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
-  // Inside the threshold: nothing rendered, and the absence is not a claim.
-  await expect(page.getByTestId("ribbon-batch-age")).toHaveCount(0);
+  // Phase 0 fix 5 INVERTED THIS PIN DELIBERATELY: the snapshot chip is ALWAYS
+  // visible, so a sub-hour age is STATED exactly rather than withheld until a
+  // threshold crossing (the cross-page brief: "Always show the age").
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 59m old");
 
   // The batch really does become an hour old while the tab is open, and the
   // ribbon now says so — the defect was that it never could.
   await page.clock.fastForward(60_000);
-  await expect(page.getByTestId("ribbon-batch-age")).toHaveText("· batch 1h old");
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 1h 0m old");
   // TWO SUBJECTS, TWO STATEMENTS, both still true and both still rendered: the
   // stream's own posture, and the age of the batch it last delivered. Losing
   // the connection does not cost the reader the fact that their data is old —

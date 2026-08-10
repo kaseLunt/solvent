@@ -33,23 +33,13 @@
   border-color: var(--accent);
 }
 
-/* The batch-age suffix inside the stream badge (Wave R1 item 3): DIM, so the
-   eye reads the badge as the stream's state and the suffix as a separate fact
-   about the batch — never one green sentence implying fresh numbers.
-   WAVE R7: scoped to `.badge`, not `.badge.live`. The batch and its age are
-   RETAINED while the connection is down, so the age slot has to keep its
-   styling under the waiting and closed tones too. */
-.badge .batchAge {
+/* The snapshot chip (Phase 0 fix 5): the batch's own freshness statement,
+   ALWAYS visible as a sibling of the stream badge — the muted tone the old
+   in-badge suffix carried, simply moved out of the badge so connection state
+   and snapshot freshness are two elements, never one green sentence implying
+   fresh numbers. Severity styling arrives with the Phase 1 SLA. */
+.snapshot {
   color: var(--ink-3);
-}
-
-/* THE UNKNOWN REGISTER (Wave R6): the same slot, in the WARN colour rather
-   than the dim one. It is louder than the age it replaces because a refusal to
-   state the age is a thing the reader must notice — and it is not the CRIT
-   colour, because "I cannot say" is not a verdict that anything is wrong with
-   the batch. */
-.badge .batchAgeUnknown {
-  color: var(--warn);
 }
 
 .badge.waiting {

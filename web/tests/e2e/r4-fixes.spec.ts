@@ -178,15 +178,19 @@ test("(1) THE RIBBON ENGAGES POST-RESUME: a slept-through threshold is still cro
   // its disclosure are RETAINED across the dead connection.
   await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
   await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
-  await expect(page.getByTestId("ribbon-batch-age")).toHaveCount(0);
+  // Phase 0 fix 5: the chip is ALWAYS visible — the sub-hour age is stated
+  // exactly, not withheld until a threshold.
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 59m old");
 
   // Five hours of suspend: the interval never ran, `performance.now()` never
-  // advanced. THE DEFECT was that the suffix could never engage from here.
+  // advanced. THE DEFECT was that the rendered age could never move from here —
+  // the chip still shows the pre-suspend reading until the resume reconciles.
   await page.clock.setSystemTime(new Date(T0.getTime() + 5 * 3_600_000));
-  await expect(page.getByTestId("ribbon-batch-age")).toHaveCount(0);
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 59m old");
 
   await dispatchResume(page);
-  await expect(page.getByTestId("ribbon-batch-age")).toHaveText("· batch 5h old");
+  // 3550s + 5h certified by the wall clock = 21550s → humanAge "5h 59m".
+  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("snapshot #1 · 5h 59m old");
   // Two subjects, two statements, both true: the stream's real posture, and the
   // age of the batch it delivered before it hung up.
   await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
