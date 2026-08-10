@@ -940,3 +940,36 @@ test("the ribbons are the OCCUPIED cells only, each labelled by its two lanes", 
     expect(ribbon.held).toBe(ribbon.from === ribbon.to);
   }
 });
+
+// ---------------------------------------------------------------------------
+// p1b-2 — THE WIRE CONTRACT IS A REFUSAL OF THIS MODULE TOO (layered defense).
+// `classifyRunBookEngine` refuses a malformed engine before this module ever
+// sees it, but this module's own refusal composition (`readTransitions`'
+// reasons) does not TRUST that gate: a wad the wire contract cannot read is
+// named here as well, and `belowOneLanes` reads bounds only through
+// `wireBigInt` — `BigInt("")` used to coerce an empty `wad_scale` to 0n (a
+// "0 entered / 0 exited" costume), and `BigInt("0x10")` read a radix literal
+// as 16, a bound that would sit "below one" against any real scale.
+// ---------------------------------------------------------------------------
+
+test("p1b-2: a wad_scale outside the wire contract REFUSES the matrix by name", () => {
+  const engine = engineOf(RUN_BOOK_ETH, "aave_v3_etherfi");
+  const broken = withMatrix(engine, (t) => ({ ...t, wad_scale: "" }));
+  const reasons = reasonsFor(broken).join(" ");
+  expect(reasons).toContain("wad_scale");
+  expect(reasons).toContain("wire Decimal contract");
+});
+
+test("p1b-2: a radix-prefixed lane bound is refused by name and NEVER read as 16", () => {
+  const engine = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const broken = withMatrix(engine, (t) => ({
+    ...t,
+    lanes: t.lanes.map((lane) => (lane.index === 0 ? { ...lane, upper_wad: "0x10" } : lane)),
+  }));
+  // The module's refusal composition names the field per index…
+  expect(reasonsFor(broken).join(" ")).toContain("lanes[0].upper_wad");
+  // …and belowOneLanes never coerces it: the committed DM region is [0, 1]
+  // (pinned above); with lane 0's bound unreadable, only lane 1 is placeable.
+  // `BigInt("0x10")` read 16n ≤ scale and kept lane 0 in the region.
+  expect(belowOneLanes(broken.hf_transitions)).toEqual([1]);
+});

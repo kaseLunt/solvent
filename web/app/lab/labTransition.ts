@@ -30,6 +30,7 @@
 // Playwright's transpiler as well as by Next.
 
 import type { LabRunBookEngine, RunBookTransitions } from "../../lib/runbook";
+import { wireBigInt } from "../../lib/wireGuard";
 
 /** The lane vocabulary's two non-bucket kinds, named rather than indexed. */
 export const LANE_KIND_BUCKET = "bucket";
@@ -114,6 +115,28 @@ export function readTransitions(engine: LabRunBookEngine): TransitionReading {
         `${engine.before.hf_histogram.comparator}`,
     );
   }
+
+  // p1b-2 — THE WIRE CONTRACT, before any lane is judged. `classifyRunBookEngine`
+  // refuses a malformed engine upstream, but this module's refusal composition
+  // does not TRUST that gate: `BigInt("")` coerces to 0n and `BigInt("0x10")`
+  // to 16n, so a wad outside the contract used to pass every margin check here
+  // and reach `belowOneLanes` as a plausible bound. Unreadable means refused,
+  // by name.
+  if (wireBigInt(t.wad_scale) === null) {
+    reasons.push(
+      `the matrix states wad_scale ${JSON.stringify(t.wad_scale)} outside the wire Decimal ` +
+        `contract (^-?[0-9]+$), so no lane edge can be judged against 1.00`,
+    );
+  }
+  t.lanes.forEach((lane, index) => {
+    if (lane.upper_wad !== null && wireBigInt(lane.upper_wad) === null) {
+      reasons.push(
+        `the matrix states lanes[${String(index)}].upper_wad ${JSON.stringify(lane.upper_wad)} ` +
+          `outside the wire Decimal contract (^-?[0-9]+$), and a bound that cannot be read ` +
+          `places no row`,
+      );
+    }
+  });
 
   // THE UNMEASURED LANE IS DIAGONAL-ONLY. A row unmeasured in this run is
   // unmeasured on BOTH sides — refusal is row-level for the whole run — so a
@@ -250,11 +273,23 @@ export function readTransitions(engine: LabRunBookEngine): TransitionReading {
  * not a small number and a row nobody measured has no health factor at all.
  */
 export function belowOneLanes(transitions: RunBookTransitions): number[] {
-  const scale = BigInt(transitions.wad_scale);
+  // p1b-2 — LAYERED DEFENSE, in-module. `BigInt("")` used to coerce an empty
+  // `wad_scale` to 0n and judge every bound against it (a "0 entered /
+  // 0 exited" costume over an unreadable vocabulary), and `BigInt("0x10")`
+  // read a radix literal as 16 — a bound that sits "below one" against any
+  // real scale. The only sanctioned read is `wireBigInt`; its null arm admits
+  // NO lane, and the body that produces it is REFUSED upstream by
+  // `readTransitions`' own reasons (this module's refusal composition) and by
+  // `classifyRunBookEngine` before that — so this function's callers, all
+  // downstream of the ok arm, never see the null arm at all.
+  const scale = wireBigInt(transitions.wad_scale);
+  if (scale === null) return [];
   const out: number[] = [];
   for (const lane of transitions.lanes) {
     if (lane.kind !== LANE_KIND_BUCKET) continue;
-    if (lane.upper_wad !== null && BigInt(lane.upper_wad) <= scale) out.push(lane.index);
+    if (lane.upper_wad === null) continue;
+    const upper = wireBigInt(lane.upper_wad);
+    if (upper !== null && upper <= scale) out.push(lane.index);
   }
   return out;
 }

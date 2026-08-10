@@ -5,12 +5,21 @@
 import { expect, test } from "@playwright/test";
 import { CELL_QUIET_LINE, cellPrimaryOutcome } from "../../app/lab/matrixCells";
 import type { LabRunBookEngine } from "../../lib/runbook";
+import { RUN_BOOK_ETH } from "../fixtures/lab-book";
 
-// Minimal engine skeleton: only the fields cellPrimaryOutcome reads.
-// usd_decimals 2 keeps expectations legible.
+// p1b-2: `cellPrimaryOutcome`'s malformed arm now consults the FULL subtree
+// classifier (`classifyRunBookEngine`), so the skeleton must be a WHOLE
+// contract-legal engine — the committed fixture's own aave engine — not the
+// 4 read fields alone (a 4-field skeleton would classify malformed on every
+// missing subtree). The outcome fields are zeroed by default so each test's
+// single documented override keeps its original meaning; usd_decimals 2
+// keeps expectations legible, as before.
+const BASE = RUN_BOOK_ETH.engines.find((candidate) => candidate.engine === "aave_v3_etherfi");
+
 function engine(over: Partial<LabRunBookEngine>): LabRunBookEngine {
+  if (!BASE) throw new Error("fixture carries no aave_v3_etherfi engine");
   return {
-    engine: "aave_v3_etherfi",
+    ...structuredClone(BASE),
     usd_decimals: 2,
     eligible_debt_delta_usd: "0",
     bad_debt_delta_usd: "0",

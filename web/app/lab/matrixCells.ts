@@ -30,7 +30,8 @@
 import type { EngineRefusal, ScenarioDefinition, Shock } from "@solvent/client";
 import { renderEngineAmount, renderSignedCount } from "../../lib/book-format";
 import type { LabRunBook, LabRunBookEngine, RunBookOutcome } from "../../lib/runbook";
-import { isWireDecimal, isZeroDecimal } from "../../lib/wireGuard";
+import { isZeroDecimal } from "../../lib/wireGuard";
+import { classifyRunBookEngine } from "./engineClassification";
 
 // ---------------------------------------------------------------------------
 // Axis families — the vocabulary a not-covered cell explains itself in.
@@ -2788,31 +2789,27 @@ export type CellOutcome =
 // The wire-contract primitives (`WIRE_DECIMAL` / `isWireDecimal` /
 // `isZeroDecimal`) were p0-8's, module-private here; p1b-1 extracted them to
 // the SHARED `lib/wireGuard.ts` so every Track B classifier answers to one
-// law. Imported above — the checks below are byte-for-byte the same tests.
+// law. p1b-2 folded this function's own 4-field check into
+// `classifyRunBookEngine` (`./engineClassification`), the exhaustive
+// subtree classifier — the malformed arm below DELEGATES, so the `fields`
+// list now covers the whole engine block with per-index naming.
 
 export function cellPrimaryOutcome(engine: LabRunBookEngine): CellOutcome {
-  // P0-8 finding 2 — validation FIRST, in read order. Every field this
-  // function reads must satisfy its wire contract before any zero/movement
-  // decision is made; a failing field makes the whole outcome MALFORMED and
-  // names the field, because a partial answer over unreadable inputs is a
-  // claim the data cannot carry.
+  // P0-8 finding 2 — validation FIRST, in read order. p1b-2 widened the
+  // validation from this function's own 4 read fields to THE FULL SUBTREE
+  // CLASSIFIER (`classifyRunBookEngine`, one law one function): every numeric
+  // wire field the run-book detail consumes is judged before any
+  // zero/movement decision, with array fields named per index — so a
+  // malformed field ANYWHERE in the engine's block (an aggregate, a bucket
+  // bound, the transition matrix's wad scale, a mover wad, a projection
+  // horizon) refuses the outcome here, upstream of every throwing renderer
+  // and every silently-permissive BigInt. The 4-field check this function
+  // carried is folded into the classifier under its unchanged field names.
+  const { malformedFields: fields } = classifyRunBookEngine(engine);
+  if (fields.length > 0) {
+    return { kind: "malformed", fields };
+  }
   const mr = engine.market_realization;
-  const malformed: string[] = [];
-  if (!Number.isInteger(engine.newly_eligible_accounts)) {
-    malformed.push("newly_eligible_accounts");
-  }
-  if (!isWireDecimal(engine.eligible_debt_delta_usd)) {
-    malformed.push("eligible_debt_delta_usd");
-  }
-  if (!isWireDecimal(engine.bad_debt_delta_usd)) {
-    malformed.push("bad_debt_delta_usd");
-  }
-  if (mr && !isWireDecimal(mr.execution_shortfall_usd)) {
-    malformed.push("market_realization.execution_shortfall_usd");
-  }
-  if (malformed.length > 0) {
-    return { kind: "malformed", fields: malformed };
-  }
   const parts: string[] = [];
   if (engine.newly_eligible_accounts !== 0) {
     parts.push(`${renderSignedCount(engine.newly_eligible_accounts)} newly eligible`);

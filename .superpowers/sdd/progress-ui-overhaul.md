@@ -764,7 +764,7 @@ spec): **1416 tests in 83 files**.
 Task list:
 - [x] Task 0 — wave config + honest route error boundary (p1b-0)
 - [x] Task 1 — wire-guard module + BigInt coercion kill (p1b-1)
-- [ ] Task 2 — full RunBookEngine classifier
+- [x] Task 2 — full RunBookEngine classifier (p1b-2)
 - [ ] Task 3 — SetRunEngineSummary classifier + tornado malformed arm
 - [ ] Task 4 — FactorPrice entry guard
 - [ ] Task 5 — result-identity module + address-mode completion
@@ -909,3 +909,127 @@ composition its module already had (Task 2 owns the engine-level register).
   pre-existing styleguide skip, no other movement.
 - `npm run typecheck`: completely clean.
 - `npx eslint` on all seven touched files: 0 errors, 0 warnings.
+
+### p1b-2 · the full RunBookEngine subtree classifier (Task 2)
+
+Closes Codex round-3 finding 1. The p0-9 gate (`cellPrimaryOutcome`'s
+malformed arm) validated 4 of the ~40+ numeric wire fields the run-book
+detail subtree consumes; every other field fed a THROWING renderer (the
+route boundary took the page: `LabRunBookDetail.tsx` money/BigInt sites,
+`flipRanking.ts:197`, `moverDumbbells.ts` BigInt sites) or a
+silently-PERMISSIVE coercion — Task 1's review proved
+`hf_transitions.wad_scale: ""` passes `readTransitions`' margin arithmetic
+untouched and coerces to a "0 entered / 0 exited" costume in
+`belowOneLanes`.
+
+Delivered:
+- `web/app/lab/engineClassification.ts` — `classifyRunBookEngine(engine):
+  { malformedFields: string[] }`, a pure, never-throwing walker over the
+  WHOLE engine in wire read order, on `wireGuard` primitives
+  (`isWireDecimal`/`isWireScale`/`isWireCount`/`malformedFields`), with
+  array fields named PER INDEX (`movers[2].hf_before_wad`,
+  `before.hf_histogram.buckets[0].upper_wad`,
+  `hf_transitions.outflows[3].cells[0].debt_before_usd`). Inventory:
+  `usd_decimals`; before/after × {accounts, eligible_accounts,
+  total_collateral_usd, total_debt_usd, eligible_debt_usd,
+  collateral_at_risk_usd, bad_debt_usd, hf_histogram.wad_scale,
+  buckets[].upper_wad, collateral_by_asset[].decimals/amount/value_usd};
+  `hf_transitions.wad_scale` + `lanes[].upper_wad` +
+  `outflows[].cells[].debt_before_usd/debt_after_usd`;
+  `newly_eligible_accounts`; the two deltas; `movers[].hf_before_wad/
+  hf_after_wad/hf_drop_wad/debt_usd`; `market_realization.*` when served;
+  `projection.horizons[].debt_usd/projected_usd/additional_interest_usd`
+  when served. Nullability mirrors the generated schema EXACTLY — a
+  `NullableDecimal` null (unbounded top bucket, unmeasured cell debts,
+  the other engine's mover vocabulary, an unpriced `value_usd`) is a
+  STATEMENT, never malformed; a missing/mis-shaped required subtree is
+  named as its own malformed field instead of throwing.
+- `web/app/lab/matrixCells.ts` — `cellPrimaryOutcome`'s malformed arm
+  DELEGATES to the classifier (one law, one function); its own 4-field
+  check is folded in under unchanged field names. `CellOutcome` shape
+  unchanged, so the cell, the superseded payload, the engine panel and the
+  parent summary all refuse on the same classification with no invocation
+  change.
+- `web/app/lab/labTransition.ts` — the LAYERED in-module defense
+  (controller addition 1): `readTransitions` refuses a `wad_scale` or any
+  non-null `lanes[].upper_wad` outside the wire contract BY NAME (the
+  module's own refusal composition — it does not trust the upstream gate),
+  and `belowOneLanes` reads bounds only through `wireBigInt` — the null
+  arm admits no lane, where `BigInt("")` judged every bucket against 0n
+  and `BigInt("0x10")` put a radix literal "below one" as 16.
+- `web/app/lab/LabBookPanel.tsx` — gate comments updated; invocation sites
+  and register unchanged (both gates read `cellPrimaryOutcome`).
+- `web/tests/unit/engine-classification.spec.ts` (17 tests) — skeleton is
+  the committed `run-book.eth_minus_30.json` engine; one documented
+  corruption per test, exact `malformedFields` pins, per-index naming,
+  schema-legal-null cleanliness, wire read order across the subtree, and
+  the controller's OWN `hf_transitions.wad_scale` unit pin.
+- `web/tests/unit/lab-transition.spec.ts` (+2) — `wad_scale: ""` REFUSES
+  the matrix by name (it was ACCEPTED before); a radix-prefixed lane bound
+  is refused per index and `belowOneLanes` yields `[1]`, never the coerced
+  `[0, 1]`.
+- `web/tests/unit/matrix-outcome.spec.ts` — the `engine()` helper is now a
+  WHOLE contract-legal engine (fixture clone, outcome fields zeroed by
+  default) instead of the old 4-field skeleton, which the full classifier
+  would rightly refuse. Every pin and every exact `fields` list survives
+  UNCHANGED (16/16) — no old→new pin movement to ledger.
+- `web/tests/e2e/p1b-fixes.spec.ts` (+2, p1b-2) — run-book mocks in
+  p0-fixes' register; (a) `before.total_debt_usd: ""` → the route stays
+  live, cell and engine panel read the malformed register naming
+  `before.total_debt_usd`, the healthy debt_manager panel renders whole;
+  (b) `movers[0].hf_before_wad: "1e5"` → same register, per-index name.
+
+Out of scope, ledgered for Task 5/6: `LabScenarioDetail.tsx:50` is the
+ADDRESS-stress path's bare-BigInt site — NOT under `RunBookEngine`, not
+covered by this classifier. The remaining run-book bare-BigInt sites
+(`LabRunBookDetail.tsx:122/:200/:431/:728/:732/:862`, `flipRanking.ts:197`,
+`moverDumbbells.ts:161/:210-211/:228-229`) are DEFENDED UPSTREAM: a
+malformed engine never reaches them.
+
+### Red-first evidence
+
+- `engine-classification.spec.ts` before the module existed: dies at
+  collection — `Cannot find module '…/app/lab/engineClassification'`.
+- The two lab-transition pins against the UNFIXED module:
+  `wad_scale: ""` was ACCEPTED (`reasonsFor` threw "expected this body to
+  be refused, and it was accepted" — the exact Task-1-review defect), and
+  the radix bound was refused only by the byte-identity join, with no
+  wire-contract reason naming `lanes[0].upper_wad`.
+- The two p1b-2 e2e pins against the UNWIRED build: both dead at the
+  settle pin (`data-cell-state "result"` — element not found): the render
+  threw in the engine panel, the route boundary replaced the segment, and
+  no cell ever settled.
+
+### Mutation kills (p1b-2-M1, p1b-2-M2, p1b-2-M3)
+
+- M1: the classifier SKIPS the aggregates group (both `aggregateChecks`
+  calls removed). Rebuild, aggregate e2e pin in isolation: KILLED at
+  exactly the settle pin (p1b-fixes.spec.ts:182) — the malformed
+  `before.total_debt_usd` reached the throwing renderer and the boundary
+  took the segment. Reverted; rebuilt.
+- M2: per-index naming replaced by a bare group name
+  (`movers.${field}`). Unit per-index pin in isolation: KILLED at exactly
+  engine-classification.spec.ts:246 — expected
+  `["movers[2].hf_before_wad"]`, received `["movers.hf_before_wad"]`.
+  Reverted.
+- M3 (controller addition 1's kill): `transitionChecks` drops the
+  `hf_transitions.wad_scale` check. Its OWN unit pin in isolation: KILLED
+  at exactly engine-classification.spec.ts:198 — expected
+  `["hf_transitions.wad_scale"]`, received `[]`. Reverted; final tree
+  re-verified.
+
+### Closing counts (p1b-2)
+
+- Track B suite: 1435 → **1456** (+21: engine-classification 17,
+  lab-transition 2, p1b-fixes 2).
+- Full run (final tree, `npm run build` + full p1b config, port 3819):
+  **1455 passed, 1 skipped, 0 failed (35.2s)** — the same single
+  pre-existing styleguide skip, no other movement; `p0-fixes` (p0-8/p0-9
+  pins), `matrix-outcome` and `lab.spec` all green inside it.
+- Committed-fixture sweep: every engine of every committed `run-book.*.json`
+  fixture classifies CLEAN — the law refuses no served body.
+- `npm run typecheck`: completely clean.
+- `npx eslint` on all eight touched files: 0 errors; 1 PRE-EXISTING
+  warning in `LabBookPanel.tsx` (`UnavailableError` unused at :27 —
+  present on the untouched HEAD file too; this task's diff there is
+  comments-only).

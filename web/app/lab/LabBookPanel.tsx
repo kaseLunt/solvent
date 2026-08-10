@@ -145,6 +145,13 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
   // the whole page with them. This panel now refuses the engine's block
   // alone, names the unreadable fields, and claims nothing: not a number,
   // not a zero, and never "no effective movement".
+  //
+  // p1b-2: the decision behind `cellPrimaryOutcome` is now the FULL subtree
+  // classifier (`classifyRunBookEngine`) — every numeric wire field this
+  // panel's ledger, histograms, transition matrix, movers, collateral and
+  // projection blocks consume, named per index — so a malformed field
+  // ANYWHERE in the block lands in this same register, upstream of every
+  // throwing renderer below.
   const outcome = cellPrimaryOutcome(engine);
   if (outcome.kind === "malformed") {
     return (
@@ -350,7 +357,10 @@ function BookResult({
   // function); when any engine is malformed the parent refuses its numeric
   // summary and names the engine and its unreadable fields, while the
   // per-engine panels still render (the malformed one as its own refusal,
-  // the healthy ones whole).
+  // the healthy ones whole). p1b-2: that shared decision now classifies the
+  // WHOLE engine subtree (`classifyRunBookEngine` behind
+  // `cellPrimaryOutcome`), so the parent refuses on the same per-index field
+  // names the cell and the panel report.
   const malformedEngines = response.engines.flatMap((engine) => {
     const outcome = cellPrimaryOutcome(engine);
     return outcome.kind === "malformed"
