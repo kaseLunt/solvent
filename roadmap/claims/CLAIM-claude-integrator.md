@@ -29,8 +29,8 @@ allowed_paths:
   - docker-compose.yml
 scope_hash: sha256:e1576647db6471d5b8d8d6f616871d6c5c037aa99474706e0994a6b48234f7a8
 issued_at: 2026-08-02T20:27:27Z
-lease_expires: 2026-08-10T23:31:55Z
-updated_at: 2026-08-09T23:31:55Z
+lease_expires: 2026-08-11T05:12:20Z
+updated_at: 2026-08-10T05:12:20Z
 ---
 
 # Claim: claude-integrator -> W3
