@@ -53,11 +53,27 @@ function isNullableWireDecimal(value: unknown): boolean {
 }
 
 /**
+ * The schema's `number | null` movement counts (`held_rows`,
+ * `lane_changed_rows`): null is the wire's own "not measured" statement and
+ * is NEVER malformed; a non-null value must be an integer (p1b-9, finding 2).
+ */
+function isNullableWireCount(value: unknown): boolean {
+  return value === null || isWireCount(value);
+}
+
+/**
  * One aggregate side (`RunBookAggregate`): the two counts, the five Decimals,
- * the histogram's scale and per-index bucket bounds, and the per-index
- * collateral decomposition. `buckets[].upper_wad` is nullable (the open-ended
- * top bucket); `collateral_by_asset[].value_usd` is nullable (an unpriced
- * balance's worth is unknowable, not zero).
+ * the histogram's scale, per-index bucket bounds AND COUNTS, the two side
+ * tallies, and the per-index collateral decomposition. `buckets[].upper_wad`
+ * is nullable (the open-ended top bucket); `collateral_by_asset[].value_usd`
+ * is nullable (an unpriced balance's worth is unknowable, not zero).
+ *
+ * p1b-9 (Codex round, finding 2): the histogram COUNTS used to bypass this
+ * walk entirely — the schema types them `number`, but the JSON cast
+ * guarantees nothing, and `count: ""` passed the gate to coerce into a
+ * zero-share costume in `belowOneCount`/`measuredCount` (`0 + ""` is `"0"`).
+ * Every count the reductions consume is now judged by `isWireCount`, per
+ * side and per index.
  */
 function aggregateChecks(side: "before" | "after", aggregate: unknown): FieldCheck[] {
   if (!isRecord(aggregate)) return [[side, false]];
@@ -80,12 +96,17 @@ function aggregateChecks(side: "before" | "after", aggregate: unknown): FieldChe
       checks.push([`${side}.hf_histogram.buckets`, false]);
     } else {
       buckets.forEach((bucket: unknown, index) => {
-        checks.push([
-          `${side}.hf_histogram.buckets[${String(index)}].upper_wad`,
-          isRecord(bucket) && isNullableWireDecimal(bucket.upper_wad),
-        ]);
+        const at = `${side}.hf_histogram.buckets[${String(index)}]`;
+        if (!isRecord(bucket)) {
+          checks.push([at, false]);
+          return;
+        }
+        checks.push([`${at}.upper_wad`, isNullableWireDecimal(bucket.upper_wad)]);
+        checks.push([`${at}.count`, isWireCount(bucket.count)]);
       });
     }
+    checks.push([`${side}.hf_histogram.infinite_count`, isWireCount(histogram.infinite_count)]);
+    checks.push([`${side}.hf_histogram.refused_count`, isWireCount(histogram.refused_count)]);
   }
   const assets = aggregate.collateral_by_asset;
   if (!Array.isArray(assets)) {
@@ -109,9 +130,17 @@ function aggregateChecks(side: "before" | "after", aggregate: unknown): FieldChe
  * The transition matrix (`RunBookTransitions`): its OWN `wad_scale` — the
  * controller-pinned field Task 1's review proved coerces to a
  * "0 entered / 0 exited" costume in `belowOneLanes` — the per-index lane
- * bounds, and every occupied cell's two nullable debts. The lane and cell
- * COUNTS are integers the module's own `readTransitions` reconciles; the
- * fields here are the ones that reach BigInt or the money renderers.
+ * bounds, and every occupied cell's two nullable debts.
+ *
+ * p1b-9 (Codex round, finding 2): AND EVERY COUNT `readTransitions` and the
+ * region reductions consume. The old header claimed the counts were "integers
+ * the module's own `readTransitions` reconciles" — but a reconciliation over
+ * unvalidated values is arithmetic over coercions (`0 + ""` is `"0"`, NaN
+ * comparisons are silently false), and a body that failed the wire contract
+ * deserves the MALFORMED register, not a contradiction sentence derived from
+ * garbage. Judged in wire read order: `lanes[].index`, `outflows[].from`,
+ * `cells[].to`/`rows`, the two margins per index, the five census totals,
+ * and the two NULLABLE movement counts (null is a statement).
  */
 function transitionChecks(transitions: unknown): FieldCheck[] {
   if (!isRecord(transitions)) return [["hf_transitions", false]];
@@ -123,10 +152,13 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
     checks.push(["hf_transitions.lanes", false]);
   } else {
     lanes.forEach((lane: unknown, index) => {
-      checks.push([
-        `hf_transitions.lanes[${String(index)}].upper_wad`,
-        isRecord(lane) && isNullableWireDecimal(lane.upper_wad),
-      ]);
+      const at = `hf_transitions.lanes[${String(index)}]`;
+      if (!isRecord(lane)) {
+        checks.push([at, false]);
+        return;
+      }
+      checks.push([`${at}.index`, isWireCount(lane.index)]);
+      checks.push([`${at}.upper_wad`, isNullableWireDecimal(lane.upper_wad)]);
     });
   }
   const outflows = transitions.outflows;
@@ -138,6 +170,7 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
         checks.push([`hf_transitions.outflows[${String(from)}]`, false]);
         return;
       }
+      checks.push([`hf_transitions.outflows[${String(from)}].from`, isWireCount(outflow.from)]);
       const cells = outflow.cells;
       if (!Array.isArray(cells)) {
         checks.push([`hf_transitions.outflows[${String(from)}].cells`, false]);
@@ -149,11 +182,42 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
           checks.push([at, false]);
           return;
         }
+        checks.push([`${at}.to`, isWireCount(cell.to)]);
+        checks.push([`${at}.rows`, isWireCount(cell.rows)]);
         checks.push([`${at}.debt_before_usd`, isNullableWireDecimal(cell.debt_before_usd)]);
         checks.push([`${at}.debt_after_usd`, isNullableWireDecimal(cell.debt_after_usd)]);
       });
     });
   }
+  // THE TWO MARGINS, per index — `from_rows[i]`/`to_rows[i]` are the numbers
+  // the histogram tallies answer to and the region reductions subtract.
+  for (const margin of ["from_rows", "to_rows"] as const) {
+    const values = transitions[margin];
+    if (!Array.isArray(values)) {
+      checks.push([`hf_transitions.${margin}`, false]);
+    } else {
+      values.forEach((value: unknown, index) => {
+        checks.push([`hf_transitions.${margin}[${String(index)}]`, isWireCount(value)]);
+      });
+    }
+  }
+  // THE CENSUS TOTALS, then the two nullable movement counts.
+  checks.push(["hf_transitions.total_rows", isWireCount(transitions.total_rows)]);
+  checks.push(["hf_transitions.measured_rows", isWireCount(transitions.measured_rows)]);
+  checks.push(["hf_transitions.unmeasured_rows", isWireCount(transitions.unmeasured_rows)]);
+  checks.push([
+    "hf_transitions.unmeasured_refused_in_batch_rows",
+    isWireCount(transitions.unmeasured_refused_in_batch_rows),
+  ]);
+  checks.push([
+    "hf_transitions.unmeasured_excluded_by_this_layer_rows",
+    isWireCount(transitions.unmeasured_excluded_by_this_layer_rows),
+  ]);
+  checks.push(["hf_transitions.held_rows", isNullableWireCount(transitions.held_rows)]);
+  checks.push([
+    "hf_transitions.lane_changed_rows",
+    isNullableWireCount(transitions.lane_changed_rows),
+  ]);
   return checks;
 }
 
@@ -194,6 +258,10 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
       }
     });
   }
+  // p1b-9 (finding 2): the FULL mover count — `moversDisclosure`'s own
+  // denominator ("top 20 of N"). A malformed total rendered "NaN are not on
+  // this page" as a computed-looking clause.
+  checks.push(["movers_total", isWireCount(e.movers_total)]);
 
   const realization = e.market_realization;
   if (realization !== null) {

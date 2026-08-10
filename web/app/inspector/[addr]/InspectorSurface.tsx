@@ -40,7 +40,7 @@ import {
   type ChainEvent,
   type ParamChange,
 } from "@/lib/inspector-data";
-import { useCursorPages } from "@/lib/pagination";
+import { scopedRows, useCursorPages } from "@/lib/pagination";
 import type { EvidenceDescriptor } from "@/lib/evidence";
 import { AddressMono } from "@/components/AddressMono";
 import { RefusedTag } from "@/components/RefusedTag";
@@ -282,13 +282,23 @@ export function InspectorSurface({ addr }: { addr: string }) {
   // one), so a component reuse across addresses can never append one
   // address's activity rows to another's list.
   const activityForRef = useRef<string | null>(null);
+  // p1b-9 (Codex round, finding 3): the walk's OWNING address, as state — set
+  // beside the reset at fetch-dispatch, read at render. The drop-and-restart
+  // above is effect-timed, so on an A→B component reuse the FIRST B render
+  // still holds A's accumulated rows; `scopedRows` below masks them
+  // render-synchronously (the p1b-6 fix-5 derived-empty pattern applied to
+  // the activity consumption), so a frame whose walk cannot prove ownership
+  // renders the empty walk, never another address's activity.
+  const [activityScope, setActivityScope] = useState<string | null>(null);
   useEffect(() => {
     if (activityForRef.current !== addr) {
       activityForRef.current = addr;
       resetActivity();
+      setActivityScope(addr);
     }
     if (valid) loadActivity();
   }, [addr, valid, loadActivity, resetActivity]);
+  const activityRows = scopedRows(activityScope, addr, activity.rows);
 
   const closeEvidence = useCallback(() => {
     setEvidence(null);
@@ -379,7 +389,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
               batch={addressState.lookup.response.batch}
               paramChanges={paramsByEngine[position.engine] ?? null}
               paramsError={paramsErrors[position.engine] ?? null}
-              activity={activity.rows}
+              activity={activityRows}
               onExplain={setEvidence}
             />
           ))}
@@ -428,7 +438,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
       />
 
       <InspectorActivity
-        events={activity.rows}
+        events={activityRows}
         loading={activity.loading}
         error={activity.error}
         hasMore={activity.hasMore}

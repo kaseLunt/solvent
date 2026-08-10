@@ -69,10 +69,35 @@ export function identityLine(id: ResultIdentity): string {
 export interface StressIdentitySource {
   readonly served_at: string;
   readonly batch: { readonly id: number };
+  /**
+   * p1b-9 (Codex round, finding 1): the response's OWN address — the account
+   * the service says this body answers for (`StressResponse.address`,
+   * generated schema). The dispatch address alone is not an identity: a
+   * mislabeled body (cache fault, proxy fault, server bug) carries another
+   * account's numbers under this request's URL, and only this field can
+   * contradict it.
+   */
+  readonly address: string;
   readonly scenario_config_version: string;
   readonly scenarios: readonly {
     readonly results: readonly { readonly engine: string }[];
   }[];
+}
+
+/**
+ * THE ADDRESS WELD (p1b-9, finding 1): does the settled body answer for the
+ * account the run was dispatched for? Compared case-insensitively — the
+ * contract's Address is 0x-hex and deployments differ in checksum casing, so
+ * a byte comparison would refuse honest bodies — and consulted BEFORE the
+ * result is admitted as a phase: a mismatch renders the contract-refusal arm
+ * (both addresses named, nothing claimed), never "results for A" over B's
+ * numbers.
+ */
+export function stressAddressMatchesDispatch(
+  addr: string,
+  response: StressIdentitySource,
+): boolean {
+  return response.address.toLowerCase() === addr.toLowerCase();
 }
 
 /** The §5 identity of one settled address-stress result. */

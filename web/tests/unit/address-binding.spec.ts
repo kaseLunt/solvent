@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 import type { StressLookup } from "@solvent/client";
 import {
   addressBinding,
+  addressMismatchLine,
   settledIdentityLine,
   staleBarrierLine,
   type StressPhase,
@@ -46,6 +47,26 @@ test("retyping the original address restores current (pure round-trip)", () => {
 test("barrier line names the address verbatim", () => {
   expect(staleBarrierLine(A)).toContain(A);
   expect(staleBarrierLine(A)).toContain("PREVIOUS INPUT");
+});
+
+// p1b-9 (Codex round, finding 1): the mismatch phase — a settled body whose
+// own `address` contradicts the dispatch, refused before admission.
+
+test("p1b-9: a mismatch phase binds like done/error — the stale barrier still interposes", () => {
+  const mismatch: StressPhase = { status: "mismatch", addr: A, echoed: B };
+  expect(addressBinding(A, mismatch)).toEqual({ kind: "current", addr: A });
+  expect(addressBinding(B, mismatch)).toEqual({ kind: "stale", addr: A });
+});
+
+test("p1b-9: the mismatch line names BOTH addresses verbatim and claims nothing", () => {
+  const line = addressMismatchLine(A, B);
+  expect(line).toContain("ADDRESS MISMATCH");
+  expect(line).toContain(A);
+  expect(line).toContain(B);
+  expect(line).toContain("refusing to render");
+  expect(line).toContain("nothing is claimed for either address");
+  // The refusal register never wears the results head.
+  expect(line).not.toContain("results for");
 });
 
 // p1b-5: the p0-1 `boundResultLine` pin (`results for ${A}`) MIGRATED — the

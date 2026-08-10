@@ -1966,3 +1966,131 @@ context = the r3 findings as the checklist + the plan's scope statement).
 The round verifies the three r3 findings CLOSED and hunts the residual
 class WITHIN the declared scope above; findings become a fix wave (the
 p0-8/p0-9 precedent).
+
+## Phase 1 Track B Codex fix wave (p1b-9)
+
+The round the p1b-7 seal dispatched ("What runs next") came back with three
+findings; all three are fixed here, test-first, in one commit
+(`fix(web): p1b-9 codex round - response address welds the identity,
+histogram counts join the classifier, activity rows mask synchronously`).
+
+### Finding 1 (HIGH) — the response's own address welds the identity
+
+`web/lib/resultIdentity.ts:69-98`: `StressIdentitySource` omitted the
+response's own `address` field (verified present on `StressResponse` in the
+generated schema, and it survives `lookup()`'s refinement — only `found` is
+sealed off), so `stressResultIdentity` trusted the DISPATCH address
+unconditionally: a mislabeled body (cache/proxy/server fault) rendered B's
+numbers under "results for A".
+
+**Fix**: `address` added to `StressIdentitySource`;
+`stressAddressMatchesDispatch(addr, response)` (case-insensitive — checksum
+casing is not an identity) consulted in LabClient's settle path BEFORE the
+result is admitted. A mismatch settles as a new `StressPhase` arm
+(`{status: "mismatch", addr, echoed}` — carrying NO result, so no arm can
+read the body) and renders the contract-refusal register
+(`addressMismatchLine`, addressBinding.ts) under testid
+`lab-address-mismatch`: both addresses named verbatim, nothing claimed for
+either, in the matrix contradiction arms' identity-refusal tone. The
+mismatch phase binds into `addressBinding` like done/error, so the stale
+barrier still interposes on an edited input.
+
+**Pins**: unit — result-identity.spec.ts ×3 (exact echo matches;
+lowercased echo matches; another account refused) +
+address-binding.spec.ts ×2 (mismatch binds like done/error; the line names
+BOTH addresses, claims nothing, never wears "results for"). e2e —
+p1b-fixes.spec.ts "f1: a mislabeled response body is refused by name":
+structuredClone of the committed stress fixture with only `address` moved →
+refusal visible naming both, `lab-found`/`lab-result-address`/
+`lab-result-age` all count 0, route live. RED witnessed before the fix
+(lab-found settled under the wrong head, no refusal testid).
+
+**Kill (p1b-9-M1)**: comparison removed from the settle path (mutant built)
+→ the f1 e2e pin dies in isolation (1 failed); restored → green.
+
+### Finding 2 (HIGH) — the histogram counts join the classifier
+
+`web/app/lab/engineClassification.ts:73-87`: the COUNTS bypassed the p1b-2
+classifier. The schema types them wire NUMBERS (verified:
+`HistogramBucket.count`, `RunBookHistogram.infinite_count`/`refused_count`,
+every `RunBookTransitions` count and margin, `movers_total` are all
+`number`), but the JSON cast guarantees nothing: `count: ""` passed the gate
+and coerced to a zero-share costume in `belowOneCount`/`measuredCount`
+(`0 + ""` is `"0"`); floats and NaN walked into `readTransitions`' margin
+arithmetic (NaN comparisons silently false → a "contradiction" register over
+garbage, not the malformed register the body earned).
+
+**Fix**: every consumed count is judged by `isWireCount`, per side and per
+index, in wire read order — `buckets[].count`, `infinite_count`,
+`refused_count` per aggregate side; `lanes[].index`, `outflows[].from`,
+`cells[].to`/`rows`, `from_rows[i]`/`to_rows[i]`, the five census totals
+(`total_rows`, `measured_rows`, `unmeasured_rows`,
+`unmeasured_refused_in_batch_rows`,
+`unmeasured_excluded_by_this_layer_rows`) on the matrix; `movers_total`
+(moversDisclosure's own denominator — a malformed total rendered "NaN are
+not on this page"). `held_rows`/`lane_changed_rows` ride a new
+`isNullableWireCount` (null is the wire's own "not measured" statement,
+NEVER malformed). The consumed-count inventory was read off
+`belowOneCount`/`measuredCount`/`unmeasuredTail`/`moversDisclosure`
+(labRunBookLines.ts) and `readTransitions`/`belowOneLanes`/
+`crossingCounts`/`transitionRibbons` (labTransition.ts).
+
+**Pins**: unit — engine-classification.spec.ts ×6, each injection class
+named (`"" as never`, `2.5`, `Number.NaN`) per side and per index; the
+nullable pair pinned legal-null AND malformed-non-null. RED witnessed: all
+6 failed pre-fix with the classifier returning `[]`. e2e —
+p1b-fixes.spec.ts "f2: a malformed histogram COUNT refuses the engine by
+name": `before.hf_histogram.buckets[0].count = "" as never` → cell
+malformed, engine panel names the field, DM panel healthy, route live. RED
+witnessed (cell settled with outcome null).
+
+**Kill (p1b-9-M2)**: counts group dropped (histogram counts, lane/outflow/
+cell counts, margins, census totals, nullable pair, movers_total all
+removed) → the 6 unit pins die in isolation (6 failed); restored → green.
+
+### Finding 3 (MEDIUM) — activity rows mask synchronously
+
+`web/app/inspector/[addr]/InspectorSurface.tsx:277-291`: the p1b-6 fix-5
+activity reset is EFFECT-timed, so on an A→B component reuse the first B
+render still holds A's accumulated rows — exactly the one-render window the
+p1b-7 seal's deviation clause recorded.
+
+**Fix**: the p1b-6 params pattern (render-synchronous derived-empty)
+applied at the consumption seam, consistent with `useCursorPages`'s
+ownership of the rows (the reset cannot move into render — a state write on
+a shared hook): `scopedRows(dispatchedFor, renderingFor, rows)`
+(lib/pagination.ts) masks to the empty walk unless the walk's owning
+address — held in `activityScope` state, set beside the reset at
+fetch-dispatch — matches the rendered `addr`. Both consumption sites
+(`InspectorPositionCard activity=`, `InspectorActivity events=`) read the
+masked `activityRows`. The p1b-7 deviation clause is discharged: the
+observable guarantee no longer relies on remount semantics even for the
+first render of a reuse.
+
+**Pins**: unit — pagination-scope.spec.ts ×3 (pass-through is identical and
+uncopied when scopes match; another address's rows derive EMPTY; a null
+scope derives empty). RECORDED CHOICE (per brief): the A→B reuse is
+remount-dependent in the real router and e2e navigation between two
+inspector addresses is a full-document load, so the reuse frame cannot be
+produced from outside — the pin is the mask's own law at unit level,
+documented in the spec header; the pass-through arm is exercised by every
+existing inspector activity e2e.
+
+**Kill (p1b-9-M3)**: mask removed (`return rows` unconditionally) → the
+mismatched-scope and null-scope pins die in isolation (2 failed);
+restored → green.
+
+### Closing counts (p1b-9)
+
+- `npm run typecheck` — clean (exit 0)
+- `npm run lint` — clean, zero warnings
+- `npm run lint:css` — clean
+- `npm run build` — clean (fresh, post-restore)
+- FULL Track B suite (`npx playwright test -c tests/playwright.p1b.config.ts`,
+  port 3819, fresh build): **1554 passed, 1 skipped, 0 failed (34.4s)**
+  (`web-3819-p1b9-full.log`) — the p1b-8 baseline (1538) plus exactly the
+  16 new pins (6 classifier + 3 identity + 2 binding + 3 scope + 2 e2e);
+  the skip is the same single pre-existing styleguide skip.
+- Mutations: **3 mutants, 3 KILLED, 0 survived** (M1 e2e-in-isolation,
+  M2/M3 unit-in-isolation), every mutant restored and the restoration
+  diff-verified against the pre-mutation bytes.

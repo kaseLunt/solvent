@@ -10,6 +10,13 @@ export type StressPhase =
   | { status: "idle" }
   | { status: "loading"; addr: string }
   | { status: "done"; addr: string; result: StressLookup }
+  /**
+   * p1b-9 (Codex round, finding 1): the settled body's own `address` field
+   * contradicts the dispatch — a mislabeled response (cache/proxy/server
+   * fault). The result is NOT admitted: no `result` is carried, so no arm can
+   * read the body's numbers, and the render is the contract-refusal line.
+   */
+  | { status: "mismatch"; addr: string; echoed: string }
   | { status: "error"; addr: string; message: string };
 
 export type AddressBinding =
@@ -18,7 +25,13 @@ export type AddressBinding =
   | { kind: "stale"; addr: string };
 
 export function addressBinding(input: string, phase: StressPhase): AddressBinding {
-  if (phase.status !== "done" && phase.status !== "error") return { kind: "none" };
+  // A mismatch refusal binds to the address it was DISPATCHED for exactly the
+  // way results and errors do: editing the box away from it interposes the
+  // stale barrier, so a refusal about a previous run never stands beside a
+  // new input as if it answered for it.
+  if (phase.status !== "done" && phase.status !== "error" && phase.status !== "mismatch") {
+    return { kind: "none" };
+  }
   return input === phase.addr
     ? { kind: "current", addr: phase.addr }
     : { kind: "stale", addr: phase.addr };
@@ -26,6 +39,21 @@ export function addressBinding(input: string, phase: StressPhase): AddressBindin
 
 export function staleBarrierLine(addr: string): string {
   return `RESULTS FOR PREVIOUS INPUT · ${addr} · the box above no longer matches these results — run committed set to answer for the new address`;
+}
+
+/**
+ * p1b-9 (finding 1): the mislabeled-response refusal, in the house
+ * identity-refusal register (the matrix's DEFINITION CHANGED/contradiction
+ * tone): BOTH addresses named verbatim, nothing claimed for either, the way
+ * forward stated. Rendered under `lab-address-mismatch` in the done-rendering
+ * slot — the body's numbers are never read.
+ */
+export function addressMismatchLine(dispatched: string, echoed: string): string {
+  return (
+    `ADDRESS MISMATCH · refusing to render: the run was dispatched for ${dispatched} ` +
+    `and the response says it answers for ${echoed}. One of them is mislabeled, so ` +
+    `nothing is claimed for either address — run committed set to answer again`
+  );
 }
 
 /**

@@ -40,7 +40,11 @@ import { getSolventClient } from "@/lib/api";
 import { isAddress, renderLookupOutcome } from "@/lib/format";
 import { AGE_UNKNOWN_RUN_AGAIN, humanAge } from "@/lib/freshness";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
-import { resultReceipt, stressResultIdentity } from "@/lib/resultIdentity";
+import {
+  resultReceipt,
+  stressAddressMatchesDispatch,
+  stressResultIdentity,
+} from "@/lib/resultIdentity";
 import { LabBatchStamp } from "./LabBatchStamp";
 import { LabBookPanel, bookDekFor, type BookState } from "./LabBookPanel";
 import { LabBoundaryGroup } from "./LabBoundaryGroup";
@@ -48,6 +52,7 @@ import { LabScenarioChips } from "./LabScenarioChips";
 import { LabScenarioDetail } from "./LabScenarioDetail";
 import {
   addressBinding,
+  addressMismatchLine,
   settledIdentityLine,
   staleBarrierLine,
   type StressPhase,
@@ -203,6 +208,16 @@ export function LabClient() {
     try {
       const result = await getSolventClient().addressStress(addr);
       if (requestSeq.current === seq) {
+        // p1b-9 (Codex round, finding 1): THE ADDRESS WELD, before the result
+        // is admitted. The response carries its own `address`; a body that
+        // says it answers for another account (cache/proxy/server mislabel)
+        // must never settle as "done" — the done arm renders "results for
+        // {addr}" and every number below it under that head. The comparison
+        // is case-insensitive (checksum casing is not an identity).
+        if (!stressAddressMatchesDispatch(addr, result.response)) {
+          setPhase({ status: "mismatch", addr, echoed: result.response.address });
+          return;
+        }
         setPhase({ status: "done", addr, result });
         // r83: a lookup that just served proves the service is answering —
         // a stored book refusal is stale the moment this lands, so it is
@@ -332,6 +347,21 @@ export function LabClient() {
               {phase.status === "error" ? (
                 <div className={styles.errorState} data-testid="lab-error">
                   {phase.message}
+                </div>
+              ) : null}
+
+              {/* p1b-9 (finding 1): the contract-refusal arm for a mislabeled
+                  response — both addresses named, nothing claimed for either,
+                  in the matrix contradiction arms' identity-refusal tone. The
+                  body was never admitted (no result is held), so no identity
+                  line, no age and no scenario content can render beside it. */}
+              {phase.status === "mismatch" ? (
+                <div
+                  className={styles.errorState}
+                  role="alert"
+                  data-testid="lab-address-mismatch"
+                >
+                  {addressMismatchLine(phase.addr, phase.echoed)}
                 </div>
               ) : null}
 

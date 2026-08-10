@@ -746,3 +746,94 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-9 · the Codex-round fix wave: the response's own address welds the
+// identity (finding 1), the histogram counts join the classifier (finding 2).
+//
+// Finding 3 (the activity rows' render-synchronous mask) is pinned at the
+// unit level (tests/unit/pagination-scope.spec.ts): the A→B component reuse
+// it guards is remount-dependent in the real router, and e2e navigation
+// between two inspector addresses is a full-document load here — the reuse
+// frame cannot be produced from the outside. Recorded choice, per brief.
+//
+// Mock shapes reused from the sections above (mockCold/mockStress,
+// mockRunBook/corruptedRunBook/aaveCell) — every corruption a structuredClone
+// of a committed fixture with ONE documented change.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-9 · Codex-round fixes", () => {
+  test("f1: a mislabeled response body is refused by name — another address's data never wears this address's head", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    // Single documented change to the committed stress fixture, serving ONE
+    // purpose (the mislabeled-echo arm): the response's own `address` field
+    // moved to a DIFFERENT account than the one the run was dispatched for —
+    // the cache/proxy/server mislabel class. Everything else byte-identical,
+    // so with the weld absent the body renders as a perfectly healthy result
+    // under the WRONG head.
+    const body = structuredClone(STRESS_200);
+    const ECHOED = "0xbBbB000000000000000000000000000000000002";
+    body.address = ECHOED;
+    await mockStress(page, body);
+    await page.goto("/lab");
+    await page.getByTestId("mode-address").click();
+    const input = page.getByTestId("lab-address-input");
+    const button = page.getByTestId("run-stress-button");
+    await expect(async () => {
+      await input.fill(STRESS_ADDR);
+      await expect(button).toBeEnabled({ timeout: 250 });
+    }).toPass();
+    await button.click();
+    // THE REFUSAL, in the identity-refusal register: both addresses named,
+    // nothing claimed for either. With the weld absent, lab-found settles
+    // instead and this pin dies first.
+    const refusal = page.getByTestId("lab-address-mismatch");
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toContainText(STRESS_ADDR);
+    await expect(refusal).toContainText(ECHOED);
+    // NO scenario content, NO identity line claiming the dispatched address,
+    // NO anchored age — the body is not read.
+    await expect(page.getByTestId("lab-found")).toHaveCount(0);
+    await expect(page.getByTestId("lab-result-address")).toHaveCount(0);
+    await expect(page.getByTestId("lab-result-age")).toHaveCount(0);
+    // The route stays live: a refusal is a rendered statement, not a throw.
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+  });
+
+  test("f2: a malformed histogram COUNT refuses the engine by name — never a zero-share costume", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    // Single documented change to the committed run-book fixture, serving ONE
+    // purpose (the counts-bypass arm): engines[0]'s (aave_v3_etherfi)
+    // before.hf_histogram.buckets[0].count set to "" — a field the p1b-2
+    // classifier never read. Today it passes the gate and coerces to a
+    // zero-share costume in belowOneCount/measuredCount (`0 + ""` is `"0"`).
+    // Everything else byte-identical.
+    const body = corruptedRunBook((engine) => {
+      const bucket = engine.before.hf_histogram.buckets[0];
+      if (!bucket) throw new Error("fixture shape: bucket missing");
+      bucket.count = "" as never;
+    });
+    await mockRunBook(page, body);
+    await page.goto("/lab");
+    await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
+    // ROUTE STAYS LIVE, the cell settles malformed — same law, same register
+    // as the p1b-2 pins above.
+    const cell = aaveCell(page);
+    await expect(cell).toHaveAttribute("data-cell-state", "result");
+    await expect(cell).toHaveAttribute("data-cell-outcome", "malformed");
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+    // The ENGINE PANEL shows the malformed register naming the COUNT by its
+    // full wire path, per side and index.
+    const aavePanel = page.locator('[data-testid="book-engine"][data-engine="aave_v3_etherfi"]');
+    await expect(aavePanel).toHaveAttribute("data-engine-outcome", "malformed");
+    await expect(aavePanel).toContainText("before.hf_histogram.buckets[0].count");
+    // The healthy second engine renders normally — the refusal is scoped.
+    const dmPanel = page.locator('[data-testid="book-engine"][data-engine="debt_manager"]');
+    await expect(dmPanel).not.toHaveAttribute("data-engine-outcome", "malformed");
+    await expect(dmPanel.getByTestId("book-engine-answer")).toBeVisible();
+  });
+});

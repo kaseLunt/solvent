@@ -12,6 +12,7 @@ import { receiptIdentity } from "../../lib/freshness";
 import {
   identityLine,
   resultReceipt,
+  stressAddressMatchesDispatch,
   stressResultIdentity,
   type ResultIdentity,
 } from "../../lib/resultIdentity";
@@ -79,6 +80,7 @@ test("answered engines are distinct, in first-answer wire order", () => {
   const identity = stressResultIdentity("0x1111111111111111111111111111111111111111", {
     served_at: "2026-07-29T11:00:00Z",
     batch: { id: 2 },
+    address: "0x1111111111111111111111111111111111111111",
     scenario_config_version: "v1",
     scenarios: [
       { results: [{ engine: "debt_manager" }, { engine: "aave_v3_etherfi" }] },
@@ -86,6 +88,49 @@ test("answered engines are distinct, in first-answer wire order", () => {
     ],
   });
   expect(identity.engines).toEqual(["debt_manager", "aave_v3_etherfi"]);
+});
+
+// ---------------------------------------------------------------------------
+// p1b-9 (Codex round, finding 1) — THE ADDRESS WELD. `StressIdentitySource`
+// carries the response's OWN `address`; a body whose address contradicts the
+// dispatch is refused BEFORE it is admitted (LabClient's settle path), so
+// another account's numbers can never render under "results for A". The
+// comparison is case-insensitive: checksum casing is not an identity, and a
+// byte comparison would refuse honest bodies.
+// ---------------------------------------------------------------------------
+
+/** A minimal source whose `address` the test controls. */
+function sourceFor(address: string) {
+  return {
+    served_at: "2026-07-29T11:00:00Z",
+    batch: { id: 2 },
+    address,
+    scenario_config_version: "v1",
+    scenarios: [],
+  };
+}
+
+test("p1b-9: an exact address echo matches the dispatch", () => {
+  const addr = "0xAAaA000000000000000000000000000000000001";
+  expect(stressAddressMatchesDispatch(addr, sourceFor(addr))).toBe(true);
+});
+
+test("p1b-9: checksum casing is not an identity — a lowercased echo still matches", () => {
+  expect(
+    stressAddressMatchesDispatch(
+      "0xAAaA000000000000000000000000000000000001",
+      sourceFor("0xaaaa000000000000000000000000000000000001"),
+    ),
+  ).toBe(true);
+});
+
+test("p1b-9: a response answering for ANOTHER account is refused — the mislabeled-echo class", () => {
+  expect(
+    stressAddressMatchesDispatch(
+      "0xAAaA000000000000000000000000000000000001",
+      sourceFor("0xbBbB000000000000000000000000000000000002"),
+    ),
+  ).toBe(false);
 });
 
 test("resultReceipt composes the age receipt from served_at + batch id (p1b-5-M2 pin)", () => {

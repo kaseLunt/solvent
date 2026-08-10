@@ -98,3 +98,33 @@ export function useCursorPages<Row, C>(
 
   return { rows, hasMore, loading, error, loadMore, reset };
 }
+
+/**
+ * p1b-9 (Codex round, finding 3): the RENDER-SYNCHRONOUS ownership mask for a
+ * scope-keyed walk.
+ *
+ * This hook owns the accumulated rows, so a caller that re-keys the walk (the
+ * Inspector: one component instance reused across addresses) cannot express
+ * the `{for: addr}` state binding its other fetches use — and the p1b-6
+ * drop-and-restart (`reset()` in an effect) is EFFECT-timed: on an A→B reuse
+ * the FIRST B render still holds A's rows, one frame of another address's
+ * data under B's head. The reset cannot be moved into render (a state write
+ * on a shared hook), so the p1b-6 fix-5 pattern (render-synchronous
+ * derived-empty) is applied at the CONSUMPTION seam instead: the caller
+ * records the scope it dispatched the walk for (state set beside the reset),
+ * and rows render ONLY while that scope is the scope being rendered. A frame
+ * that cannot prove ownership renders the empty walk — never a neighbour's
+ * rows.
+ *
+ * Pinned by tests/unit/pagination-scope.spec.ts; the A→B reuse itself is
+ * remount-dependent in the real router, so the pin is the mask's own law
+ * (recorded p1b-9 decision — e2e cannot produce the reuse frame from
+ * outside).
+ */
+export function scopedRows<Row>(
+  dispatchedFor: string | null,
+  renderingFor: string,
+  rows: readonly Row[],
+): readonly Row[] {
+  return dispatchedFor === renderingFor ? rows : [];
+}

@@ -314,6 +314,124 @@ test("p1b-2: the four p0 fields fold in under their unchanged names", () => {
   ).toEqual(["market_realization.execution_shortfall_usd"]);
 });
 
+// ---------------------------------------------------------------------------
+// p1b-9 (Codex round, finding 2) — the COUNTS join the classifier.
+//
+// The histogram counts (`buckets[].count`, `infinite_count`, `refused_count`)
+// and every transition count the reductions consume (`lanes[].index`,
+// `outflows[].from`, `cells[].to`/`rows`, the two margins per index, the five
+// census totals, the two nullable movement counts, `movers_total`) bypassed
+// the p1b-2 gate: the schema types them `number`, but a JSON cast guarantees
+// nothing — `count: ""` passed the classifier and coerced to a zero share in
+// `belowOneCount`/`measuredCount` (`0 + ""` is `"0"`, a string costume), a
+// float or NaN walked into `readTransitions`' margin arithmetic. Each class
+// (string-as-never, float, NaN) is pinned by name, per side and per index.
+// ---------------------------------------------------------------------------
+
+test("p1b-9: a histogram bucket COUNT outside integrality is named per side and index", () => {
+  expect(
+    corrupted((engine) => {
+      const bucket = engine.before.hf_histogram.buckets[0];
+      if (!bucket) throw new Error("fixture shape: bucket missing");
+      bucket.count = "" as never;
+    }),
+  ).toEqual(["before.hf_histogram.buckets[0].count"]);
+});
+
+test("p1b-9: the histogram's two side tallies are named per side", () => {
+  expect(corrupted((engine) => (engine.after.hf_histogram.infinite_count = 2.5))).toEqual([
+    "after.hf_histogram.infinite_count",
+  ]);
+  expect(
+    corrupted((engine) => (engine.before.hf_histogram.refused_count = Number.NaN)),
+  ).toEqual(["before.hf_histogram.refused_count"]);
+});
+
+test("p1b-9: the matrix's lane, outflow and cell counts are named per index", () => {
+  expect(
+    corrupted((engine) => {
+      const lane = engine.hf_transitions.lanes[1];
+      if (!lane) throw new Error("fixture shape: lane missing");
+      lane.index = "" as never;
+    }),
+  ).toEqual(["hf_transitions.lanes[1].index"]);
+  expect(
+    corrupted((engine) => {
+      const outflow = engine.hf_transitions.outflows[3];
+      if (!outflow) throw new Error("fixture shape: outflow missing");
+      outflow.from = 2.5;
+    }),
+  ).toEqual(["hf_transitions.outflows[3].from"]);
+  expect(
+    corrupted((engine) => {
+      const cell = engine.hf_transitions.outflows[3]?.cells[0];
+      if (!cell) throw new Error("fixture shape: occupied cell missing");
+      cell.to = Number.NaN;
+    }),
+  ).toEqual(["hf_transitions.outflows[3].cells[0].to"]);
+  expect(
+    corrupted((engine) => {
+      const cell = engine.hf_transitions.outflows[3]?.cells[0];
+      if (!cell) throw new Error("fixture shape: occupied cell missing");
+      cell.rows = "" as never;
+    }),
+  ).toEqual(["hf_transitions.outflows[3].cells[0].rows"]);
+});
+
+test("p1b-9: the two margins are named per index — the histograms' own tallies answer to them", () => {
+  expect(
+    corrupted((engine) => {
+      engine.hf_transitions.from_rows[2] = "" as never;
+    }),
+  ).toEqual(["hf_transitions.from_rows[2]"]);
+  expect(
+    corrupted((engine) => {
+      engine.hf_transitions.to_rows[0] = Number.NaN;
+    }),
+  ).toEqual(["hf_transitions.to_rows[0]"]);
+});
+
+test("p1b-9: the five census totals are named; a null movement count stays a statement", () => {
+  expect(corrupted((engine) => (engine.hf_transitions.total_rows = Number.NaN))).toEqual([
+    "hf_transitions.total_rows",
+  ]);
+  expect(
+    corrupted((engine) => (engine.hf_transitions.measured_rows = "" as never)),
+  ).toEqual(["hf_transitions.measured_rows"]);
+  expect(corrupted((engine) => (engine.hf_transitions.unmeasured_rows = 1.5))).toEqual([
+    "hf_transitions.unmeasured_rows",
+  ]);
+  expect(
+    corrupted(
+      (engine) => (engine.hf_transitions.unmeasured_refused_in_batch_rows = "" as never),
+    ),
+  ).toEqual(["hf_transitions.unmeasured_refused_in_batch_rows"]);
+  expect(
+    corrupted(
+      (engine) => (engine.hf_transitions.unmeasured_excluded_by_this_layer_rows = 2.5),
+    ),
+  ).toEqual(["hf_transitions.unmeasured_excluded_by_this_layer_rows"]);
+  // The nullable pair: null is the wire's own "not measured" statement and is
+  // NEVER malformed; a non-null value must be an integer.
+  expect(
+    corrupted((engine) => {
+      engine.hf_transitions.held_rows = null;
+      engine.hf_transitions.lane_changed_rows = null;
+    }),
+  ).toEqual([]);
+  expect(corrupted((engine) => (engine.hf_transitions.held_rows = 1.5))).toEqual([
+    "hf_transitions.held_rows",
+  ]);
+  expect(
+    corrupted((engine) => (engine.hf_transitions.lane_changed_rows = "" as never)),
+  ).toEqual(["hf_transitions.lane_changed_rows"]);
+});
+
+test("p1b-9: movers_total joins the classifier — the disclosure sentence's own denominator", () => {
+  expect(corrupted((engine) => (engine.movers_total = "" as never))).toEqual(["movers_total"]);
+  expect(corrupted((engine) => (engine.movers_total = 2.5))).toEqual(["movers_total"]);
+});
+
 test("p1b-2: fields are named in wire read order across the whole subtree", () => {
   expect(
     corrupted((engine) => {
