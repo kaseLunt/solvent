@@ -11,13 +11,21 @@
 //         engine says "no effective movement" — bad debt and shortfall can no
 //         longer hide behind a $0 eligible-debt delta.
 //
+//   p0-3 · health boundary price: the Inspector's boundary row names HEALTH —
+//         the number is the price at which the position is still healthy, not
+//         a liquidation trigger — carries the current mark alongside, and the
+//         evidence drawer is retitled to match.
+//
 // Mock shapes, fixture files, and the hydration-race fill idiom are reused
 // from tests/e2e/lab.spec.ts — the fixtures are the committed, generated
 // bodies that spec documents (tests/fixtures/generate.mjs provenance).
+// p0-3's inspector mocks instead reuse tests/e2e/inspector.spec.ts's pattern
+// (typed TS fixtures from tests/fixtures/inspector.ts).
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { ADDRESS_FOUND, EVENTS, FOUND_ADDR, HISTORY, PARAMS } from "../fixtures/inspector";
 
 const API = "http://localhost:8080";
 
@@ -220,5 +228,57 @@ test.describe("p0-2 · outcome-aware matrix cells", () => {
     const cell = aaveCell(page);
     await expect(cell).toHaveAttribute("data-cell-state", "result");
     await expect(cell).toContainText("no effective movement");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p0-3 · health boundary price
+// ---------------------------------------------------------------------------
+
+/**
+ * The inspector.spec.ts mock, same helper shape: fulfilled responses still
+ * cross an origin (3818 → 8080), so CORS applies, and the trailing `*` in the
+ * address route never crosses `/`, so it does NOT swallow the /history route.
+ */
+async function mockInspectorFound(page: Page) {
+  await page.route("**/v1/stream*", (route) => route.abort());
+  await page.route("**/v1/params*", (route) => route.fulfill({ json: PARAMS, headers: CORS }));
+  await page.route("**/v1/events*", (route) => route.fulfill({ json: EVENTS, headers: CORS }));
+  await page.route("**/v1/address/*/history*", (route) =>
+    route.fulfill({ json: HISTORY, headers: CORS }),
+  );
+  await page.route("**/v1/address/*", (route) =>
+    route.fulfill({ json: ADDRESS_FOUND, headers: CORS }),
+  );
+}
+
+test.describe("p0-3 · health boundary price", () => {
+  test("the boundary row names health, shows the current mark, and never says Liquidation price", async ({ page }) => {
+    await mockInspectorFound(page);
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    const card = page.getByTestId("position-aave_v3_etherfi");
+    await expect(card.getByText("Health boundary price")).toBeVisible();
+    await expect(card).toContainText("current");
+    // current_price "400000000000" @ 8dec — money() at this callsite has NO
+    // "$" prefix and renders "4,000"; pinned WITH its label because a bare
+    // "4,000" already matches the weETH price-input row of the same card.
+    await expect(card).toContainText("current weETH ≈ 4,000");
+    // boundary "370370370371" @ 8dec — money()'s real output, the full string.
+    await expect(card).toContainText("3,703.70370371");
+    await expect(card.getByText("Liquidation price")).toHaveCount(0);
+    await expect(
+      card.getByRole("button", { name: "explain health boundary price" }),
+    ).toBeVisible();
+  });
+
+  test("the evidence drawer is retitled", async ({ page }) => {
+    await mockInspectorFound(page);
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    await page
+      .getByTestId("position-aave_v3_etherfi")
+      .getByRole("button", { name: "explain health boundary price" })
+      .click();
+    await expect(page.getByText("EXPLAIN · HEALTH BOUNDARY PRICE")).toBeVisible();
+    await expect(page.getByText("EXPLAIN · LIQUIDATION PRICE")).toHaveCount(0);
   });
 });

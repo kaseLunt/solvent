@@ -286,7 +286,7 @@ export function liquidationPriceEvidence(
   const lp = position.liquidation_price;
   const rows: EvidenceRow[] =
     lp === null
-      ? [{ label: "liquidation price", value: "not published for this position", tone: "dim" }]
+      ? [{ label: "health boundary price", value: "not published for this position", tone: "dim" }]
       : [
           ...lp.prices.map((price) => ({
             label: `lowest_healthy_price · ${price.asset.slice(0, 10)}…`,
@@ -324,7 +324,7 @@ export function liquidationPriceEvidence(
               ]
             : []),
         ];
-  return positionNumberEvidence(position, batch, { title: "EXPLAIN · LIQUIDATION PRICE", subject, rows });
+  return positionNumberEvidence(position, batch, { title: "EXPLAIN · HEALTH BOUNDARY PRICE", subject, rows });
 }
 
 export function priceInputEvidence(

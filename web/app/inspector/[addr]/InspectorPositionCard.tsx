@@ -400,7 +400,7 @@ export function InspectorPositionCard({
     if (lp === null) {
       return (
         <div className={styles.kvRow}>
-          <span className={styles.k}>Liquidation price</span>
+          <span className={styles.k}>Health boundary price</span>
           <span className={`${styles.v} ${styles.vDim}`}>not published for this position</span>
         </div>
       );
@@ -412,18 +412,24 @@ export function InspectorPositionCard({
         : money(first.lowest_healthy_price, { decimals: first.price_decimals });
     return (
       <div className={styles.kvRow}>
-        <span className={styles.k}>Liquidation price</span>
+        <span className={styles.k}>Health boundary price</span>
         <span className={styles.v}>
           <ExplainButton
-            label="explain liquidation price"
+            label="explain health boundary price"
             onExplain={() => {
               onExplain(liquidationPriceEvidence(position, batch, value));
             }}
           >
             {value}
           </ExplainButton>{" "}
+          {/* P0 fix 3 — the number is the price required for HEALTH, not a
+              liquidation trigger, and it only reads honestly NEXT TO the
+              current mark (the account can already be liquidatable with the
+              mark far below the boundary). */}
           <span className={styles.vDim}>
-            · lowest healthy · ceil(P*): still healthy at exactly this price
+            {first === undefined
+              ? " · still healthy at exactly this price (ceil P*)"
+              : ` · current ${symbolForAsset(first.asset)} ≈ ${money(first.current_price, { decimals: first.price_decimals })} · still healthy at exactly this price (ceil P*)`}
           </span>
           {lp.diagnostic && <span className={`${styles.verdict} ${styles.verdictWarn}`}>diagnostic</span>}
           {lp.already_breached && <span className={`${styles.verdict} ${styles.verdictCrit}`}>already breached</span>}
