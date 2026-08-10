@@ -44,6 +44,7 @@ import {
   appliedShocksDetailsSummary,
   appliedShocksSummary,
   bookResultAnswer,
+  bookResultMalformedAnswer,
   boundaryForensicsSummary,
   boundaryGroupAnswer,
   boundaryMemberTally,
@@ -563,6 +564,32 @@ test("bookResultAnswer: no engine makes no claim; two engines are never summed",
   expect(both).toContain("+2 on debt_manager");
   expect(bookResultAnswer([ENGINE_FACTS])).not.toContain("debt_manager");
   expect(BOOK_RESULT_METHOD).toContain("never added together");
+});
+
+test("bookResultMalformedAnswer names every malformed engine and its fields, and claims no number", () => {
+  // p0-9 finding 1 — the parent answer's REFUSAL register: when any engine's
+  // block is unreadable, the sentence names the engine(s) and field(s) and
+  // composes no figure. Unreadable is not zero, and the wording never
+  // collides with the composed sentence's own opening.
+  const one = bookResultMalformedAnswer([
+    { engine: "aave_v3_etherfi", fields: ["eligible_debt_delta_usd"] },
+  ]);
+  expect(one).toContain("makes no numeric claim");
+  expect(one).toContain("aave_v3_etherfi");
+  expect(one).toContain("eligible_debt_delta_usd");
+  expect(one).toContain("wire Decimal contract");
+  expect(one).toContain("not zero");
+  expect(one).not.toContain("This scenario changes eligible accounts");
+  expect(one).not.toContain("$");
+
+  const both = bookResultMalformedAnswer([
+    { engine: "aave_v3_etherfi", fields: ["eligible_debt_delta_usd", "bad_debt_delta_usd"] },
+    { engine: "debt_manager", fields: ["newly_eligible_accounts"] },
+  ]);
+  expect(both).toContain("aave_v3_etherfi");
+  expect(both).toContain("debt_manager");
+  expect(both).toContain("bad_debt_delta_usd");
+  expect(both).toContain("newly_eligible_accounts");
 });
 
 test("engineResultForensicsSummary and runbookHistogramForensicsSummary count their rows", () => {

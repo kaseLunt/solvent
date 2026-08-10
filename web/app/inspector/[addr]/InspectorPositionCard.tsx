@@ -405,7 +405,15 @@ export function InspectorPositionCard({
         </div>
       );
     }
-    const first = lp.prices[0];
+    /* P0-9 finding 3 — the API's solver-error path serializes `prices: null`
+       (a Go nil slice), violating api/openapi.yaml's required-array contract
+       — CONTRACT-VIOLATING but OBSERVED on the wire, and `lp.prices[0]`
+       threw on it before the not-established arm below could render. The
+       server-side slice init is outside this program's boundary, so the UI
+       defends: a non-array `prices` is the SAME statement as an empty one —
+       the solve published no boundary — and folds into the absent-boundary
+       arm with `lp.reason` still exposed. */
+    const first = Array.isArray(lp.prices) ? lp.prices[0] : undefined;
     /* P0-8 finding 1 — A BOUNDARY THAT DOES NOT EXIST MAY NOT BE CALLED
        HEALTHY. The wire legally serves `liquidation_price` with an EMPTY
        `prices` array (no-debt / no-factor solves) or with

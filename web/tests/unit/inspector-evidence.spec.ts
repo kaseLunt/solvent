@@ -102,6 +102,23 @@ test("the drawer withholds the ceil assertion when the wire declines it (boundar
   expect(text).toContain("boundary_is_healthy: false");
 });
 
+test("the drawer folds the observed prices:null serialization into the absent-boundary arm", () => {
+  // p0-9 finding 3 — structuredClone variant, single purpose: REPRODUCE the
+  // API's actual solver-error serialization (cmd/api's wireLiquidationPrice
+  // marshals a Go nil slice as `prices: null`), CONTRACT-VIOLATING per
+  // api/openapi.yaml's required array but OBSERVED on the wire. `as never`
+  // marks the deliberate violation. The drawer must fold it into the same
+  // not-established arm — reason exposed, no crash, no health claim.
+  const wire = structuredClone(aaveWire);
+  if (wire.liquidation_price === null) throw new Error("fixture invariant: aave lp expected");
+  wire.liquidation_price.prices = null as never;
+  wire.liquidation_price.reason = "solver error: the boundary solve did not complete";
+  const text = drawerText(wire);
+  expect(text).not.toContain("still HEALTHY");
+  expect(text).toContain("not established");
+  expect(text).toContain("solver error: the boundary solve did not complete");
+});
+
 test("the descriptor quotes the wire's own numbers for the HF law", () => {
   const descriptor = hfEvidence(aave, batch, "1.08");
   const focus = descriptor.sections[0];

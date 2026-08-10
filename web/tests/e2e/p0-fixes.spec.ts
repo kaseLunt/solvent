@@ -587,6 +587,198 @@ test.describe("p0-8 · malformed deltas refuse the quiet arm", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// p0-9 · codex round 2.
+//
+// finding 1 — the PARENT summary (`BookResult`'s answer line) used to compose
+// `bookResultAnswer(response.engines)` BEFORE the per-engine guards below it,
+// and that sentence parses `eligible_debt_delta_usd` through the throwing
+// money renderers — so a malformed field p0-8's per-engine panel would have
+// refused honestly took the whole /lab route down first. The parent now
+// classifies every engine with the same `cellPrimaryOutcome` decision the
+// cell and the panel read, and refuses its numeric summary when any engine
+// is unreadable — naming the engine and its fields — while the per-engine
+// panels still render (malformed one refused, healthy ones whole).
+//
+// finding 2 — the MALFORMED register existed only for `state="result"` cells;
+// a SUPERSEDED cell rendered its held payload through the OLD composition:
+// a malformed `bad_debt_delta_usd` quietly showed the eligible-debt dollars
+// (the quiet bypass p0-2 closed for current cells), and a malformed
+// `eligible_debt_delta_usd` crashed the route via the throwing parser. The
+// superseded arm now classifies its payload first: malformed renders the
+// malformed register PLUS the batch disclosure (old/new ids, re-run
+// affordance); a valid payload renders exactly as before.
+//
+// finding 3 — the API's solver-error path serializes `liquidation_price.prices:
+// null` (a Go nil slice), violating api/openapi.yaml's required-array
+// contract; `lp.prices[0]` threw before p0-8's not-established arm could
+// render. OBSERVED contract violation, UI-side defense only (the server-side
+// slice init is outside this program's boundary): a non-array `prices` folds
+// into the same absent-boundary register, with `lp.reason` still exposed.
+// ---------------------------------------------------------------------------
+
+/**
+ * Finding 2's mixed-batch construction (lab.spec.ts's SUPERSESSION mock, with
+ * a corrupted eth body): eth_minus_30 serves `ethBody` (batch 1), any other
+ * scenario serves the committed weeth batch-2 fixture, whose settle makes
+ * batch 2 the anchor and supersedes the eth row.
+ */
+async function mockMixedBatchRuns(page: Page, ethBody: RunBookBody) {
+  await page.route(`${API}/v1/scenarios/*/run-book`, (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: RUN_CORS, body: "" });
+    }
+    const body = route.request().url().includes("/eth_minus_30/")
+      ? JSON.stringify(ethBody)
+      : fixture("run-book.weeth.batch2.json");
+    return route.fulfill({ status: 200, contentType: "application/json", headers: RUN_CORS, body });
+  });
+}
+
+test.describe("p0-9 · codex round 2", () => {
+  test("finding 1: a malformed engine refuses the PARENT summary; cell and detail name the field; the route stays live", async ({ page }) => {
+    await mockCold(page);
+    // Single documented change to the committed run-book fixture, serving ONE
+    // purpose (the parent-summary crash arm): the first engine's
+    // (aave_v3_etherfi) eligible_debt_delta_usd set to "" — the field the
+    // PARENT answer line parses, which p0-8's e2e (bad_debt_delta_usd) never
+    // reached. Everything else byte-identical.
+    const body = structuredClone(RUN_BOOK_200);
+    const engine = body.engines[0];
+    if (!engine) throw new Error("fixture shape: engines[0] missing");
+    engine.eligible_debt_delta_usd = "";
+    await mockRunBook(page, body);
+    await page.goto("/lab");
+    await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
+    // ROUTE STAYS LIVE: the run settles into a classified cell, not an error
+    // boundary. A mutant that lets bookResultAnswer run unguarded dies here —
+    // the throw unmounts the whole route and no cell ever settles.
+    const cell = aaveCell(page);
+    await expect(cell).toHaveAttribute("data-cell-state", "result");
+    await expect(cell).toHaveAttribute("data-cell-outcome", "malformed");
+    await expect(cell).toContainText("eligible_debt_delta_usd");
+    // The DETAIL names the same field from the same classification (p0-8's
+    // per-engine refusal, now reachable because the parent no longer throws).
+    const aavePanel = page.locator('[data-testid="book-engine"][data-engine="aave_v3_etherfi"]');
+    await expect(aavePanel).toHaveAttribute("data-engine-outcome", "malformed");
+    await expect(aavePanel).toContainText("eligible_debt_delta_usd");
+    // The PARENT summary REFUSES the number, in the answer line's own
+    // register: the malformed engine and its fields are named, and the
+    // composed numeric sentence never renders.
+    const answer = page.getByTestId("book-result-answer");
+    await expect(answer).toContainText("makes no numeric claim");
+    await expect(answer).toContainText("aave_v3_etherfi");
+    await expect(answer).toContainText("eligible_debt_delta_usd");
+    await expect(answer).not.toContainText("This scenario changes eligible accounts");
+    // Healthy engines keep their whole panels: the refusal is scoped to the
+    // engine that earned it, never spread over the book.
+    const dmPanel = page.locator('[data-testid="book-engine"][data-engine="debt_manager"]');
+    await expect(dmPanel).not.toHaveAttribute("data-engine-outcome", "malformed");
+    await expect(dmPanel.getByTestId("book-engine-answer")).toBeVisible();
+  });
+
+  test("finding 2a: a superseded cell with a malformed bad debt refuses the quiet dollars and keeps the batch disclosure", async ({ page }) => {
+    await mockCold(page);
+    // Single documented change to the committed run-book fixture, serving ONE
+    // purpose (the superseded quiet-bypass arm): the first engine's
+    // bad_debt_delta_usd set to "" — the field the OLD superseded composition
+    // never read, so the cell showed the eligible-debt dollars as if the
+    // payload were readable. Everything else byte-identical.
+    const body = structuredClone(RUN_BOOK_200);
+    const engine = body.engines[0];
+    if (!engine) throw new Error("fixture shape: engines[0] missing");
+    engine.bad_debt_delta_usd = "";
+    await mockMixedBatchRuns(page, body);
+    await page.goto("/lab");
+    await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
+    const cell = aaveCell(page);
+    await expect(cell).toHaveAttribute("data-cell-state", "result");
+    // Batch 2 lands on ANOTHER row; the eth row's held payload is now a
+    // superseded measurement — and it must be CLASSIFIED, not rendered raw.
+    await page
+      .locator('[data-testid="matrix-run"][data-scenario-id="weeth_market_depeg_oracles_held"]')
+      .click();
+    await expect(cell).toHaveAttribute("data-cell-state", "superseded");
+    // THE MIXED-BATCH PIN: the malformed register, in the superseded arm.
+    await expect(cell).toHaveAttribute("data-cell-outcome", "malformed");
+    await expect(cell).toContainText("unreadable");
+    await expect(cell).toContainText("bad_debt_delta_usd");
+    // The quiet bypass is dead: the $6,000 the old arm composed from the
+    // eligible-debt delta (600000000000 @ 8dp) never renders.
+    await expect(cell).not.toContainText("$6,000");
+    // The superseded batch disclosure SURVIVES the refusal: old and new ids,
+    // and the re-run affordance, stay on the cell.
+    await expect(cell).toContainText("at batch #1");
+    await expect(cell).toContainText("matrix reads #2");
+    await expect(cell).toContainText("re-run this row");
+    // And the SAME row's valid payload keeps the unchanged rendering: the
+    // debt_manager cell (1500000000 @ 6dp) still shows its dollars.
+    const dmCell = page
+      .locator('[data-testid="matrix-row"][data-scenario-id="eth_minus_30"] td')
+      .nth(2);
+    await expect(dmCell).toHaveAttribute("data-cell-state", "superseded");
+    await expect(dmCell).toContainText("$1,500");
+  });
+
+  test("finding 2b: a superseded cell with a malformed eligible debt refuses instead of crashing the route", async ({ page }) => {
+    await mockCold(page);
+    // Single documented change to the committed run-book fixture, serving ONE
+    // purpose (the superseded crash arm): the first engine's
+    // eligible_debt_delta_usd set to "" — the exact field the OLD superseded
+    // composition fed to the throwing parser. Everything else byte-identical.
+    const body = structuredClone(RUN_BOOK_200);
+    const engine = body.engines[0];
+    if (!engine) throw new Error("fixture shape: engines[0] missing");
+    engine.eligible_debt_delta_usd = "";
+    await mockMixedBatchRuns(page, body);
+    await page.goto("/lab");
+    await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
+    const cell = aaveCell(page);
+    await expect(cell).toHaveAttribute("data-cell-state", "result");
+    await page
+      .locator('[data-testid="matrix-run"][data-scenario-id="weeth_market_depeg_oracles_held"]')
+      .click();
+    // ROUTE STAYS LIVE: with the superseded arm's guard removed this render
+    // throws in usd() and the route unmounts — this settle pin dies first.
+    await expect(cell).toHaveAttribute("data-cell-state", "superseded");
+    await expect(cell).toHaveAttribute("data-cell-outcome", "malformed");
+    await expect(cell).toContainText("unreadable");
+    await expect(cell).toContainText("eligible_debt_delta_usd");
+    await expect(cell).toContainText("at batch #1");
+    await expect(cell).toContainText("matrix reads #2");
+    await expect(cell).toContainText("re-run this row");
+  });
+
+  test("finding 3: the observed prices:null solver-error serialization folds into the absent-boundary arm", async ({ page }) => {
+    // Single documented purpose: REPRODUCE the API's actual solver-error
+    // serialization — cmd/api's wireLiquidationPrice marshals a Go nil slice
+    // as `prices: null`, violating api/openapi.yaml's required-array contract
+    // but OBSERVED on the wire. `as never` marks the deliberate violation;
+    // the reason is the wire's own say on why the solve served nothing.
+    const body = structuredClone(ADDRESS_FOUND);
+    const aave = body.positions[0];
+    if (aave === undefined || aave.liquidation_price === null) {
+      throw new Error("fixture shape drifted");
+    }
+    aave.liquidation_price.prices = null as never;
+    aave.liquidation_price.reason = "solver error: the boundary solve did not complete";
+    await mockInspectorFound(page);
+    await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    const card = page.getByTestId("position-aave_v3_etherfi");
+    // RENDERS-WITHOUT-CRASH PIN: the card and its refusal register are on
+    // screen. With the defense removed, `lp.prices[0]` throws and the route
+    // never paints this card — this visibility pin dies first.
+    const row = card.getByTestId("boundary-not-established");
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("not established");
+    // The wire's own reason stays exposed through the fold.
+    await expect(row).toContainText("solver error: the boundary solve did not complete");
+    // No health claim is invented over an absent boundary.
+    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
+  });
+});
+
 test.describe("p0-5 · snapshot chip", () => {
   test("a FRESH batch still shows its age beside the live badge", async ({ page }) => {
     const harness = await mockPostureWithBatchAge(page, 42); // snapshot frame, age_seconds 42

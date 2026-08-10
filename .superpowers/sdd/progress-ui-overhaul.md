@@ -603,3 +603,132 @@ the whole-page crash above, which is what surfaced the EngineResult throw.
   prior 1391 + 18 new, the same single pre-existing styleguide skip, no
   other movement.
 - `npm run typecheck`: completely clean.
+
+## p0-9 — Codex round 2 fixes (parent summaries, superseded cells, null prices)
+
+Codex round 2 on the p0-8 work returned three findings; all three fixed
+test-first. House laws unchanged: refusals render honestly, unknowable never
+looks like zero, and a malformed wire value must never crash a route NOR
+render as a number.
+
+### Finding 1 [high] — the PARENT summary crashed before the per-engine guards
+
+LabBookPanel.tsx `BookResult` evaluated `bookResultAnswer(response.engines)`
+(which parses `eligible_debt_delta_usd` through the throwing money
+renderers) BEFORE the guarded `EngineResult` children rendered — so a
+malformed `eligible_debt_delta_usd` (e.g. "") took the whole /lab route down
+through the error boundary. p0-8's e2e only corrupted `bad_debt_delta_usd`,
+which the parent sentence never parses; the crash path was untested.
+
+Fix:
+- LabBookPanel.tsx BookResult: every engine is classified FIRST with
+  `cellPrimaryOutcome` (matrixCells.ts — the SAME decision the cell and the
+  engine panel read; one law, one function). Any malformed engine → the
+  answer line renders `bookResultMalformedAnswer` instead of the composed
+  numeric sentence, while the per-engine panels still render (the malformed
+  one as p0-8's MALFORMED panel, healthy ones whole).
+- labPanelLines.ts: `bookResultMalformedAnswer` — the answer line's refusal
+  register, mirroring the existing no-engines refusal: names every malformed
+  engine and its fields, "makes no numeric claim", "failed the wire Decimal
+  contract", "Unreadable is not zero", composes no figure.
+
+New pins:
+- e2e p0-fixes.spec.ts "finding 1": structuredClone variant,
+  `engines[0].eligible_debt_delta_usd = ""` — route stays live (cell
+  settles, `data-cell-outcome="malformed"`), matrix cell AND detail panel
+  name the field, parent answer refuses ("makes no numeric claim", engine +
+  field named, composed sentence absent), healthy debt_manager panel whole.
+- unit lab-panel-lines.spec.ts: `bookResultMalformedAnswer` names every
+  engine/field, claims no number (no "$"), never collides with the composed
+  sentence's opening.
+
+Mutant (pre-guard bypassed — ternary condition inverted so the composed
+sentence always runs): rebuild, KILLED at p0-fixes.spec.ts:657 — the
+route-stays-live settle pin, in isolation (the throw unmounts the route and
+no cell ever reads "result").
+
+### Finding 2 [medium] — superseded cells rendered their payload unclassified
+
+LabMatrix.tsx's MALFORMED branch existed only for `state="result"`. A
+SUPERSEDED cell rendered the held payload through the old composition:
+malformed `bad_debt_delta_usd` quietly showed the eligible-debt dollars
+(the quiet bypass, again), and malformed `eligible_debt_delta_usd` threw in
+`usd()` → route crash.
+
+Fix:
+- LabMatrix.tsx superseded arm: the held result payload goes through
+  `cellPrimaryOutcome` BEFORE rendering. Malformed → the malformed register
+  (`data-cell-outcome="malformed"`, fields named, "unreadable is not zero")
+  PLUS the existing superseded batch disclosure (old batch id, anchor batch
+  id, the re-run affordance — supersession states WHEN the cell was
+  measured; it never launders WHETHER it can be read). Valid → the current
+  rendering, unchanged; withheld payloads unchanged.
+
+New pins (Codex's mixed-batch construction — corrupted eth_minus_30 at
+batch 1, valid weeth batch-2 fixture supersedes it, per lab.spec.ts's own
+SUPERSESSION mock):
+- e2e "finding 2a" (quiet bypass): `bad_debt_delta_usd = ""` → superseded +
+  malformed register + field named; the $6,000 the old arm composed never
+  renders; batch ids and re-run affordance survive; the SAME row's valid
+  debt_manager payload still shows "$1,500" (valid arm unchanged, same
+  mixed-batch state).
+- e2e "finding 2b" (crash): `eligible_debt_delta_usd = ""` → route stays
+  live, superseded + malformed register + field named + batch disclosure.
+
+Mutant (superseded arm's guard forced false, result arm intact): rebuild,
+KILLED at both mixed-batch pins in isolation — 2b at p0-fixes.spec.ts:743
+(the settle pin; `usd()` throws and the route unmounts), 2a at the
+malformed-register pin (the quiet dollars render instead).
+
+### Finding 3 [medium] — `prices: null` crashed before the not-established arm
+
+The API's solver-error path serializes `liquidation_price.prices: null` (a
+Go nil slice), violating api/openapi.yaml's required-array contract —
+`lp.prices[0]` in InspectorPositionCard.tsx threw before p0-8's
+not-established arm could render. UI-SIDE FIX ONLY: the server change is
+outside this program's preservation boundary; no Go code touched.
+
+**API defect (outside program scope): solver-error wireLiquidationPrice
+serializes prices:null, violating the openapi required-array contract —
+server-side slice init needed; UI defends meanwhile.**
+
+Fix:
+- InspectorPositionCard.tsx `renderLiquidationPriceRow`: a non-array/null
+  `prices` folds into the existing not-established arm
+  (`Array.isArray` guard → `first` undefined), with `lp.reason` still
+  exposed inline. Same statement as an empty array: the solve published no
+  boundary.
+- lib/evidence.ts `liquidationPriceEvidence`: same defense (`servedPrices`),
+  covering both the `[0]` index and the `.map` over rows.
+
+New pins (structuredClone variants documented as REPRODUCING the server's
+actual solver-error serialization — contract-violating but observed;
+`as never` marks the deliberate violation):
+- e2e "finding 3": `liquidation_price.prices = null as never` + a reason —
+  card renders, `boundary-not-established` register + reason visible, no
+  health claim, no crash.
+- unit inspector-evidence.spec.ts: the drawer folds the same body into the
+  not-established arm — reason exposed, no "still HEALTHY", no crash.
+
+Mutant (both defenses removed — card index + evidence servedPrices):
+rebuild, KILLED at both pins in isolation — the e2e at
+p0-fixes.spec.ts:773 (the renders-without-crash visibility pin; the card
+never paints) and the unit drawer pin (TypeError surfaces).
+
+### Red-first evidence
+
+Pre-fix build (HEAD source + the new specs): 5 failures, exactly the new
+defect pins — finding 1 and finding 2b dead at route-crash (the parent
+throw unmounts /lab), finding 2a at the missing malformed register,
+finding 3 e2e + the drawer unit at the prices:null crash. The
+`bookResultMalformedAnswer` unit's red was the module-level missing-export
+failure (the function IS part of the fix).
+
+### Closing counts (p0-9)
+
+- Suite: 1410 → **1416** (+6: p0-fixes e2e 4, lab-panel-lines 1,
+  inspector-evidence 1).
+- Full run (final tree, `npm run build` + full p0-config suite):
+  **1415 passed, 1 skipped, 0 failed (35.7s)** — prior 1409 + 6 new, the
+  same single pre-existing styleguide skip, no other movement.
+- `npm run typecheck`: completely clean.

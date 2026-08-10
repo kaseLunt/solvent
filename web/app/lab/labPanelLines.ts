@@ -392,6 +392,36 @@ export function bookResultAnswer(engines: readonly RunBookEngineFacts[]): string
   );
 }
 
+/** One engine the parent answer refuses to read, with the fields that failed. */
+export interface MalformedEngineFacts {
+  engine: string;
+  fields: readonly string[];
+}
+
+/**
+ * SLOT 3's REFUSAL arm for the whole run book (P0-9 finding 1).
+ *
+ * `bookResultAnswer` feeds every engine's `eligible_debt_delta_usd` through
+ * the throwing money renderers, so it may only run over engines that passed
+ * the wire Decimal contract — the same `cellPrimaryOutcome` decision the
+ * matrix cell and the engine panel read. When any engine fails it, THIS
+ * sentence renders instead: the engine and its unreadable fields are named,
+ * no figure is composed, and the register mirrors the no-engines refusal
+ * above — a claim the data cannot carry is not made in a softer voice.
+ */
+export function bookResultMalformedAnswer(
+  malformed: readonly MalformedEngineFacts[],
+): string {
+  const named = malformed
+    .map((entry) => `${entry.engine} (${entry.fields.join(", ")})`)
+    .join(" and ");
+  return (
+    `This run served an unreadable engine result, so it makes no numeric claim about what ` +
+    `the scenario does to either book: ${named} failed the wire Decimal contract. Unreadable ` +
+    `is not zero, and no figure is composed over a field that cannot be read.`
+  );
+}
+
 /** SLOT 6 for the whole run book. */
 export const BOOK_RESULT_METHOD =
   "Every delta is after minus before for this scenario's own run, on each engine's own book. " +

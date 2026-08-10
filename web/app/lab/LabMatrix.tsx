@@ -215,7 +215,39 @@ function Cell({ state }: { state: LabCellState }) {
           <span className={styles.cellSub}>{state.refusal.detail}</span>
         </td>
       );
-    case "superseded":
+    case "superseded": {
+      // P0-9 finding 2 — CLASSIFIED BEFORE RENDERED, in this arm too. The
+      // MALFORMED register existed only for `state="result"`; a superseded
+      // cell rendered its held payload through the old composition, so a
+      // malformed `bad_debt_delta_usd` quietly showed the eligible-debt
+      // dollars and a malformed `eligible_debt_delta_usd` threw in `usd()`
+      // and took the route down. The held payload goes through the SAME
+      // `cellPrimaryOutcome` decision the result arm reads; malformed keeps
+      // the batch disclosure (old and new ids, the re-run affordance) and
+      // claims no number — the supersession is a fact about WHEN the cell
+      // was measured, and it never launders WHETHER it can be read.
+      const held =
+        state.payload.kind === "result" ? cellPrimaryOutcome(state.payload.engine) : null;
+      if (held !== null && held.kind === "malformed") {
+        return (
+          <td
+            className={styles.cellSuperseded}
+            data-testid="matrix-cell"
+            data-cell-state="superseded"
+            data-cell-outcome="malformed"
+            title={`this result was measured at batch #${String(state.batchId)}; the matrix now reads batch #${String(state.anchorBatchId)}. Its held payload is unreadable: ${held.fields.join(", ")} failed the wire Decimal contract (^-?[0-9]+$), so the cell refuses to read a value it cannot parse.`}
+          >
+            <span className={styles.cellTag}>SUPERSEDED</span>
+            <span className={styles.cellSub}>
+              outcome unreadable — {held.fields.join(", ")} failed the wire contract; nothing
+              is claimed, and unreadable is not zero
+            </span>
+            <span className={styles.cellSub}>
+              at batch #{state.batchId} · matrix reads #{state.anchorBatchId} · re-run this row
+            </span>
+          </td>
+        );
+      }
       return (
         <td
           className={styles.cellSuperseded}
@@ -242,6 +274,7 @@ function Cell({ state }: { state: LabCellState }) {
           </span>
         </td>
       );
+    }
     case "unanswered":
       return (
         <td

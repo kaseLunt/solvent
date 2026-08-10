@@ -291,13 +291,20 @@ export function liquidationPriceEvidence(
   // `boundary_is_healthy: true`. An absent boundary is stated as not
   // established (with the wire's reason); a declined one is named by its own
   // wire field.
-  const first = lp?.prices[0];
+  // P0-9 finding 3 — the API's solver-error path serializes `prices: null`
+  // (a Go nil slice), violating the openapi required-array contract:
+  // CONTRACT-VIOLATING but OBSERVED, and both the index below and the
+  // `lp.prices.map` in the rows threw on it. The drawer folds a non-array
+  // `prices` into the same absent-boundary arm the row uses — no rows to
+  // list, boundary not established, the wire's `reason` still exposed.
+  const servedPrices = lp !== null && Array.isArray(lp.prices) ? lp.prices : [];
+  const first = servedPrices[0];
   const boundaryEstablished = first !== undefined && first.lowest_healthy_price !== null;
   const rows: EvidenceRow[] =
     lp === null
       ? [{ label: "health boundary price", value: "not published for this position", tone: "dim" }]
       : [
-          ...lp.prices.map((price) => ({
+          ...servedPrices.map((price) => ({
             label: `lowest_healthy_price · ${price.asset.slice(0, 10)}…`,
             value:
               `${renderNullableDecimal(price.lowest_healthy_price, { decimals: price.price_decimals })} ` +

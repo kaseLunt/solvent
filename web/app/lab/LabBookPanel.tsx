@@ -89,6 +89,7 @@ import {
   BOOK_RESULT_FORENSICS_SUMMARY,
   BOOK_RESULT_METHOD,
   bookResultAnswer,
+  bookResultMalformedAnswer,
   engineResultAnswer,
   engineResultForensicsSummary,
   engineResultMethod,
@@ -339,6 +340,23 @@ function BookResult({
   // named here instead, in the cells' own words.
   const hole = bookHoleEngines(response, covered);
   const complete = bookReachedEveryCoveredEngine(response, covered);
+  // P0-9 FINDING 1 — THE PARENT SENTENCE IS GATED ON EVERY ENGINE IT READS.
+  // `bookResultAnswer` feeds each engine's `eligible_debt_delta_usd` through
+  // the throwing money renderers, and it used to run BEFORE the per-engine
+  // guards below — so one malformed field p0-8's EngineResult would have
+  // refused honestly took the whole route down through the error boundary
+  // first. Every engine is classified HERE, by the SAME decision the matrix
+  // cell and the engine panel read (`cellPrimaryOutcome` — one law, one
+  // function); when any engine is malformed the parent refuses its numeric
+  // summary and names the engine and its unreadable fields, while the
+  // per-engine panels still render (the malformed one as its own refusal,
+  // the healthy ones whole).
+  const malformedEngines = response.engines.flatMap((engine) => {
+    const outcome = cellPrimaryOutcome(engine);
+    return outcome.kind === "malformed"
+      ? [{ engine: engine.engine, fields: outcome.fields }]
+      : [];
+  });
   return (
     <div data-testid="book-result">
       <div className={styles.scenarioHead}>
@@ -394,9 +412,13 @@ function BookResult({
         </p>
       )}
 
-      {/* ---- SLOT 3: ANSWER — computed from response.engines (R4) ---- */}
+      {/* ---- SLOT 3: ANSWER — computed from response.engines (R4), through
+              the P0-9 malformed gate above: the composed numeric sentence may
+              only run over engines that passed the wire Decimal contract. ---- */}
       <p className={styles.answerLine} data-testid="book-result-answer">
-        {bookResultAnswer(response.engines)}
+        {malformedEngines.length > 0
+          ? bookResultMalformedAnswer(malformedEngines)
+          : bookResultAnswer(response.engines)}
       </p>
 
       {/* ---- SLOT 4 + 5: VISUAL + LEDGER — the per-engine blocks ---- */}
