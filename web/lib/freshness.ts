@@ -35,11 +35,6 @@ export function humanAge(ageSeconds: number): string {
   return `${String(hours)}h ${String(minutes % 60)}m`;
 }
 
-/** Whole hours, for the ribbon's coarse `· batch {X}h old` suffix. */
-export function ageHours(ageSeconds: number): number {
-  return Math.floor(Math.max(0, ageSeconds) / 3600);
-}
-
 /** The batch envelope fields this module reads — nothing else is needed. */
 export interface FreshnessBatch {
   id: number;
@@ -626,9 +621,10 @@ export function batchFreshnessStamp(batch: FreshnessBatch, ageSeconds?: number):
 // never blanked: a table is not made more honest by being emptied.
 //
 // AND THIS IS NOT A STALENESS CLAIM. "I cannot say how old this is" is a
-// refusal to state, not a verdict that the batch is old. The ribbon therefore
-// does NOT render its `· batch Xh old` suffix while the age is unknown: that
-// suffix is a computed claim, and there is nothing left to compute it from.
+// refusal to state, not a verdict that the batch is old. The chip therefore
+// never carries a computed age — nor an SLA tier (lib/freshnessTiers.ts) —
+// while the age is unknown: those are computed claims, and there is nothing
+// left to compute them from.
 // ---------------------------------------------------------------------------
 
 /**
@@ -696,40 +692,19 @@ export function batchFreshnessLineUnknown(batch: FreshnessBatch, refreshFailed: 
   return `batch ${batchFreshnessStampUnknown(batch, refreshFailed)}`;
 }
 
-/**
- * The RIBBON's suffix while the age is unknown — the slot `ribbonBatchAgeSuffix`
- * would have filled, carrying a refusal instead of a computed `Xh old`.
- *
- * It is never null: the whole finding is that SILENCE in this slot reads as
- * freshness, and a page that cannot state the age must not fall silent.
- */
-export function ribbonBatchAgeUnknown(refreshFailed: boolean): string {
-  return `· batch ${unknownAgePhrase(refreshFailed)}`;
-}
+// ---------------------------------------------------------------------------
+// RETIRED FOR REAL (p1a-3 — the p0-5 deferred cleanup, this wave's owning
+// task): `ribbonBatchAgeSuffix` (the >1h `· batch Xh old` gate),
+// `ribbonBatchAgeUnknown` (its unknown-slot twin), `RIBBON_STALE_BATCH_SECONDS`
+// (3600 — an hour picked by hand), and `ageHours` (their unit). The always-on
+// snapshot chip below replaced the suffix's render slot in Phase 0; severity
+// is now the ratified SLA's job — `freshnessTier` (lib/freshnessTiers.ts),
+// whose bounds are theorems about /v1/meta constants, not a taste threshold.
+// Zero production consumers at retirement (reference-search proven); the unit
+// pins moved to tests/unit/freshness-tiers.spec.ts.
+// ---------------------------------------------------------------------------
 
-/**
- * The stale threshold the PostureRibbon's suffix keys on: one hour. LIVE
- * describes the STREAM (it really is connected); the suffix describes the
- * BATCH (it really is old). Two subjects, two statements — the ribbon never
- * fakes a state it cannot know.
- */
-export const RIBBON_STALE_BATCH_SECONDS = 3600;
-
-/**
- * `· batch 24h old`, or null when the batch is inside the threshold. Null
- * means "render nothing" — the absence of the suffix is not a claim of
- * freshness beyond what LIVE already says.
- *
- * Fed the ANCHORED age (Wave R3), this suffix now ENGAGES while the page is
- * open: a batch received 50s inside the hour crosses the threshold on the
- * next tick and says so, instead of staying silent forever on a frozen number.
- */
-export function ribbonBatchAgeSuffix(ageSeconds: number): string | null {
-  if (ageSeconds <= RIBBON_STALE_BATCH_SECONDS) return null;
-  return `· batch ${String(ageHours(ageSeconds))}h old`;
-}
-
-// Phase 0 fix 5: the always-on snapshot chip. Replaces ribbonBatchAgeSuffix's
+// Phase 0 fix 5: the always-on snapshot chip. Replaced the retired suffix's
 // >1h gate — freshness is stated at EVERY age, in humanAge precision, as its
 // own element beside the connection badge (never inside it).
 export function snapshotChip(batchId: number, ageSeconds: number): string {

@@ -25,8 +25,10 @@
 //   (b) RECONCILIATION on the lifecycle events that mean "this tab may have
 //       been suspended" — pageshow, visibilitychange, focus — coalesced,
 //       because a single resume fires all three.
-//   (c) the ribbon suffix, which is downstream of the age, therefore ENGAGES
-//       after a resume instead of staying frozen inside the threshold.
+//   (c) severity, which is downstream of the age, therefore ENGAGES after a
+//       resume instead of staying frozen inside a threshold. (p1a-3: the >1h
+//       ribbon suffix that first carried this part is RETIRED; the ratified
+//       SLA tier — freshnessTier over /v1/meta constants — carries it now.)
 //
 // The React plumbing (listeners, the background re-fetch) is pinned in the
 // browser by tests/e2e/r4-fixes.spec.ts. This file pins the ARITHMETIC, with
@@ -35,19 +37,17 @@
 
 import { expect, test } from "@playwright/test";
 import {
-  ageHours,
   anchoredAgeSeconds,
   anchorWireAge,
   humanAge,
   monotonicNowMs,
   RESUME_COALESCE_MS,
   RESUME_EVENTS,
-  RIBBON_STALE_BATCH_SECONDS,
-  ribbonBatchAgeSuffix,
   shouldReconcileOnResume,
   wallNowMs,
   type AgeAnchor,
 } from "../../lib/freshness";
+import { freshnessTier, TIER_FALLBACK } from "../../lib/freshnessTiers";
 
 /** A wall-clock epoch far from zero, so a wall reading is never mistaken for
  *  a monotonic one by a test that gets the argument order wrong. */
@@ -172,22 +172,22 @@ test("both clocks frozen: the age is the wire's own number, never fresher", () =
 });
 
 // ---------------------------------------------------------------------------
-// (c) the ribbon suffix is downstream of the age — so it engages after sleep.
+// (c) severity is downstream of the age — so it engages after sleep. (p1a-3:
+// the retired >1h suffix's law, re-pinned on the ratified SLA tier.)
 // ---------------------------------------------------------------------------
 
-test("THE RIBBON ENGAGES AFTER SLEEP: the suffix appears on a clock the tick never saw", () => {
+test("THE TIER ENGAGES AFTER SLEEP: severity escalates on a clock the tick never saw", () => {
   withSplitClock((clock) => {
-    // Received fifty seconds inside the hour: correctly silent.
-    const anchor = anchorWireAge(RIBBON_STALE_BATCH_SECONDS - 50);
-    expect(ribbonBatchAgeSuffix(anchoredAgeSeconds(anchor))).toBeNull();
+    // Received 100s old — FRESH under the ratified bounds: nothing to flag.
+    const anchor = anchorWireAge(100);
+    expect(freshnessTier(anchoredAgeSeconds(anchor), TIER_FALLBACK)).toBe("fresh");
 
     // The lid closes for five hours. The interval never fired and
-    // `performance.now()` never moved — the R3 code stayed silent here, over a
-    // batch now five hours past the threshold.
+    // `performance.now()` never moved — the R3 code held "fresh" here, over a
+    // batch now hours past the sweep worst case.
     clock.sleep(5 * 3_600_000);
     expect(monotonicNowMs()).toBe(MONO_BASE);
-    expect(ribbonBatchAgeSuffix(anchoredAgeSeconds(anchor))).toBe("· batch 5h old");
-    expect(ageHours(anchoredAgeSeconds(anchor))).toBe(5);
+    expect(freshnessTier(anchoredAgeSeconds(anchor), TIER_FALLBACK)).toBe("critical");
   });
 });
 

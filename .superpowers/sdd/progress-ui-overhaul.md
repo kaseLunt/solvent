@@ -1425,7 +1425,7 @@ Task list:
 - [x] Task 0 — wave config + ledger section (p1a-0)
 - [x] Task 1 — tokens.css migration + width contract (p1a-1)
 - [x] Task 2 — stylelint: the structural floor (p1a-2)
-- [ ] Task 3 — freshness tier machinery (pure) + meta constants provider
+- [x] Task 3 — freshness tier machinery (pure) + meta constants provider
       (p1a-3)
 - [ ] Task 4 — THE MIGRATION WAVE: canon appbar + tiered chip (badge
       retirement) (p1a-4)
@@ -1657,6 +1657,83 @@ against current HEAD (12 → 14 specs in the file).
 - `npm run lint:css`: clean. `npm run typecheck`: clean.
 - `npm run lint` (eslint .): 0 errors (one pre-existing LabBookPanel
   warning, untouched); `npx eslint` on the touched spec + config: clean.
+
+### p1a-3 · freshness tier machinery (pure) + meta constants provider (Task 3)
+
+The ratified SLA becomes code: `web/lib/freshnessTiers.ts` (NEW) —
+`freshnessTier(ageSeconds, c): "fresh" | "aging" | "stale" | "critical"`
+with every bound a theorem about the pipeline's constants (fresh ≤ 2 ×
+`price_poll_seconds`, aging ≤ `price_ceiling_seconds`, stale ≤
+`dm_sweep_worst_case_seconds`, critical beyond; bounds inclusive on the
+calm side, so 120/121 · 360/361 · 5580/5581 under the fallback trio).
+`TIER_FALLBACK = {60, 360, 5580}` mirrors the live deployment. UNKNOWN
+AGE IS NOT AN INPUT — stated in the module comment: callers route the
+unknown register (freshness.ts, Wave R6) first; there is deliberately no
+null arm.
+
+`web/lib/meta.tsx` (NEW) — `MetaConstantsProvider` +
+`useMetaConstants(): { constants, source: "meta" | "fallback" }` over a
+pure core (`tierConstantsOf`, `loadMetaConstants`,
+`META_CONSTANTS_FALLBACK`, `MetaSource`): ONE `client.meta()` fetch on
+mount, abort-guarded (`AbortController` + aborted-check before setState),
+failure → disclosed fallback, NO retry — meta is static per deploy.
+Field names read from the generated `MetaResponse.constants` schema:
+`price_poll_seconds` / `price_ceiling_seconds` /
+`dm_sweep_worst_case_seconds`. **Recorded decision:** `client.meta()`
+runs `assertCompatible` internally and its `seizure_model` check is
+UNCONDITIONAL, so a live server can make `meta()` throw
+`SchemaVersionMismatchError` after a good fetch — that rejection is
+caught into the SAME fallback arm, source `"fallback"` (pinned): tier
+thresholds never trust constants from a server the client refuses to
+read. **NOT MOUNTED YET** — Task 4 mounts the provider in the layout;
+until then `useMetaConstants` outside a provider answers the fallback.
+
+**Retirements (the p0-5 deferred cleanup — this task owns it).**
+`ribbonBatchAgeSuffix`, `ribbonBatchAgeUnknown`,
+`RIBBON_STALE_BATCH_SECONDS` (=3600, the hand-picked hour), and
+`ageHours` deleted from `web/lib/freshness.ts` (tombstone comment left in
+place). Zero production consumers PROVEN FIRST by language-server
+reference search (`find_referencing_symbols` on all four: only the three
+unit specs + intra-file uses). Spec assertions retired old → new:
+
+| Old pin | Disposition |
+|---|---|
+| freshness.spec.ts "the ribbon suffix is absent inside the hour and present past it" (`RIBBON_STALE_BATCH_SECONDS` = 3600, `· batch Nh old` strings) | RETIRED — boundary law is now tier-shaped (120/121 · 360/361 · 5580/5581) in freshness-tiers.spec.ts |
+| freshness.spec.ts "THE RIBBON ENGAGES: the stale-batch suffix appears as the anchor crosses 1h" | RETIRED — surviving law (severity downstream of the ANCHORED age, moves while the page is open) re-pinned in freshness-tiers.spec.ts "the tier is downstream of the ANCHORED age" |
+| freshness.spec.ts `ageHours(-10) === 0` | dropped with `ageHours`; the negative-age floor stays pinned via `humanAge(-10)` |
+| freshness-resume.spec.ts "THE RIBBON ENGAGES AFTER SLEEP" (suffix `· batch 5h old` on a paused monotonic clock) | REWRITTEN as "THE TIER ENGAGES AFTER SLEEP" — fresh→critical across a 5h sleep, same split-clock drive |
+| freshness-blind-resume.spec.ts "THE RIBBON SLOT IS NEVER SILENT while the age is unknown" (`ribbonBatchAgeUnknown` byte pins) | REWRITTEN as "THE CHIP IS NEVER SILENT" — the law survives on `snapshotChipUnknown` (always-on chip, no silent register); byte pins moved onto the chip strings |
+
+Still-live exports untouched (unknown register, anchor/resume machinery,
+`snapshotChip`/`snapshotChipUnknown`, stamps, `receiptIdentity`).
+
+**Red-first evidence:** freshness-tiers.spec.ts written first; run died
+at collection — `Cannot find module '…\web\lib\freshnessTiers'` — then
+green 11/11 after the two modules landed.
+
+**Mutation kills (each in isolation, each reverted):**
+
+- **M1 · fresh bound `2×poll → 3×poll`** (`web-3820-p1a3-mutM1.log`):
+  KILLED at exactly the 121s pin (freshness-tiers.spec.ts:48 —
+  `freshnessTier(121, TIER_FALLBACK)` expected "aging", received
+  "fresh"), plus the runtime-override (:72) and anchored-age (:100)
+  pins: 3 failed / 8 passed.
+- **M2 · provider failure arm claims source `"meta"`**
+  (`web-3820-p1a3-mutM2.log`): KILLED at exactly the fallback-source pin
+  (freshness-tiers.spec.ts:178, expected "fallback" received "meta") and
+  the SchemaVersionMismatchError-arm pin (:191): 2 failed / 9 passed.
+
+### Closing counts (p1a-3)
+
+- Suite: 1566 → **1575 tests** (+11 freshness-tiers unit pins, −2
+  retired freshness.spec pins; base = p1b-10's 1565 passed + 1 skipped).
+- Full p1a run (final tree, fresh `npm run build`, port 3820):
+  **1574 passed, 1 skipped, 0 failed (35.3s)**
+  (`web-3820-p1a3-full.log`) — same single pre-existing styleguide skip;
+  zero movement in every untouched spec.
+- `npm run typecheck`: clean. `npm run lint` (eslint .): clean, zero
+  warnings. `npm run lint:css`: clean. `npx eslint` on the 7 touched
+  files: clean.
 
 ### p1b-6 · the identity gap audit closes (Task 6)
 

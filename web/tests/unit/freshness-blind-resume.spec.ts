@@ -48,10 +48,8 @@ import {
   RESUME_COALESCE_MS,
   RESUME_RETRY_DELAYS_MS,
   resumeRetryDelayMs,
-  ribbonBatchAgeSuffix,
-  ribbonBatchAgeUnknown,
-  RIBBON_STALE_BATCH_SECONDS,
   shouldReconcileOnResume,
+  snapshotChipUnknown,
   trackResumeSignal,
   unknownAgePhrase,
   type FreshnessBatch,
@@ -356,19 +354,19 @@ test("the unknown stamp mirrors the known stamp — same shape, refusal in the a
   expect(unknown[2]).toBe("age UNKNOWN since resume");
 });
 
-test("THE RIBBON SLOT IS NEVER SILENT while the age is unknown", () => {
-  // THE FINDING, in one pair of lines. At 130s the computed suffix is null —
-  // "render nothing" — and on the ribbon nothing reads as `LIVE · WATERMARKED`
-  // with no reservation attached. That silence is exactly what carried
-  // hours-old data for another ~58 minutes.
-  expect(ribbonBatchAgeSuffix(130)).toBeNull();
-  expect(130).toBeLessThan(RIBBON_STALE_BATCH_SECONDS);
-  // The unknown register cannot be null: there is no input that silences it.
-  expect(ribbonBatchAgeUnknown(false)).toBe("· batch age UNKNOWN since resume · refreshing");
-  expect(ribbonBatchAgeUnknown(true)).toBe(
-    "· batch age UNKNOWN since resume · refresh failed, data retained",
+test("THE CHIP IS NEVER SILENT while the age is unknown", () => {
+  // (p1a-3 re-anchor: the old vehicle for this law — `ribbonBatchAgeSuffix`,
+  // null at 130s, and `ribbonBatchAgeUnknown` filling its slot — is RETIRED
+  // with the >1h gate. The law itself SURVIVES on the always-on snapshot
+  // chip, which renders at EVERY age and so has no silent register at all.)
+  // The unknown chip cannot be null: there is no input that silences it.
+  expect(snapshotChipUnknown(7, false)).toBe(
+    "snapshot #7 · age UNKNOWN since resume · refreshing",
   );
-  // And it is not the stale suffix wearing a new coat — no hour count is
+  expect(snapshotChipUnknown(7, true)).toBe(
+    "snapshot #7 · age UNKNOWN since resume · refresh failed, data retained",
+  );
+  // And it is not a staleness verdict wearing a new coat — no hour count is
   // implied, because none is known.
-  expect(ribbonBatchAgeUnknown(false)).not.toMatch(/\d+h old/);
+  expect(snapshotChipUnknown(7, false)).not.toMatch(/\d+h old/);
 });

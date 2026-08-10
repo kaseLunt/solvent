@@ -3,22 +3,23 @@
 // Laws under test:
 //   - the age comes from the WIRE's `age_seconds`, never recomputed from
 //     `computed_at` against a browser clock;
-//   - `computed_at` renders VERBATIM — no locale reformatting;
-//   - the ribbon suffix appears ONLY past the hour threshold, and its absence
-//     is not a freshness claim.
+//   - `computed_at` renders VERBATIM — no locale reformatting.
+//
+// RETIRED (p1a-3): the third law this file carried — "the ribbon suffix
+// appears ONLY past the hour threshold" — is gone with `ribbonBatchAgeSuffix`
+// / `RIBBON_STALE_BATCH_SECONDS` / `ageHours` (the p0-5 deferred cleanup).
+// Severity is now the ratified SLA's job: `freshnessTier` bounds derived from
+// /v1/meta constants, pinned by tests/unit/freshness-tiers.spec.ts.
 
 import { expect, test } from "@playwright/test";
 import {
   AGE_TICK_MS,
-  ageHours,
   anchoredAgeSeconds,
   anchorWireAge,
   batchFreshnessLine,
   batchFreshnessStamp,
   humanAge,
   monotonicNowMs,
-  RIBBON_STALE_BATCH_SECONDS,
-  ribbonBatchAgeSuffix,
 } from "../../lib/freshness";
 
 /**
@@ -62,7 +63,6 @@ test("humanAge degrades honestly — seconds, minutes, then hours+minutes", () =
 
 test("a negative age floors at zero rather than rendering a future batch", () => {
   expect(humanAge(-10)).toBe("0s");
-  expect(ageHours(-10)).toBe(0);
 });
 
 test("the freshness line carries the batch id, the VERBATIM computed_at, and the wire age", () => {
@@ -79,13 +79,10 @@ test("computed_at is never reformatted — the service's own string survives", (
   expect(batchFreshnessLine(odd)).toContain("2026-07-29T10:00:00Z");
 });
 
-test("the ribbon suffix is absent inside the hour and present past it", () => {
-  expect(RIBBON_STALE_BATCH_SECONDS).toBe(3600);
-  expect(ribbonBatchAgeSuffix(0)).toBeNull();
-  expect(ribbonBatchAgeSuffix(3600)).toBeNull();
-  expect(ribbonBatchAgeSuffix(3601)).toBe("· batch 1h old");
-  expect(ribbonBatchAgeSuffix(87902)).toBe("· batch 24h old");
-});
+// RETIRED (p1a-3): "the ribbon suffix is absent inside the hour and present
+// past it" — the >1h gate and its `· batch Nh old` strings are deleted. The
+// boundary law it pinned is now tier-shaped: 120/121 · 360/361 · 5581, in
+// tests/unit/freshness-tiers.spec.ts.
 
 // ---------------------------------------------------------------------------
 // WAVE R3, Codex round-10 MEDIUM: the age was FROZEN at the wire value.
@@ -158,21 +155,11 @@ test("the HOUR boundary is crossed while the page is open", () => {
   });
 });
 
-test("THE RIBBON ENGAGES: the stale-batch suffix appears as the anchor crosses 1h", () => {
-  withFakeClock((advance) => {
-    // Received 50s inside the threshold — nothing to say yet.
-    const anchor = anchorWireAge(RIBBON_STALE_BATCH_SECONDS - 50);
-    expect(ribbonBatchAgeSuffix(anchoredAgeSeconds(anchor))).toBeNull();
-    // One tick later the batch really IS over an hour old, and says so.
-    advance(AGE_TICK_MS);
-    expect(anchoredAgeSeconds(anchor)).toBe(3610);
-    expect(ribbonBatchAgeSuffix(anchoredAgeSeconds(anchor))).toBe("· batch 1h old");
-    // And it keeps counting: 23 more hours of an open tab.
-    advance(23 * 3_600_000);
-    expect(ribbonBatchAgeSuffix(anchoredAgeSeconds(anchor))).toBe("· batch 24h old");
-    expect(ageHours(anchoredAgeSeconds(anchor))).toBe(24);
-  });
-});
+// RETIRED (p1a-3): "THE RIBBON ENGAGES: the stale-batch suffix appears as the
+// anchor crosses 1h" — the suffix is deleted. Its surviving law (severity is
+// downstream of the ANCHORED age and moves while the page is open) is
+// re-pinned tier-shaped in freshness-tiers.spec.ts ("the tier is downstream
+// of the ANCHORED age — severity moves while the page is open").
 
 test("the tick is a minute — coarse enough for a text age, fine enough for every boundary", () => {
   expect(AGE_TICK_MS).toBe(60_000);
