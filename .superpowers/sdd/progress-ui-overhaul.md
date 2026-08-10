@@ -268,3 +268,99 @@ Program spec: docs/specs/2026-08-09-ui-overhaul-program-design.md
   stream-posture, freshness-blind-resume unit — 110 passed, 1 pre-existing
   skip (styleguide-not-compiled, shell.spec.ts). typecheck: only the
   pre-existing lab-runbook-lines.spec.ts(858) TS2322.
+
+### p0-6a pre-existing TS2322 repaired (lab-runbook-lines.spec.ts:858)
+
+- The one error every task recorded as "the acceptable pre-existing failure"
+  is repaired (controller-authorized, ahead of the close's full-suite step):
+  the r89 contradictory-row fixture passed `symbol: null` where the wire type
+  is `symbol?: string`. Fix IN THE SPEC FILE ONLY: the object literal is now
+  explicit with the `symbol` key OMITTED — the same no-symbol shape the file's
+  own `UNPRICED` fixture and the contract's own unpriced example use. The
+  tested arm is unchanged (value_usd + unpriced:true ⇒ contradictory);
+  `collateralReadingLine` never reads `symbol`. Spec re-run: 29/29 passed,
+  the contradictory-row assertions included. `npm run typecheck`: COMPLETELY
+  clean — zero errors repo-wide for the first time this phase.
+- Commit: c2b74e8 `test(web): p0-6a repair pre-existing TS2322 in
+  lab-runbook-lines spec - symbol omitted, unpriced arm unchanged`.
+
+## Phase 0 CLOSE (p0-6) — seal
+
+### Closing counts
+
+- Suite: **1362 pre-phase → 1389 now** (+27 tests this phase:
+  address-binding 6, matrix-outcome 5, comparator-label 2,
+  freshness-snapshot 2, p0-fixes e2e 10, history-copy 9→11 net +2).
+- Close run (post-p0-6a tree, `npm run build` + full
+  `npx playwright test -c tests/playwright.p0.config.ts`, log
+  `web-3818-p06full.log`): **1388 passed, 1 skipped, 0 failures (32.6s)** —
+  exactly inventory (1389, via `--list`) minus the 1 pre-existing skip (the
+  styleguide smoke self-skips unless NEXT_PUBLIC_SHOW_STYLEGUIDE=1 at build).
+- `npm run typecheck`: **completely clean** (post-p0-6a).
+- `npm run lint`: **0 errors**, 1 warning — `UnavailableError` unused in
+  app/lab/LabBookPanel.tsx:27. PRE-EXISTING: the import is present at
+  c320d4b^ (the pre-phase tree; file last touched by pre-phase 851032e).
+  Not a Phase 0 regression; left for the task that owns LabBookPanel.
+- Task-1 watch item (lab.spec.ts "?scenario=<id> auto-runs EXACTLY ONE
+  scenario" flaked once during task 1): PASSED in the close's full run; the
+  task-1 evidence stands (5/5 under --repeat-each=5 in isolation, whitespace-
+  only intervening change) — recorded as a one-off flake, no action.
+
+### Mutation transcript
+
+- Formalized at `.superpowers/sdd/p0-mutations/` (mutations.json +
+  transcript.md, t9w20 format): **8 distinct mutants, 10 isolated kill
+  observations, 0 survivors** — all kills observed in isolation during tasks
+  1–5 and transcribed from the task reports, not re-run. Count reconciliation
+  vs the brief's "9": task 1 ran ONE mutant killed at BOTH tiers (e2e+unit);
+  task 3 ran ONE mutant observed at TWO assertions; tasks 2/4/5 two each.
+  Task 1's p0-1b red-first role=status assertion is test-first evidence, not
+  a mutant.
+
+### Pin-migration inventory (the phase's full displacement record)
+
+- p0-1: none retired; new pins address-binding.spec.ts (6) + p0-fixes p0-1
+  (2 e2e, one strengthened by p0-1b's role=status line).
+- p0-2: NONE changed — lab.spec.ts:269-270 (`net eligible accounts +1` /
+  `batch #1`) survives verbatim (fragment kept FIRST in the sub-line); the
+  known count-duplication flagged above for Phase 3 remains open.
+- p0-3: zero pre-existing pins (grep-confirmed); new pins pin the NEW copy
+  and pin the OLD copy to count 0.
+- p0-4 (old → new):
+  - tests/unit/history-copy.spec.ts:27-29 — HF_HISTORY_HEAD pin → engine-
+    specific historyHead/pointTitlePrefix tests + HISTORY_SECTION_HEAD pin.
+  - tests/e2e/r1-fixes.spec.ts:437 — hf-history "Health factor across
+    batches" → hf-history "Risk history across batches" AND
+    history-aave_v3_etherfi "Health factor across batches".
+  - tests/e2e/book.spec.ts:203-204 (grep-surfaced) — raw "comparator:
+    hf_wad" / "comparator: hf_num/hf_den" → the two humanized labels.
+- p0-5 (batch-age suffix → always-on snapshot chip; retired testids
+  `ribbon-batch-age`/`ribbon-batch-age-unknown` → `ribbon-snapshot`):
+  - r3-fixes.spec.ts:196, :201.
+  - r4-fixes.spec.ts:181, :186, :189.
+  - r6-fixes.spec.ts:212, :220, :223, :226, :242, :248, :249, :313, :319,
+    :328, :331, :344, :564, :577, :578.
+  - r7-fixes.spec.ts:517, :534, :587 (forced deviation, ledgered at p0-5;
+    badge-string pins untouched) — plus the three now-vacuous retired-testid
+    toHaveCount(0) lines (r7:496/:535/:567) flagged for cleanup.
+  - app/styleguide/page.tsx:309 specimen migrated (compile-forced).
+- Frozen and byte-identical throughout: every badge string (`LIVE ·
+  WATERMARKED`, `STREAM · *`, `NO SERVABLE BATCH`) in shell.spec.ts /
+  state-matrix.spec.ts / r7-fixes.spec.ts.
+
+### Open flags carried forward (all ledgered above)
+
+- Phase 3: drop the legacy `net eligible accounts +N` fragment and move
+  lab.spec.ts:269's pin onto the composed part (p0-2 duplication).
+- r7-fixes.spec.ts:496/:535/:567 vacuous toHaveCount(0) lines (p0-5).
+- freshness.ts retired-from-render functions (`ribbonBatchAgeSuffix`,
+  `ribbonBatchAgeUnknown`, `RIBBON_STALE_BATCH_SECONDS`/`ageHours`) await the
+  task that owns their unit specs (p0-5).
+- Unknown-register chip is muted, not warn-coloured, until Phase 1's SLA
+  severity styling (p0-5, brief-directed).
+- LabBookPanel.tsx:27 unused-import lint warning (pre-phase).
+- Phase 1 Track B owns the typed-envelope generalization of result identity
+  (p0-1 fixed the address-mode instance only).
+
+**Phase 0 is COMPLETE pending Codex adversarial review** (dispatched by the
+controller over the p0-0…p0-6 range per landing discipline).

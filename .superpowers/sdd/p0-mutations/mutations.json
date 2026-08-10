@@ -1,0 +1,138 @@
+{
+  "meta": {
+    "wave": "UI-overhaul Phase 0 trust fixes (tasks p0-1 … p0-5), phase close p0-6",
+    "applier": "by hand during each task (no mutate.py): each mutant applied alone to the task's completed working tree, rebuilt where the kill was e2e (npm run build), the kill observed in isolation, then reverted and the revert proven by a green re-run of the task's affected set",
+    "count_reconciliation": "The task-6 brief said 9 mutants (2 per task 1/2/4/5, 1 for task 3). Reconciled against the per-task reports and the ledger (the source of truth): 8 DISTINCT MUTANT DIFFS, 10 ISOLATED KILL OBSERVATIONS. Task 1 ran ONE mutant killed at BOTH tiers (e2e + unit, each in isolation) — the brief counted those two kills as two mutants; task 3 ran ONE mutant observed at TWO assertions (both kill sites recorded). Task 1's fix round p0-1b additionally produced a RED-FIRST role=status assertion (failed at the recorded p0-fixes.spec.ts:83 against the unfixed build) — test-first evidence, not a mutant, and not counted here.",
+    "notes": "This spec is the FORMAL RECORD of kills already observed in isolation during tasks 1–5 (task-1-report.md … task-5-report.md and the per-task sections of progress-ui-overhaul.md). Nothing was re-run for this transcript: every isolation observation was recorded clean at its task, so the brief's re-run clause was never triggered. 'search' strings were re-verified byte-for-byte against the CURRENT post-phase tree at each site; 'replace' strings are the mutations as the reports record them — literal where the report quotes the mutated code (P0M1), minimal reconstructions of the report's recorded semantics elsewhere (marked per mutant). Line-number anchors: recorded-at-observation lines are kept, and because later tasks appended imports/helpers to shared spec files, the CURRENT line of every kill assertion at seal time is recorded beside it in transcript.md."
+  },
+  "mutations": [
+    {
+      "id": "P0M1",
+      "task": "p0-1 (task 1, commit 19e21f2 + fix round 6e259e2)",
+      "property": "Address binding is a COMPARISON, not a blessing: a settled stress result belongs to the address it was computed FOR, and an edited input must flip the binding to 'stale' (barrier raised, result withheld) rather than letting the old result stand under the new address. Deleting the comparison makes every settled result read as current — the exact trust defect p0-1 fixes.",
+      "description": "comparison deleted: addressBinding always returns the 'current' arm",
+      "command": "e2e: npm run build && npx playwright test -c tests/playwright.p0.config.ts tests/e2e/p0-fixes.spec.ts -g \"stale barrier\" | unit: npx playwright test -c tests/playwright.p0.config.ts tests/unit/address-binding.spec.ts",
+      "kill_sites": 2,
+      "edits": [
+        {
+          "file": "web/app/lab/addressBinding.ts",
+          "search": "  return input === phase.addr\n    ? { kind: \"current\", addr: phase.addr }\n    : { kind: \"stale\", addr: phase.addr };",
+          "replace": "  return { kind: \"current\", addr: phase.addr };",
+          "provenance": "replace is LITERAL from task-1-report.md ('the return replaced with return { kind: \"current\", addr: phase.addr }; (comparison deleted)')"
+        }
+      ]
+    },
+    {
+      "id": "P0M2",
+      "task": "p0-2 (task 2, commit 7cadf05)",
+      "property": "A settled matrix cell folds EVERY nonzero outcome dimension into its sub-line — deleting the bad-debt block lets bad debt move invisibly behind a cell that renders every other part, the '$0 while bad debt moved' defect p0-2 exists to kill.",
+      "description": "bad-debt block deleted from cellPrimaryOutcome",
+      "command": "npm run build && npx playwright test -c tests/playwright.p0.config.ts tests/e2e/p0-fixes.spec.ts -g \"bad debt and shortfall\"",
+      "kill_sites": 1,
+      "edits": [
+        {
+          "file": "web/app/lab/matrixCells.ts",
+          "search": "  if (!isZeroDecimal(engine.bad_debt_delta_usd)) {\n    parts.push(`Δ bad debt ${usd(engine.bad_debt_delta_usd, engine.usd_decimals)}`);\n  }\n",
+          "replace": "",
+          "provenance": "block-deletion per task-2-report.md ('Bad-debt block deleted from cellPrimaryOutcome'); the deleted block is the current tree's own text"
+        }
+      ]
+    },
+    {
+      "id": "P0M3",
+      "task": "p0-2 (task 2, commit 7cadf05)",
+      "property": "The quiet arm is REACHABLE and honest: an all-zero engine says 'no effective movement' instead of parading zero-dollar deltas as outcomes. Forcing isZeroDecimal to false makes the quiet arm unreachable — every zero renders as a movement claim.",
+      "description": "isZeroDecimal returns false unconditionally (quiet arm unreachable)",
+      "command": "npm run build && npx playwright test -c tests/playwright.p0.config.ts tests/e2e/p0-fixes.spec.ts -g \"all-zero engine\"",
+      "kill_sites": 1,
+      "edits": [
+        {
+          "file": "web/app/lab/matrixCells.ts",
+          "search": "  return /^-?0*\\.?0*$/.test(value);",
+          "replace": "  return false;",
+          "provenance": "minimal reconstruction of task-2-report.md's recorded semantics ('isZeroDecimal → always false')"
+        }
+      ]
+    },
+    {
+      "id": "P0M4",
+      "task": "p0-3 (task 3, commit 5df32c4)",
+      "property": "The value-arm row names HEALTH, not liquidation: the number is the lowest price at which the position is still healthy (ceil P*), not a liquidation trigger. Reverting the label to 'Liquidation price' restores the misnaming — and the presence of the OLD copy is itself pinned against (toHaveCount(0)), so the kill is observed at BOTH the rename-visibility assertion and the discriminating absence pin.",
+      "description": "value-arm label reverted to 'Liquidation price'",
+      "command": "site a: npm run build + the p0-3 describe alone (web-3818-p03mutA.log) | site b: the discriminating pin alone via a scratch spec, deleted before commit (web-3818-p03mutB.log)",
+      "kill_sites": 2,
+      "edits": [
+        {
+          "file": "web/app/inspector/[addr]/InspectorPositionCard.tsx",
+          "search": "        <span className={styles.k}>Health boundary price</span>",
+          "replace": "        <span className={styles.k}>Liquidation price</span>",
+          "provenance": "value-arm (line 415) label reversion per task-3-report.md; the null-arm span at :403 carries different indentation, so the search is single-site"
+        }
+      ]
+    },
+    {
+      "id": "P0M5",
+      "task": "p0-4 (task 4, commit 50938fe)",
+      "property": "The history head is ENGINE-SPECIFIC: the DM's disclosure ratio must never wear health-factor clothing. Returning the Aave string for every engine re-dresses the DM series as 'Health factor across batches' — the defect p0-4 names.",
+      "description": "historyHead returns the Aave string for every engine",
+      "command": "npm run build && npx playwright test -c tests/playwright.p0.config.ts (p0-4 DM/Aave-heads test in isolation)",
+      "kill_sites": 1,
+      "edits": [
+        {
+          "file": "web/lib/history-series.ts",
+          "search": "  if (engine === \"aave_v3_etherfi\") return \"Health factor across batches\";\n  if (engine === \"debt_manager\") return \"Borrow headroom (disclosure) across batches\";\n  return \"Plotted series across batches\";",
+          "replace": "  return \"Health factor across batches\";",
+          "provenance": "minimal reconstruction of task-4-report.md's recorded semantics ('historyHead returns the Aave string for every engine')"
+        }
+      ]
+    },
+    {
+      "id": "P0M6",
+      "task": "p0-4 (task 4, commit 50938fe)",
+      "property": "Comparator tokens are HUMANIZED for the reader: 'hf_wad' must render as \"the pool's own health factor (wad)\", never leak through as a wire token. Deleting the hf_wad arm passes the raw token through to the Book histogram panel head.",
+      "description": "comparatorReaderLabel passes 'hf_wad' through verbatim",
+      "command": "npm run build && npx playwright test -c tests/playwright.p0.config.ts (p0-4 Book humanization test in isolation)",
+      "kill_sites": 1,
+      "edits": [
+        {
+          "file": "web/lib/book-copy.ts",
+          "search": "  if (comparator === \"hf_wad\") return \"the pool's own health factor (wad)\";\n",
+          "replace": "",
+          "provenance": "minimal reconstruction of task-4-report.md's recorded semantics ('comparatorReaderLabel passes \"hf_wad\" through')"
+        }
+      ]
+    },
+    {
+      "id": "P0M7",
+      "task": "p0-5 (task 5, commit 6c8e875)",
+      "property": "The snapshot chip is ALWAYS visible, at every age — resurrecting the old >1h-only policy (empty chip at ≤3600s) lets a live stream over a fresh-looking batch hide the snapshot's age entirely, the conflation p0-5 separates.",
+      "description": "snapshotChip returns \"\" at ageSeconds <= 3600 (the retired suffix policy resurrected)",
+      "command": "npm run build && npx playwright test -c tests/playwright.p0.config.ts (p0-5 fresh-batch test in isolation)",
+      "kill_sites": 1,
+      "edits": [
+        {
+          "file": "web/lib/freshness.ts",
+          "search": "  return `snapshot #${String(batchId)} · ${humanAge(ageSeconds)} old`;",
+          "replace": "  if (ageSeconds <= 3600) return \"\";\n  return `snapshot #${String(batchId)} · ${humanAge(ageSeconds)} old`;",
+          "provenance": "minimal reconstruction of task-5-report.md's recorded semantics ('snapshotChip returns \"\" at ≤3600s')"
+        }
+      ]
+    },
+    {
+      "id": "P0M8",
+      "task": "p0-5 (task 5, commit 6c8e875)",
+      "property": "R6's arbitration is preserved one-to-one: while the age is UNRESOLVED the computed chip is NOT built — feeding snapshotChip the understated number the page just admitted it does not have restates the round-13 defect. Ignoring `unresolved` renders 'snapshot #1 · 2m old' where the refusal register must stand.",
+      "description": "PostureRibbon passes snapshotChip(...) unconditionally, ignoring age.unresolved",
+      "command": "npm run build && npx playwright test -c tests/playwright.p0.config.ts (the r6-fixes unknown-register test in isolation)",
+      "kill_sites": 1,
+      "edits": [
+        {
+          "file": "web/components/PostureRibbon.tsx",
+          "search": "          age.unresolved\n            ? snapshotChipUnknown(posture.batch.id, age.refreshFailed)\n            : snapshotChip(posture.batch.id, age.seconds ?? posture.batch.age_seconds)",
+          "replace": "          snapshotChip(posture.batch.id, age.seconds ?? posture.batch.age_seconds)",
+          "provenance": "minimal reconstruction of task-5-report.md's recorded semantics ('PostureRibbon ignores unresolved, always computes')"
+        }
+      ]
+    }
+  ]
+}
