@@ -2536,3 +2536,106 @@ byte-identical.
   styleguide skip.
 - Mutations: **3 mutants, 3 KILLED, 0 survived**, all unit-in-isolation,
   every restoration diff-verified against the pre-mutation bytes.
+
+## Phase 1 Track A — the shared component kit (p1a-5)
+
+### p1a-5 · verdict banner, exact affordance, chip family, states (Task 5)
+
+The canon's §4–§8 primitives land as an ADDITIVE kit — zero page-consumer
+changes, zero pin movement outside the new spec. Commit `feat(web): p1a-5
+the component kit lands - verdict banner enforces its identity strip,
+exactness carries a visible cue, chips speak nine dimensions`.
+
+- **`web/lib/kit.ts` — NEW, pure (the p1a-4b lift pattern)**: the kit's
+  composition law lives where unit specs can pin it; the thin components
+  render these models verbatim. Exports: `VERDICT_TONE_CLASS`
+  (current→vAccent · refused/superseded/partial→vWarn · empty→vQuiet;
+  §4's `.vCrit` spine is defined in the CSS but no phase-1 variant maps
+  to it — the grammar's escalation slot), `identityMissing` (render-empty
+  = missing: null/undefined/booleans/whitespace-only strings/arrays of
+  only those; elements and numbers are content — 0 is a lawful count,
+  never absence), `VERDICT_IDENTITY_REFUSAL` (structural-refusal copy
+  naming the omission and stating the law), `verdictBannerModel`,
+  `CHIP_TONE_CLASS` (7 tones → the 7 §6 recipes), `refusedChipSegments`
+  (state word → plain cause → wire code; the array order IS the render
+  order), `exactValueMode` (human===exact → "plain"), `exactAriaLabel`
+  (the §7 featured-specimen grammar).
+- **`web/components/VerdictBanner.tsx` + `verdict.module.css`**: §4
+  grammar — answer at `--t-chapter`/650/lh 1.3, qualification `--t-ui`
+  `--ink-2` capped at the 720px prose measure, identity strip as a flex
+  chip row; 1px `--line` frame + 4px LEFT border carrying the variant
+  tone; flat (no shadow — data surface). THE RATIFIED LAW enforced
+  structurally: a missing/render-empty `identity` prop renders a
+  warn-register structural refusal
+  (`data-identity-refusal="missing-identity-strip"`) naming exactly what
+  is missing — not a dev-throw, and never the happy sentence.
+- **`web/components/ExactValue.tsx` + `exact.module.css`**: §7 CSS
+  verbatim (dotted `--ink-3` underline, offset 3px, cursor help, " ⧉"
+  `::after` at `--t-floor`; hover/focus-visible → accent underline +
+  `--chip-bg` ground, glyph → `--accent-text`); `title`=exact,
+  `tabIndex=0`, `role="button"`, aria-label per the featured grammar,
+  Enter copies via `navigator.clipboard` with a graceful no-op fallback.
+  FORBIDDEN arm: human===exact renders a PLAIN span (no affordance, no
+  title, no glyph) + dev-warn — the false-scent law.
+- **`web/components/StatusChip.tsx` + `chip.module.css`**: `StatusChip`
+  (the seven §6 tones + mono `val`, optional 7px dot — HOLLOW on the
+  unknown register), `ChipVal` (embedded mono value for mid-sentence
+  composition: "COVERAGE 2/2 ENGINES", "30 BATCHES NOT RETAINED"),
+  `RefusedChip` (the canon refused-tag: dashed `--warn` border on the
+  `--warn-bg` state fill, `--warn-text` ink; plain cause LEADS, wire code
+  mono secondary; `word` arm serves WITHHELD; named RefusedChip because
+  the legacy `RefusedTag` and its 15 consumers stay untouched this
+  phase), `EngineTag` (mono wire names only — never a sans AAVE/DM
+  identity). The `.chip`/`.val`/`.c*` recipes match ribbon.module.css's
+  landed appbar family byte-for-byte, plus the kit-only `cOk` (the appbar
+  deliberately has no green — `ok` exists solely for the comfortable risk
+  verdict) and inline-block `.refusedTag` (mixed prose — flex would
+  swallow the middot spacing).
+- **`web/components/states/*` + `states.module.css`**: the six §8 states
+  with the specimen copy as overridable defaults — `Skeleton` (reserves
+  the EXACT final geometry via width/height; 1.6s shimmer strictly inside
+  `prefers-reduced-motion: no-preference`), `EmptyDefinitive` (absence is
+  computed, not assumed; quiet COVERAGE 2/2 + SNAPSHOT 48s chips),
+  `InvalidInput` (RETAINED input in mono dotted-crit; "Nothing was looked
+  up: no request left this page."), `RefusedCard` (warn-bg card,
+  RefusedChip default `sweep failed twice · sweep_failed_no_success`,
+  accounting foot line), `UnavailableCard` (c-unknown `30 BATCHES NOT
+  RETAINED` — a named hole, never zero), `SupersededCard` (mono
+  bound-identity clause, SUPERSEDED c-warn chip, the late-response law
+  line). The anti-state panel's laws are recorded in the module and
+  component comments.
+
+### Red-first evidence + mutation kills (p1a-5)
+
+- RED: `web/tests/unit/kit.spec.ts` (11 pins) written first, died at
+  collection — `Cannot find module '…\lib\kit'`
+  (`web-3820-p1a5-red.log`); implemented, then 11/11 green
+  (`web-3820-p1a5-green.log`).
+- **p1a-5-M1 — banner identity enforcement removed** (the refusal branch
+  deleted from `verdictBannerModel`, in isolation): KILLED at exactly the
+  two identity-law pins — 2 failed / 9 passed
+  (`web-3820-p1a5-mutM1.log`). Restored byte-identical.
+- **p1a-5-M2 — affordance forced when human===exact** (`exactValueMode`
+  → constant "affordance", in isolation): KILLED at exactly the
+  forbidden-arm pin — 1 failed / 10 passed (`web-3820-p1a5-mutM2.log`).
+  Restored byte-identical; post-restore targeted run 11/11 green.
+
+### Closing counts (p1a-5)
+
+- `npm run typecheck` / `npm run lint` / `npm run lint:css` — clean.
+- `npm run build` — clean (fresh, `web-3820-p1a5-build.log`).
+- FULL p1a suite (`npx playwright test -c tests/playwright.p1a.config.ts`,
+  fresh build): **1599 passed, 1 skipped, 0 failed (34.8s)**
+  (`web-3820-p1a5-final-full.log`) — the p1a-4b baseline 1588 plus
+  exactly the 11 new kit pins; same single pre-existing styleguide skip.
+- Consumers: NONE by design — the kit is additive (existing
+  StatCard/RefusedTag/Drawer interfaces untouched); Task 6 mounts the
+  specimens in the styleguide (render pins land there); Phase 3 migrates
+  the page surfaces.
+- Recorded for Task 6 / reviewers: (i) the unit project cannot load CSS
+  modules (the Playwright transform drops the import binding — verified
+  empirically), hence the pure-model lift and model-level pins — DOM
+  order, resolved colors, and copy-glyph behavior are Task 6 e2e
+  territory; (ii) RefusedChip/RefusedTag coexistence is deliberate;
+  (iii) `.vCrit`, `.dot`, and the states' default specimen copy are
+  grammar slots awaiting their styleguide/Phase-3 consumers.

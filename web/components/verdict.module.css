@@ -1,0 +1,59 @@
+/* The verdict banner family (canon §4, RATIFIED as the binding page-answer
+ * contract): .verdict = 1px --line border, 4px LEFT border carrying the
+ * variant tone, radius 8px, --panel ground, padding 18px 22px. The answer
+ * renders at --t-chapter/650/lh 1.3; the qualification at --t-ui in --ink-2
+ * capped at the 720px prose measure; the identity strip is a flex chip row.
+ * Flat data surface — no shadow (shadows are overlays-only law). */
+
+.verdict {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  padding: 18px 22px;
+}
+
+/* Variant spines (§4): the tone travels on the left border alone — the
+ * banner never recolors its answer text by variant. */
+.vAccent {
+  border-left-color: var(--accent);
+}
+
+/* §4 grammar's escalation slot — defined by the canon CSS; no phase-1
+ * variant maps here (see web/lib/kit.ts VERDICT_TONE_CLASS). */
+.vCrit {
+  border-left-color: var(--crit);
+}
+
+.vWarn {
+  border-left-color: var(--warn);
+}
+
+.vQuiet {
+  border-left-color: var(--line);
+}
+
+.answer {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: var(--t-chapter);
+  font-weight: 650;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.qual {
+  margin: 8px 0 0;
+  font-family: var(--sans);
+  font-size: var(--t-ui);
+  color: var(--ink-2);
+  max-width: 720px;
+}
+
+.idStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: 12px;
+}

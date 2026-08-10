@@ -1,0 +1,136 @@
+/* The kit's chip family (canon §05/§06, p1a-5). The .chip/.val/.c* recipes
+ * MATCH the landed appbar family in ribbon.module.css byte-for-byte — the
+ * kit gets its own module (page surfaces must not couple to the appbar's
+ * stylesheet) but the two families must stay visually identical. Sans 12px
+ * uppercase state words, mono embedded values, outline-first: a fill is
+ * the top escalation register only. */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-family: var(--sans);
+  font-size: var(--t-floor);
+  font-weight: 600;
+  letter-spacing: var(--track-refused);
+  text-transform: uppercase;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* Embedded values are mono, never uppercase, tabular. */
+.chip .val {
+  font-family: var(--mono);
+  font-size: var(--t-mono-floor);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text always uses the -text grade; borders keep the fill/glyph chroma. */
+
+/* Green is rationed (§04 law): ok = comfortably healthy ONLY — never
+ * fresh, never complete, never connected. (The appbar family has no ok
+ * chip for exactly that reason; the kit needs it for the risk verdict.) */
+.cOk {
+  color: var(--ok-text);
+  border-color: var(--ok);
+}
+
+.cAccent {
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.cWarn {
+  color: var(--warn-text);
+  border-color: var(--warn);
+}
+
+/* Outline-first: coral text + border, NO fill. */
+.cCrit {
+  color: var(--crit-text);
+  border-color: var(--crit);
+}
+
+/* The one escalation fill — critical comparators and critical age only. */
+.cCritFill {
+  color: var(--crit-text);
+  border-color: var(--crit);
+  background: var(--crit-bg);
+}
+
+.cQuiet {
+  color: var(--ink-2);
+  border-color: var(--line);
+}
+
+/* The unknown register: dashed, never any tier's color. */
+.cUnknown {
+  color: var(--ink-2);
+  border-color: var(--ink-3);
+  border-style: dashed;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  display: block;
+}
+
+/* The unknown register's dot is HOLLOW (§06): unknown must not read as any
+ * tier — a filled dot is a state claim. */
+.cUnknown .dot {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+  border: 1px solid currentColor;
+}
+
+/* ---- the canon refused-tag (§05 D5 / §06): dashed --warn border on the
+ * --warn-bg state fill, --warn-text ink. The plain cause is narration —
+ * sentence case, NO uppercase transform (the REFUSED/WITHHELD word is
+ * literal caps); the wire code rides secondary in mono. ---- */
+.refusedTag {
+  /* inline-block, not inline-flex: the tag is mixed PROSE (word · cause ·
+   * code with literal middots), and flex would swallow the separators'
+   * surrounding whitespace. */
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1px dashed var(--warn);
+  border-radius: var(--r-sm);
+  background: var(--warn-bg);
+  font-family: var(--sans);
+  font-size: var(--t-floor);
+  font-weight: 600;
+  letter-spacing: var(--track-refused);
+  color: var(--warn-text);
+  white-space: nowrap;
+}
+
+/* The wire code: mono, quoted-register, never leading. */
+.wire {
+  font-family: var(--mono);
+  font-size: var(--t-mono-floor);
+  font-weight: 500;
+  letter-spacing: normal;
+}
+
+/* ---- engine identity (§06): mono wire names only, on the chip ground ---- */
+.engineTag {
+  font-family: var(--mono);
+  font-size: var(--t-floor);
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--chip-bg);
+  color: var(--ink-2);
+  white-space: nowrap;
+}

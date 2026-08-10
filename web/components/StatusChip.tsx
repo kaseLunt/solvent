@@ -1,0 +1,103 @@
+import { Fragment } from "react";
+import type { ReactNode } from "react";
+import { CHIP_TONE_CLASS, refusedChipSegments, type ChipTone } from "@/lib/kit";
+import styles from "./chip.module.css";
+
+export interface StatusChipProps {
+  /**
+   * One of the seven §6 registers. Outline-first: only `crit-fill` carries
+   * a fill (the top escalation — critical comparators and critical age).
+   * `ok` is rationed: comfortably healthy only — never fresh, never
+   * complete, never connection posture.
+   */
+  tone: ChipTone;
+  /** The sans STATE WORD(s) — uppercase narration (e.g. "COVERAGE", "SNAPSHOT"). */
+  children: ReactNode;
+  /**
+   * The embedded value — mono, never uppercase, tabular (e.g. "48s",
+   * "2/2"). Renders after the children; for a value mid-sentence
+   * ("COVERAGE 2/2 ENGINES", "30 BATCHES NOT RETAINED") embed `<ChipVal>`
+   * in the children instead.
+   */
+  val?: ReactNode;
+  /** 7px status dot (connection chips); hollow on the unknown register. */
+  dot?: boolean;
+  title?: string;
+  testId?: string;
+}
+
+/**
+ * The §5/§6 chip: one dimension per chip, composed with middots by the
+ * caller — no dimension may recolor another, and the sentence never
+ * collapses into one badge. Class recipes match the landed appbar family
+ * (ribbon.module.css) byte-for-byte; the two must stay visually identical.
+ */
+export function StatusChip({ tone, children, val, dot = false, title, testId }: StatusChipProps) {
+  return (
+    <span
+      className={`${styles.chip} ${styles[CHIP_TONE_CLASS[tone]]}`}
+      data-tone={tone}
+      title={title}
+      data-testid={testId}
+    >
+      {dot && <span className={styles.dot} aria-hidden="true" />}
+      {children}
+      {val !== undefined && <ChipVal>{val}</ChipVal>}
+    </span>
+  );
+}
+
+/** An embedded mono value inside a chip's children — ages, counts, wire
+ * codes are mono, never uppercase, tabular (§5 law). */
+export function ChipVal({ children }: { children: ReactNode }) {
+  return <span className={styles.val}>{children}</span>;
+}
+
+export interface RefusedChipProps {
+  /** The PLAIN CAUSE — leads (an owner-approved phrasebook sentence, e.g. "sweep failed twice"). */
+  cause: string;
+  /** The wire code — mono, rides secondary, NEVER leads (e.g. "sweep_failed_no_success"). */
+  code?: string;
+  /** The state word: REFUSED (default) or WITHHELD. */
+  word?: string;
+  testId?: string;
+}
+
+/**
+ * The canon refused-tag (§5 D5 + §6): dashed --warn border on --warn-bg,
+ * `REFUSED · <plain cause> · <wire code>`. Named RefusedChip because the
+ * legacy RefusedTag (primitives.module.css register) stays untouched this
+ * phase; page surfaces migrate to this one with their Phase 3 rebuilds.
+ * Render order comes verbatim from `refusedChipSegments` — the wire code
+ * can never lead (§8 anti-state law).
+ */
+export function RefusedChip({ cause, code, word = "REFUSED", testId }: RefusedChipProps) {
+  const segments = refusedChipSegments(cause, code, word);
+  return (
+    <span className={styles.refusedTag} data-testid={testId}>
+      {segments.map((segment, index) => (
+        <Fragment key={`${segment.register}-${segment.text}`}>
+          {index > 0 && " · "}
+          {segment.register === "wire" ? (
+            <span className={styles.wire}>{segment.text}</span>
+          ) : (
+            segment.text
+          )}
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Engine identity is mono WIRE NAMES only — `aave_v3` / `debt_manager` —
+ * never a sans "AAVE"/"DM" abbreviation (§1 identity law). Rendered
+ * verbatim on the chip ground.
+ */
+export function EngineTag({ engine, testId }: { engine: string; testId?: string }) {
+  return (
+    <span className={styles.engineTag} data-testid={testId}>
+      {engine}
+    </span>
+  );
+}

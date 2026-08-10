@@ -1,0 +1,28 @@
+/* The exact-layer affordance (canon §7, CSS verbatim): dotted --ink-3
+ * underline + the " ⧉" glyph = "an exact string is underneath". Hover or
+ * focus lifts underline and glyph to the accent register on the chip
+ * ground. Progressive disclosure without a visible cue is a hidden
+ * drawer — the cue is the contract. */
+
+.exact {
+  text-decoration: underline dotted var(--ink-3);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.exact:hover,
+.exact:focus-visible {
+  text-decoration-color: var(--accent);
+  background: var(--chip-bg);
+}
+
+.exact::after {
+  content: " ⧉";
+  font-size: var(--t-floor);
+  color: var(--ink-3);
+}
+
+.exact:hover::after,
+.exact:focus-visible::after {
+  color: var(--accent-text);
+}
