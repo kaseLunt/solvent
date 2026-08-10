@@ -24,7 +24,6 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  UnavailableError,
   type BookResponse,
   type ScenarioDefinition,
   type Waterfall,
