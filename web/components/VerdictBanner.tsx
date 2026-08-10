@@ -58,7 +58,12 @@ export function VerdictBanner({ variant, answer, qualification, identity, testId
     >
       <p className={styles.answer}>{answer}</p>
       {qualification !== undefined && <p className={styles.qual}>{qualification}</p>}
-      <div className={styles.idStrip}>{identity}</div>
+      {/* data-slot: the strip's stable DOM hook — e2e pins assert it renders
+          non-empty on every lawful banner (p1a-6; CSS-module class names are
+          not a contract). */}
+      <div className={styles.idStrip} data-slot="identity">
+        {identity}
+      </div>
     </section>
   );
 }

@@ -85,18 +85,28 @@ test("styleguide renders every specimen section (when built in)", async ({ page 
   );
 
   await expect(page.getByTestId("specimen-banner")).toBeVisible();
+  // p1a-6 rebuilt the page canon-structured (build-contract §1–§11 order,
+  // then the production primitives Phase 3 migrates onto the kit). The walk's
+  // old→new ledger lives in .superpowers/sdd/progress-ui-overhaul.md §p1a-6.
   for (const section of [
     "sg-tokens",
+    "sg-type",
+    "sg-verdict",
+    "sg-freshness",
+    "sg-dimensions",
+    "sg-exact",
+    "sg-states",
+    "sg-table",
+    "sg-pagination",
+    "sg-drawer",
+    "sg-ribbon",
+    "sg-charts",
+    "sg-interaction",
     "sg-statcard",
     "sg-severity",
     "sg-chips",
     "sg-marks",
     "sg-stampline",
-    "sg-ribbon",
-    "sg-table",
-    "sg-pagination",
-    "sg-charts",
-    "sg-drawer",
     "sg-truth",
   ]) {
     await expect(page.getByTestId(section)).toBeVisible();

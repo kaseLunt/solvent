@@ -2639,3 +2639,107 @@ exactness carries a visible cue, chips speak nine dimensions`.
   territory; (ii) RefusedChip/RefusedTag coexistence is deliberate;
   (iii) `.vCrit`, `.dot`, and the states' default specimen copy are
   grammar slots awaiting their styleguide/Phase-3 consumers.
+
+### p1a-6 · the styleguide is the living canon (Task 6)
+
+The /styleguide route rebuilt canon-structured — the component kit's
+first mount, the §04 palette's self-verifying contrast gate, and the §11
+interaction register's reference implementation. Commit `feat(web): p1a-6
+the styleguide is the living canon - self-verifying contrast, nine
+dimensions, the interaction register demonstrated`.
+
+**Specimen-walk ledger (shell.spec old → new).** Old 12:
+`sg-tokens · sg-statcard · sg-severity · sg-chips · sg-marks ·
+sg-stampline · sg-ribbon · sg-table · sg-pagination · sg-charts ·
+sg-drawer · sg-truth`. New 19, in the build contract's own section order,
+then the pre-canon production primitives Phase 3 migrates:
+`sg-tokens (rebuilt: palette + LIVE contrast lab) · sg-type (NEW: the
+closed 14-token set) · sg-verdict (NEW: five §4 variants + the
+identity-refusal law specimen) · sg-freshness (NEW: all five snapshot
+states) · sg-dimensions (NEW: nine dimensions + three compositions) ·
+sg-exact (NEW: §7 affordance + forbidden arm) · sg-states (NEW: six §8
+states) · sg-table (kept, §9 reskin) · sg-pagination (kept) · sg-drawer
+(kept) · sg-ribbon (kept, §10) · sg-charts (kept, §11 conventions) ·
+sg-interaction (NEW: the §11 register demo) · sg-statcard · sg-severity ·
+sg-chips (now also mounts the kit EngineTag) · sg-marks · sg-stampline ·
+sg-truth (all kept)`.
+
+**FOUND AND FIXED — the CI env-var build was broken at HEAD.**
+`NEXT_PUBLIC_SHOW_STYLEGUIDE=1 npm run build` died at /styleguide
+prerender: the old SERVER page passed column `cell` functions straight
+into the client DataTable ("Functions cannot be passed directly to Client
+Components"), so the exact build CI's web job runs could not complete on
+this toolchain (the web CI lane has been standing-red since before Track
+A). Fixed structurally: the §9 table specimen moved into a client
+component (`app/styleguide/TableSpecimen.tsx`, the shape PaginationDemo
+already used). The env-var build is now clean and is the build this
+task's counts were taken on.
+
+- **`web/lib/contrast.ts` — NEW, pure**: parseCssColor / compositeOver
+  (translucent grounds composite first, §14 discipline) /
+  relativeLuminance / contrastRatio (WCAG 2.x) / AA_NORMAL_TEXT /
+  formatRatio. The styleguide MEASURES its swatches through this module —
+  nothing prints the canon's numbers.
+- **`ContrastSpecimens.tsx` — NEW client**: 17 audited §04 pairs (every
+  text token on its worst ground(s), incl. both term pairs and
+  accent-ink-on-accent), measured from getComputedStyle on the rendered
+  swatches; re-measures on data-theme mutation AND the OS scheme query.
+  THE KNOWN-BAD PROBE: `--ink-3 on --chip-bg` — the §04 ledger's own
+  never-on-chip law, rendered WITH its failing measured ratio and pinned
+  to the exact per-theme values (4.29 light · 4.05 dark): numbers a
+  stubbed computation cannot produce. All 17 lawful pairs verified ≥ 4.5
+  in BOTH themes before pinning (worst margins: light ink-3/panel-2 4.51,
+  crit-text/chip 4.52; dark ink-3/panel 4.53, crit-text/chip 4.54).
+- **`InteractionRegisterDemo.tsx` + `interaction.module.css` — NEW**: the
+  §11 register on one specimen stress ladder — Tab enters (ONE stop),
+  ←/→ traverse in data order, Home/End jump, Enter focuses the mark's
+  ledger row (the evidence), Esc leaves; focused mark wears the 2px
+  accent ring; the mono readout persists past blur (hover is never the
+  only path; the canon's −30% readout specimen verbatim). ARIA:
+  `aria-details` → `#sg-ir-ledger` (the tabular twin, one row per mark,
+  exact strings), `aria-describedby` → `#sg-ir-method`; a visible
+  `EXACT DATA ↓` control moves focus to the ledger. This is the
+  reference implementation Phase 3 copies.
+- **Kit mounts**: five VerdictBanner variants with §4's exact copy
+  (current's $8.5K wears ExactValue), PLUS the identity-refusal law
+  specimen (`identity={null}` → the warn-register structural refusal).
+  Freshness tier row: four `snapshotChipParts` tiers composed EXACTLY as
+  the appbar composes them (the kit chip recipes match ribbon
+  byte-for-byte) + the c-unknown `AGE UNKNOWN — NO BATCH METADATA` chip.
+  Nine §6 dimension rows + three compositions in the fixed order
+  (comp-1 is the brief's `LIQUIDATABLE · DUST · COMPUTED · SNAPSHOT 18h
+  12m · CRITICAL`). ExactValue featured + forbidden arms. All six §8
+  states. §9 table reskin: refused money cells print the word `refused`
+  in amber (never an em dash), the status column carries the kit
+  RefusedChip, and the footer reconciles per engine — never one summed
+  count.
+- **`VerdictBanner.tsx`**: the identity strip gains `data-slot="identity"`
+  — a stable DOM hook (CSS-module class names are not a contract); the
+  task-5 carry-in pin asserts it non-empty on all five specimens.
+  **Carry-in ruling — data-variant on refusal renders: evaluated,
+  AGREED with the landed task-5 behavior** (the refusal render keeps the
+  REQUESTED variant in `data-variant` and adds the
+  `data-identity-refusal` marker — what was asked and what happened are
+  both stated); now pinned.
+- **Precision divergence carried from §p1a-4**: ages print `humanAge`
+  output (`18h 12m`), not the canon specimens' compact `18h` / `4m 12s`
+  — same cosmetic divergence, same ruling.
+
+**Verification.** RED: the new pins written first; the old page could not
+even BUILD under the env var (the red log is the build failure above).
+GREEN: 9/9 targeted (`web-3820-p1a6-target.log`). Mutations (isolation,
+env-var rebuild each, restored to the exact pre-mutation text):
+**p1a-6-M1** contrastRatio → constant 4.53: KILLED at exactly the probe's
+exact-ratio pin, 1 failed / 7 passed (`web-3820-p1a6-mutM1.log`).
+**p1a-6-M2** the demo svg's `onKeyDown` removed: KILLED at exactly the
+ArrowRight `data-focus-index` pin, 1 failed / 7 passed
+(`web-3820-p1a6-mutM2.log`). Typecheck / lint / lint:css clean. FULL p1a
+suite on the CI-mirror build (`NEXT_PUBLIC_SHOW_STYLEGUIDE=1 npm run
+build`): **1608 passed, 0 skipped, 0 failed (31.1s)**
+(`web-3820-p1a6-final-full.log`) — the p1a-5 baseline 1599 + the
+formerly-skipped shell walk now running + exactly the 8 new p1a-6 pins.
+**The standing skip is intact**: a no-var build was also run — all 9
+styleguide tests SKIP (never fail) on the 404
+(`web-3820-p1a6-novar.log`), so local runs without the var keep the
+p1a-5-era behavior (skips, with counts 1599+9-skipped shape) and CI's
+env-var expectation is unchanged.

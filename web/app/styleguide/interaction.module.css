@@ -1,0 +1,137 @@
+/* The §11 interaction-register demo (p1a-6). Chart text ≥12px structurally
+ * (tokens only); the readout is the ONE lawful elevation (an overlay-register
+ * card); the ledger is the chart's tabular twin at the terminal register. */
+
+.frame {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: var(--sp-4);
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.headRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-2);
+}
+
+.kicker {
+  font-family: var(--mono);
+  font-size: var(--t-floor);
+  letter-spacing: var(--track-tag);
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0;
+}
+
+/* The visible exact-data control (§11): moves focus to the ledger. */
+.exactData {
+  font-family: var(--sans);
+  font-size: var(--t-floor);
+  font-weight: 600;
+  letter-spacing: var(--track-refused);
+  text-transform: uppercase;
+  color: var(--accent-text);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  padding: 3px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chart {
+  display: block;
+}
+
+.axis {
+  stroke: var(--line);
+}
+
+.stem {
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: 0.5;
+}
+
+.mark {
+  fill: var(--accent);
+  cursor: pointer;
+}
+
+/* The canon's focus ring: 2px accent, never a fill change on the mark. */
+.focusRing {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.tick {
+  fill: var(--ink-2);
+  font-family: var(--sans);
+  font-size: var(--t-floor);
+}
+
+/* The persistent readout — mono exact strings; the overlay register is the
+ * one place elevation is lawful. */
+.readout {
+  display: inline-block;
+  margin-top: 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--panel-2);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--t-mono-sm);
+  padding: 8px 12px;
+  box-shadow: var(--shadow);
+}
+
+.ledger {
+  margin-top: var(--sp-4);
+}
+
+.ledgerTable {
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: var(--t-mono-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.ledgerCaption {
+  caption-side: top;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: var(--t-floor);
+  color: var(--ink-2);
+  padding-bottom: 6px;
+}
+
+.ledgerTable th {
+  font-family: var(--sans);
+  font-size: var(--t-floor);
+  font-weight: 600;
+  letter-spacing: var(--track-th);
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--ink-2);
+  border-bottom: 2px solid var(--ink);
+  padding: 4px 18px 4px 0;
+}
+
+.ledgerTable td {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 18px 4px 0;
+}
+
+.method {
+  font-size: var(--t-ui);
+  color: var(--ink-2);
+  max-width: 720px;
+  margin: 12px 0 0;
+}

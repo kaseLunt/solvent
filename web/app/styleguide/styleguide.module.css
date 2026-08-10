@@ -99,3 +99,196 @@
   color: var(--ink-3);
   margin: 6px 0 0;
 }
+
+/* ---- p1a-6 · the living canon ------------------------------------------ */
+
+.dek {
+  font-size: var(--t-body);
+  color: var(--ink-2);
+  max-width: 720px;
+  margin: 0 0 var(--sp-6);
+}
+
+/* The live contrast lab. */
+.contrastGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+
+.contrastCard {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 2px 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: 10px 12px;
+}
+
+/* The deliberate failure is framed as one — never mistakable for a lawful pair. */
+.contrastProbe {
+  border: 1px dashed var(--crit);
+}
+
+.contrastSample {
+  grid-row: 1 / span 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: var(--t-ui);
+  font-weight: 600;
+}
+
+.contrastName {
+  font-family: var(--mono);
+  font-size: var(--t-floor);
+  color: var(--ink-2);
+}
+
+.contrastRatio {
+  font-family: var(--mono);
+  font-size: var(--t-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.contrastFail {
+  color: var(--crit-text);
+}
+
+.contrastNote {
+  font-size: var(--t-floor);
+  color: var(--ink-2);
+}
+
+/* The closed type set. */
+.typeRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.typeName {
+  font-family: var(--mono);
+  font-size: var(--t-floor);
+  color: var(--ink-2);
+  flex: none;
+  width: 200px;
+}
+
+.typeRole {
+  font-size: var(--t-floor);
+  color: var(--ink-2);
+  margin-left: auto;
+  flex: none;
+  max-width: 340px;
+  white-space: normal;
+}
+
+/* The nine dimensions + compositions. */
+.dimRow {
+  margin-bottom: var(--sp-4);
+}
+
+.dimLabel {
+  font-family: var(--mono);
+  font-size: var(--t-floor);
+  letter-spacing: var(--track-tag);
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0 0 6px;
+}
+
+.subhead {
+  font-family: var(--mono);
+  font-size: var(--t-floor);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-2);
+  font-weight: 500;
+  border-bottom: 1px dashed var(--line);
+  padding-bottom: 4px;
+  margin: var(--sp-5) 0 var(--sp-4);
+}
+
+.compRead {
+  font-size: var(--t-ui);
+  color: var(--ink-2);
+  margin: 6px 0 0;
+  max-width: 720px;
+}
+
+/* The banner stack. */
+.bannerStack {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+/* The exact affordance demos. */
+.exactDemo {
+  font-size: var(--t-body);
+  max-width: 720px;
+  margin: 0 0 10px;
+}
+
+/* The six states. */
+.stateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+.stateCard {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: var(--sp-4);
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.stateKicker {
+  font-family: var(--mono);
+  font-size: var(--t-floor);
+  letter-spacing: var(--track-tag);
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0;
+}
+
+/* §9 table reskin: a refused money cell says the word in amber. */
+.refcell {
+  font-size: var(--t-meta);
+  color: var(--warn-text);
+}
+
+.tableFoot {
+  font-size: var(--t-floor);
+  color: var(--ink-2);
+  margin: 8px 0 0;
+  max-width: 960px;
+}
+
+/* The pre-canon production-primitives group divider. */
+.groupNote {
+  font-family: var(--mono);
+  font-size: var(--t-floor);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border-top: 2px solid var(--ink);
+  padding-top: 10px;
+  margin: var(--sp-7) 0 var(--sp-4);
+}
