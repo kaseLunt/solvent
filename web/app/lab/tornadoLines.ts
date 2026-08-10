@@ -211,6 +211,15 @@ export interface TornadoHeaderInput {
    * and counted in their own appended clause when nonzero.
    */
   measuredZeroScenarioIds?: readonly string[];
+  /**
+   * p1b-3 — results the cell layer classified MALFORMED (a consumed engine
+   * field outside the wire contract). They leave the reach counts — a reach
+   * clause is a measurement claim, and these rows were NOT read — but KEEP
+   * their absence count, because their batch disclosures still render on the
+   * surface and the header states the same arithmetic the page shows. Named
+   * in their own clause when non-empty, never silently dropped.
+   */
+  malformedScenarioIds?: readonly string[];
 }
 
 /** The refusal clause's fixed class order — grep-stable, never alphabetized per body. */
@@ -240,12 +249,18 @@ export function tornadoHeaderLine(input: TornadoHeaderInput): string {
   // about the book. The refusal clause below is its only appearance here.
   const refusedIds = new Set(refusals.map((refusal) => refusal.scenarioId));
   const admitted = response.results.filter((result) => !refusedIds.has(result.scenario_id));
-  const noReach = admitted.filter(
+  // p1b-3 — a MALFORMED row was not READ, so it contributes to neither reach
+  // count; its absence disclosures still render on the surface, so the
+  // absence count below keeps it. Its own clause names it.
+  const malformed = input.malformedScenarioIds ?? [];
+  const malformedIds = new Set(malformed);
+  const read = admitted.filter((result) => !malformedIds.has(result.scenario_id));
+  const noReach = read.filter(
     (result) =>
       result.shock_reach.reach === "no_mark_moved" ||
       result.shock_reach.reach === "no_shock_reached_the_book",
   ).length;
-  const declaredNoMove = admitted.filter(
+  const declaredNoMove = read.filter(
     (result) => result.shock_reach.reach === "all_shocks_declared_at_identity",
   ).length;
   const absentEngines = admitted.reduce(
@@ -269,6 +284,12 @@ export function tornadoHeaderLine(input: TornadoHeaderInput): string {
     `declared no move: ${String(declaredNoMove)}`,
     `engines named absent rather than drawn: ${String(absentEngines)}`,
   );
+  // p1b-3 — the malformed clause, NAMED, only when non-empty: the drawn count
+  // dropped these rows, and a count that dropped a row without saying where
+  // it went is a header lying by arithmetic.
+  if (malformed.length > 0) {
+    parts.push(`malformed, not read: ${String(malformed.length)} (${malformed.join(", ")})`);
+  }
   if (refusals.length > 0) {
     const byClass = REFUSAL_CLASS_ORDER.flatMap((why) => {
       const count = refusals.filter((refusal) => refusal.why === why).length;

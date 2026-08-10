@@ -167,12 +167,19 @@ function TornadoPanel({ engine, entries }: { engine: string; entries: readonly P
   // clamped float.
   const drawable: TornadoBarInput[] = [];
   const noDenominator: { scenarioId: string; sentence: string }[] = [];
+  const malformedBars: { scenarioId: string; sentence: string }[] = [];
   for (const entry of entries) {
     const bar = barLength(entry.summary);
     if (bar.drawn) {
       drawable.push({ scenarioId: entry.scenarioId, ratio: bar.ratio, exact: bar.exact });
-    } else {
+    } else if (bar.reason === "no-denominator") {
       noDenominator.push({ scenarioId: entry.scenarioId, sentence: bar.sentence });
+    } else {
+      // p1b-3 — UNREACHABLE in the composed surface: `tornadoCellState`
+      // refuses a malformed result before any of its engines reaches a
+      // panel. Kept as a visible refusal rather than a silent drop, in case
+      // a future caller feeds this panel without the gate.
+      malformedBars.push({ scenarioId: entry.scenarioId, sentence: bar.sentence });
     }
   }
 
@@ -224,6 +231,18 @@ function TornadoPanel({ engine, entries }: { engine: string; entries: readonly P
           data-engine={engine}
         >
           <span className={styles["tone-warn"]}>NO DENOMINATOR</span> · {entry.scenarioId}:{" "}
+          {entry.sentence}
+        </p>
+      ))}
+      {malformedBars.map((entry) => (
+        <p
+          key={entry.scenarioId}
+          className={styles.caption}
+          data-testid="tornado-panel-malformed"
+          data-scenario-id={entry.scenarioId}
+          data-engine={engine}
+        >
+          <span className={styles["tone-warn"]}>MALFORMED</span> · {entry.scenarioId}:{" "}
           {entry.sentence}
         </p>
       ))}
@@ -398,6 +417,15 @@ function TornadoResult({
     why: refusalClassOf(row.cell.state) ?? row.cell.state,
   }));
 
+  // p1b-3 — the rows the classifier refused: excluded from bars, geometry
+  // and the drawn count, NAMED in the header's own clause, and rendered in
+  // the ledger as the malformed register instead of numbers. Their batch and
+  // identity disclosures (the absence captions below) stay: those are facts
+  // about coverage, not readings of the refused numbers.
+  const malformedScenarioIds = rows
+    .filter((row) => row.cell.state === "malformed")
+    .map((row) => row.result.scenario_id);
+
   const drawnRows = rows.filter(
     (row) => (row.cell.state === "bars" || row.cell.state === "partly-reached") && !row.leftCohort,
   );
@@ -464,6 +492,7 @@ function TornadoResult({
           filteredDeepLinkIds,
           refusals,
           measuredZeroScenarioIds,
+          malformedScenarioIds,
         })}
       </p>
 
@@ -622,6 +651,26 @@ function TornadoResult({
                 <b>COVERAGE SKEW</b> · {id}: {cell.sentence}
               </p>
             );
+          case "malformed":
+            // p1b-3 — the p0-8 register at row scale, fields named per engine
+            // index: the run served a body whose consumed fields fail the wire
+            // Decimal contract, so this row reads NOTHING from it — not a
+            // dollar value, not a quiet zero, not a bar.
+            return (
+              <p
+                key={id}
+                className={styles.errorState}
+                data-testid="tornado-state"
+                data-scenario-id={id}
+                data-state="malformed"
+              >
+                <b>MALFORMED RESULT</b> · {id}: outcome unreadable —{" "}
+                {cell.fields.join(", ")} failed the wire Decimal contract (^-?[0-9]+$): version
+                skew or a malformed body. Nothing on this row is read — no bar, no ledger figure,
+                no quiet zero. Its batch and identity disclosures stand; nothing is claimed, and
+                unreadable is not zero.
+              </p>
+            );
           case "unlisted-result":
             return (
               <p
@@ -695,8 +744,30 @@ function TornadoResult({
             </tr>
           </thead>
           <tbody>
-            {admittedRows.flatMap(({ result }) =>
-              result.engines.flatMap((engine) => {
+            {admittedRows.flatMap(({ result, cell }) => {
+              // p1b-3 — a MALFORMED result keeps its PLACE in the ledger (a
+              // vanished row is a silent drop) but none of its numbers: one
+              // register row, fields named, in the p0-8 voice. The numeric
+              // columns and the block rows render only for non-malformed
+              // rows, so no unreadable value ever reaches a money renderer.
+              if (cell.state === "malformed") {
+                return [
+                  <tr
+                    key={`${result.scenario_id}-malformed`}
+                    data-testid="tornado-ledger-malformed"
+                    data-scenario-id={result.scenario_id}
+                  >
+                    <td>{result.scenario_id}</td>
+                    <td className={chart.wrapCell} colSpan={7}>
+                      MALFORMED RESULT — {cell.fields.join(", ")} failed the wire Decimal
+                      contract (^-?[0-9]+$). No delta, no denominator, no movement and no block
+                      row is read from this result; nothing is claimed, and unreadable is not
+                      zero.
+                    </td>
+                  </tr>,
+                ];
+              }
+              return result.engines.flatMap((engine) => {
                 const numeric = (
                   <tr
                     key={`${result.scenario_id}-${engine.engine}`}
@@ -795,8 +866,8 @@ function TornadoResult({
                   );
                 }
                 return [numeric, ...blocks];
-              }),
-            )}
+              });
+            })}
           </tbody>
         </table>
       </div>

@@ -765,7 +765,7 @@ Task list:
 - [x] Task 0 — wave config + honest route error boundary (p1b-0)
 - [x] Task 1 — wire-guard module + BigInt coercion kill (p1b-1)
 - [x] Task 2 — full RunBookEngine classifier (p1b-2)
-- [ ] Task 3 — SetRunEngineSummary classifier + tornado malformed arm
+- [x] Task 3 — SetRunEngineSummary classifier + tornado malformed arm (p1b-3)
 - [ ] Task 4 — FactorPrice entry guard
 - [ ] Task 5 — result-identity module + address-mode completion
 - [ ] Task 6 — five-gap race/identity audit close
@@ -1033,3 +1033,144 @@ malformed engine never reaches them.
   warning in `LabBookPanel.tsx` (`UnavailableError` unused at :27 —
   present on the untouched HEAD file too; this task's diff there is
   comments-only).
+
+### p1b-3 · SetRunEngineSummary classifier + the tornado's malformed arm (Task 3)
+
+Closes Codex round-3 finding 3. The tornado/set-run path had ZERO decimal
+validation: `barLength` called bare `BigInt` — `""` coerced to a silent 0n
+(an empty denominator wore the no-denominator sentence "carries no debt on
+the before side", a measurement claim off a value nobody could read; an
+empty delta wore the measured-zero costume), and `"-"` threw
+`SyntaxError: Cannot convert - to a BigInt` (recorded at
+tornadoCells.ts:493) which the route boundary ate — and the ledger's
+`renderSignedUsdAmount`/`renderUsdAmount` calls threw on malformed deltas,
+scales, realization and projection fields, replacing the whole tornado.
+`tornadoCellState` had identity/coverage arms but no malformed arm.
+
+Delivered:
+- `web/app/lab/setRunClassification.ts` — `classifySetRunEngine(engine):
+  { malformedFields: string[] }`, sibling of `engineClassification.ts`
+  (p1b-2): wireGuard primitives, per-index naming
+  (`projection.horizons[1].projected_usd`), never throws, nullability
+  mirrors the generated schema EXACTLY (`flipped_to_eligible` /
+  `hf_dropped_accounts` null are the engines' own vocabulary statements;
+  the two blocks judged only when served; a mis-shaped served block is
+  named as its own field). SCOPE IS THE CONSUMED SET, BY DECISION
+  (recorded in the module header + pinned in the spec): `usd_decimals`,
+  `accounts`/`movement_excluded_accounts` (+ the two nullable movement
+  subjects when non-null), `eligible_debt_delta_usd`,
+  `total_debt_usd_before`, `market_realization.{execution_shortfall_usd,
+  bad_debt_at_liquidation_usd,usd_decimals}` when served,
+  `projection.horizons[].{debt_usd,projected_usd,additional_interest_usd}`
+  when served. Served-but-unconsumed fields (`before_bad_debt_usd`,
+  `total_debt_usd_after`, the census counts, …) are OUT of scope: a
+  classifier refusing a renderable row over a field no renderer reads
+  would refuse real answers over dead weight.
+- `web/app/lab/tornadoCells.ts` — `TornadoCellState` gains
+  `{ state: "malformed"; fields }`; the arm runs AFTER the
+  set/identity/coverage gates (a malformed row is still identity-bound; a
+  moved definition keeps precedence — pinned) and BEFORE the reach switch
+  (a reach sentence is a measurement claim; this row was not read), fields
+  named `engines[i].<field>`. `barLength` reads ONLY through `wireBigInt`;
+  `BarLength` gains a typed `{ drawn: false; reason: "malformed"; fields;
+  sentence }` refusal — unreachable in the composed surface (the cell
+  gate runs first), kept so a gate-skipping caller meets a named arm,
+  never a coerced 0n and never the no-denominator sentence.
+- `web/app/lab/tornadoLines.ts` — `tornadoHeaderLine` takes
+  `malformedScenarioIds`: malformed rows leave BOTH reach counts (not
+  read), KEEP the absence count (their batch disclosures still render, so
+  the header states the page's own arithmetic), and get their own NAMED
+  clause `malformed, not read: N (ids)` — never silently dropped from the
+  drawn-count arithmetic.
+- `web/app/lab/LabTornado.tsx` — the malformed row state
+  (`data-state="malformed"`, p0-8 register voice: fields named,
+  "nothing is claimed, and unreadable is not zero"); the ledger keeps the
+  row's PLACE as one register row (`tornado-ledger-malformed`) while the
+  numeric columns and block rows render only for non-malformed rows, so
+  no unreadable value reaches a money renderer; the panel's `!drawn`
+  branch splits by reason (a malformed engine renders a MALFORMED caption
+  rather than a mislabelled NO DENOMINATOR — defense-in-depth for the
+  unreachable arm); malformed rows excluded from bars/geometry/drawn
+  counts by construction.
+- `web/tests/unit/set-run-classification.spec.ts` (10 tests) — skeleton
+  is the committed `run-book-set.no-denominator.json` engines; clean
+  sweep over all three committed set fixtures; one documented corruption
+  per consumed group; per-index naming; nullable statements; the
+  OUT-OF-SCOPE pin (unconsumed fields corrupt → clean, so the scope
+  decision cannot drift silently); wire read order.
+- `web/tests/unit/set-run-outcome.spec.ts` (+8) — the no-coercion pin
+  (`""` denominator → the malformed arm, NEVER "no debt on the before
+  side"), the dash/radix refusals, read-order naming, the legal-zero
+  denominator KEEPING its existing sentence, and the cell-arm position
+  pins (before the reach switch, after the identity gates, per-index
+  naming across two engines).
+- `web/tests/unit/tornado-lines.spec.ts` (+2) — the header clause: reach
+  counts drop the malformed row, the absence count keeps it, the clause
+  names it; absent at zero.
+- `web/tests/e2e/p1b-fixes.spec.ts` (+1, p1b-3) — set-run mocks in
+  tornado.spec.ts's register (OPTIONS preflight + request sink); the
+  committed variant with ONE documented corruption
+  (eth_minus_30/debt_manager `eligible_debt_delta_usd: ""`) → route
+  stays live, the malformed register names
+  `engines[1].eligible_debt_delta_usd`, ethfi's bar still draws (1 rect
+  on the page), the no-denominator caption of the refused row's OTHER
+  engine vanishes with it (nothing is read from a malformed result), the
+  exact header line pinned whole including `malformed, not read: 1
+  (eth_minus_30)`, no numeric/block ledger rows for the row, its register
+  row in their place.
+
+Pin movement (ledgered old→new): the `{}` block stand-ins in
+tornado-lines.spec.ts's r57-5/r58-4 builders (`projection: {} as …`,
+`market_realization: {} as …`, `blockValue = {}`) are now contract-legal
+blocks (`legalShortfall()`/`legalProjection()`) — an empty object was
+never a legal block and the malformed arm now rightly refuses it
+(`projection.horizons` / `market_realization.*` named). Every asserted
+sentence and state in those laws is UNCHANGED. No other pin moved; all
+20 tornado.spec.ts e2e pins survive unmodified.
+
+### Red-first evidence
+
+- `set-run-classification.spec.ts` before the module existed: run dies at
+  collection — `Cannot find module '…/web/app/lab/setRunClassification'`.
+- The 7 unit pins against the UNFIXED modules: `barLength("")` returned
+  the no-denominator arm wearing the measurement claim, `barLength("-")`
+  threw `SyntaxError: Cannot convert - to a BigInt` at
+  tornadoCells.ts:493, the both-fields pin the same class,
+  `tornadoCellState` returned `bars` over malformed engines (three cell
+  pins), and the header carried "shock did not reach: 1" with no
+  malformed clause.
+- The p1b-3 e2e against the UNWIRED build: dead at the route-stays-live
+  pin (p1b-fixes.spec.ts:228, `tornado-header` not found) — page snapshot
+  shows the p1b-0 boundary's "This view refused to render" alert where
+  the tornado should be: the malformed delta reached
+  `renderSignedUsdAmount` in the ledger and the boundary took the whole
+  lab segment.
+
+### Mutation kills (p1b-3-M1, p1b-3-M2)
+
+- M1: the classifier is BYPASSED in `tornadoCellState` (the malformed
+  check replaced with an empty list — the arm unreachable). Rebuild, the
+  p1b-3 e2e in isolation: KILLED at exactly the route-stays-live pin
+  (p1b-fixes.spec.ts:228) — the malformed engine fell through to `bars`,
+  its delta reached the ledger's money renderer, the boundary took the
+  segment and no header rendered. Reverted; rebuilt.
+- M2: `barLength` reverted to bare `BigInt`. The no-coercion pin in
+  isolation: KILLED at exactly set-run-outcome.spec.ts:490 — expected the
+  malformed arm, received `reason: "no-denominator"` with "debt_manager
+  carries no debt on the before side": the coerced 0n resurrected the
+  measurement claim off an unreadable value. Reverted; final tree
+  rebuilt and re-verified.
+
+### Closing counts (p1b-3)
+
+- Track B suite: 1456 → **1477** (+21: set-run-classification 10,
+  set-run-outcome 8, tornado-lines 2, p1b-fixes 1).
+- Full run (final tree, `npm run build` + full p1b config, port 3819):
+  **1476 passed, 1 skipped, 0 failed (35.5s)** — the same single
+  pre-existing styleguide skip, no other movement; tornado.spec.ts 20/20
+  green inside it.
+- Committed-fixture sweep (in-suite): every engine of every committed
+  `run-book-set*.json` fixture classifies CLEAN — the law refuses no
+  served body.
+- `npm run typecheck`: completely clean.
+- `npx eslint` on all eight touched files: 0 errors, 0 warnings.

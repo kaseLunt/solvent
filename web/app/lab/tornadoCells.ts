@@ -37,6 +37,8 @@ import type {
   SetRunEngineSummary,
   SetRunScenarioResult,
 } from "../../lib/runbookSet";
+import { malformedFields, wireBigInt } from "../../lib/wireGuard";
+import { classifySetRunEngine } from "./setRunClassification";
 
 /** The set-level gate: the body answers its own membership two ways, or not at all. */
 export interface SetContradiction {
@@ -169,7 +171,16 @@ export type TornadoCellState =
    * definition changed without its version moving. A contract violation,
    * refused and named, never reconciled in either direction.
    */
-  | { state: "coverage-skew"; sentence: string };
+  | { state: "coverage-skew"; sentence: string }
+  /**
+   * p1b-3 (closes Codex r3 finding 3) — an engine row carries a consumed
+   * value outside the wire contract (`classifySetRunEngine`). Judged AFTER
+   * the set/identity/coverage gates — a malformed row is still identity-bound
+   * and keeps its batch disclosures — and BEFORE any reach arm, because an
+   * unreadable number is never a measured zero, never a drawn bar and never a
+   * thrown renderer. Fields are named per engine index: `engines[1].<field>`.
+   */
+  | { state: "malformed"; fields: readonly string[] };
 
 /**
  * The cell states that REFUSE a result whole (r57 item 4): they contribute no
@@ -309,6 +320,21 @@ export function tornadoCellState(
     }
   }
 
+  // p1b-3 — CLASSIFY BEFORE ANY REACH ARM DRAWS. Every consumed field of
+  // every answered engine passes `classifySetRunEngine` or the row refuses
+  // whole into its own named state: no bar, no measured-zero marker, no
+  // ledger figure, no thrown renderer. It sits AFTER the identity and
+  // coverage gates (a malformed row is still identity-bound, and a moved
+  // definition keeps its precedence) and BEFORE the reach switch (a reach
+  // sentence is a measurement claim, and this row's measurements were not
+  // read). Fields are named per engine index, the p1b-2 pattern.
+  const malformed = result.engines.flatMap((engine, index) =>
+    classifySetRunEngine(engine).malformedFields.map(
+      (field) => `engines[${String(index)}].${field}`,
+    ),
+  );
+  if (malformed.length > 0) return { state: "malformed", fields: malformed };
+
   switch (result.shock_reach.reach) {
     case "projection_no_spot_pass":
       // R57 item 5 — the sentence points at a block only when that block will
@@ -447,7 +473,14 @@ export interface BarMagnitude {
 /** Whether an answered engine may draw a bar at all, and the length if it may. */
 export type BarLength =
   | { drawn: true; ratio: number; exact: BarMagnitude }
-  | { drawn: false; reason: "no-denominator"; sentence: string };
+  | { drawn: false; reason: "no-denominator"; sentence: string }
+  /**
+   * p1b-3 — a ratio input outside the wire Decimal contract. UNREACHABLE in
+   * the composed surface (`tornadoCellState` refuses the whole row first),
+   * kept as this function's own typed refusal so a caller that skips the
+   * gate meets a named arm, never a coerced 0n and never a SyntaxError.
+   */
+  | { drawn: false; reason: "malformed"; fields: readonly string[]; sentence: string };
 
 // R57 item 6 — the layout ratio's exact-arithmetic bounds. `Number(bigint)`
 // on a 10^400-class integer is Infinity, and Infinity/Infinity is NaN, and
@@ -480,7 +513,31 @@ const RATIO_EPSILON = 1e-12;
  * and no geometry downstream can meet a NaN.
  */
 export function barLength(engine: SetRunEngineSummary): BarLength {
-  const denominator = BigInt(engine.total_debt_usd_before);
+  // p1b-3 — THE ONLY SANCTIONED STRING→BIGINT PATH (wireGuard). Bare BigInt
+  // here was the r3 finding-3 defect class: BigInt("") is a silent 0n — an
+  // empty denominator wore the no-denominator sentence ("carries no debt on
+  // the before side", a measurement claim off a value nobody could read) and
+  // an empty delta wore the measured-zero costume — and BigInt("-") threw a
+  // SyntaxError the route boundary ate. wireBigInt returns null instead:
+  // never a throw, never a coercion, and the null arm below is a typed
+  // MALFORMED refusal that never borrows the no-denominator sentence.
+  const numerator = wireBigInt(engine.eligible_debt_delta_usd);
+  const denominator = wireBigInt(engine.total_debt_usd_before);
+  if (numerator === null || denominator === null) {
+    const fields = malformedFields([
+      ["eligible_debt_delta_usd", numerator !== null],
+      ["total_debt_usd_before", denominator !== null],
+    ]);
+    return {
+      drawn: false,
+      reason: "malformed",
+      fields,
+      sentence:
+        `${engine.engine} served ${fields.join(", ")} outside the wire Decimal contract ` +
+        "(^-?[0-9]+$): version skew or a malformed body. Nothing is read from it — no ratio, " +
+        "no zero — and no bar is drawn. Unreadable is not zero.",
+    };
+  }
   if (denominator === 0n) {
     return {
       drawn: false,
@@ -490,7 +547,6 @@ export function barLength(engine: SetRunEngineSummary): BarLength {
         "and nothing is divided.",
     };
   }
-  const numerator = BigInt(engine.eligible_debt_delta_usd);
   // R58 item 5 — the exact pair travels WITH the ratio: the clamp below can
   // collapse two different true ratios onto one float, so ordering is decided
   // downstream by cross-multiplied bigints and the float stays width-only.

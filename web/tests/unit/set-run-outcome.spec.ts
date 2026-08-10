@@ -468,6 +468,144 @@ test.describe("the axis law's client half", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// p1b-3 (closes Codex r3 finding 3) — the tornado classifies BEFORE it draws.
+// `barLength` used bare `BigInt`: `""` coerced to 0n (an empty denominator
+// wore the no-denominator sentence — "carries no debt on the before side", a
+// measurement claim off a value nobody could read — and an empty delta wore
+// the measured-zero costume), and `"-"` threw a SyntaxError the route
+// boundary ate. The composition: `tornadoCellState` refuses a malformed row
+// FIRST (after the identity/coverage gates, before any reach arm), and
+// `barLength` itself reads only through `wireBigInt` — its null arm is a
+// typed MALFORMED refusal, never a coercion, never a throw, and never the
+// no-denominator sentence.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-3 — barLength asserts the wire contract and never coerces", () => {
+  test("an empty denominator is MALFORMED, never the no-denominator measurement claim", () => {
+    // THE NO-COERCION PIN (mutation target: barLength reverted to bare
+    // BigInt): BigInt("") is 0n, which resurrects the "no debt on the before
+    // side" sentence — a claim about the book from an unreadable value.
+    const bar = barLength(engine({ total_debt_usd_before: "" }));
+    expect(bar).toEqual({
+      drawn: false,
+      reason: "malformed",
+      fields: ["total_debt_usd_before"],
+      sentence: expect.stringContaining("outside the wire Decimal contract") as unknown as string,
+    });
+    if (bar.drawn || bar.reason !== "malformed") return;
+    expect(bar.sentence).not.toContain("no debt on the before side");
+    expect(bar.sentence).toContain("Unreadable is not zero");
+  });
+
+  test("a dash delta refuses by name instead of throwing, and a radix prefix never reads as 16", () => {
+    const dash = barLength(engine({ eligible_debt_delta_usd: "-" }));
+    expect(dash.drawn).toBe(false);
+    if (dash.drawn || dash.reason !== "malformed") throw new Error("expected the malformed arm");
+    expect(dash.fields).toEqual(["eligible_debt_delta_usd"]);
+
+    const radix = barLength(engine({ eligible_debt_delta_usd: "0x10" }));
+    expect(radix.drawn).toBe(false);
+    if (radix.drawn || radix.reason !== "malformed") throw new Error("expected the malformed arm");
+    expect(radix.fields).toEqual(["eligible_debt_delta_usd"]);
+  });
+
+  test("both fields malformed are named together, in wire read order", () => {
+    const bar = barLength(engine({ eligible_debt_delta_usd: " 1", total_debt_usd_before: "1.0" }));
+    if (bar.drawn || bar.reason !== "malformed") throw new Error("expected the malformed arm");
+    expect(bar.fields).toEqual(["eligible_debt_delta_usd", "total_debt_usd_before"]);
+  });
+
+  test("a contract-legal zero denominator KEEPS the existing no-denominator refusal", () => {
+    // The measured-zero denominator is a true fact about the book and its
+    // sentence stays; only the unreadable one stops wearing it.
+    const zero = barLength(engine({ total_debt_usd_before: "0" }));
+    expect(zero.drawn).toBe(false);
+    if (zero.drawn) return;
+    expect(zero.reason).toBe("no-denominator");
+    expect(zero.sentence).toContain("no debt on the before side");
+  });
+});
+
+test.describe("p1b-3 — tornadoCellState classifies the row before any reach arm draws it", () => {
+  const listedFor = (r: SetRunScenarioResult) => ({
+    scenarioId: r.scenario_id,
+    version: r.scenario_version,
+    configVersion: "v1",
+  });
+
+  test("a malformed engine Decimal refuses the ROW, fields named per engine index", () => {
+    const moved = result({
+      shock_reach: { ...result().shock_reach, reach: "every_mark_moved" },
+      engines: [engine({ total_debt_usd_before: "" })],
+    });
+    expect(tornadoCellState(moved, "v1", listedFor(moved), ["debt_manager"])).toEqual({
+      state: "malformed",
+      fields: ["engines[0].total_debt_usd_before"],
+    });
+  });
+
+  test("the arm sits BEFORE the reach switch: a malformed partly-reached row never draws its qualified bars", () => {
+    const held = result({
+      shock_reach: {
+        ...result().shock_reach,
+        reach: "some_marks_held",
+        marks_moved: 1,
+        applied_shocks: [{}, {}] as SetRunScenarioResult["shock_reach"]["applied_shocks"],
+      },
+      engines: [engine({ eligible_debt_delta_usd: "0.5" })],
+    });
+    const cell = tornadoCellState(held, "v1", listedFor(held), ["debt_manager"]);
+    expect(cell.state).toBe("malformed");
+    if (cell.state !== "malformed") return;
+    expect(cell.fields).toEqual(["engines[0].eligible_debt_delta_usd"]);
+  });
+
+  test("the arm sits AFTER the identity gates: a definition that moved wins over a malformed number", () => {
+    // A malformed row is still identity-bound: identity is judged before any
+    // number is read, so the DEFINITION CHANGED refusal keeps its precedence.
+    const moved = result({
+      shock_reach: { ...result().shock_reach, reach: "every_mark_moved" },
+      engines: [engine({ total_debt_usd_before: "" })],
+    });
+    const cell = tornadoCellState(
+      moved,
+      "v1",
+      { scenarioId: moved.scenario_id, version: "v2", configVersion: "v1" },
+      ["debt_manager"],
+    );
+    expect(cell.state).toBe("definition-changed");
+  });
+
+  test("a second engine's malformed block field is named beside the first engine's clean row", () => {
+    const moved = result({
+      covered_engines: ["aave_v3_etherfi", "debt_manager"],
+      shock_reach: { ...result().shock_reach, reach: "every_mark_moved" },
+      engines: [
+        engine({ engine: "aave_v3_etherfi", usd_decimals: 8, movement_rule: "hf_strictly_dropped", hf_dropped_accounts: 0, flipped_to_eligible: null }),
+        engine({
+          market_realization: {
+            hfs_unchanged: true,
+            execution_shortfall_usd: "1e5",
+            bad_debt_at_liquidation_usd: "0",
+            usd_decimals: 6,
+            seizure_model: "pro-rata-over-counted-collateral",
+            note: "",
+          },
+        }),
+      ],
+    });
+    const cell = tornadoCellState(moved, "v1", listedFor(moved), [
+      "aave_v3_etherfi",
+      "debt_manager",
+    ]);
+    expect(cell).toEqual({
+      state: "malformed",
+      fields: ["engines[1].market_realization.execution_shortfall_usd"],
+    });
+  });
+});
+
 test.describe("the header states the freshness arm in force, once", () => {
   const withFreshness = (
     freshness: RunBookSetResponse["evaluation"]["freshness"],

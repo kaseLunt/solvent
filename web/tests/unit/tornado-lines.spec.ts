@@ -523,6 +523,30 @@ const cellResult = (over: Partial<SetRunScenarioResult> = {}): SetRunScenarioRes
 
 const LISTED_IDENTITY = { scenarioId: "eth_minus_30", version: "v1", configVersion: "v1" };
 
+// p1b-3 pin update (ledgered): these builders carried `{}` block stand-ins,
+// which the malformed arm now rightly refuses (`projection.horizons` /
+// `market_realization.*` named) — an empty object was never a contract-legal
+// block. The blocks are now minimal LEGAL values; every asserted sentence in
+// the r57-5 / r58-4 laws below is unchanged.
+const legalShortfall = (): SetRunEngineSummary["market_realization"] => ({
+  hfs_unchanged: true,
+  execution_shortfall_usd: "840",
+  bad_debt_at_liquidation_usd: "0",
+  usd_decimals: 6,
+  seizure_model: "pro-rata-over-counted-collateral",
+  note: "",
+});
+
+const legalProjection = (): SetRunEngineSummary["projection"] => ({
+  label: "PROJECTION",
+  basis: "delta-only",
+  annual_delta_bps: 200,
+  apy_observed_at_block: 1,
+  prices_held_flat: true,
+  horizons: [],
+  note: "",
+});
+
 test.describe("r57 item 2 — the coverage join, both halves", () => {
   test("same-version rows with covered_engines ≠ listing engines are COVERAGE SKEW, naming both sets", () => {
     // KILLS: the r57-2 defect — tornadoCells checked the version and never the
@@ -602,7 +626,7 @@ test.describe("r57 item 5 — a sentence never points at a block the page does n
           ...cellResult().shock_reach,
           reach: "projection_no_spot_pass",
         },
-        engines: [cellEngine({ projection: {} as SetRunEngineSummary["projection"] })],
+        engines: [cellEngine({ projection: legalProjection() })],
       }),
       "v1",
       LISTED_IDENTITY,
@@ -629,9 +653,7 @@ test.describe("r57 item 5 — a sentence never points at a block the page does n
     const withBlock = tornadoCellState(
       cellResult({
         shock_reach: { ...cellResult().shock_reach, reach: "no_shocks_declared" },
-        engines: [
-          cellEngine({ market_realization: {} as SetRunEngineSummary["market_realization"] }),
-        ],
+        engines: [cellEngine({ market_realization: legalShortfall() })],
       }),
       "v1",
       LISTED_IDENTITY,
@@ -928,7 +950,9 @@ test.describe("r58 item 4 — the mandatory block is judged PER ANSWERED ENGINE"
     blocks: { aave: boolean; dm: boolean },
   ) => {
     const block = reach === "projection_no_spot_pass" ? "projection" : "market_realization";
-    const blockValue = {} as SetRunEngineSummary["projection"];
+    const blockValue = (
+      reach === "projection_no_spot_pass" ? legalProjection() : legalShortfall()
+    ) as SetRunEngineSummary["projection"];
     return cellResult({
       covered_engines: ["aave_v3_etherfi", "debt_manager"],
       shock_reach: { ...cellResult().shock_reach, reach },
@@ -1126,6 +1150,43 @@ test.describe("r58 item 6 — the dispatch record speaks in dispatch-time past t
     expect(wildcard.notice).toContain("A * is never expanded");
     expect(wildcard.dispatchNotice).toContain("A * is never expanded");
     expect(wildcard.dispatchNotice).toContain("when the set was dispatched");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p1b-3 — the header's malformed clause: a malformed row leaves the reach
+// counts (it was NOT read), keeps its absence count (its batch disclosures
+// stay on the surface), and is NAMED in its own clause — never silently
+// dropped from the drawn-count arithmetic.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-3 — malformed rows get their own header clause", () => {
+  test("the malformed row leaves the reach counts, keeps its absences, and is named", () => {
+    // b_two is the body's only no-reach row AND carries the only withheld
+    // engine. Malformed, it is not READ — so the no-reach count drops it —
+    // but its absence disclosure still renders on the surface, so the absence
+    // count keeps it: the header and the page state one arithmetic.
+    const line = tornadoHeaderLine({
+      response: headerResponse("still_newest", 7),
+      drawnScenarioIds: ["a_one"],
+      filteredDeepLinkIds: [],
+      malformedScenarioIds: ["b_two"],
+    });
+    expect(line).toContain("shock did not reach: 0");
+    expect(line).toContain("declared no move: 1");
+    expect(line).toContain("engines named absent rather than drawn: 2");
+    expect(line).toContain("malformed, not read: 1 (b_two)");
+  });
+
+  test("no malformed rows, no clause — the header never carries a standing zero", () => {
+    expect(
+      tornadoHeaderLine({
+        response: headerResponse("still_newest", 7),
+        drawnScenarioIds: ["a_one"],
+        filteredDeepLinkIds: [],
+        malformedScenarioIds: [],
+      }),
+    ).not.toContain("malformed");
   });
 });
 

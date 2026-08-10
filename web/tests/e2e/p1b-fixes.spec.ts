@@ -160,6 +160,137 @@ function corruptedRunBook(mutate: (engine: RunBookBody["engines"][number]) => vo
   return body;
 }
 
+// ---------------------------------------------------------------------------
+// p1b-3 · the tornado classifies before it draws.
+//
+// Set-run mocks in tornado.spec.ts's register: the POST answered with the
+// committed no-denominator variant carrying ONE documented corruption, the
+// OPTIONS preflight answered, every request body captured in a sink.
+// ---------------------------------------------------------------------------
+
+/** Mock the set-run POST (tornado.spec.ts's mockSetRun: OPTIONS leg + sink). */
+async function mockSetRun(
+  page: Page,
+  body: () => { status: number; body: string },
+  sink: string[],
+) {
+  await page.route(`${API}/v1/scenarios/run-book-set`, (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: RUN_CORS, body: "" });
+    }
+    sink.push(route.request().postData() ?? "");
+    const answer = body();
+    return route.fulfill({
+      status: answer.status,
+      contentType: "application/json",
+      headers: RUN_CORS,
+      body: answer.body,
+    });
+  });
+}
+
+/** The base listing's four variant ids, in its own order (tornado.spec.ts). */
+const SET_VARIANT_LINK =
+  "/lab?scenarios=eth_minus_30,weeth_market_depeg_oracles_held,dm_rate_horizon_plus_200bps,ethfi_minus_50";
+
+test.describe("p1b-3 · the tornado classifies before it draws", () => {
+  test("a malformed set-run Decimal refuses the ROW by name — the route stays live and the other row's bar draws", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    // Single documented change to the committed set variant, serving ONE
+    // purpose (the malformed arm): eth_minus_30's debt_manager
+    // eligible_debt_delta_usd set to "" — outside the wire Decimal contract.
+    // Today the bare BigInt in barLength coerces it to 0n (a measured-zero
+    // costume on the panel) and the ledger's renderSignedUsdAmount throws on
+    // it, so the route boundary replaces the whole tornado. Everything else
+    // byte-identical.
+    const body = JSON.parse(fixture("run-book-set.no-denominator.json")) as {
+      results: {
+        scenario_id: string;
+        engines: { engine: string; eligible_debt_delta_usd: string }[];
+      }[];
+    };
+    const row = body.results
+      .find((candidate) => candidate.scenario_id === "eth_minus_30")
+      ?.engines.find((candidate) => candidate.engine === "debt_manager");
+    if (row === undefined) throw new Error("fixture shape: eth_minus_30/debt_manager missing");
+    row.eligible_debt_delta_usd = "";
+    const posts: string[] = [];
+    await mockSetRun(page, () => ({ status: 200, body: JSON.stringify(body) }), posts);
+
+    await page.goto(SET_VARIANT_LINK);
+
+    // ROUTE STAYS LIVE: the set settles into a classified surface, never the
+    // route boundary. With the classifier bypassed, the ledger's money
+    // renderer throws and no header ever renders — this pin dies first.
+    const header = page.getByTestId("tornado-header");
+    await expect(header).toBeVisible();
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+
+    // The malformed register, in the p0-8 voice, naming the field PER ENGINE
+    // INDEX — a row state, before the visual, never empty space.
+    const state = page.locator('[data-testid="tornado-state"][data-state="malformed"]');
+    await expect(state).toHaveCount(1);
+    await expect(state).toHaveAttribute("data-scenario-id", "eth_minus_30");
+    await expect(state).toContainText("MALFORMED RESULT");
+    await expect(state).toContainText("engines[1].eligible_debt_delta_usd");
+    await expect(state).toContainText("unreadable is not zero");
+
+    // EXCLUDED from bars and geometry; the OTHER row's bar still draws — the
+    // refusal is scoped to the result that earned it, never spread over the
+    // set. And nothing else is read from the malformed result: its aave
+    // engine's no-denominator claim (a measurement claim) vanishes with it.
+    await expect(
+      page.locator('[data-testid="tornado-bar"][data-scenario-id="eth_minus_30"]'),
+    ).toHaveCount(0);
+    await expect(page.locator('[data-testid="tornado-bar"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid="tornado-bar"]').first()).toHaveAttribute(
+      "data-scenario-id",
+      "ethfi_minus_50",
+    );
+    await expect(
+      page.locator('[data-testid="tornado-zero-bar"][data-scenario-id="eth_minus_30"]'),
+    ).toHaveCount(0);
+    await expect(page.getByTestId("tornado-no-denominator")).toHaveCount(0);
+
+    // THE HEADER'S ARITHMETIC STAYS HONEST: the drawn count drops the row
+    // (2 → 1 against the unmutated variant) and the row is NAMED in its own
+    // clause — never silently dropped.
+    await expect(header).toHaveText(
+      "batch 1 · bars drawn for 1 of 4 requested scenario(s) · shock did not reach: 0 · " +
+        "declared no move: 0 · engines named absent rather than drawn: 0 · " +
+        "malformed, not read: 1 (eth_minus_30)",
+    );
+
+    // THE LEDGER: no numeric row and no block row for the malformed result —
+    // its register row sits in their place, fields named, nothing claimed.
+    await expect(
+      page.locator('[data-testid="tornado-ledger-row"][data-scenario-id="eth_minus_30"]'),
+    ).toHaveCount(0);
+    const ledgerRow = page.locator(
+      '[data-testid="tornado-ledger-malformed"][data-scenario-id="eth_minus_30"]',
+    );
+    await expect(ledgerRow).toHaveCount(1);
+    await expect(ledgerRow).toContainText("MALFORMED RESULT");
+    await expect(ledgerRow).toContainText("engines[1].eligible_debt_delta_usd");
+    await expect(ledgerRow).toContainText("unreadable is not zero");
+
+    // The healthy rows keep their whole account: ethfi's numeric ledger row,
+    // weeth's market-realization blocks, the projection block.
+    await expect(
+      page.locator('[data-testid="tornado-ledger-row"][data-scenario-id="ethfi_minus_50"]'),
+    ).toHaveCount(1);
+    await expect(
+      page.locator('[data-testid="tornado-ledger-block"][data-block="market-realization"]'),
+    ).toHaveCount(2);
+    await expect(
+      page.locator('[data-testid="tornado-ledger-block"][data-block="projection"]'),
+    ).toHaveCount(1);
+    expect(posts).toHaveLength(1);
+  });
+});
+
 test.describe("p1b-2 · the classifier covers the whole engine subtree", () => {
   test("a malformed AGGREGATE field refuses the engine by name — the route stays live", async ({ page }) => {
     await mockCold(page);
