@@ -82,3 +82,86 @@ Program spec: docs/specs/2026-08-09-ui-overhaul-program-design.md
      presence of old copy is itself pinned against.
 - Suite after revert: p0-fixes + inspector + r1-fixes e2e — 50 passed.
   typecheck: only the pre-existing lab-runbook-lines.spec.ts(858) TS2322.
+
+### p0-4 engine-specific ratio terminology (InspectorHistory + BookHistogram)
+
+- Defect: the DM's disclosure ratio (maxBorrowLT/borrowings) wore "health
+  factor" clothing in four places — the history section head, the DM
+  sparkline's aria label, DM point hover titles ("HF ≈x.xxxx"), and Book's
+  histogram panel heads printing raw wire tokens ("comparator: hf_num/hf_den")
+  as reader copy.
+- New pure copy (web/lib/history-series.ts): `historyHead(engine)` — Aave
+  "Health factor across batches" / DM "Borrow headroom (disclosure) across
+  batches" / no-claim "Plotted series across batches"; `pointTitlePrefix(engine)`
+  — "HF" / "disclosure ratio" / "value"; `HISTORY_SECTION_HEAD = "Risk history
+  across batches"`. `HF_HISTORY_HEAD` RETIRED (deleted). Serena
+  find_referencing_symbols before deletion named its only consumers
+  (InspectorHistory.tsx, history-copy.spec.ts); post-edit grep: zero stale
+  references (only the plan doc mentions the name).
+- HEAD-PLACEMENT DECISION (brief Step 3 NOTE): the section head at
+  InspectorHistory.tsx:92 is a styled `<div className={styles.sectionHead}>`,
+  NOT an `<h*>` element — no heading-level hierarchy exists, so no h-level
+  skip is possible. The section keeps ONE neutral head (HISTORY_SECTION_HEAD)
+  because the loading / error / unknowable / not-found states are not
+  per-engine and must stay headed; the engine-specific claim moved INTO each
+  card's header row (a `history-head-${engine}` span beside the EngineChip,
+  rendering historyHead(engine.engine)). No CSS touched (inspector.module.css
+  is outside the brief's Files list — the head reuses the historyMeta row).
+- Hover-title builder: entryForPoint already received the engine
+  (buildHistorySeries passes engine.engine — traced with
+  find_referencing_symbols; no signature threading was needed). Its "HF"
+  literal became pointTitlePrefix(engineName). Generic gap strings reworded:
+  "no health factor published for this point" → "no plotted value published
+  for this point"; "health factor carries neither wad nor num/den" → "the
+  plotted series carries neither wad nor num/den".
+- Sparkline aria label (InspectorHistory.tsx ~272): `${engine} health factor
+  across retained batches` → engine-conditional seriesNoun ("health factor" /
+  "borrow-headroom disclosure" / "plotted series"), same
+  exact-match-with-no-claim-fallback arms as historyHead.
+- Book (web/lib/book-copy.ts + BookHistogram.tsx:~78/~104 both arms): new
+  `comparatorReaderLabel(comparator)` — "hf_wad" → "the pool's own health
+  factor (wad)"; "hf_num/hf_den" → "maxBorrowLT/borrowings — a disclosure, not
+  the engine's trigger"; an unknown token passes through verbatim. The
+  "comparator:" prefix is dropped (the label is self-describing).
+  riskBandPanelAria, DM_DISCLOSURE_LINE and referenceLegend untouched.
+- Pins displaced (old → new):
+  - tests/unit/history-copy.spec.ts:27-29: `HF_HISTORY_HEAD` exact pin ("the
+    head says what the chart IS") → brief Step 1's two engine-specific tests
+    (historyHead / pointTitlePrefix) + a HISTORY_SECTION_HEAD pin ("Risk
+    history across batches").
+  - tests/e2e/r1-fixes.spec.ts:437: hf-history containText "Health factor
+    across batches" → hf-history containText "Risk history across batches"
+    AND history-aave_v3_etherfi containText "Health factor across batches".
+  - tests/e2e/book.spec.ts:203-204 (surfaced by the Step 4 grep — NOT
+    book-charts.spec.ts / chart-spec-v4.spec.ts, which pin no comparator
+    token): containText "comparator: hf_wad" / "comparator: hf_num/hf_den" →
+    the two humanized labels.
+  - UNCHANGED as required: tests/unit/history-series.spec.ts:236,244
+    (engine-aware takeaways) pass verbatim; the Lab comparator pins
+    (runbook-bsplit/runbook-transition e2e) target Lab components outside this
+    brief and still pass.
+- New specs: tests/unit/comparator-label.spec.ts (brief verbatim); a p0-4
+  describe appended to tests/e2e/p0-fixes.spec.ts — the DM/Aave card heads +
+  aria labels (the committed HISTORY fixture is aave-only, so the test derives
+  ONE documented DM engine block — a computed num/den point, wad null, sweep
+  mark — pushed beside the byte-identical aave block via a later route
+  override on the p0-3 mock), and the Book humanization test (book.spec.ts's
+  mock shape over the BOOK fixture).
+- Red runs recorded: both unit specs failed at import (missing exports:
+  comparatorReaderLabel / HISTORY_SECTION_HEAD); both p0-4 e2e tests failed
+  pre-wiring (DM head not found at :368; raw "comparator: hf_num/hf_den"
+  present at :386).
+- Mutation kills (each applied alone, rebuilt, run in isolation, reverted):
+  - Mutant A (historyHead returns the Aave string for every engine): KILLED at
+    p0-fixes.spec.ts:368, the DM-head toBeVisible — the brief's predicted
+    assertion.
+  - Mutant B (comparatorReaderLabel passes "hf_wad" through): KILLED at
+    p0-fixes.spec.ts:387, the humanized-label toBeVisible. DIVERGENCE from the
+    brief's predicted toHaveCount(0) kill, recorded: the fix drops the
+    "comparator: " prefix, so the mutant prints bare "hf_wad", which
+    "comparator: hf_wad" can never match — the count pin stays 0 and the kill
+    lands one assertion later, still inside the Book test, in isolation.
+- Suite after reverts (rebuild + run): p0-fixes, inspector, r1-fixes,
+  book-charts, chart-spec-v4, book e2e + history-copy, history-series,
+  comparator-label unit — 164 passed. typecheck: only the pre-existing
+  lab-runbook-lines.spec.ts(858) TS2322.

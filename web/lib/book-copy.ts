@@ -169,3 +169,18 @@ export function riskBandTintClause(comparator: string): string {
 export function riskBandForensicsSummary(buckets: number): string {
   return `Exact data: the wire's own note and ${String(buckets)} bucket boundaries`;
 }
+
+/**
+ * Phase 0 fix 4: comparator wire tokens are identifiers, not reader copy —
+ * the Book histogram printed "comparator: hf_num/hf_den" verbatim as a panel
+ * head. Known tokens humanize per ENGINE semantics (the wad IS the pool's own
+ * comparator; num/den is a disclosure, never the trigger); an unknown token
+ * passes through verbatim rather than being guessed at.
+ */
+export function comparatorReaderLabel(comparator: string): string {
+  if (comparator === "hf_wad") return "the pool's own health factor (wad)";
+  if (comparator === "hf_num/hf_den") {
+    return "maxBorrowLT/borrowings — a disclosure, not the engine's trigger";
+  }
+  return comparator;
+}

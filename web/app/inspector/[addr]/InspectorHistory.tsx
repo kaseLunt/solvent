@@ -12,8 +12,13 @@
 //
 // WAVE R1 ITEM 11 — what changed, and why:
 //
-//   - the head says what the chart IS ("Health factor across batches"), not
-//     what the pipeline did ("persisted points across retained batches");
+//   - the head says what the chart IS, not what the pipeline did ("persisted
+//     points across retained batches") — and since Phase 0 fix 4 it says so
+//     PER ENGINE: the section-level head is NEUTRAL ("Risk history across
+//     batches" — it also heads the loading/error/unknowable states, which are
+//     not per-engine), and each engine card's own head names ITS series
+//     (historyHead: Aave's health factor vs the DM's borrow-headroom
+//     DISCLOSURE — the DM ratio never wears health-factor clothing);
 //   - the meta line separates PLOTS from WITNESSED from the requested
 //     WINDOW: "{p} of {w} witnessed batches plot" makes an all-gap engine
 //     legible at a glance, where "{n} point(s)" over an empty chart read as
@@ -57,9 +62,10 @@ import {
   engineNeverPresent,
   engineNeverPresentLine,
   historyTakeaway,
-  HF_HISTORY_HEAD,
   HISTORY_DOCTRINE_LINE,
   HISTORY_DOCTRINE_SUMMARY,
+  HISTORY_SECTION_HEAD,
+  historyHead,
   historyMetaLine,
   knownBatchAxis,
   newestPlottedLabel,
@@ -89,7 +95,7 @@ const HF_REFERENCE_VALUE = 1;
 export function InspectorHistory({ state }: { state: HistoryState }) {
   return (
     <section data-testid="hf-history">
-      <div className={styles.sectionHead}>{HF_HISTORY_HEAD}</div>
+      <div className={styles.sectionHead}>{HISTORY_SECTION_HEAD}</div>
       {state.status === "loading" && <p className="mono dim">loading history…</p>}
       {state.status === "error" && (
         <div className={`${styles.stateCard} ${styles.stateRefused}`}>
@@ -236,10 +242,24 @@ function EngineHistoryCard({
         ? "reference line: 1.0 on the DISCLOSURE ratio maxBorrowLT/borrowings. The verdict is the engine's strict boolean (equality healthy) and not this chart."
         : "reference line: 1.0, a plotting aid only; this engine's verdict semantics are not asserted by this chart.";
 
+  // Phase 0 fix 4: the sparkline's accessible name names the SERIES this
+  // engine actually plots — same exact-match-with-no-claim-fallback arms as
+  // historyHead, so the DM's aria label never claims a health factor.
+  const seriesNoun =
+    engine.engine === "aave_v3_etherfi"
+      ? "health factor"
+      : engine.engine === "debt_manager"
+        ? "borrow-headroom disclosure"
+        : "plotted series";
+
   return (
     <div className={styles.historyCard} data-testid={`history-${engine.engine}`}>
       <div className={styles.historyMeta}>
         <EngineChip engine={engine.engine} />
+        {/* Phase 0 fix 4: the card's OWN head names the series this engine
+            actually plots — the DM's disclosure ratio is never headed as a
+            health factor. The neutral section head spans the cards above. */}
+        <span data-testid={`history-head-${engine.engine}`}>{historyHead(engine.engine)}</span>
         <span data-testid={`history-meta-${engine.engine}`}>
           {historyMetaLine(tally, series.newest, engine.engine, limit)}
         </span>
@@ -269,7 +289,7 @@ function EngineHistoryCard({
           pointTitles={series.titles}
           width={width}
           height={72}
-          label={`${engine.engine} health factor across retained batches`}
+          label={`${engine.engine} ${seriesNoun} across retained batches`}
           referenceValue={HF_REFERENCE_VALUE}
           referenceLabel="1.0"
           domain={domain}

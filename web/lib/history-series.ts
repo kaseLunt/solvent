@@ -136,7 +136,7 @@ function entryForPoint(point: AddressHistoryPoint, engineName: string): HistoryS
       batchId,
       kind: "unpublished",
       value: null,
-      title: `batch ${String(batchId)} · no health factor published for this point${sweep}`,
+      title: `batch ${String(batchId)} · no plotted value published for this point${sweep}`,
       display: EM_DASH,
     };
   }
@@ -155,7 +155,7 @@ function entryForPoint(point: AddressHistoryPoint, engineName: string): HistoryS
       batchId,
       kind: "unpublished",
       value: null,
-      title: `batch ${String(batchId)} · health factor carries neither wad nor num/den${sweep}`,
+      title: `batch ${String(batchId)} · the plotted series carries neither wad nor num/den${sweep}`,
       display: EM_DASH,
     };
   }
@@ -164,7 +164,7 @@ function entryForPoint(point: AddressHistoryPoint, engineName: string): HistoryS
     batchId,
     kind: "computed",
     value,
-    title: `batch ${String(batchId)} · HF ${display} @ block ${formatBlock(point.balances_block)}${sweep}`,
+    title: `batch ${String(batchId)} · ${pointTitlePrefix(engineName)} ${display} @ block ${formatBlock(point.balances_block)}${sweep}`,
     display,
   };
 }
@@ -308,8 +308,27 @@ export function newestPlottedLabel(series: HistorySeries): NewestPlottedLabel | 
 // instead of an empty frame.
 // ---------------------------------------------------------------------------
 
-/** The section head — what the chart IS, in the reader's words. */
-export const HF_HISTORY_HEAD = "Health factor across batches";
+/**
+ * The section-level head. It spans EVERY engine's card (and the loading /
+ * error / unknowable / not-found states), so it claims neither engine's
+ * vocabulary — each card's own head (`historyHead`) makes the engine's claim.
+ */
+export const HISTORY_SECTION_HEAD = "Risk history across batches";
+
+// Phase 0 fix 4: the DM plots a DISCLOSURE ratio (maxBorrowLT/borrowings),
+// not a health factor — the section vocabulary must say which one it is.
+// Exact-match engine ids with a no-claim fallback, per house convention.
+export function historyHead(engine: string): string {
+  if (engine === "aave_v3_etherfi") return "Health factor across batches";
+  if (engine === "debt_manager") return "Borrow headroom (disclosure) across batches";
+  return "Plotted series across batches";
+}
+
+export function pointTitlePrefix(engine: string): string {
+  if (engine === "aave_v3_etherfi") return "HF";
+  if (engine === "debt_manager") return "disclosure ratio";
+  return "value";
+}
 
 /** The one-line doctrine that stays VISIBLE. The rest moves behind a details. */
 export const HISTORY_DOCTRINE_LINE =

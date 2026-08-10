@@ -29,6 +29,7 @@ import {
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import {
+  comparatorReaderLabel,
   RISK_BAND_HEADING,
   RISK_BAND_METHOD,
   riskBandDenominatorLine,
@@ -73,7 +74,9 @@ function EnginePanel({
       <div className={styles.panel} data-testid={`book-histogram-${histogram.engine}`}>
         <div className={styles.panelHead}>
           <EngineChip engine={histogram.engine} />
-          <span className={styles.comparator}>comparator: {histogram.comparator}</span>
+          {/* Phase 0 fix 4: the wire token is an identifier, not reader copy —
+              the label is self-describing, so no "comparator:" prefix. */}
+          <span className={styles.comparator}>{comparatorReaderLabel(histogram.comparator)}</span>
         </div>
         <div className={styles.emptyReason}>
           {histogram.refusal !== null && <RefusedTag reason={histogram.refusal.code} />}{" "}
@@ -97,7 +100,9 @@ function EnginePanel({
     <div className={styles.panel} data-testid={`book-histogram-${histogram.engine}`}>
       <div className={styles.panelHead}>
         <EngineChip engine={histogram.engine} />
-        <span className={styles.comparator}>comparator: {histogram.comparator}</span>
+        {/* Phase 0 fix 4: the wire token is an identifier, not reader copy —
+            the label is self-describing, so no "comparator:" prefix. */}
+        <span className={styles.comparator}>{comparatorReaderLabel(histogram.comparator)}</span>
       </div>
       <div className={styles.panelBody}>
         {/* ---- SLOT 2: STATE — everything that qualifies the bars, BEFORE the

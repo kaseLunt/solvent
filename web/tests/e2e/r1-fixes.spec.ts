@@ -434,7 +434,12 @@ test("(11) the history head and meta line separate what PLOTS from what is witne
   await mockInspector(page, ADDRESS_FOUND);
   await page.goto(`/inspector/${FOUND_ADDR}`);
 
-  await expect(page.getByTestId("hf-history")).toContainText("Health factor across batches");
+  // Phase 0 fix 4: the SECTION head went neutral (it spans both engines'
+  // cards); the health-factor claim now lives on the Aave card's own head.
+  await expect(page.getByTestId("hf-history")).toContainText("Risk history across batches");
+  await expect(page.getByTestId("history-aave_v3_etherfi")).toContainText(
+    "Health factor across batches",
+  );
   await expect(page.getByTestId("history-meta-aave_v3_etherfi")).toContainText(
     "witnessed batches plot",
   );

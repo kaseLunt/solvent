@@ -25,6 +25,12 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import {
+  BOOK,
+  POSITIONS_AAVE_PAGE_1,
+  POSITIONS_AAVE_PAGE_2,
+  POSITIONS_DM_PAGE_1,
+} from "../fixtures/book";
 import { ADDRESS_FOUND, EVENTS, FOUND_ADDR, HISTORY, PARAMS } from "../fixtures/inspector";
 
 const API = "http://localhost:8080";
@@ -280,5 +286,107 @@ test.describe("p0-3 · health boundary price", () => {
       .click();
     await expect(page.getByText("EXPLAIN · HEALTH BOUNDARY PRICE")).toBeVisible();
     await expect(page.getByText("EXPLAIN · LIQUIDATION PRICE")).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p0-4 · engine-specific terminology
+// ---------------------------------------------------------------------------
+
+/**
+ * p0-4: the committed HISTORY body carries only the aave engine, and the DM
+ * vocabulary needs a DM card on the page. Single documented derivation: the
+ * aave engine block re-shaped as a debt_manager block holding ONE computed
+ * point whose health_factor is the DM's num/den DISCLOSURE (wad null, the
+ * exact rational maxBorrowLT/borrowings) with a sweep mark — the shape the
+ * unit suite's DM fixtures use. The aave engine stays byte-identical.
+ */
+const AAVE_HISTORY_ENGINE = HISTORY.engines[0];
+if (AAVE_HISTORY_ENGINE === undefined) {
+  throw new Error("fixture invariant: aave history engine expected");
+}
+const AAVE_COMPUTED_POINT = AAVE_HISTORY_ENGINE.points[0];
+if (AAVE_COMPUTED_POINT === undefined) {
+  throw new Error("fixture invariant: computed point expected");
+}
+
+const DM_HISTORY_ENGINE: typeof AAVE_HISTORY_ENGINE = {
+  ...structuredClone(AAVE_HISTORY_ENGINE),
+  engine: "debt_manager",
+  value_decimals: 6,
+  points: [
+    {
+      ...structuredClone(AAVE_COMPUTED_POINT),
+      sweep_block: 154796500,
+      liquidatable: true,
+      health_factor: {
+        wad: null,
+        num: "3200000000",
+        den: "4200000000",
+        infinite: false,
+        note: "maxBorrowLT/borrowings is a disclosure; the verdict is the engine's strict boolean.",
+      },
+      total_collateral_base: "3200000000",
+      total_debt_base: "4200000000",
+    },
+  ],
+};
+
+/**
+ * p0-3's inspector mocks, plus a LATER history route (Playwright consults
+ * routes newest-first, so this override wins) serving BOTH engines' history.
+ */
+async function mockInspectorBothHistories(page: Page) {
+  await mockInspectorFound(page);
+  const history = structuredClone(HISTORY);
+  history.engines.push(DM_HISTORY_ENGINE);
+  await page.route("**/v1/address/*/history*", (route) =>
+    route.fulfill({ json: history, headers: CORS }),
+  );
+}
+
+/** The book.spec.ts mock shape: the /v1/book body plus cursor-aware positions. */
+async function mockBookSurface(page: Page) {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => route.fulfill({ json: BOOK, headers: CORS }));
+  await page.route("**/v1/positions*", (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("engine") === "debt_manager") {
+      return route.fulfill({ json: POSITIONS_DM_PAGE_1, headers: CORS });
+    }
+    if (url.searchParams.get("cursor") === null) {
+      return route.fulfill({ json: POSITIONS_AAVE_PAGE_1, headers: CORS });
+    }
+    return route.fulfill({ json: POSITIONS_AAVE_PAGE_2, headers: CORS });
+  });
+}
+
+test.describe("p0-4 · engine-specific terminology", () => {
+  test("the DM history card is headed as a disclosure, the Aave card as a health factor", async ({ page }) => {
+    await mockInspectorBothHistories(page);
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    await expect(page.getByText("Borrow headroom (disclosure) across batches")).toBeVisible();
+    await expect(page.getByText("Health factor across batches")).toBeVisible();
+    // the SECTION head spans both engines' cards, so it claims neither
+    // engine's vocabulary; each card's own head makes the engine's claim.
+    await expect(page.getByTestId("hf-history")).toContainText("Risk history across batches");
+    // the DM sparkline no longer claims a health factor in its aria label
+    await expect(
+      page.getByLabel("debt_manager health factor across retained batches"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByLabel("debt_manager borrow-headroom disclosure across retained batches"),
+    ).toBeVisible();
+  });
+
+  test("Book histogram panels humanize the comparator token", async ({ page }) => {
+    await mockBookSurface(page);
+    await page.goto("/book");
+    await expect(page.getByText("comparator: hf_wad")).toHaveCount(0);
+    await expect(page.getByText("comparator: hf_num/hf_den")).toHaveCount(0);
+    await expect(page.getByText("the pool's own health factor (wad)")).toBeVisible();
+    await expect(
+      page.getByText("maxBorrowLT/borrowings — a disclosure, not the engine's trigger"),
+    ).toBeVisible();
   });
 });

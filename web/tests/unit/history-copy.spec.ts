@@ -13,10 +13,12 @@ import {
   DM_DISCLOSURE_LINE,
   engineNeverPresent,
   engineNeverPresentLine,
-  HF_HISTORY_HEAD,
   HISTORY_DOCTRINE_LINE,
   HISTORY_DOCTRINE_SUMMARY,
+  HISTORY_SECTION_HEAD,
+  historyHead,
   historyMetaLine,
+  pointTitlePrefix,
   tallyHistory,
 } from "../../lib/history-series";
 import { HISTORY } from "../fixtures/inspector";
@@ -24,8 +26,22 @@ import { HISTORY } from "../fixtures/inspector";
 const ENGINE = HISTORY.engines[0];
 if (ENGINE === undefined) throw new Error("fixture invariant: one engine series expected");
 
-test("the head says what the chart IS", () => {
-  expect(HF_HISTORY_HEAD).toBe("Health factor across batches");
+// Phase 0 fix 4: the DM plots a DISCLOSURE ratio (maxBorrowLT/borrowings),
+// never a health factor — the head must say which one each card is.
+test("history head is engine-specific and never dresses the DM ratio as a health factor", () => {
+  expect(historyHead("aave_v3_etherfi")).toBe("Health factor across batches");
+  expect(historyHead("debt_manager")).toBe("Borrow headroom (disclosure) across batches");
+  expect(historyHead("unknown_engine")).toBe("Plotted series across batches");
+});
+
+test("point hover prefix is engine-specific", () => {
+  expect(pointTitlePrefix("aave_v3_etherfi")).toBe("HF");
+  expect(pointTitlePrefix("debt_manager")).toBe("disclosure ratio");
+  expect(pointTitlePrefix("unknown_engine")).toBe("value");
+});
+
+test("the section-level head spans engines, so it claims neither engine's vocabulary", () => {
+  expect(HISTORY_SECTION_HEAD).toBe("Risk history across batches");
 });
 
 test("the tally separates what PLOTS from what is merely witnessed", () => {

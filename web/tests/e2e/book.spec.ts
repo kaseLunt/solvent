@@ -200,8 +200,12 @@ test("HF histograms are per engine, each on its OWN comparator, counts beside bu
   const dm = page.getByTestId("book-histogram-debt_manager");
   await expect(aave).toBeVisible();
   await expect(dm).toBeVisible();
-  await expect(aave).toContainText("comparator: hf_wad");
-  await expect(dm).toContainText("comparator: hf_num/hf_den");
+  // Phase 0 fix 4: the wire tokens are identifiers, not reader copy — each
+  // panel head humanizes its comparator per the engine's own semantics.
+  await expect(aave).toContainText("the pool's own health factor (wad)");
+  await expect(dm).toContainText(
+    "maxBorrowLT/borrowings — a disclosure, not the engine's trigger",
+  );
   // CX-6: refused / infinite counts are their own ACCOUNTING ROWS beneath the
   // bars, in the reader's words. They were never folded into the denominator
   // and now they say so: an account with no debt has no comparator to bucket,
