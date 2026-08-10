@@ -2871,3 +2871,82 @@ byte-identical.
   and mutually discriminating (M1 kills only the -0 pins, M2 only the
   occupancy pins), every restoration diff-verified against the
   pre-mutation bytes.
+
+## p1a-7 — Track C convergence pass: the four un-audited surfaces hold under the new foundation
+
+**Scope**: verify History (/observatory), Activity (/feed), Proof (/proof),
+Developers (/developers) under the Task 1-6 foundation (--t-* tokens with
+floor-lifted --fs-* aliases, shell 1280 + stepped breakpoints, the canon
+appbar, amended palette). NO IA changes; fix only breakage. Result:
+**ZERO fixes owed, ZERO pin updates** — all four surfaces hold as-is, so
+this commit carries only this ledger entry.
+
+### Per-surface verdicts
+
+- **History (/observatory) — HOLDS.** Engine switcher, summary cards,
+  four-chart grid, legend, bucket record, stampline all render on tokens
+  in both themes at 1366/1440/1920/2560; charts widen with the shell
+  without label loss; no sub-12px text, no overflow.
+- **Activity (/feed) — HOLDS.** Posture strip, engine/view/type chip
+  rows, liquidation detail card, untimed-tail divider, load-more strip
+  all legible at the lifted sizes; the since_block note reflows beside
+  the TYPE chips at >=1920 per the stepped breakpoints; no overflow.
+- **Proof (/proof) — HOLDS.** Two-subject split, weld table, TWO
+  SUBJECTS banner, probe records, evidence pins clean in both themes;
+  the materialization key wraps honestly at 1366/1440 and single-lines
+  at 1920/2560, copy affordance intact.
+- **Developers (/developers) — HOLDS.** Endpoint chip index reflows
+  (3 rows at 1366 → 2 at 2560), TypeScript block, per-operation cards,
+  curl samples, error envelope, Proof Center cross-link all clean in
+  both themes (~14,500px-tall page, inspected via sectional crops).
+
+### Method (evidence)
+
+- The four suites first, against the fresh no-var build:
+  `npx playwright test -c tests/playwright.p1a.config.ts` over
+  observatory/feed/proof/developers specs — **59 passed / 0 failed**,
+  UNMODIFIED (none of the four files carries a geometry pin, so the
+  shell-width carve-out was never needed).
+- Screenshot matrix: 4 surfaces x 1366/1440/1920/2560 x light/dark =
+  **32 renders** captured to the workspace convergence/ dir via a
+  throwaway spec (same fixture mocks the suites use; /v1/stream and
+  /v1/meta aborted — the appbar's disclosed-fallback arm, the same state
+  every appbar pin exercises). The spec was deleted after capture;
+  screenshots stay untracked workspace artifacts.
+- Programmatic audit on every render, same pass: elements bearing direct
+  text with computed font-size < 12px — **ZERO in all 32** (the token
+  lift reaches everything; no inline-style remnants); horizontal
+  overflow outside overflow-x containers — **ZERO**; page scrollWidth
+  overflow — **ZERO** (audit.json beside the screenshots).
+- Every render inspected by eye (developers via top/mid/bottom crops).
+  One observation recorded as NOT-foundation, no action: the observatory
+  y-max direct label sits at the max point and the series line passes
+  under its trailing glyphs — present at every width in both themes,
+  a pre-Track-A W-OBS drawing trait (the label stays legible; moving it
+  is chart redesign, outside "fix only breakage").
+
+### CI-lane findings (the Task 6 handoff, recorded for Task 8)
+
+- The lane last ran 2026-08-08 at origin/main f36b4d4 — the ~30 Track
+  A/B commits since (dc01409 on) are LOCAL-ONLY; CI has never seen them.
+- **web job**: fails at its FIRST step (typecheck) — a single TS2322 at
+  tests/unit/lab-runbook-lines.spec.ts:858 (`symbol: null` against
+  `symbol?: string`). Already repaired in unpushed c2b74e8 (p0-6a,
+  "symbol omitted, unpriced arm unchanged"). At HEAD, typecheck / lint /
+  lint:css all exit 0 locally and the CI-mirror suite below is green, so
+  the web lane's known standing-failure set is EMPTY at HEAD (later CI
+  steps never ran behind the typecheck fail-fast; the styleguide RSC
+  breakage was already fixed structurally in p1a-6).
+- **race job** (`go test -race`) and **go job** (`gofmt`): Go-side,
+  untouched by any Track A/B commit, out of this track's scope —
+  Task 8's close inherits them by name.
+
+### Closing counts (p1a-7)
+
+- `npm run typecheck` — clean (exit 0)
+- `npm run lint` — clean (exit 0)
+- `npm run lint:css` — clean (exit 0)
+- Four-surface suites (no-var build): **59 passed, 0 failed, 0 skipped**
+- FULL p1a suite, CI-mirror (`NEXT_PUBLIC_SHOW_STYLEGUIDE=1` build,
+  port 3820): **1613 passed, 0 failed, 0 skipped (41.0s)** — the p1a-6
+  1608 baseline plus exactly the 5 p1b-11 pins that landed since.
