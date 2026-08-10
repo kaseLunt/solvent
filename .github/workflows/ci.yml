@@ -93,6 +93,10 @@ jobs:
         run: npm run typecheck
       - name: lint
         run: npm run lint
+      # p1a-2: the 12px floor is STRUCTURAL — every font-size in web CSS must
+      # reference a type token (var(--t-*); legacy var(--fs-*) until Phase 3).
+      - name: lint css
+        run: npm run lint:css
       - name: build
         run: npm run build
       - name: playwright install
