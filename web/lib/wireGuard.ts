@@ -186,6 +186,53 @@ export function wireBigInt(value: string): bigint | null {
   return isWireDecimal(value) ? BigInt(value) : null;
 }
 
+/**
+ * THE THROWING READS (p1b-14, Codex round 6). Round 6 found the -0 class on
+ * yet another unclassified surface (BookHistogram's bucket counts), and the
+ * class audit found the same posture at every unclassified integer render:
+ * `String(x)` / arithmetic over a wire integer that never met a guard. The
+ * two readers below are the population/scale twins of `parseDecimal` /
+ * `assertScale` — the established consumption posture on classifier-less
+ * surfaces: anything the contract would not have produced THROWS rather than
+ * becoming a silently different number, and the throw lands in the p1b-0
+ * route boundary ("the honest arm on a surface with no classifier"). Surfaces
+ * that DO hold a scoped refusal arm (the histogram panel, the live strips)
+ * classify with the predicates directly instead.
+ */
+export class WireIntegerError extends Error {}
+
+/** Names -0 explicitly — `String(-0)` is `"0"` and would hide the sign. */
+function describeWireInt(value: number): string {
+  return Object.is(value, -0) ? "-0" : String(value);
+}
+
+/**
+ * Read a wire POPULATION at a render/arithmetic site, or refuse. Returns the
+ * value untouched when `isWirePopulation` admits it; throws `WireIntegerError`
+ * naming the field otherwise. `0` stays legal.
+ */
+export function readWirePopulation(value: number, field: string): number {
+  if (isWirePopulation(value)) return value;
+  throw new WireIntegerError(
+    `${field} is not a wire population (a nonnegative safe integer, never -0): ` +
+      `got ${describeWireInt(value)} — out of contract, refused before render`,
+  );
+}
+
+/**
+ * Read a wire SCALE rendered as its own caption (e.g. "18-dec"), or refuse.
+ * The formatting path already refuses through `assertScale` (p1b-13); this
+ * covers the sites that print the scale as a bare integer without formatting
+ * anything at it.
+ */
+export function readWireScale(value: number, field: string): number {
+  if (isWireScale(value)) return value;
+  throw new WireIntegerError(
+    `${field} is not a wire scale (an integer in [0, 1000], never -0): ` +
+      `got ${describeWireInt(value)} — out of contract, refused before render`,
+  );
+}
+
 /** One named check: `[field, ok]`. Compose these in READ ORDER at each site. */
 export type FieldCheck = readonly [field: string, ok: boolean];
 

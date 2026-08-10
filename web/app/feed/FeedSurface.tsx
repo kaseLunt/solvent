@@ -22,6 +22,7 @@ import { useCursorPages, type CursorPage } from "@/lib/pagination";
 import { usePosture } from "@/lib/posture";
 import { solventBaseUrl } from "@/lib/api";
 import { EM_DASH } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import {
   EVENT_DISPLAY_TYPES,
   FEED_ENGINES,
@@ -425,8 +426,11 @@ export function FeedSurface() {
           <span>
             filter echo: engine {envelope.filter.engine ?? EM_DASH} · types{" "}
             {echoTypes(envelope.filter.types)} · since_block{" "}
-            {envelope.filter.since_block === null ? EM_DASH : String(envelope.filter.since_block)}{" "}
-            · limit {String(envelope.limit)}
+            {/* p1b-14: the echoed wire integers pass the population guard. */}
+            {envelope.filter.since_block === null
+              ? EM_DASH
+              : String(readWirePopulation(envelope.filter.since_block, "since_block"))}{" "}
+            · limit {String(readWirePopulation(envelope.limit, "limit"))}
           </span>
         )}
         {hasMore ? (

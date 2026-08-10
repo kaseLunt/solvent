@@ -13,6 +13,7 @@
 // tests/unit/honest-render.spec.ts pins both laws.
 
 import { formatUnits, type LookupOutcome } from "@solvent/client";
+import { isWirePopulation } from "./wireGuard";
 
 /** The one glyph for "this quantity is not applicable / not established". */
 export const EM_DASH = "—";
@@ -67,8 +68,21 @@ export function renderNullableDecimal(
   return options.prefix === undefined ? body : `${options.prefix}${body}`;
 }
 
-/** Group an integer (block number, count) with thin separators: 25,641,730. */
+/**
+ * Group an integer (block number, count) with thin separators: 25,641,730.
+ *
+ * p1b-14 (Codex round 6): a block height is a wire POPULATION (a nonnegative
+ * safe integer), and this is the one chokepoint every wire block renders
+ * through. A bare `toLocaleString` rendered `JSON.parse("-1e-324")` (-0, the
+ * surviving fingerprint of an out-of-contract fractional token) as "-0", a
+ * negative as "-25", an unsafe integer as a rounded lie. Out-of-contract
+ * input renders the WORD register instead — `unreadable`, the p1b-13
+ * LabTornado vocabulary for a number nobody may read — never a throw:
+ * `formatBlock` renders inside the layout-level PostureRibbon, ABOVE the
+ * p1b-0 route boundary, where a throw would unmount the app shell.
+ */
 export function formatBlock(block: number): string {
+  if (!isWirePopulation(block)) return "unreadable";
   return block.toLocaleString("en-US");
 }
 

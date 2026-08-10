@@ -27,6 +27,7 @@ import { StatCard } from "@/components/StatCard";
 import { Stampline, StampItem } from "@/components/Stampline";
 import { solventBaseUrl } from "@/lib/api";
 import { formatBlock } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import {
   fetchObservatorySeries,
   isRollupUnavailable,
@@ -261,7 +262,10 @@ function ObservatoryBody({
               sub={
                 newest.refused
                   ? "withheld, no number served"
-                  : `${String(newest.refused_positions)} refused position row(s) in this bucket`
+                  : // p1b-14: a refused-row tally is a wire population.
+                    `${String(
+                      readWirePopulation(newest.refused_positions, "refused_positions"),
+                    )} refused position row(s) in this bucket`
               }
             />
             <StatCard
@@ -275,7 +279,9 @@ function ObservatoryBody({
               tone={
                 !newest.refused &&
                 newest.liquidatable_positions !== null &&
-                newest.liquidatable_positions > 0
+                // p1b-14: guard before the branch — -0 is out of contract,
+                // never a legal "none liquidatable".
+                readWirePopulation(newest.liquidatable_positions, "liquidatable_positions") > 0
                   ? "crit"
                   : "default"
               }

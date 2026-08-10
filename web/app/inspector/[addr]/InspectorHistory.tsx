@@ -72,6 +72,7 @@ import {
   tallyHistory,
 } from "@/lib/history-series";
 import { renderLookupOutcome } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import type { AddressHistoryEngine, HistoryLookup } from "@/lib/inspector-data";
 import { hfAxisMaxLabel, hfAxisMinLabel, paddedSparklineDomain } from "@/lib/sparkline-scale";
 import { useMeasuredWidth, useMonoCharWidth } from "@/lib/useMeasuredWidth";
@@ -118,8 +119,9 @@ export function InspectorHistory({
       <div className={styles.sectionHead}>{HISTORY_SECTION_HEAD}</div>
       {weldBatchId !== null && positionBatchId !== null && (
         <p className="mono dim" data-testid="history-batch-weld">
-          history window newest batch #{String(weldBatchId)} · position read at batch #
-          {String(positionBatchId)}
+          {/* p1b-14: both seam ids are wire populations, guarded reads. */}
+          history window newest batch #{String(readWirePopulation(weldBatchId, "batch.id"))} ·
+          position read at batch #{String(readWirePopulation(positionBatchId, "batch.id"))}
         </p>
       )}
       {state.status === "loading" && <p className="mono dim">loading history…</p>}
@@ -157,7 +159,8 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
       <div className={styles.stateCard}>
         <p className="mono">
           no persisted points in the covered window, which is a definitive answer over{" "}
-          {String(lookup.response.limit)} batches ({renderLookupOutcome("not-found")}).
+          {String(readWirePopulation(lookup.response.limit, "limit"))} batches (
+          {renderLookupOutcome("not-found")}).
         </p>
         <p className="mono dim">{lookup.note}</p>
       </div>

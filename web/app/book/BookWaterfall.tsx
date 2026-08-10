@@ -26,6 +26,7 @@ import { ProjectionBadge } from "@/components/ProjectionBadge";
 import { RefusedTag } from "@/components/RefusedTag";
 import { AddressMono } from "@/components/AddressMono";
 import { groupDecimalString } from "@/lib/book-format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import {
   BAD_DEBT_LEGEND,
   ELIGIBLE_REALIZED_GLOSS,
@@ -112,7 +113,8 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
           <span>
             {waterfall.monotonicity.engine ?? "unnamed engine"} at grid point{" "}
             {waterfall.monotonicity.index !== undefined
-              ? `#${String(waterfall.monotonicity.index)}`
+              ? // p1b-14: a grid index is a wire population, guarded at the read.
+                `#${String(readWirePopulation(waterfall.monotonicity.index, "monotonicity.index"))}`
               : "?"}
             {waterfall.monotonicity.factor !== undefined
               ? ` (factor ${factorTimesLabel(waterfall.monotonicity.factor, waterfall.grid_scale)})`
@@ -214,7 +216,11 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
                   <tr key={`${String(held.chain_id)}-${held.asset}-${held.source}`}>
                     <td>
                       <AddressMono address={held.asset} copy={false} />{" "}
-                      <span className="mono dim">chain {String(held.chain_id)}</span>
+                      {/* p1b-14: a chain id is a wire population (nonnegative
+                          integer identity), guarded at the read. */}
+                      <span className="mono dim">
+                        chain {String(readWirePopulation(held.chain_id, "held_flat.chain_id"))}
+                      </span>
                     </td>
                     <td className="mono dim">{held.source}</td>
                     <td className={styles.num}>{groupDecimalString(held.value)}</td>

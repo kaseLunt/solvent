@@ -10,6 +10,7 @@ import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { groupDecimalString } from "@/lib/book-format";
 import { EM_DASH } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import { BAD_DEBT_METHOD, badDebtAnswer } from "./readingLines";
 import styles from "./book.module.css";
 
@@ -18,9 +19,11 @@ function usdCell(value: string | null, decimals: number): string {
   return `$${groupDecimalString(formatUnits(value, decimals, { trim: true }))}`;
 }
 
-/** Nullable COUNTS obey the same law: null is withheld, never 0. */
+/** Nullable COUNTS obey the same law: null is withheld, never 0.
+ *  p1b-14: a non-null count is a wire population, guarded at the read —
+ *  a -0 token renders NO cell; the route boundary refuses by name. */
 function countCell(value: number | null): string {
-  return value === null ? EM_DASH : String(value);
+  return value === null ? EM_DASH : String(readWirePopulation(value, "bad_debt count"));
 }
 
 const COLUMNS: ReadonlyArray<Column<BadDebt>> = [

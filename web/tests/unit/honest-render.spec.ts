@@ -105,3 +105,30 @@ test.describe("block time", () => {
     expect(renderBlockTime(25641730, "2026-07-30T18:56:31Z")).toBe("2026-07-30T18:56:31Z");
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-14 (Codex round 6) — THE BLOCK RENDERER REFUSES OUT-OF-CONTRACT INTEGERS.
+//
+// `formatBlock` was a bare `toLocaleString`: `JSON.parse("-1e-324")` (-0 — the
+// surviving fingerprint of a fractional token) rendered "-0", a negative
+// height rendered "-25", and an unsafe integer rendered a rounded lie. It is
+// the one chokepoint every wire block height renders through — including the
+// layout-level PostureRibbon, which sits ABOVE the p1b-0 route boundary — so
+// its refusal is the WORD register (`unreadable`, the p1b-13 LabTornado
+// vocabulary), never a throw that could unmount the app shell.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-14: formatBlock refuses out-of-contract block integers", () => {
+  test("-0, negatives, fractions and unsafe integers render 'unreadable', never a number", async () => {
+    const { formatBlock } = await import("../../lib/format");
+    // The defect input: the raw token -1e-324 parses to NEGATIVE ZERO.
+    expect(Object.is(JSON.parse("-1e-324"), -0)).toBe(true);
+    expect(formatBlock(JSON.parse("-1e-324") as number)).toBe("unreadable");
+    expect(formatBlock(-25641730)).toBe("unreadable");
+    expect(formatBlock(1.5)).toBe("unreadable");
+    expect(formatBlock(2 ** 53)).toBe("unreadable");
+    // Legal heights are untouched: grouped digits, and 0 stays a real block.
+    expect(formatBlock(25641730)).toBe("25,641,730");
+    expect(formatBlock(0)).toBe("0");
+  });
+});

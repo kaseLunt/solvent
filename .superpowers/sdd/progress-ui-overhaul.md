@@ -3372,3 +3372,173 @@ legal and renders as 0 — the wire's own claim is kept.
 - The client-ts exception is NARROW and closed: `assertScale` only.
   No other client-ts behavior changed; the package's other 350 pins
   passed untouched.
+
+## Phase 1 Track B Codex fix wave 6 (p1b-14)
+
+One commit
+(`fix(web): p1b-14 codex round 6 - the negative-zero class dies at every
+unclassified integer render`).
+
+Codex round 6 found the -0 class again — the book histogram's bucket
+counts — and the mandate was the CLASS, not the instance: every wire
+integer consumed by an UNCLASSIFIED surface (book, observatory, feed,
+inspector, proof) through `String()` / `toLocaleString` / arithmetic
+with no wire guard in front.
+
+### The named instance (HIGH) — BookHistogram bucket counts
+
+`web/app/book/BookHistogram.tsx:249` (pre-fix): a `/v1/book` bucket
+count token `-1e-324` parses to -0; `bucket.count > 0` is false so the
+bucket drew nothing, `String(bucket.count)` rendered "0" — a served
+account HIDDEN as a measured zero (the RED e2e snapshot shows the
+"1.05 – 1.10  0" row over a wire count of 1) — and the -0 joined the
+reduce that builds the denominator every share is computed against.
+
+Fix (panel-scoped): `malformedHistogramCounts` (readingLines.ts) — the
+decision layer EnginePanel consults BEFORE any count read: every
+consumed count (`buckets[i].count` per index, `infinite_count`,
+`refused_count`) answers to `isWirePopulation`, in the panel's read
+order, composed through `malformedFields`. A non-empty result renders
+the panel's own refusal composition (head + `hist-malformed-{engine}`
+register naming the fields, the LabBookPanel malformed voice); the
+OTHER engine's panel and the route stay live.
+
+### The class kill — two consumption reads + one word register
+
+- `wireGuard.ts` gains THE THROWING READS: `readWirePopulation` /
+  `readWireScale` (+ `WireIntegerError`) — the population/scale twins
+  of `parseDecimal`/`assertScale` for classifier-less sites: legal
+  values pass untouched, anything else throws (naming the field, and
+  naming `-0` explicitly since `String(-0)` is "0"), landing in the
+  p1b-0 route boundary — the arm p1b-13 already blessed as "the honest
+  arm on a surface with no classifier".
+- `format.ts` `formatBlock` — the one chokepoint every wire block
+  height renders through — now refuses out-of-contract input with the
+  WORD register (`unreadable`, the p1b-13 LabTornado vocabulary),
+  never a throw: it renders inside the layout-level PostureRibbon,
+  ABOVE the route boundary, where a throw would unmount the shell.
+  RED witnessed: `formatBlock(JSON.parse("-1e-324"))` returned `"-0"`
+  (`web-3819-p1b14-red-formatblock.log`).
+- Layout-level / live-instrument surfaces (PostureRibbon, Ribbon batch
+  chip, FeedLiveStrip, freshness stamp lines) classify with
+  `isWirePopulation` directly and render the word register — scoped,
+  no shell risk, no route nuke over one malformed SSE frame.
+
+### THE AUDIT TABLE (class-closure evidence for round 7)
+
+Universe: every `number`-typed field in the generated schema
+(`packages/client-ts/src/generated/schema.ts`) of a response type
+consumed by an unclassified surface; consumers enumerated by grep over
+`app/book app/observatory app/feed app/inspector app/proof lib`
+(components included). Verdicts: (a) already guarded, (b) was
+render-reachable unguarded, FIXED this wave, (c) unreachable /
+derived-locally / out of scope, recorded.
+
+| Field(s) | Consumer site(s) | Verdict | Action |
+|---|---|---|---|
+| EngineHistogram `buckets[].count`, `infinite_count`, `refused_count` | BookHistogram.tsx (bars, presence dots, row labels, denominator reduce, accounting rows), readingLines `belowOneCount` | (b) | **FIXED** — `malformedHistogramCounts` panel classifier (the named instance) |
+| Aggregate `positions`, `computed_positions`, `refused_positions`, `flagged_positions`, `liquidatable_positions` | BookStatRows (denominator, cards, split-collapse branch), readingLines (`engineStatsAnswer`/`SplitLine`/`liquidatableCardSub`/`histogramReadingLine`), bookDek `engineCounts`, BookPositions (on-book count, hidden subtraction, footer, liq disclosure) | (b) | **FIXED** — `readWirePopulation` at every read (route arm) |
+| Count `count` (refusal tallies) | BookStatRows `refusalBreakdown` | (b) | **FIXED** — `readWirePopulation` |
+| BadDebt `insolvent_positions`, `eligible_positions` (nullable) | BookBadDebt `countCell`; readingLines `eligibleDebtFragment` dust gate | (b) | **FIXED** — null carries; non-null reads guarded |
+| BadDebt/WaterfallEngine/Shortfall `usd_decimals`, Aggregate/Position/PositionSummary/AddressHistoryEngine `value_decimals`, FactorPrice `price_decimals`, Leg/PriceInput/SeizedCollateral/PriceSeries `decimals`, ChainEvent `amount_decimals`, LiquidationDetail `debt_decimals` | every money render (`formatUnits`/`renderNullableDecimal`/`renderEngineAmount`/`money`/`usd`) | (a) | `assertScale` refuses -0/negative/fractional/out-of-range since p1b-13; throw lands in the route arm (p1b-13 e2e pins this) |
+| `value_decimals` printed as its own caption | InspectorPositionCard "N-dec" line; evidence.ts "value decimals" row | (b) | **FIXED** — `readWireScale` |
+| WaterfallEngine `newly_eligible_accounts`, `cumulative_eligible_accounts` | stressIncrements latch weld (arithmetic BEFORE any guard; malformed counts either fed a rendered step or tripped the LATCH CONTRADICTION register — the wrong claim) | (b) | **FIXED** — count-contract check before the weld, refusing into the module's own `refused` arm (COUNT CONTRADICTION voice) |
+| WaterfallEngine `cumulative_eligible_accounts`, `insolvent_if_liquidated_accounts` | waterfallView (answer sentence, step labels, all-dust `> 0` gates) | (b) | **FIXED** — `accountCount` helper + guarded gates |
+| Monotonicity `index` | BookWaterfall violation strip | (b) | **FIXED** — `readWirePopulation` |
+| WaterfallPoint `index` | waterfallView/stressIncrements ordering arithmetic | (c) | ordering violations already refuse via the GRID CONTRADICTION arm; the index never renders outside that refusal's own text — recorded |
+| HeldFlat `chain_id`, ChainEvent `chain_id` | BookWaterfall held-flat table; FeedList/InspectorActivity TxLink title | (b) | **FIXED** — `readWirePopulation` |
+| BookCoverage `excluded_by_this_layer` | BookSurface coverage stamp | (b) | **FIXED** — `readWirePopulation` |
+| BookCoverage `batch_positions`, `in_book`, `refused_in_batch` | no web consumer (grep: none) | (c) | recorded — unconsumed |
+| PositionsResponse `total_positions` | BookConcentration (walk-closure compare + takeaway), BookRiskMap walk progress, BookPositions footer/hidden | (b) | **FIXED** — guarded reads |
+| PositionsResponse/EventsResponse/AddressHistoryResponse `limit` | FeedSurface filter echo; InspectorHistory (definitive-window sentence + card prop) | (b) | **FIXED** — `readWirePopulation` |
+| Batch `id` | bookDek, BookConcentration/BookRiskMap captions, BookPositions footer, inspector-lines `lookupTakeaway`, InspectorSurface found-negative, InspectorHistory weld seam, freshness stamp lines, Ribbon batch chip, FeedLiveStrip | (b) | **FIXED** — `readWirePopulation` below the boundary; word register (`#unreadable`) on layout/live chrome |
+| Batch `age_seconds` | freshness `batchFreshnessStamp` fallback (`humanAge` floors negatives — -0 rendered "0s ago", fabricated maximal freshness); PostureRibbon anchor input | (b) | **FIXED** — guarded fallback renders "age unreadable"; the ribbon pre-classifies and renders the `unreadable` snapshot chip (not the unknown-since-resume register — no resume happened) |
+| Batch `position_count`, `refused_count` | FeedLiveStrip (the mandate's named envelope counts) | (b) | **FIXED** — word register (live instrument; the durable list below must not die with a frame) |
+| Batch `flagged_count` | no web render (grep: none) | (c) | recorded — unconsumed |
+| Stamp `last_block` | BookSurface marks, PostureRibbon/FeedLiveStrip watermarks, InspectorSurface, evidence | (b) | **FIXED** — `formatBlock` word register (one chokepoint) |
+| Stamp `chain_id` | evidence watermark row | (b) | **FIXED** — `readWirePopulation` |
+| Stamp / ObservatorySeriesPoint `acked_epoch`, `max_epoch_at_compute` | InspectorPositionCard `unackedEpochs` subtraction; ObservatoryPointDetail reorg row; evidence `reorgPostureRow` | (b) | **FIXED** — both legs guarded before the subtraction at all three sites |
+| SweepStamp `rows`, `failed`, `generation` | ObservatoryPointDetail sweep row; PostureRibbon sweep chip; BookSurface `marksSummary` glyph branch | (b) | **FIXED** — guarded reads (word register on the ribbon age); BookSurface line 331's tone branch is transitively covered (same render as marksSummary) |
+| SweepStamp `age_seconds` (nullable) | PostureRibbon sweep chip | (b) | **FIXED** — word register |
+| AsOf/PositionSummary `balances_block`, `params_block`, `sweep_block`; Leg `debt_index_block`, `collateral_index_block`; PriceInput `block_number`; ParamChange `effective_block`; ChainEvent `block_number`; RateIndex `as_of_block`; ObservatorySeriesPoint `last_block` | formatBlock render sites across all five surfaces + evidence + history-series | (b) | **FIXED** — `formatBlock` word register; the `sweep_block > 0` CLAIM branches (InspectorPositionCard, positionRow, history-series `sweepMark`) additionally guarded with `readWirePopulation` so -0 can never read as "no sweep recorded" |
+| ParamChange `effective_log_index`; ChainEvent `log_index`, `seq` | InspectorPositionCard provenance; FeedList/InspectorActivity provenance lines (incl. the `seq !== 0` branch, where `-0 !== 0` is false) | (b) | **FIXED** — `readWirePopulation` |
+| EventFilter `since_block` | FeedSurface filter echo | (b) | **FIXED** — `readWirePopulation` |
+| ObservatorySeriesPoint `accounts`, `liquidatable_positions` (nullable), `refused_positions` | `displayMetric` (THE chokepoint: cards, chart labels, titles, records), observatory-series `counts()`/takeaway, ObservatorySurface sub + crit-tone branch, ObservatoryPointDetail | (b) | **FIXED** — guarded at `displayMetric` + each remaining read |
+| ObservatorySeriesPoint `batch_id`; AddressHistoryPoint `batch_id` | ObservatoryPointDetail observed-batch row; history-series point titles | (b) | **FIXED** — `readWirePopulation` |
+| ObservatorySeriesResponse `step_seconds` | `describeStride` | (b) | **FIXED** — `readWirePopulation` (the `effectiveStrideSeconds` geometry path already refuses non-finite/<=0 to the native stride — its own local guard, recorded) |
+| ReconcileSummary `exit_code`, `gated_rows`, `gated_exact`, `gated_drift`, `advisory_rows`; ReconcileWeld `rows_exact`, `rows_compared` | ProofSurface rows/chips; evidence `deriveProofSubjectStatus` ACCEPTANCE WELDS (`-0 !== 0` is false — a -0 exit code or drift SAILED THROUGH and accepted the receipt) + drawer rows | (b) | **FIXED** — guarded before the welds and at every render |
+| Service `schema_version`, `algorithm_revision` | ProofSurface + evidence identity rows | (b) | **FIXED** — `readWirePopulation` |
+| SubstrateRef `batch_id` | ProofSurface takeaway/chips; evidence live-subject rows | (b) | **FIXED** — `readWirePopulation` |
+| PriceInput `budget_seconds`, `age_seconds` | evidence budget-verdict row | (b) | **FIXED** — `readWirePopulation` |
+| StreamPayload `stale_since_seconds`, `last_good_batch_id` | FeedLiveStrip; PostureRibbon stale anchor | (b) | **FIXED** — word register (strip); the ribbon pre-classifies the anchor input (an unreadable staleness DURATION is withheld while the NO SERVABLE BATCH fact keeps rendering) |
+| StreamPayload `poll_interval_seconds`; MetaResponse `sweep_never_refusals_in_batch`; ChainEpoch/Cursor/SupersessionLeg fields; Neutralized/PriceState/QuarantinedRange/PricePoint fields; Heartbeat/SweepCounts fields | no unclassified-surface consumer (grep: none on the five surfaces) | (c) | recorded — unconsumed here |
+| riskBins/headroomCurve/paretoView/RiskMapLedger/DensityMap counts; `riskMapReadingLine`/`riskMapCoverageLine` `n()` | derived locally from walked rows (bin membership, band totals) | (c) | recorded — not wire integers |
+| `eventKey` (feed-view); React `key=` compositions | identity attributes, never rendered text | (c) | recorded |
+| Shock `factor_num`/`factor_den` | factor.ts `toBig` (throwing, -0-refusing since p1b-12) | (a) | — |
+| FactorPrice `price_decimals` | factorPriceGuard `classifyFactorPrice` (p1b-4) | (a) | — |
+| ProjectionHorizon/Projection fields; resultIdentity `batchId`; SetRun*/RunBook* fields | Lab surfaces — CLASSIFIED scope (engineClassification, setRunClassification, runbookSet, resultIdentity per p1b-2/3/5/9..13) | (a)/(c) | outside this wave's unclassified mandate |
+
+### Named residues (recorded, not fixed — each exceeds the wave's ~30-line budget or sits outside the class)
+
+- **`/v1/meta` constants** (freshnessTiers thresholds, meta.tsx): wire
+  integers consumed as tier boundaries with no wire guard — a
+  malformed constant shifts tier claims. A meta-constants classifier
+  is a future-round candidate (the p1a-3 fallback-disclosure machinery
+  is the natural home).
+- **`retryAfter` twins** (runbookSet.ts, runbook.ts) — standing p1b-12
+  record, unchanged: any-number posture, wider than this class.
+- **posture provider carry** (lib/posture.tsx): the provider stores
+  the SSE envelope raw and every consumer guards at ITS read (this
+  wave). A provider-level frame classifier would centralize the six
+  word-register sites but is a structural change — recorded.
+- **A2 information boundary** (p1b-11): unchanged — -0 remains the
+  only post-parse fingerprint; fractional tokens that round onto safe
+  integers still need raw-text validation (Phase-3+).
+
+### Red-first, executed and witnessed
+
+- **e2e RED (both pins failed pre-fix, `web-3819-p1b14-red-e2e.log`)**:
+  the bucket-count splice rendered the aave panel with NO malformed
+  register and the hidden-account "1.05 – 1.10  0" row (error-context
+  snapshot); the computed_positions splice rendered the book with NO
+  route refusal.
+- **unit RED (`web-3819-p1b14-red-formatblock.log`)**:
+  `formatBlock(JSON.parse("-1e-324"))` — Expected `"unreadable"`,
+  Received `"-0"`: the renderer printed the sign bit.
+- The `malformedHistogramCounts` and throwing-read pins are born with
+  their functions; their bite is proven by mutation (below), and the
+  defect input (`JSON.parse("-1e-324")` IS -0) is itself pinned in
+  both specs.
+
+### Mutation kill (p1b-14-M1)
+
+The bucket-count guard alone removed from `malformedHistogramCounts`
+(`isWirePopulation(bucket.count)` mutated to `true`) —
+book-charts-copy.spec.ts in isolation dies at exactly the 2 p1b-14
+bucket pins (**2 failed / 52 passed**, `web-3819-p1b14-mutM1.log`; the
+infinite/refused pins' survival discriminates the mutant); restored,
+`cmp`-verified byte-identical, 54/54 green.
+
+### Closing counts (p1b-14)
+
+- `npm run typecheck` / `npm run lint` / `npm run lint:css` — clean
+  (exit 0)
+- touched unit specs (wire-guard + book-charts-copy + honest-render) —
+  **77 passed** (71 pre-existing + 6 new)
+- `npm run build` — clean (fresh, post-restore)
+- e2e book + book-charts + book-table + observatory + feed +
+  inspector + proof + p1b-fixes — **144 passed**
+- FULL Track B suite (`npx playwright test -c
+  tests/playwright.p1b.config.ts`, port 3819, fresh build):
+  **1618 passed, 9 skipped, 0 failed (35.5s)**
+  (`web-3819-p1b14-full2.log`) — the p1b-13 count (1610 + 9 skipped)
+  plus exactly the 8 new pins (1 honest-render + 2 wire-guard +
+  3 book-charts-copy + 2 e2e).
+
+### Audit tally
+
+**26 field-group rows render-reachable unguarded, FIXED** (about 60
+individual read sites across 27 files), **5 rows already guarded**
+(assertScale / factor / factorPrice / lab classifiers), **8 rows
+recorded** (unconsumed, locally derived, identity-only, or the named
+residues above).

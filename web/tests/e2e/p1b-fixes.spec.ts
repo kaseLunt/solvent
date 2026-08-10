@@ -1064,3 +1064,92 @@ test.describe("p1b-13 · Codex round-5 fix", () => {
     await expect(page.getByText("239,603,961")).toHaveCount(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-14 · the Codex round-6 fix wave: the -0 class dies at every
+// UNCLASSIFIED integer render. Round 6 found the class again on the book
+// histogram: a /v1/book bucket-count token `-1e-324` parses to -0,
+// `String(bucket.count)` rendered "0" (an account HIDDEN as a measured
+// zero) and the -0 corrupted the denominator every share is computed
+// against. The named fix is panel-scoped: `malformedHistogramCounts`
+// (readingLines.ts) classifies every consumed histogram count with
+// `isWirePopulation` BEFORE arithmetic, and a malformed panel renders the
+// refusal register naming its fields — the OTHER engine's panel and the
+// route stay live. The class sweep guards every other render-reachable wire
+// integer through `readWirePopulation`, whose throw lands in the p1b-0
+// route boundary (the honest arm on a surface with no classifier) — the
+// aggregate pin below is the sweep's vehicle.
+//
+// The -0 payloads are produced exactly as p1b-12's raw-splice (see that
+// block): `JSON.stringify(-0)` normalizes to the token `0`, so the raw body
+// string carries the token.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-14 · Codex round-6 fix", () => {
+  test("a bucket-count token that parses to -0 refuses the PANEL by name — no hidden account, route live", async ({
+    page,
+  }) => {
+    // Single documented change to the committed /v1/book fixture: the aave
+    // histogram's only nonzero bucket ("1.05 – 1.10", count 1 — one real
+    // account) carries the raw token -1e-324.
+    const SENTINEL = 987654321; // no legal count of this book: unmistakable
+    const body = structuredClone(BOOK);
+    const aave = body.hf_histogram.engines.find((e) => e.engine === "aave_v3_etherfi");
+    if (!aave) throw new Error("fixture shape: aave histogram engine missing");
+    const bucket = aave.buckets.find((b) => b.label === "1.05 – 1.10");
+    if (!bucket) throw new Error("fixture shape: the 1.05 – 1.10 bucket missing");
+    bucket.count = SENTINEL;
+    const serialized = JSON.stringify(body);
+    const needle = `"count":${String(SENTINEL)}`;
+    expect(serialized.split(needle).length).toBe(2);
+    const raw = serialized.replace(needle, '"count":-1e-324');
+    await mockBookWith(page, body);
+    await page.route("**/v1/book", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", headers: CORS, body: raw }),
+    );
+    await page.goto("/book");
+    // THE PANEL ARM: the aave panel refuses by field name…
+    const malformed = page.getByTestId("hist-malformed-aave_v3_etherfi");
+    await expect(malformed).toBeVisible();
+    await expect(malformed).toContainText("buckets[3].count");
+    await expect(malformed).toContainText("never 0");
+    // …no bar, share or count row is drawn from the unreadable book…
+    const aavePanel = page.getByTestId("book-histogram-aave_v3_etherfi");
+    await expect(aavePanel.getByTestId("hist-row-label")).toHaveCount(0);
+    await expect(aavePanel.getByTestId("hist-denominator-aave_v3_etherfi")).toHaveCount(0);
+    // …the healthy engine's panel still renders its own comparator…
+    await expect(
+      page.getByTestId("book-histogram-debt_manager").getByTestId("hist-row-label").first(),
+    ).toBeVisible();
+    // …and the ROUTE is live: this is the panel's refusal, not the page's.
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+    await expect(page.getByRole("banner")).toBeVisible();
+  });
+
+  test("an aggregate computed_positions token that parses to -0 refuses the ROUTE — the sweep's readWirePopulation arm", async ({
+    page,
+  }) => {
+    const SENTINEL = 987654321;
+    const body = structuredClone(BOOK);
+    const agg = body.engines.find((e) => e.engine === "aave_v3_etherfi");
+    if (!agg) throw new Error("fixture shape: aave aggregate missing");
+    agg.computed_positions = SENTINEL;
+    const serialized = JSON.stringify(body);
+    const needle = `"computed_positions":${String(SENTINEL)}`;
+    expect(serialized.split(needle).length).toBe(2);
+    const raw = serialized.replace(needle, '"computed_positions":-1e-324');
+    await mockBookWith(page, body);
+    await page.route("**/v1/book", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", headers: CORS, body: raw }),
+    );
+    await page.goto("/book");
+    // The p1b-0 route boundary is the honest arm on a classifier-less
+    // surface: the route refuses by name, and no computed-looking sentence
+    // is assembled over a count nobody may read.
+    const refusal = page.getByTestId("route-refusal");
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toContainText("refused to render");
+    await expect(page.getByRole("banner")).toBeVisible();
+    await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toHaveCount(0);
+  });
+});

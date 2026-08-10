@@ -22,6 +22,7 @@ import { getSolventClient } from "@/lib/api";
 import { Stampline, StampItem } from "@/components/Stampline";
 import { RefusedTag } from "@/components/RefusedTag";
 import { formatBlock, EM_DASH } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import {
   batchFreshnessLine,
   batchFreshnessLineUnknown,
@@ -47,8 +48,14 @@ type BookState =
 function marksSummary(watermarks: readonly Stamp[]): string {
   return watermarks
     .map((stamp) => {
+      // p1b-14: the failed tally passes the population guard before the
+      // glyph branch — a -0 token must refuse, never read as sweep✓.
       const sweep =
-        stamp.sweep === null ? "" : stamp.sweep.failed > 0 ? " · sweep⚠" : " · sweep✓";
+        stamp.sweep === null
+          ? ""
+          : readWirePopulation(stamp.sweep.failed, "sweep.failed") > 0
+            ? " · sweep⚠"
+            : " · sweep✓";
       return `${stamp.engine} @${formatBlock(stamp.last_block)}${sweep}`;
     })
     .join(" · ");
@@ -356,7 +363,13 @@ export function BookSurface() {
             value={
               state.book.coverage.stress_coverage_is_full
                 ? "full"
-                : `partial · ${String(state.book.coverage.excluded_by_this_layer)} excluded, ${String(
+                : `partial · ${String(
+                    // p1b-14: a coverage tally is a wire population.
+                    readWirePopulation(
+                      state.book.coverage.excluded_by_this_layer,
+                      "coverage.excluded_by_this_layer",
+                    ),
+                  )} excluded, ${String(
                     state.book.coverage.withheld_engines.length,
                   )} engine(s) withheld`
             }

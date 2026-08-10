@@ -13,6 +13,7 @@ import { AddressMono } from "@/components/AddressMono";
 import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal } from "@/lib/format";
 import { txExplorerUrl, type ChainEvent } from "@/lib/inspector-data";
 import { feedAmount } from "@/lib/feed-view";
+import { readWirePopulation } from "@/lib/wireGuard";
 import { activityTakeaway } from "@/lib/inspector-lines";
 import styles from "../inspector.module.css";
 
@@ -48,7 +49,12 @@ function TxLink({ event }: { event: ChainEvent }) {
   const url = txExplorerUrl(event.chain_id, event.tx_hash);
   if (url === null) {
     return (
-      <span className={styles.txLink} title={`${event.tx_hash} (no explorer configured for chain ${String(event.chain_id)})`}>
+      <span
+        className={styles.txLink}
+        title={`${event.tx_hash} (no explorer configured for chain ${String(
+          readWirePopulation(event.chain_id, "chain_id"),
+        )})`}
+      >
         {short}
       </span>
     );
@@ -146,7 +152,8 @@ export function InspectorActivity({ events, loading, error, hasMore, onLoadMore 
                 <EngineChip engine={event.engine} />
                 <span className="mono dim">
                   {event.block_time === null ? "" : `block ${formatBlock(event.block_number)} · `}
-                  log {String(event.log_index)}
+                  {/* p1b-14: provenance integers are wire populations. */}
+                  log {String(readWirePopulation(event.log_index, "log_index"))}
                 </span>
                 <TxLink event={event} />
                 <LiquidationExtract event={event} />

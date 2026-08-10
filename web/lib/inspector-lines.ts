@@ -5,6 +5,7 @@
 // impersonate it.
 
 import type { AddressLookup } from "@solvent/client";
+import { readWirePopulation } from "./wireGuard";
 
 /**
  * The activity section's takeaway (r74): the feed orders CUSTODIED header
@@ -91,7 +92,8 @@ export function positionMethodLine(engine: string, valueDecimals: number): strin
  * box below the fold is a total to a reader who stops at the head.
  */
 export function lookupTakeaway(lookup: AddressLookup): string {
-  const batch = `#${String(lookup.response.batch.id)}`;
+  // p1b-14: the batch id is a wire population, guarded at the read.
+  const batch = `#${String(readWirePopulation(lookup.response.batch.id, "batch.id"))}`;
   switch (lookup.outcome) {
     case "found": {
       const count = lookup.response.positions.length;

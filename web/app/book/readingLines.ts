@@ -21,6 +21,12 @@ import {
 import { groupDecimalString, renderEngineAmount } from "../../lib/book-format";
 import { EM_DASH } from "../../lib/format";
 import { WARN_HEADROOM_PCT } from "../../lib/headroom";
+import {
+  isWirePopulation,
+  malformedFields,
+  readWirePopulation,
+  type FieldCheck,
+} from "../../lib/wireGuard";
 import { ALL_DUST_SUFFIX, sumProvablyDust } from "./dust";
 import { usdExponentLabel, type RiskBinsResult } from "./riskBins";
 
@@ -42,13 +48,45 @@ export function eligibleDebtFragment(badDebt: BadDebt | undefined): string {
     return `Σ eligible debt ${EM_DASH}`;
   }
   // A NULL member count is an unknowable membership — not > 0, so no suffix.
+  // p1b-14: a non-null count is read through the population guard before the
+  // `> 0` test — a -0 member count is out of contract, never "no members".
   const dust =
     badDebt.eligible_positions !== null &&
-    badDebt.eligible_positions > 0 &&
+    readWirePopulation(badDebt.eligible_positions, "eligible_positions") > 0 &&
     sumProvablyDust(badDebt.eligible_debt_usd, badDebt.usd_decimals)
       ? ALL_DUST_SUFFIX
       : "";
   return `Σ eligible debt ${usd(badDebt.eligible_debt_usd, badDebt.usd_decimals)}${dust}`;
+}
+
+/**
+ * p1b-14 (Codex round 6) — THE HISTOGRAM COUNT CLASSIFIER, the decision layer
+ * `EnginePanel` consults BEFORE any count arithmetic or render.
+ *
+ * THE DEFECT: a `/v1/book` bucket-count token `-1e-324` parses to -0 (the
+ * p1b-11 class, another surface over): `bucket.count > 0` is false, so the
+ * bucket drew nothing, `String(bucket.count)` rendered "0" — an account the
+ * wire SERVED, hidden as a measured zero — and the -0 joined the reduce that
+ * builds the denominator every share on the panel is computed against.
+ *
+ * Every count the panel consumes is judged by `isWirePopulation` (the same
+ * law as every other population on the surface: nonnegative safe integer,
+ * never -0), in the panel's own read order — buckets, then the two
+ * accounting rows. A non-empty result is the panel refusal register's
+ * content; the panel refuses by name and no count is read past it.
+ */
+export function malformedHistogramCounts(histogram: EngineHistogram): string[] {
+  const checks: FieldCheck[] = [
+    ...histogram.buckets.map(
+      (bucket, index): FieldCheck => [
+        `buckets[${String(index)}].count`,
+        isWirePopulation(bucket.count),
+      ],
+    ),
+    ["infinite_count", isWirePopulation(histogram.infinite_count)],
+    ["refused_count", isWirePopulation(histogram.refused_count)],
+  ];
+  return malformedFields(checks);
 }
 
 /** Σ of bucket counts whose whole range sits at-or-below the wad scale. */
@@ -69,7 +107,12 @@ export function histogramReadingLine(
   badDebt: BadDebt | undefined,
   wadScale: bigint,
 ): string {
-  const computed = aggregate === undefined ? EM_DASH : String(aggregate.computed_positions);
+  // p1b-14: the aggregate's counts pass the population guard before they are
+  // spoken as a computed claim; the throw lands in the p1b-0 route boundary.
+  const computed =
+    aggregate === undefined
+      ? EM_DASH
+      : String(readWirePopulation(aggregate.computed_positions, "computed_positions"));
   if (histogram.comparator === "hf_wad") {
     const n = belowOneCount(histogram, wadScale);
     return (
@@ -78,7 +121,10 @@ export function histogramReadingLine(
       `${eligibleDebtFragment(badDebt)}.`
     );
   }
-  const m = aggregate === undefined ? EM_DASH : String(aggregate.liquidatable_positions);
+  const m =
+    aggregate === undefined
+      ? EM_DASH
+      : String(readWirePopulation(aggregate.liquidatable_positions, "liquidatable_positions"));
   return (
     "What this shows: how many accounts sit at each borrow-headroom ratio, which is a " +
     `disclosure rather than the engine's trigger. The engine's own verdict counts ${m} of ` +
@@ -141,7 +187,10 @@ export function riskMapReadingLine(result: RiskBinsResult): string {
 
 /** The Liquidatable stat card's sub: the DENOMINATOR, and nothing else. */
 export function liquidatableCardSub(computedPositions: number): string {
-  return `of ${groupDecimalString(String(computedPositions))} computed positions`;
+  // p1b-14: a denominator is a wire population; out-of-contract refuses.
+  return `of ${groupDecimalString(
+    String(readWirePopulation(computedPositions, "computed_positions")),
+  )} computed positions`;
 }
 
 /** The Liquidatable card's METHOD slot: what decides the verdict. */
@@ -153,9 +202,15 @@ export const LIQUIDATABLE_CARD_METHOD = "engine's own comparator";
  * a reader who reads one sentence has read the block's verdict.
  */
 export function engineStatsAnswer(aggregate: Aggregate, badDebt: BadDebt | undefined): string {
+  // p1b-14: both counts pass the population guard before the sentence claims
+  // them as computed facts.
   return (
-    `${aggregate.engine}: ${groupDecimalString(String(aggregate.liquidatable_positions))} of ` +
-    `${groupDecimalString(String(aggregate.computed_positions))} computed positions ` +
+    `${aggregate.engine}: ${groupDecimalString(
+      String(readWirePopulation(aggregate.liquidatable_positions, "liquidatable_positions")),
+    )} of ` +
+    `${groupDecimalString(
+      String(readWirePopulation(aggregate.computed_positions, "computed_positions")),
+    )} computed positions ` +
     `liquidatable · ${eligibleDebtFragment(badDebt)}.`
   );
 }
@@ -188,11 +243,14 @@ export function engineStatsMethod(aggregate: Aggregate): string {
 
 /** SLOT 2 / SLOT 7 — the raw position split, in one line. */
 export function engineStatsSplitLine(aggregate: Aggregate): string {
+  // p1b-14: every leg of the split is a wire population, guarded at the read.
+  const leg = (value: number, field: string): string =>
+    groupDecimalString(String(readWirePopulation(value, field)));
   return (
-    `${groupDecimalString(String(aggregate.positions))} positions · ` +
-    `${groupDecimalString(String(aggregate.computed_positions))} computed · ` +
-    `${groupDecimalString(String(aggregate.refused_positions))} refused · ` +
-    `${groupDecimalString(String(aggregate.flagged_positions))} flagged`
+    `${leg(aggregate.positions, "positions")} positions · ` +
+    `${leg(aggregate.computed_positions, "computed_positions")} computed · ` +
+    `${leg(aggregate.refused_positions, "refused_positions")} refused · ` +
+    `${leg(aggregate.flagged_positions, "flagged_positions")} flagged`
   );
 }
 

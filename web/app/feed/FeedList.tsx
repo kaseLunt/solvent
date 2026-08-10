@@ -19,6 +19,7 @@ import { AddressMono } from "@/components/AddressMono";
 import { EngineChip } from "@/components/EngineChip";
 import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal } from "@/lib/format";
 import { groupDecimalString } from "@/lib/book-format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import {
   splitUntimedTail,
   txExplorerUrl,
@@ -57,7 +58,9 @@ function TxLink({ event }: { event: FeedChainEvent }) {
     return (
       <span
         className={styles.txLink}
-        title={`${event.tx_hash} (no explorer configured for chain ${String(event.chain_id)})`}
+        title={`${event.tx_hash} (no explorer configured for chain ${String(
+          readWirePopulation(event.chain_id, "chain_id"),
+        )})`}
       >
         {short}
       </span>
@@ -200,8 +203,10 @@ function FeedRow({
         <EngineChip engine={event.engine} />
         <span className="mono dim">
           {event.block_time === null ? "" : `block ${formatBlock(event.block_number)} · `}
-          log {String(event.log_index)}
-          {event.seq !== 0 && ` · seq ${String(event.seq)}`}
+          {/* p1b-14: provenance integers are wire populations, guarded at
+              the read; the throw lands in the p1b-0 route boundary. */}
+          log {String(readWirePopulation(event.log_index, "log_index"))}
+          {readWirePopulation(event.seq, "seq") !== 0 && ` · seq ${String(event.seq)}`}
         </span>
         <TxLink event={event} />
         {hasDetail && (

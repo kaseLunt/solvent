@@ -19,6 +19,7 @@
 
 import { formatUnits } from "@solvent/client";
 import { groupDecimalString } from "@/lib/book-format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import { EngineChip } from "@/components/EngineChip";
 import type { FullBookWalk } from "./useFullBookWalk";
 import { buildRiskBins } from "./riskBins";
@@ -116,15 +117,20 @@ export function BookConcentration({
     );
   }
 
+  // p1b-14: the server's qualifying total is a wire population, guarded once
+  // before the walk-closure comparison and both sentences that speak it.
+  const serverTotal =
+    state.total === null ? null : readWirePopulation(state.total, "total_positions");
+
   // r100: a terminal page proves only that the cursor ended. "Walked all"
   // needs the server's own count to agree — a premature terminal page must
   // never draw a partial vector as the book.
-  if (state.total !== null && rows.length !== state.total) {
+  if (serverTotal !== null && rows.length !== serverTotal) {
     return (
       <ConcentrationShell engine={engine}>
         <p className={styles.incrementsContradiction} data-testid={`concentration-short-${engine}`}>
           {`WALK CONTRADICTION: the cursor ended after ${String(rows.length)} rows but the ` +
-            `server counted ${String(state.total)} qualifying — the vector is not the book, ` +
+            `server counted ${String(serverTotal)} qualifying — the vector is not the book, ` +
             `so no concentration claim is made.`}
         </p>
       </ConcentrationShell>
@@ -133,16 +139,17 @@ export function BookConcentration({
 
   const curve = headroomCurve(bins);
   const pareto = paretoView(rows, bins.decimals);
-  const batchId = state.batch.id;
+  // p1b-14: the batch id renders in the takeaway; population-guarded read.
+  const batchId = readWirePopulation(state.batch.id, "batch.id");
 
   return (
     <ConcentrationShell engine={engine}>
       {/* ---- SLOT 3: the takeaway — completeness and the floor, FIRST. ---- */}
       <p className={styles.answerLine} data-testid={`concentration-takeaway-${engine}`}>
-        {state.total === null
+        {serverTotal === null
           ? `Walked ${String(rows.length)} rows of batch #${String(batchId)} on ${engine} — the ` +
             `server stated no qualifying total, so completeness rests on the cursor alone; ${floorClause}.`
-          : `Walked all ${String(rows.length)} of the ${String(state.total)} qualifying rows of ` +
+          : `Walked all ${String(rows.length)} of the ${String(serverTotal)} qualifying rows of ` +
             `batch #${String(batchId)} on ${engine}; ${floorClause}.`}
       </p>
 

@@ -23,6 +23,7 @@
 import { formatUnits } from "@solvent/client";
 import type { ObservatorySeriesPoint, ObservatorySeriesResponse } from "./observatory-data";
 import { EM_DASH, formatBlock, renderNullableDecimal } from "./format";
+import { readWirePopulation } from "./wireGuard";
 
 /** The rollup's native bucket (the contract: hourly). */
 export const NATIVE_BUCKET_SECONDS = 3600;
@@ -167,7 +168,9 @@ export function displayMetric(
 ): string {
   const raw = rawMetric(point, metric);
   if (raw === null) return EM_DASH;
-  if (typeof raw === "number") return String(raw);
+  // p1b-14: the two count metrics are wire populations, guarded at THIS one
+  // chokepoint — cards, chart labels and bucket records all read through it.
+  if (typeof raw === "number") return String(readWirePopulation(raw, metric));
   return renderNullableDecimal(raw, { decimals: usdDecimals, prefix: "$" });
 }
 
@@ -236,7 +239,8 @@ export function describeStride(stepSeconds: number | null): string {
   if (stepSeconds === null) {
     return "native hourly buckets · every captured bucket served verbatim";
   }
-  return `stride ${String(stepSeconds)}s · every Nth captured bucket VERBATIM, skipped buckets are never averaged`;
+  // p1b-14: a served stride is a wire population, guarded at the read.
+  return `stride ${String(readWirePopulation(stepSeconds, "step_seconds"))}s · every Nth captured bucket VERBATIM, skipped buckets are never averaged`;
 }
 
 /** The served range, disclosed. Absent bounds are unbounded, and say so. */
@@ -435,7 +439,10 @@ export function observatoryTakeaway(
       `no numbers served for it${gapClause}.`
     );
   }
-  const accounts = newest.accounts === null ? EM_DASH : String(newest.accounts);
+  const accounts =
+    newest.accounts === null
+      ? EM_DASH
+      : String(readWirePopulation(newest.accounts, "accounts"));
   return (
     `debt ${displayMetric(newest, "debt_usd", response.usd_decimals)} across ${accounts} ` +
     `account(s) as of bucket ${newest.bucket_start}${gapClause}.`
@@ -464,7 +471,9 @@ export function gridReadingLine(
     return `only one captured bucket in this window (${first.bucket_start}) — no movement to state.`;
   }
   const usd = response.usd_decimals;
-  const counts = (value: number | null) => (value === null ? EM_DASH : String(value));
+  // p1b-14: non-null counts pass the population guard before the sentence.
+  const counts = (value: number | null) =>
+    value === null ? EM_DASH : String(readWirePopulation(value, "count"));
   return (
     `between captured buckets ${first.bucket_start} and ${last.bucket_start}: ` +
     `debt ${displayMetric(first, "debt_usd", usd)} → ${displayMetric(last, "debt_usd", usd)}, ` +

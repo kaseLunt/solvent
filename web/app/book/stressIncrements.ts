@@ -25,7 +25,7 @@
 
 import { formatUnits, type Waterfall } from "@solvent/client";
 import { groupDecimalString } from "../../lib/book-format";
-import { wireBigInt } from "../../lib/wireGuard";
+import { isWirePopulation, wireBigInt } from "../../lib/wireGuard";
 import { factorTimesLabel } from "./waterfallView";
 
 interface EnginePoint {
@@ -113,6 +113,26 @@ export function stressIncrements(waterfall: Waterfall, engine: string): StressIn
     if (a === undefined || b === undefined) continue;
     if (stopIndex !== null && b.index >= stopIndex) break;
 
+    // p1b-14: THE COUNT CONTRACT COMES BEFORE THE LATCH WELD. The weld's
+    // arithmetic consumed the three counts raw, so a -0 token (the p1b-11
+    // class) either fed a fabricated `newlyEligible` into a rendered step or
+    // tripped the LATCH CONTRADICTION register — which claims a
+    // contradiction where the truth is that a count cannot be read.
+    if (
+      !isWirePopulation(a.at.cumulative_eligible_accounts) ||
+      !isWirePopulation(b.at.cumulative_eligible_accounts) ||
+      !isWirePopulation(b.at.newly_eligible_accounts)
+    ) {
+      return {
+        kind: "refused",
+        reason:
+          `COUNT CONTRADICTION: a served account count between ` +
+          `${factorTimesLabel(a.factor, waterfall.grid_scale)} and ` +
+          `${factorTimesLabel(b.factor, waterfall.grid_scale)} is outside the wire population ` +
+          `contract (a nonnegative safe integer) — no step reading is drawn from a count that ` +
+          `cannot be read.`,
+      };
+    }
     // THE LATCH WELD: the served per-point entry count must reproduce the
     // cumulative series exactly — that identity is the only license for
     // calling these accounts "first crossed here".

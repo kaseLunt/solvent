@@ -19,6 +19,7 @@
 // Pinned by tests/unit/freshness.spec.ts.
 
 import type { FreshnessTier } from "./freshnessTiers";
+import { isWirePopulation } from "./wireGuard";
 
 /**
  * A wire age in seconds as `{X}h {Y}m` — the coarse human form the stampline
@@ -610,8 +611,21 @@ export function batchFreshnessLine(batch: FreshnessBatch, ageSeconds?: number): 
  * sentence: `batch #5 · computed … · 24h 25m ago`.
  */
 export function batchFreshnessStamp(batch: FreshnessBatch, ageSeconds?: number): string {
-  const age = ageSeconds ?? batch.age_seconds;
-  return `#${String(batch.id)} · computed ${batch.computed_at} · ${humanAge(age)} ago`;
+  // p1b-14: the WIRE fallback age is a population — `humanAge`'s zero floor
+  // is for a legal clock read early, never a costume for an out-of-contract
+  // token (-0 would render "0s ago": fabricated maximal freshness). The
+  // anchored `ageSeconds` is locally derived and stays untouched. This line
+  // renders on layout-adjacent chrome too, so the refusal is the word
+  // register, never a throw.
+  const age =
+    ageSeconds ?? (isWirePopulation(batch.age_seconds) ? batch.age_seconds : null);
+  const ageClause = age === null ? "age unreadable" : `${humanAge(age)} ago`;
+  return `${wireBatchIdLabel(batch.id)} · computed ${batch.computed_at} · ${ageClause}`;
+}
+
+/** p1b-14: `#5`, or `#unreadable` for an out-of-contract id (word register). */
+function wireBatchIdLabel(id: number): string {
+  return `#${isWirePopulation(id) ? String(id) : "unreadable"}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -686,7 +700,7 @@ export const AGE_UNKNOWN_RUN_AGAIN = "age UNKNOWN since resume · run again to r
  * lands in the same place and finds a refusal instead of a number.
  */
 export function batchFreshnessStampUnknown(batch: FreshnessBatch, refreshFailed: boolean): string {
-  return `#${String(batch.id)} · computed ${batch.computed_at} · ${unknownAgePhrase(refreshFailed)}`;
+  return `${wireBatchIdLabel(batch.id)} · computed ${batch.computed_at} · ${unknownAgePhrase(refreshFailed)}`;
 }
 
 /** The head-line form of the same statement. */

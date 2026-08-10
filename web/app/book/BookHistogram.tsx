@@ -40,7 +40,7 @@ import {
   riskBandTintClause,
 } from "@/lib/book-copy";
 import { sharePercent, shareBarWidth } from "@/lib/book-format";
-import { histogramReadingLine } from "./readingLines";
+import { histogramReadingLine, malformedHistogramCounts } from "./readingLines";
 import styles from "./book.module.css";
 
 const BAR_MAX = 240;
@@ -82,6 +82,28 @@ function EnginePanel({
           {histogram.refusal !== null && <RefusedTag reason={histogram.refusal.code} />}{" "}
           buckets are empty because the ENGINE is withheld, and that says nothing about how many
           positions sit here.
+        </div>
+      </div>
+    );
+  }
+
+  // p1b-14 (Codex round 6): CLASSIFY BEFORE ANY COUNT READ. A bucket-count
+  // token that parses to -0 hid a served account as a measured "0" and
+  // corrupted the denominator below. A malformed panel refuses by field name
+  // — the panel's own arm, so the other engine's panel and the route stay
+  // live — and no bucket, share or accounting row is drawn past it.
+  const malformed = malformedHistogramCounts(histogram);
+  if (malformed.length > 0) {
+    return (
+      <div className={styles.panel} data-testid={`book-histogram-${histogram.engine}`}>
+        <div className={styles.panelHead}>
+          <EngineChip engine={histogram.engine} />
+          <span className={styles.comparator}>{comparatorReaderLabel(histogram.comparator)}</span>
+        </div>
+        <div className={styles.emptyReason} data-testid={`hist-malformed-${histogram.engine}`}>
+          counts unreadable — {malformed.join(", ")} failed the wire population contract (a
+          nonnegative safe integer): version skew or a malformed body. No bucket, share or
+          denominator is computed from a count nobody may read, and unreadable is never 0.
         </div>
       </div>
     );

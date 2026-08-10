@@ -19,6 +19,7 @@
 import { formatUnits, type Aggregate, type BadDebt } from "@solvent/client";
 import { groupDecimalString } from "../../lib/book-format";
 import { EM_DASH } from "../../lib/format";
+import { readWirePopulation } from "../../lib/wireGuard";
 import { eligibleDebtFragment } from "./readingLines";
 
 /** The dek before /v1/book has answered — what the surface IS, not a number. */
@@ -33,9 +34,11 @@ export const BOOK_DEK_LOADING =
  * SAME way the cards are, which is the honest failure mode.
  */
 export function engineCounts(aggregate: Aggregate): { liquidatable: number; denominator: number } {
+  // p1b-14: THE one count source is also the one guard site — both counts
+  // pass the population law before any dek sentence claims them.
   return {
-    liquidatable: aggregate.liquidatable_positions,
-    denominator: aggregate.computed_positions,
+    liquidatable: readWirePopulation(aggregate.liquidatable_positions, "liquidatable_positions"),
+    denominator: readWirePopulation(aggregate.computed_positions, "computed_positions"),
   };
 }
 
@@ -75,7 +78,9 @@ export interface BookDekInput {
  * would have to name a served engine that does not exist. Flagged, not
  * improvised silently: see the wave report.
  */
-export function bookDek({ batchId, engines, badDebt }: BookDekInput): string {
+export function bookDek({ batchId: rawBatchId, engines, badDebt }: BookDekInput): string {
+  // p1b-14: the batch id renders three sentences below; one guarded read.
+  const batchId = readWirePopulation(rawBatchId, "batch.id");
   const served = engines.filter((aggregate) => !aggregate.refused);
   const withheld = engines.filter((aggregate) => aggregate.refused);
   const bad = (engine: string) => badDebt.find((row) => row.engine === engine);

@@ -3,6 +3,7 @@
 import { usePosture, usePostureRefresh } from "@/lib/posture";
 import { ribbonCoverage } from "@/lib/coverage";
 import { formatBlock } from "@/lib/format";
+import { isWirePopulation } from "@/lib/wireGuard";
 import { snapshotChipParts, snapshotChipUnknown, staleSinceReading } from "@/lib/freshness";
 import { freshnessTier } from "@/lib/freshnessTiers";
 import { useMetaConstants, type MetaConstantsSource } from "@/lib/meta";
@@ -88,8 +89,18 @@ export function PostureRibbon() {
   // tidiness — each live receipt owns a bounded repair schedule, and two live
   // at once would spend twice the reconnects the bound allows.
   // ---------------------------------------------------------------------
+  // p1b-14: BOTH wire ages pass the population law before anchoring — a -0
+  // token (`JSON.parse("-1e-324")`) fed the anchor a fabricated freshness.
+  // This component sits ABOVE the p1b-0 route boundary, so an out-of-contract
+  // age never throws: the batch age renders the word register below, and an
+  // unreadable staleness DURATION withholds the duration while the
+  // NO SERVABLE BATCH fact keeps rendering.
+  const batchAgeReadable = posture.batch !== null && isWirePopulation(posture.batch.age_seconds);
   const age = useAnchoredAgeSeconds(
-    posture.batch !== null && posture.unavailable === null && posture.batchReceiptId !== null
+    posture.batch !== null &&
+      posture.unavailable === null &&
+      posture.batchReceiptId !== null &&
+      batchAgeReadable
       ? { ageSeconds: posture.batch.age_seconds, receiptId: posture.batchReceiptId }
       : null,
     refreshPosture,
@@ -97,6 +108,7 @@ export function PostureRibbon() {
   const staleAge = useAnchoredAgeSeconds(
     posture.unavailable !== null &&
       posture.unavailable.staleSinceSeconds !== null &&
+      isWirePopulation(posture.unavailable.staleSinceSeconds) &&
       posture.unavailableReceiptId !== null
       ? {
           ageSeconds: posture.unavailable.staleSinceSeconds,
@@ -123,7 +135,13 @@ export function PostureRibbon() {
         asOfs.push({
           label: `${stamp.engine} sweep`,
           value:
-            stamp.sweep.age_seconds === null ? "age —" : `age ${String(stamp.sweep.age_seconds)}s`,
+            stamp.sweep.age_seconds === null
+              ? "age —"
+              : // p1b-14: a non-null sweep age is a wire population; the word
+                // register refuses what the contract would not have produced.
+                isWirePopulation(stamp.sweep.age_seconds)
+                ? `age ${String(stamp.sweep.age_seconds)}s`
+                : "age unreadable",
           tone: stamp.sweep.failed > 0 ? "warn" : "dim",
         });
       }
@@ -139,7 +157,16 @@ export function PostureRibbon() {
     // severity and text can never disagree.
     const batchId = posture.batch.id;
     let snapshot: RibbonSnapshotChip;
-    if (age.unresolved) {
+    if (!batchAgeReadable) {
+      // p1b-14: the wire age is out of contract — the chip states exactly
+      // that. Not the unknown-since-resume register (no resume happened),
+      // and never a floored "0s": the word register, no tier, no tier color.
+      snapshot = {
+        parts: { label: "SNAPSHOT", batchId, age: "unreadable", tierWord: null },
+        tier: null,
+        title: snapshotTitle(batchId, null),
+      };
+    } else if (age.unresolved) {
       snapshot = {
         parts: snapshotChipUnknown(batchId, age.refreshFailed),
         tier: null,

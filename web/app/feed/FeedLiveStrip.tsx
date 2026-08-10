@@ -17,7 +17,19 @@
 
 import { usePosture } from "@/lib/posture";
 import { formatBlock } from "@/lib/format";
+import { isWirePopulation } from "@/lib/wireGuard";
 import styles from "./feed.module.css";
+
+/**
+ * p1b-14: every envelope integer this live instrument prints passes the
+ * population law at the read. The strip is a LIVE surface fed by SSE frames —
+ * refusing the whole /feed route over one malformed frame would take the
+ * durable chain-fact list below with it — so the refusal is the word register
+ * (`unreadable`, the p1b-13 LabTornado vocabulary), scoped to the number.
+ */
+function wireCount(value: number): string {
+  return isWirePopulation(value) ? String(value) : "unreadable";
+}
 
 function streamChip(state: string): { label: string; tone: string } {
   switch (state) {
@@ -54,20 +66,20 @@ export function FeedLiveStrip() {
           {posture.unavailable.staleSinceSeconds !== null && (
             <>
               {" "}
-              · held data <b>{String(posture.unavailable.staleSinceSeconds)}s</b> stale
+              · held data <b>{wireCount(posture.unavailable.staleSinceSeconds)}s</b> stale
             </>
           )}
           {posture.unavailable.lastGoodBatchId !== null && (
             <>
               {" "}
-              · last good batch <b>#{String(posture.unavailable.lastGoodBatchId)}</b>
+              · last good batch <b>#{wireCount(posture.unavailable.lastGoodBatchId)}</b>
             </>
           )}
         </span>
       ) : posture.batch !== null ? (
         <span data-testid="feed-live-batch">
-          batch <b>#{String(posture.batch.id)}</b> · {String(posture.batch.position_count)}{" "}
-          positions · {String(posture.batch.refused_count)} refused
+          batch <b>#{wireCount(posture.batch.id)}</b> · {wireCount(posture.batch.position_count)}{" "}
+          positions · {wireCount(posture.batch.refused_count)} refused
           {posture.batch.supersession.superseded && (
             <>
               {" "}

@@ -1,5 +1,6 @@
 import type { RibbonCoverage } from "@/lib/coverage";
 import type { FreshnessTier } from "@/lib/freshnessTiers";
+import { isWirePopulation } from "@/lib/wireGuard";
 import type { SnapshotChipParts } from "@/lib/freshness";
 import type { RibbonPostureTone, RibbonStreamPosture } from "@/lib/stream-posture";
 import styles from "./ribbon.module.css";
@@ -151,7 +152,13 @@ export function Ribbon(props: RibbonProps) {
             data-testid="ribbon-batch"
             title="the served batch's identity — its freshness is the SNAPSHOT chip's statement"
           >
-            BATCH <span className={styles.val}>#{String(props.batchId)}</span>
+            {/* p1b-14: a batch id is a wire population. The ribbon sits ABOVE
+                the p1b-0 route boundary, so its refusal is the word register
+                (`unreadable`), never a throw that could unmount the shell. */}
+            BATCH{" "}
+            <span className={styles.val}>
+              #{isWirePopulation(props.batchId) ? String(props.batchId) : "unreadable"}
+            </span>
           </span>
         </>
       )}

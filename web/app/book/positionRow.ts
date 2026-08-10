@@ -28,6 +28,7 @@ import {
 // specs under Playwright's transpiler as well as by Next.
 import type { Mark } from "../../components/MarksStamp";
 import { factorDistancePercent, hfDisplayFromRatio, hfDisplayFromWad } from "../../lib/book-format";
+import { readWirePopulation } from "../../lib/wireGuard";
 import {
   headroomBand,
   headroomBelowWarn,
@@ -212,7 +213,10 @@ function rowMarks(position: RefinedPositionSummary): Mark[] {
   // sweep_block 0 there is an ABSENT sweep (S ∅ — e.g. SWEEP_NEVER), rendered
   // visibly; on Aave there is no sweeper and no S mark at all.
   if (position.engine === "debt_manager") {
-    marks.push({ letter: "S", block: position.sweep_block > 0 ? position.sweep_block : null });
+    // p1b-14: the sweep clock passes the population guard BEFORE the `> 0`
+    // branch — a -0 token must refuse, never read as an absent sweep (S ∅).
+    const sweepBlock = readWirePopulation(position.sweep_block, "sweep_block");
+    marks.push({ letter: "S", block: sweepBlock > 0 ? sweepBlock : null });
   }
   return marks;
 }

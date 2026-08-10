@@ -42,6 +42,7 @@ import { displayHf, displayRatio } from "@/lib/history-series";
 import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "@/lib/format";
 import { classifyFactorPrice } from "@/lib/factorPriceGuard";
 import { groupDecimalString } from "@/lib/book-format";
+import { readWirePopulation, readWireScale } from "@/lib/wireGuard";
 import { legParamsDisclosure, legParamsLine } from "@/lib/params-format";
 import { NO_PRICE_PATH_LABEL, noPricePathTitle } from "@/lib/liq-distance";
 import { hfSeverity } from "@/lib/severity";
@@ -198,7 +199,13 @@ export function InspectorPositionCard({
   const severity = hfSeverity({ verdict, ratio, infinite: hf?.infinite ?? false });
 
   const stamp = batch.watermarks.find((w) => w.engine === position.engine);
-  const unackedEpochs = stamp === undefined ? null : stamp.max_epoch_at_compute - stamp.acked_epoch;
+  // p1b-14: both epoch stamps pass the population guard BEFORE the
+  // subtraction whose result renders as the reorg disclosure.
+  const unackedEpochs =
+    stamp === undefined
+      ? null
+      : readWirePopulation(stamp.max_epoch_at_compute, "max_epoch_at_compute") -
+        readWirePopulation(stamp.acked_epoch, "acked_epoch");
   const provenances = [...new Set(position.price_inputs.map((input) => input.provenance))];
   const sources = [...new Set(position.price_inputs.map((input) => input.source.split(":")[0] ?? input.source))];
 
@@ -207,10 +214,13 @@ export function InspectorPositionCard({
   const totalCollateral = money(totals.collateral, { decimals: position.value_decimals });
   const totalDebt = money(totals.debt, { decimals: position.value_decimals });
 
+  // p1b-14: the sweep clock is read through the population guard BEFORE the
+  // `> 0` branch — a -0 token must refuse, never read as "no sweep recorded".
+  const sweepBlock = isDm ? readWirePopulation(position.as_of.sweep_block, "sweep_block") : null;
   const marks: Mark[] = [
     { letter: "B", block: position.as_of.balances_block },
     { letter: "P", block: position.as_of.params_block },
-    ...(isDm ? [{ letter: "S", block: position.as_of.sweep_block > 0 ? position.as_of.sweep_block : null }] : []),
+    ...(isDm ? [{ letter: "S", block: sweepBlock !== null && sweepBlock > 0 ? sweepBlock : null }] : []),
   ];
 
   const symbolForAsset = (asset: string): string => {
@@ -348,7 +358,7 @@ export function InspectorPositionCard({
           {provenance !== null ? (
             <span className={`${styles.v} ${styles.vOk}`}>
               {provenance.source_event} @ ({formatBlock(provenance.effective_block)} · log{" "}
-              {String(provenance.effective_log_index)})
+              {String(readWirePopulation(provenance.effective_log_index, "effective_log_index"))})
             </span>
           ) : (
             <span className={`${styles.v} ${styles.vDim}`}>
@@ -653,7 +663,12 @@ export function InspectorPositionCard({
                 >
                   {totalCollateral}
                 </ExplainButton>{" "}
-                <span className={styles.vDim}>· {String(position.value_decimals)}-dec, engine&apos;s own unit</span>
+                {/* p1b-14: a scale printed as its own caption passes the scale
+              guard (the formatting path already refuses through assertScale). */}
+          <span className={styles.vDim}>
+            · {String(readWireScale(position.value_decimals, "value_decimals"))}-dec, engine&apos;s
+            own unit
+          </span>
               </span>
             </div>
             <div className={styles.kvRow}>
@@ -750,7 +765,7 @@ export function InspectorPositionCard({
             {/* Hazard arms stay OUTSIDE the fold: a missing watermark, unacked
                 epochs, and the never-swept state are disclosures, not
                 provenance. Their safe twins live in the counted fold below. */}
-            {isDm && position.as_of.sweep_block <= 0 && (
+            {isDm && sweepBlock !== null && sweepBlock <= 0 && (
               <div className={styles.kvRow}>
                 <span className={styles.k}>Sweep mark</span>
                 <span className={`${styles.v} ${styles.vCrit}`}>∅ never swept</span>
@@ -796,7 +811,7 @@ export function InspectorPositionCard({
               {String(
                 4 +
                   (unackedEpochs !== null && unackedEpochs <= 0 ? 1 : 0) +
-                  (isDm && position.as_of.sweep_block > 0 ? 1 : 0) +
+                  (isDm && sweepBlock !== null && sweepBlock > 0 ? 1 : 0) +
                   (!isDm ? 1 : 0),
               )}{" "}
               proof row(s)
@@ -816,10 +831,10 @@ export function InspectorPositionCard({
                 <span className={styles.k}>Params mark</span>
                 <span className={`${styles.v} ${styles.vOk}`}>✓ {formatBlock(position.as_of.params_block)}</span>
               </div>
-              {isDm && position.as_of.sweep_block > 0 && (
+              {isDm && sweepBlock !== null && sweepBlock > 0 && (
                 <div className={styles.kvRow}>
                   <span className={styles.k}>Sweep mark</span>
-                  <span className={`${styles.v} ${styles.vOk}`}>✓ {formatBlock(position.as_of.sweep_block)}</span>
+                  <span className={`${styles.v} ${styles.vOk}`}>✓ {formatBlock(sweepBlock)}</span>
                 </div>
               )}
               {!isDm && (

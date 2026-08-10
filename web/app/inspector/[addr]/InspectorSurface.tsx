@@ -24,6 +24,7 @@ import {
 } from "@solvent/client";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import { formatBlock, isAddress } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import { lookupTakeaway } from "@/lib/inspector-lines";
 import {
   batchFreshnessLine,
@@ -478,7 +479,10 @@ function FoundBlock({ lookup }: { lookup: AddressLookup }) {
           <p>
             Here is what entitles the service to the definitive answer above: the lookup was{" "}
             <b>complete</b>, so every engine was available to be asked in batch{" "}
-            <span className="mono">{String(lookup.response.batch.id)}</span>, and none withheld its
+            <span className="mono">
+              {String(readWirePopulation(lookup.response.batch.id, "batch.id"))}
+            </span>
+            , and none withheld its
             book (withheld engines: none).
           </p>
           <details className={styles.noteDisclosure} data-testid="found-note">

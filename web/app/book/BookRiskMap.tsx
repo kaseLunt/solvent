@@ -33,6 +33,7 @@ import { DensityMap, type DensityCell, type DensityGeometry } from "@/components
 import { RiskMapLedger, type RiskCellDetail } from "@/components/charts/RiskMapLedger";
 import { CopyChip } from "@/app/proof/CopyChip";
 import { EM_DASH, truncateAddress } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import { groupDecimalString, renderEngineAmount } from "@/lib/book-format";
 import { RISK_MAP_DEK } from "@/lib/book-copy";
 import { headroomBandLabel, WARN_HEADROOM_DISCLOSURE } from "@/lib/headroom";
@@ -201,10 +202,16 @@ export function BookRiskMap({
     state.phase === "walking"
       ? state.pageCount === 0
         ? "walking the full book · requesting page 1"
-        : `walking the full book · walked ${groupDecimalString(String(state.loaded))} of ${
-            state.total === null ? EM_DASH : groupDecimalString(String(state.total))
+        : // p1b-14: the served total and batch id are wire populations,
+          // guarded at the read.
+          `walking the full book · walked ${groupDecimalString(String(state.loaded))} of ${
+            state.total === null
+              ? EM_DASH
+              : groupDecimalString(String(readWirePopulation(state.total, "total_positions")))
           } · page ${String(state.pageCount)} · batch ${
-            state.batchId === null ? EM_DASH : `#${String(state.batchId)}`
+            state.batchId === null
+              ? EM_DASH
+              : `#${String(readWirePopulation(state.batchId, "batch.id"))}`
           }`
       : state.phase === "idle"
         ? "walking the full book · waiting for the book aggregate to settle"
@@ -222,17 +229,20 @@ export function BookRiskMap({
       : onBook.batchId === state.batch.id
         ? ` · ${groupDecimalString(String(onBook.count))} on book`
         : ` · on-book count withheld (aggregate from batch #${String(
-            onBook.batchId,
-          )}, map from batch #${String(state.batch.id)}: counts from two batches are never blended)`;
+            readWirePopulation(onBook.batchId, "batch.id"),
+          )}, map from batch #${String(
+            readWirePopulation(state.batch.id, "batch.id"),
+          )}: counts from two batches are never blended)`;
 
   const fullHead =
     state.phase === "full"
       ? `full book · ${groupDecimalString(String(state.rows.length))} positions · as-of batch #${String(
-          state.batch.id,
+          readWirePopulation(state.batch.id, "batch.id"),
         )}${state.batch.supersession.superseded ? " · SUPERSEDED (still served)" : ""}${onBookSegment}`
       : null;
 
-  const batchId = state.phase === "full" ? state.batch.id : null;
+  // p1b-14: population-guarded read for the id the method line renders.
+  const batchId = state.phase === "full" ? readWirePopulation(state.batch.id, "batch.id") : null;
   const plottable = binned !== null && (binned.bins.length > 0 || binned.crit.length > 0);
 
   return (

@@ -43,6 +43,7 @@ import { Stampline, StampItem } from "@/components/Stampline";
 import { CopyChip } from "./CopyChip";
 import kv from "@/components/evidence.module.css";
 import styles from "./proof.module.css";
+import { readWirePopulation } from "@/lib/wireGuard";
 
 type ProofState =
   | { phase: "loading" }
@@ -463,7 +464,11 @@ function ProofStampline({ manifest }: { manifest: EvidenceManifest }) {
     <Stampline collapse>
       <StampItem
         label="batch"
-        value={live.kind === "serving" ? `#${String(live.substrate.batch_id)}` : EM_DASH}
+        value={
+          live.kind === "serving"
+            ? `#${String(readWirePopulation(live.substrate.batch_id, "batch_id"))}`
+            : EM_DASH
+        }
         tone={live.kind === "serving" ? "default" : "dim"}
         keepOpen
       />
@@ -495,7 +500,9 @@ function ProofStampline({ manifest }: { manifest: EvidenceManifest }) {
         value={
           manifest.reconcile === null
             ? "absent"
-            : `${manifest.reconcile.result} · ${String(manifest.reconcile.gated_exact)}/${String(manifest.reconcile.gated_rows)}`
+            : `${manifest.reconcile.result} · ${String(
+                readWirePopulation(manifest.reconcile.gated_exact, "gated_exact"),
+              )}/${String(readWirePopulation(manifest.reconcile.gated_rows, "gated_rows"))}`
         }
         tone={
           manifest.reconcile !== null && proofSubjectStatus(manifest).kind === "accepted"

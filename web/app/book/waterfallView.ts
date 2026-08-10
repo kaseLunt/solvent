@@ -22,7 +22,13 @@ import { formatUnits, parseDecimal, type Waterfall } from "@solvent/client";
 // reaches the unit-spec transpiler).
 import type { WaterfallStep } from "../../components/charts/WaterfallSteps";
 import { factorDistancePercent, groupDecimalString } from "../../lib/book-format";
+import { readWirePopulation } from "../../lib/wireGuard";
 import { sumProvablyDust } from "./dust";
+
+/** p1b-14: an account tally on a rung is a wire population, guarded at the read. */
+function accountCount(value: number, field: string): string {
+  return groupDecimalString(String(readWirePopulation(value, field)));
+}
 
 /** Display an exact USD amount: "$4,200" — string surgery, no float. */
 function usd(value: string, decimals: number): string {
@@ -84,7 +90,7 @@ export function waterfallEngineAnswer(waterfall: Waterfall, engine: string): str
       : `By ${gridPercentLabel(deepest.factor, waterfall.grid_scale)}`;
   return (
     `${where}, ${engine} could liquidate ${usd(at.cumulative_debt_eligible_usd, at.usd_decimals)} ` +
-    `of debt across ${groupDecimalString(String(at.cumulative_eligible_accounts))} accounts, and ` +
+    `of debt across ${accountCount(at.cumulative_eligible_accounts, "cumulative_eligible_accounts")} accounts, and ` +
     `${usd(at.cumulative_bad_debt_usd, at.usd_decimals)} would still be owed after all ` +
     `collateral is seized. Engine books are never summed.`
   );
@@ -104,7 +110,7 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
     steps.push({
       label:
         `${times} · ${percent} · ` +
-        `${groupDecimalString(String(at.cumulative_eligible_accounts))} acct`,
+        `${accountCount(at.cumulative_eligible_accounts, "cumulative_eligible_accounts")} acct`,
       value: geometry(at.cumulative_debt_eligible_usd, at.usd_decimals),
       display: usd(at.cumulative_debt_eligible_usd, at.usd_decimals),
       kind: "flow",
@@ -120,7 +126,7 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
       steps.push({
         label:
           `${times} · ${percent} bad debt · ` +
-          `${groupDecimalString(String(at.insolvent_if_liquidated_accounts))} insolvent`,
+          `${accountCount(at.insolvent_if_liquidated_accounts, "insolvent_if_liquidated_accounts")} insolvent`,
         value: geometry(at.cumulative_bad_debt_usd, at.usd_decimals),
         display: usd(at.cumulative_bad_debt_usd, at.usd_decimals),
         kind: "residual",
@@ -168,15 +174,18 @@ export function waterfallAllDustRungs(waterfall: Waterfall, engine: string): Wat
         ? "unshocked"
         : `${factorTimesLabel(point.factor, waterfall.grid_scale)} ` +
           `(${gridPercentLabel(point.factor, waterfall.grid_scale)})`;
+    // p1b-14: the zero-member gates read their counts through the population
+    // guard — a -0 member count is out of contract, never "no members".
     if (
-      at.cumulative_eligible_accounts > 0 &&
+      readWirePopulation(at.cumulative_eligible_accounts, "cumulative_eligible_accounts") > 0 &&
       sumProvablyDust(at.cumulative_debt_eligible_usd, at.usd_decimals)
     ) {
       rungs.eligible.push(name);
     }
     if (
       /[1-9]/.test(at.cumulative_bad_debt_usd) &&
-      at.insolvent_if_liquidated_accounts > 0 &&
+      readWirePopulation(at.insolvent_if_liquidated_accounts, "insolvent_if_liquidated_accounts") >
+        0 &&
       sumProvablyDust(at.cumulative_bad_debt_usd, at.usd_decimals)
     ) {
       rungs.badDebt.push(name);

@@ -99,6 +99,7 @@ import {
 } from "@/lib/headroom";
 import { groupDecimalString, renderEngineAmount } from "@/lib/book-format";
 import { EM_DASH } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import {
   DUST_CHIP_LABELS,
   DUST_DEFAULT_STEP,
@@ -709,12 +710,16 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   // read together.
   const mapOnBook =
     bookFeed.batchId !== null && aggregate !== null && !aggregate.refused
-      ? { count: aggregate.positions, batchId: bookFeed.batchId }
+      ? // p1b-14: the on-book count is a wire population, guarded at the read.
+        { count: readWirePopulation(aggregate.positions, "positions"), batchId: bookFeed.batchId }
       : null;
 
   const hidden =
     dustActive && aggServed !== null && envelope !== null && envelope.totalPositions !== null
-      ? aggServed.positions - envelope.totalPositions
+      ? // p1b-14: both legs of the hidden-count subtraction pass the
+        // population guard before any difference is claimed.
+        readWirePopulation(aggServed.positions, "positions") -
+        readWirePopulation(envelope.totalPositions, "total_positions")
       : null;
 
   let hiddenSegment = "";
@@ -722,15 +727,20 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
     if (hidden !== null) {
       hiddenSegment = hiddenBelowStepSegment(hidden);
     } else if (bookFeed.batchId !== null && !sameBatch) {
-      hiddenSegment = hiddenCountMismatch(bookFeed.batchId, envelope.batch.id);
+      // p1b-14: both ids render in the mismatch sentence; guarded reads.
+      hiddenSegment = hiddenCountMismatch(
+        readWirePopulation(bookFeed.batchId, "batch.id"),
+        readWirePopulation(envelope.batch.id, "batch.id"),
+      );
     }
   }
 
   const qualifyingDisplay =
     envelope === null || envelope.totalPositions === null
       ? EM_DASH
-      : String(envelope.totalPositions);
-  const onBookDisplay = aggServed === null ? EM_DASH : String(aggServed.positions);
+      : String(readWirePopulation(envelope.totalPositions, "total_positions"));
+  const onBookDisplay =
+    aggServed === null ? EM_DASH : String(readWirePopulation(aggServed.positions, "positions"));
   // THE FOOTER NAMES WHAT IS APPLIED (Wave R7). A column names itself; the
   // honored deprecated key names itself AND its quantity, because a reader
   // scanning a Headroom column has to be able to see that the ROWS are not
@@ -793,9 +803,15 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
     () => rows.reduce((count, row) => (row.verdict === "liquidatable" ? count + 1 : count), 0),
     [rows],
   );
+  // p1b-14: the aggregate's verdict count passes the population guard before
+  // the comparison that decides whether a disclosure sentence is composed.
+  const liqAggregate =
+    aggServed === null
+      ? null
+      : readWirePopulation(aggServed.liquidatable_positions, "liquidatable_positions");
   const liqDisclosure =
-    aggServed !== null && aggServed.liquidatable_positions > loadedLiquidatable
-      ? { aggregate: aggServed.liquidatable_positions, loaded: loadedLiquidatable }
+    liqAggregate !== null && liqAggregate > loadedLiquidatable
+      ? { aggregate: liqAggregate, loaded: loadedLiquidatable }
       : null;
 
   const empty =
@@ -1050,7 +1066,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
                 )}
                 {envelope !== null && (
                   <span>
-                    batch #{String(envelope.batch.id)}
+                    batch #{String(readWirePopulation(envelope.batch.id, "batch.id"))}
                     {envelope.batch.supersession.superseded ? " · SUPERSEDED (still served)" : ""}
                   </span>
                 )}

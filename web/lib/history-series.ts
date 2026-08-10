@@ -42,7 +42,7 @@
 import { formatUnits, type HealthFactor } from "@solvent/client";
 import type { AddressHistoryEngine, AddressHistoryPoint } from "./inspector-data";
 import { EM_DASH, formatBlock } from "./format";
-import { wireBigInt } from "./wireGuard";
+import { readWirePopulation, wireBigInt } from "./wireGuard";
 
 export type HistoryEntryKind =
   | "computed"
@@ -117,11 +117,15 @@ export function displayHf(hf: HealthFactor): string | null {
  */
 function sweepMark(engineName: string, point: AddressHistoryPoint): string {
   if (engineName !== "debt_manager") return "";
-  return point.sweep_block > 0 ? ` · S ${formatBlock(point.sweep_block)}` : " · S ∅";
+  // p1b-14: the sweep clock passes the population guard BEFORE the `> 0`
+  // branch — a -0 token must refuse, never read as an absent sweep (S ∅).
+  const sweepBlock = readWirePopulation(point.sweep_block, "sweep_block");
+  return sweepBlock > 0 ? ` · S ${formatBlock(sweepBlock)}` : " · S ∅";
 }
 
 function entryForPoint(point: AddressHistoryPoint, engineName: string): HistorySeriesEntry {
-  const batchId = point.batch_id;
+  // p1b-14: the batch id renders in every point title; guarded read.
+  const batchId = readWirePopulation(point.batch_id, "batch_id");
   // The sweep disclosure travels with EVERY persisted DM point — the verdict
   // rides computed points, and a refused point's S ∅ is the same absent-sweep
   // truth the refusal names.

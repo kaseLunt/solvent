@@ -24,6 +24,7 @@ import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { renderEngineAmount, groupDecimalString } from "@/lib/book-format";
 import { EM_DASH } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import {
   ENGINE_STATS_FORENSICS_SUMMARY,
   LIQUIDATABLE_CARD_METHOD,
@@ -37,7 +38,10 @@ import styles from "./book.module.css";
 
 function refusalBreakdown(aggregate: Aggregate): string {
   if (aggregate.refusals.length === 0) return "none";
-  return aggregate.refusals.map((count) => `${count.key} ×${String(count.count)}`).join(" · ");
+  // p1b-14: a refusal tally is a wire population, guarded at the read.
+  return aggregate.refusals
+    .map((count) => `${count.key} ×${String(readWirePopulation(count.count, "refusals[].count"))}`)
+    .join(" · ");
 }
 
 function EngineStats({
@@ -47,8 +51,17 @@ function EngineStats({
   aggregate: Aggregate;
   badDebt: BadDebt | undefined;
 }) {
-  const denominator = `${groupDecimalString(String(aggregate.computed_positions))}/${groupDecimalString(
-    String(aggregate.positions),
+  // p1b-14: every count this block renders or branches on passes the
+  // population guard ONCE, up front — both arms below read only these.
+  const computedPositions = readWirePopulation(aggregate.computed_positions, "computed_positions");
+  const positions = readWirePopulation(aggregate.positions, "positions");
+  const liquidatablePositions = readWirePopulation(
+    aggregate.liquidatable_positions,
+    "liquidatable_positions",
+  );
+  const refusedPositions = readWirePopulation(aggregate.refused_positions, "refused_positions");
+  const denominator = `${groupDecimalString(String(computedPositions))}/${groupDecimalString(
+    String(positions),
   )} positions counted`;
 
   if (aggregate.refused) {
@@ -108,7 +121,7 @@ function EngineStats({
 
   // R3 / inventory hazard: with refusals counted in the split, the split is
   // refusal-class content and may not sit behind a summary.
-  const splitCollapsible = aggregate.refused_positions === 0;
+  const splitCollapsible = refusedPositions === 0;
 
   return (
     <div className={styles.engineBlock} data-testid={`book-stats-${aggregate.engine}`}>
@@ -153,22 +166,22 @@ function EngineStats({
           label="Liquidatable"
           value={
             <>
-              <span className={aggregate.liquidatable_positions > 0 ? "crit-t" : undefined}>
-                {String(aggregate.liquidatable_positions)}
+              <span className={liquidatablePositions > 0 ? "crit-t" : undefined}>
+                {String(liquidatablePositions)}
               </span>{" "}
-              / {String(aggregate.computed_positions)}
+              / {String(computedPositions)}
             </>
           }
           /* The Σ rode this sub until W-3L. It now rides the ANSWER, which is
              where the adjective it qualifies is actually read. */
-          sub={liquidatableCardSub(aggregate.computed_positions)}
+          sub={liquidatableCardSub(computedPositions)}
           method={LIQUIDATABLE_CARD_METHOD}
           testId={`book-stat-liquidatable-${aggregate.engine}`}
         />
         <StatCard
           label="Refused"
-          value={String(aggregate.refused_positions)}
-          tone={aggregate.refused_positions > 0 ? "warn" : "default"}
+          value={String(refusedPositions)}
+          tone={refusedPositions > 0 ? "warn" : "default"}
           /* HAZARD: the breakdown rides the card, so it is visible on every
              render. It never moves into the expandable below. */
           sub={refusalBreakdown(aggregate)}

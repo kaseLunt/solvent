@@ -229,3 +229,41 @@ test("the exported WIRE_DECIMAL is the contract regex itself", () => {
   expect(WIRE_DECIMAL.test("-15")).toBe(true);
   expect(WIRE_DECIMAL.test("1e5")).toBe(false);
 });
+
+// ---------------------------------------------------------------------------
+// p1b-14 (Codex round 6) — THE THROWING READS. The population/scale twins of
+// `parseDecimal`/`assertScale` for classifier-less consumption sites: the
+// value passes untouched when the predicate admits it, and anything the
+// contract would not have produced THROWS (landing in the p1b-0 route
+// boundary) instead of becoming a silently different number.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-14: readWirePopulation / readWireScale", () => {
+  test("legal values pass through untouched; 0 stays legal on both", async () => {
+    const { readWirePopulation, readWireScale } = await import("../../lib/wireGuard");
+    expect(readWirePopulation(0, "count")).toBe(0);
+    expect(readWirePopulation(42, "count")).toBe(42);
+    expect(readWireScale(0, "usd_decimals")).toBe(0);
+    expect(readWireScale(18, "usd_decimals")).toBe(18);
+  });
+
+  test("-0, negatives, fractions and unsafe integers throw, naming the field and -0 by sign", async () => {
+    const { readWirePopulation, readWireScale, WireIntegerError } = await import(
+      "../../lib/wireGuard"
+    );
+    // The defect input: the raw token -1e-324 parses to NEGATIVE ZERO.
+    const minusZero = JSON.parse("-1e-324") as number;
+    expect(Object.is(minusZero, -0)).toBe(true);
+    // `String(-0)` is "0" — the message must name -0 explicitly or the
+    // refusal would hide the very fingerprint it refuses on.
+    expect(() => readWirePopulation(minusZero, "buckets[3].count")).toThrow(WireIntegerError);
+    expect(() => readWirePopulation(minusZero, "buckets[3].count")).toThrow(/buckets\[3\]\.count/);
+    expect(() => readWirePopulation(minusZero, "buckets[3].count")).toThrow(/-0/);
+    expect(() => readWirePopulation(-1, "count")).toThrow(WireIntegerError);
+    expect(() => readWirePopulation(1.5, "count")).toThrow(WireIntegerError);
+    expect(() => readWirePopulation(2 ** 53, "count")).toThrow(WireIntegerError);
+    expect(() => readWireScale(minusZero, "usd_decimals")).toThrow(/-0/);
+    expect(() => readWireScale(-1, "usd_decimals")).toThrow(WireIntegerError);
+    expect(() => readWireScale(1001, "usd_decimals")).toThrow(WireIntegerError);
+  });
+});

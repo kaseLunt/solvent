@@ -15,6 +15,7 @@
 import type { Batch, PriceInput, RefinedLeg, RefinedPosition, Stamp } from "@solvent/client";
 import type { components } from "@solvent/client";
 import { EM_DASH, formatBlock, renderNullableDecimal } from "./format";
+import { readWirePopulation, readWireScale } from "./wireGuard";
 import { classifyFactorPrice } from "./factorPriceGuard";
 import { liqBonusEvidenceValue, paramPercent, paramScaleNote } from "./params-format";
 import { noPricePathTitle } from "./liq-distance";
@@ -80,12 +81,16 @@ function reorgPostureRow(stamp: Stamp | undefined): EvidenceRow {
   if (stamp === undefined) {
     return { label: "reorg posture", value: "no watermark for this engine on the batch", tone: "crit" };
   }
-  const unacked = stamp.max_epoch_at_compute - stamp.acked_epoch;
+  // p1b-14: both epoch stamps pass the population guard BEFORE the
+  // subtraction whose result renders as the reorg disclosure.
+  const maxEpoch = readWirePopulation(stamp.max_epoch_at_compute, "max_epoch_at_compute");
+  const acked = readWirePopulation(stamp.acked_epoch, "acked_epoch");
+  const unacked = maxEpoch - acked;
   return unacked <= 0
     ? { label: "reorg posture", value: "none unacked", tone: "ok" }
     : {
         label: "reorg posture",
-        value: `${String(unacked)} unacked epoch(s) at compute · acked ${String(stamp.acked_epoch)} of ${String(stamp.max_epoch_at_compute)}`,
+        value: `${String(unacked)} unacked epoch(s) at compute · acked ${String(acked)} of ${String(maxEpoch)}`,
         tone: "crit",
       };
 }
@@ -97,7 +102,7 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
   const batchSection: EvidenceSection = {
     title: "BATCH · MATERIALIZATION",
     rows: [
-      { label: "batch", value: String(batch.id) },
+      { label: "batch", value: String(readWirePopulation(batch.id, "batch.id")) },
       { label: "computed_at", value: batch.computed_at },
       { label: "producer · status", value: `${batch.producer} · ${batch.status}` },
       ...(batch.supersession.superseded
@@ -108,7 +113,7 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
         value:
           stamp === undefined
             ? "absent"
-            : `chain ${String(stamp.chain_id)} · last block ${formatBlock(stamp.last_block)}`,
+            : `chain ${String(readWirePopulation(stamp.chain_id, "chain_id"))} · last block ${formatBlock(stamp.last_block)}`,
         tone: stamp === undefined ? "crit" : "default",
       },
       reorgPostureRow(stamp),
@@ -244,7 +249,8 @@ export function totalEvidence(
         value: raw ?? `${EM_DASH} (null, not established, and never rendered as 0)`,
         tone: raw === null ? "dim" : "default",
       },
-      { label: "value decimals", value: String(position.value_decimals) },
+      // p1b-14: a scale printed as its own caption passes the scale guard.
+      { label: "value decimals", value: String(readWireScale(position.value_decimals, "value_decimals")) },
       {
         label: "unit",
         value:
@@ -429,7 +435,13 @@ export function priceInputEvidence(
       },
       {
         label: "budget verdict",
-        value: `${input.verdict} (budget ${String(input.budget_seconds)}s, age ${input.age_seconds === null ? EM_DASH : `${String(input.age_seconds)}s`})`,
+        value: `${input.verdict} (budget ${String(
+          readWirePopulation(input.budget_seconds, "budget_seconds"),
+        )}s, age ${
+          input.age_seconds === null
+            ? EM_DASH
+            : `${String(readWirePopulation(input.age_seconds, "age_seconds"))}s`
+        })`,
         tone: priceVerdictTone(input.verdict),
       },
       { label: "contract note", value: input.note, tone: "dim" },
@@ -549,29 +561,42 @@ export function deriveProofSubjectStatus(manifest: EvidenceManifest): ProofSubje
   if (reconcile === null) {
     return { kind: "unavailable", reason: manifest.reconcile_unavailable_reason ?? NO_REASON };
   }
+  // p1b-14: every receipt integer passes the population guard BEFORE the
+  // acceptance welds — `-0 !== 0` is false, so a -0 exit code or drift token
+  // would have sailed THROUGH the checks below and accepted a receipt whose
+  // numbers cannot be read. A malformed receipt is not a rejected proof (that
+  // would claim the reconcile failed); the throw lands in the p1b-0 route
+  // boundary, which refuses to read it at all.
+  const exitCode = readWirePopulation(reconcile.exit_code, "exit_code");
+  const gatedDrift = readWirePopulation(reconcile.gated_drift, "gated_drift");
+  const gatedExact = readWirePopulation(reconcile.gated_exact, "gated_exact");
+  const gatedRows = readWirePopulation(reconcile.gated_rows, "gated_rows");
   if (reconcile.result !== "pass") {
     return {
       kind: "rejected",
       reconcile,
-      detail: `receipt verdict "${reconcile.result}" (exit ${String(reconcile.exit_code)})`,
+      detail: `receipt verdict "${reconcile.result}" (exit ${String(exitCode)})`,
     };
   }
-  if (reconcile.exit_code !== 0) {
+  if (exitCode !== 0) {
     return {
       kind: "rejected",
       reconcile,
-      detail: `verdict "pass" with exit code ${String(reconcile.exit_code)}, an internally inconsistent receipt`,
+      detail: `verdict "pass" with exit code ${String(exitCode)}, an internally inconsistent receipt`,
     };
   }
-  if (reconcile.gated_drift !== 0 || reconcile.gated_exact !== reconcile.gated_rows) {
+  if (gatedDrift !== 0 || gatedExact !== gatedRows) {
     return {
       kind: "rejected",
       reconcile,
-      detail: `gated ${String(reconcile.gated_exact)}/${String(reconcile.gated_rows)} exact, drift ${String(reconcile.gated_drift)}`,
+      detail: `gated ${String(gatedExact)}/${String(gatedRows)} exact, drift ${String(gatedDrift)}`,
     };
   }
   for (const weld of reconcile.welds) {
-    if (weld.rows_exact !== weld.rows_compared) {
+    if (
+      readWirePopulation(weld.rows_exact, "rows_exact") !==
+      readWirePopulation(weld.rows_compared, "rows_compared")
+    ) {
       return {
         kind: "rejected",
         reconcile,
@@ -684,7 +709,7 @@ export function proofTakeaway(manifest: EvidenceManifest): string {
         : "NO COMMITTED RECEIPT — nothing is proven";
   const liveArm =
     live.kind === "serving"
-      ? `serving batch #${String(live.substrate.batch_id)} under its watermark vector`
+      ? `serving batch #${String(readWirePopulation(live.substrate.batch_id, "batch_id"))} under its watermark vector`
       : "NO SERVABLE BATCH";
   return `${proofArm}; ${liveArm}.`;
 }
@@ -721,8 +746,11 @@ function buildIdentitySection(manifest: EvidenceManifest): EvidenceSection {
         tone: manifest.commit === null ? "dim" : "default",
       },
       { label: "service", value: `${service.name} · ${service.version}` },
-      { label: "schema version", value: String(service.schema_version) },
-      { label: "algorithm revision", value: String(service.algorithm_revision) },
+      { label: "schema version", value: String(readWirePopulation(service.schema_version, "schema_version")) },
+      {
+        label: "algorithm revision",
+        value: String(readWirePopulation(service.algorithm_revision, "algorithm_revision")),
+      },
       { label: "scenario config", value: service.scenario_config_version },
       { label: "seizure model", value: service.seizure_model, tone: "dim" },
     ],
@@ -768,19 +796,35 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
       title: "RECEIPT · COMMITTED ARTIFACT",
       rows: [
         { label: "schema", value: reconcile.schema, tone: "dim" },
-        { label: "result · exit", value: `${reconcile.result} · ${String(reconcile.exit_code)}` },
+        // p1b-14: receipt tallies pass the population guard at the read.
+        {
+          label: "result · exit",
+          value: `${reconcile.result} · ${String(readWirePopulation(reconcile.exit_code, "exit_code"))}`,
+        },
         { label: "finished_at", value: reconcile.finished_at },
         {
           label: "gated rows",
-          value: `${String(reconcile.gated_exact)}/${String(reconcile.gated_rows)} exact · drift ${String(reconcile.gated_drift)}`,
-          tone: reconcile.gated_drift === 0 ? "ok" : "crit",
+          value: `${String(readWirePopulation(reconcile.gated_exact, "gated_exact"))}/${String(
+            readWirePopulation(reconcile.gated_rows, "gated_rows"),
+          )} exact · drift ${String(readWirePopulation(reconcile.gated_drift, "gated_drift"))}`,
+          tone: readWirePopulation(reconcile.gated_drift, "gated_drift") === 0 ? "ok" : "crit",
         },
-        { label: "advisory rows", value: String(reconcile.advisory_rows), tone: "dim" },
+        {
+          label: "advisory rows",
+          value: String(readWirePopulation(reconcile.advisory_rows, "advisory_rows")),
+          tone: "dim",
+        },
         ...reconcile.welds.map(
           (weld): EvidenceRow => ({
             label: `weld · ${weld.engine}`,
-            value: `${String(weld.rows_exact)}/${String(weld.rows_compared)} exact`,
-            tone: weld.rows_exact === weld.rows_compared ? "ok" : "crit",
+            value: `${String(readWirePopulation(weld.rows_exact, "rows_exact"))}/${String(
+              readWirePopulation(weld.rows_compared, "rows_compared"),
+            )} exact`,
+            tone:
+              readWirePopulation(weld.rows_exact, "rows_exact") ===
+              readWirePopulation(weld.rows_compared, "rows_compared")
+                ? "ok"
+                : "crit",
           }),
         ),
         { label: "comparison sha256", value: reconcile.comparison_sha256 },
@@ -825,7 +869,10 @@ export function liveSubjectEvidence(manifest: EvidenceManifest): EvidenceDescrip
           {
             title: "SERVING BATCH · IDENTITY",
             rows: [
-              { label: "batch", value: `#${String(status.substrate.batch_id)}` },
+              {
+                label: "batch",
+                value: `#${String(readWirePopulation(status.substrate.batch_id, "batch_id"))}`,
+              },
               { label: "materialization key", value: status.substrate.materialization_key },
               {
                 label: "substrate digest",
@@ -858,7 +905,7 @@ export function liveSubjectEvidence(manifest: EvidenceManifest): EvidenceDescrip
     title: "EXPLAIN · LIVE SUBJECT",
     subject:
       status.kind === "serving"
-        ? `batch #${String(status.substrate.batch_id)} · LIVE · WATERMARKED`
+        ? `batch #${String(readWirePopulation(status.substrate.batch_id, "batch_id"))} · LIVE · WATERMARKED`
         : "NO SERVABLE BATCH",
     comparator: LIVE_COMPARATOR,
     marker: "operational",

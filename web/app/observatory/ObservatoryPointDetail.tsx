@@ -13,6 +13,7 @@
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "@/lib/format";
+import { readWirePopulation } from "@/lib/wireGuard";
 import type { ObservatorySeriesResponse } from "@/lib/observatory-data";
 import { pointDetailTakeaway, type BucketEntry } from "@/lib/observatory-series";
 import styles from "./observatory.module.css";
@@ -67,14 +68,20 @@ function DetailBody({
   if (point === null) return null;
   const usd = (value: string | null) =>
     renderNullableDecimal(value, { decimals: response.usd_decimals, prefix: "$" });
-  const count = (value: number | null) => (value === null ? EM_DASH : String(value));
+  // p1b-14: non-null counts pass the population guard before the record.
+  const count = (value: number | null) =>
+    value === null ? EM_DASH : String(readWirePopulation(value, "count"));
 
   // W-3L hazard fences — these three are disclosures, not provenance, and a
   // record carrying one keeps it OUTSIDE the forensic expandable:
   //   - unacked reorg epochs at compute;
   //   - an UNRECORDED sweep stamp (explicitly not "the engine has no sweeper");
   //   - a rate row whose scale is unstated (kind outside the vocabulary).
-  const unacked = point.max_epoch_at_compute - point.acked_epoch > 0;
+  // p1b-14: both epoch stamps pass the population guard BEFORE the
+  // subtraction that decides (and later renders) the unacked disclosure.
+  const maxEpochAtCompute = readWirePopulation(point.max_epoch_at_compute, "max_epoch_at_compute");
+  const ackedEpoch = readWirePopulation(point.acked_epoch, "acked_epoch");
+  const unacked = maxEpochAtCompute - ackedEpoch > 0;
   const sweepUnrecorded = !point.sweep_recorded;
   const hasUnstatedScale = point.rates.some((rate) => rate.scale === "unstated");
 
@@ -86,8 +93,8 @@ function DetailBody({
           <>none unacked</>
         ) : (
           <span className="crit-t">
-            {String(point.max_epoch_at_compute - point.acked_epoch)} unacked epoch(s) · acked{" "}
-            {String(point.acked_epoch)} of {String(point.max_epoch_at_compute)}
+            {String(maxEpochAtCompute - ackedEpoch)} unacked epoch(s) · acked{" "}
+            {String(ackedEpoch)} of {String(maxEpochAtCompute)}
           </span>
         )}{" "}
         <span className="dim">(the stamp pair copied from the observed batch&apos;s watermark vector)</span>
@@ -118,8 +125,10 @@ function DetailBody({
         ) : (
           <>
             <span className="mono">
-              {String(point.sweep.rows)} swept · {String(point.sweep.failed)} failed · gen{" "}
-              {String(point.sweep.generation)}
+              {/* p1b-14: sweep tallies are wire populations, guarded reads. */}
+              {String(readWirePopulation(point.sweep.rows, "sweep.rows"))} swept ·{" "}
+              {String(readWirePopulation(point.sweep.failed, "sweep.failed"))} failed · gen{" "}
+              {String(readWirePopulation(point.sweep.generation, "sweep.generation"))}
               {point.sweep.generation_open ? " (pass in flight)" : " (pass complete)"}
             </span>{" "}
             <span className="dim">
@@ -218,7 +227,7 @@ function DetailBody({
         <dd>{count(point.accounts)}</dd>
 
         <dt>refused position rows</dt>
-        <dd>{String(point.refused_positions)}</dd>
+        <dd>{String(readWirePopulation(point.refused_positions, "refused_positions"))}</dd>
 
         <dt>liquidatable positions</dt>
         <dd>{count(point.liquidatable_positions)}</dd>
@@ -249,7 +258,7 @@ function DetailBody({
 
           <dt>observed batch</dt>
           <dd data-testid="observatory-point-batch">
-            #{String(point.batch_id)}{" "}
+            #{String(readWirePopulation(point.batch_id, "batch_id"))}{" "}
             <span className="dim">
               (the COMPLETE batch this bucket observed; the batch itself may since have been
               pruned by retention)

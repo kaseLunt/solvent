@@ -34,6 +34,7 @@ import {
   engineStatsSplitLine,
   engineStatsWithheldAnswer,
   histogramReadingLine,
+  malformedHistogramCounts,
   liquidatableCardSub,
   riskMapCellDetailLine,
   riskMapCoverageLine,
@@ -816,4 +817,45 @@ test("R8 / AC-55: no `--ink-1` reference survives in any file this wave touched"
     const source = readFileSync(path.join(root, file), "utf8");
     expect(source, file).not.toContain("--ink-1");
   }
+});
+
+// ---------------------------------------------------------------------------
+// p1b-14 (Codex round 6) — THE HISTOGRAM COUNT CLASSIFIER. A bucket-count
+// token `-1e-324` parses to -0: `String(bucket.count)` rendered "0" (a served
+// account HIDDEN as a measured zero) and the -0 joined the denominator
+// reduce. `malformedHistogramCounts` is the decision layer EnginePanel
+// consults BEFORE any count arithmetic; every consumed count answers to
+// `isWirePopulation`.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-14: malformedHistogramCounts — the panel's count classifier", () => {
+  const cleanHist = BOOK.hf_histogram.engines[0] as EngineHistogram;
+
+  test("a clean histogram classifies clean, and 0 stays a legal count", () => {
+    expect(malformedHistogramCounts(cleanHist)).toEqual([]);
+  });
+
+  test("a -0 bucket count is named by index — the defect input, pinned", () => {
+    const mutated = structuredClone(cleanHist);
+    const bucket = mutated.buckets[3];
+    if (bucket === undefined) throw new Error("fixture shape drifted");
+    // The defect input: the raw token -1e-324 parses to NEGATIVE ZERO.
+    bucket.count = JSON.parse("-1e-324") as number;
+    expect(Object.is(bucket.count, -0)).toBe(true);
+    expect(malformedHistogramCounts(mutated)).toEqual(["buckets[3].count"]);
+  });
+
+  test("negative, fractional and unsafe counts are flagged; fields in read order", () => {
+    const mutated = structuredClone(cleanHist);
+    const first = mutated.buckets[0];
+    if (first === undefined) throw new Error("fixture shape drifted");
+    first.count = -1;
+    mutated.infinite_count = 1.5;
+    mutated.refused_count = 2 ** 53;
+    expect(malformedHistogramCounts(mutated)).toEqual([
+      "buckets[0].count",
+      "infinite_count",
+      "refused_count",
+    ]);
+  });
 });
