@@ -354,6 +354,31 @@
   font-weight: 600;
 }
 
+/* Phase 0 fix 1 — the address-binding lines. The stale barrier mirrors
+   .notServed above (the tornado deep-link notice's block): the same
+   border/background/ink tokens, nothing invented. */
+.staleBarrier {
+  border: 1px dashed var(--ink-3);
+  border-radius: var(--r-md);
+  background: var(--refused-bg);
+  padding: var(--sp-5);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/* The bound-result line mirrors the batch stamp's .stampline register
+   (components/primitives.module.css): the muted mono caption tokens, with no
+   panel chrome of its own. */
+.resultAddress {
+  margin-top: var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
 .notApplicable {
   border: 1px dashed var(--ink-3);
   border-radius: var(--r-md);

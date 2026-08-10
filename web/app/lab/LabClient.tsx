@@ -43,15 +43,15 @@ import { LabBookPanel, bookDekFor, type BookState } from "./LabBookPanel";
 import { LabBoundaryGroup } from "./LabBoundaryGroup";
 import { LabScenarioChips } from "./LabScenarioChips";
 import { LabScenarioDetail } from "./LabScenarioDetail";
+import {
+  addressBinding,
+  boundResultLine,
+  staleBarrierLine,
+  type StressPhase,
+} from "./addressBinding";
 import styles from "./lab.module.css";
 
 type Mode = "address" | "book";
-
-type StressPhase =
-  | { status: "idle" }
-  | { status: "loading"; addr: string }
-  | { status: "done"; addr: string; result: StressLookup }
-  | { status: "error"; addr: string; message: string };
 
 function describeError(error: unknown): string {
   if (error instanceof UnavailableError) {
@@ -152,6 +152,11 @@ export function LabClient() {
   }, [mode, readBook]);
 
   const inputValid = isAddress(input);
+
+  // Phase 0 fix 1: the render-time identity check between the input box and
+  // the settled result. A pure derivation — editing the box never destroys
+  // the phase, so retyping the exact address restores the result.
+  const binding = addressBinding(input, phase);
 
   /**
    * The per-address scenarios AS THE WIRE SERVED THEM, for the address panel
@@ -296,20 +301,33 @@ export function LabClient() {
             </p>
           )}
 
-          {phase.status === "error" && (
-            <div className={styles.errorState} data-testid="lab-error">
-              {phase.message}
-            </div>
-          )}
+          {binding.kind === "stale" ? (
+            <p data-testid="lab-stale-result" className={styles.staleBarrier}>
+              {staleBarrierLine(binding.addr)}
+            </p>
+          ) : (
+            <>
+              {phase.status === "error" ? (
+                <div className={styles.errorState} data-testid="lab-error">
+                  {phase.message}
+                </div>
+              ) : null}
 
-          {phase.status === "done" && (
-            <StressResult
-              result={phase.result}
-              committed={committed}
-              activeId={activeId}
-              activeScenario={activeScenario}
-              onSelect={setSelectedId}
-            />
+              {phase.status === "done" ? (
+                <>
+                  <p data-testid="lab-result-address" className={styles.resultAddress}>
+                    {boundResultLine(phase.addr)}
+                  </p>
+                  <StressResult
+                    result={phase.result}
+                    committed={committed}
+                    activeId={activeId}
+                    activeScenario={activeScenario}
+                    onSelect={setSelectedId}
+                  />
+                </>
+              ) : null}
+            </>
           )}
         </section>
       )}
