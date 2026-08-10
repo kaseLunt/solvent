@@ -284,6 +284,15 @@ export function liquidationPriceEvidence(
   subject: string,
 ): EvidenceDescriptor {
   const lp = position.liquidation_price;
+  // P0-8 finding 1, consistency leg — the drawer obeys the same law as the
+  // row: the ceil-health sentence is a positive health claim, and it renders
+  // ONLY when a numeric boundary EXISTS on the wire (a served FactorPrice
+  // whose `lowest_healthy_price` is non-null) AND the wire itself asserts
+  // `boundary_is_healthy: true`. An absent boundary is stated as not
+  // established (with the wire's reason); a declined one is named by its own
+  // wire field.
+  const first = lp?.prices[0];
+  const boundaryEstablished = first !== undefined && first.lowest_healthy_price !== null;
   const rows: EvidenceRow[] =
     lp === null
       ? [{ label: "health boundary price", value: "not published for this position", tone: "dim" }]
@@ -294,12 +303,34 @@ export function liquidationPriceEvidence(
               `${renderNullableDecimal(price.lowest_healthy_price, { decimals: price.price_decimals })} ` +
               `(current ${renderNullableDecimal(price.current_price, { decimals: price.price_decimals })})`,
           })),
-          {
-            label: "ceil disclosure",
-            value:
-              "ceil(P*): at exactly this price the position is still HEALTHY, and liquidation begins strictly below it.",
-            tone: "dim",
-          },
+          ...(boundaryEstablished
+            ? lp.boundary_is_healthy
+              ? [
+                  {
+                    label: "ceil disclosure",
+                    value:
+                      "ceil(P*): at exactly this price the position is still HEALTHY, and liquidation begins strictly below it.",
+                    tone: "dim" as const,
+                  },
+                ]
+              : [
+                  {
+                    label: "ceil disclosure",
+                    value:
+                      "withheld — the wire does not certify health at exactly this boundary " +
+                      "(boundary_is_healthy: false), so no exact-price health claim is made.",
+                    tone: "warn" as const,
+                  },
+                ]
+            : [
+                {
+                  label: "boundary",
+                  value:
+                    "not established — the solve published no boundary price on this axis" +
+                    (lp.reason !== undefined && lp.reason !== "" ? ` · ${lp.reason}` : ""),
+                  tone: "dim" as const,
+                },
+              ]),
           { label: "axis", value: lp.axis },
           {
             label: "solve",

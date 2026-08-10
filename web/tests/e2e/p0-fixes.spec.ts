@@ -466,6 +466,127 @@ async function mockPostureWithBatchAge(page: Page, ageSeconds: number): Promise<
   return harness;
 }
 
+// ---------------------------------------------------------------------------
+// p0-8 finding 1 · absent boundaries refuse the health assertion.
+// The wire legally serves `liquidation_price` with an EMPTY `prices` array
+// (no-debt / no-factor solves) or with `lowest_healthy_price: null`
+// (NullableDecimal), and `boundary_is_healthy` is the wire's OWN say on
+// whether the boundary is a health claim. The row may say "still healthy at
+// exactly this price (ceil P*)" ONLY when a numeric boundary exists AND
+// `boundary_is_healthy` is true — an em dash dressed with a health sentence
+// asserted an unknowable as healthy.
+// Variants: structuredClone of the committed ADDRESS_FOUND fixture
+// (tests/fixtures/inspector.ts), one documented purpose each, all
+// contract-legal per api/openapi.yaml (LiquidationPrice / FactorPrice).
+// ---------------------------------------------------------------------------
+
+test.describe("p0-8 · absent boundaries refuse the health assertion", () => {
+  test("(a) empty prices: the row states the boundary is not established — no health claim", async ({ page }) => {
+    // Single documented purpose: the empty-prices arm with the wire's own
+    // reason. The Aave position's liquidation_price gets `prices: []` and the
+    // optional `reason` the solver serves alongside it; nothing else moves.
+    const body = structuredClone(ADDRESS_FOUND);
+    const aave = body.positions[0];
+    if (aave === undefined || aave.liquidation_price === null) {
+      throw new Error("fixture shape drifted");
+    }
+    aave.liquidation_price.prices = [];
+    aave.liquidation_price.reason = "position holds no counted collateral in the factor";
+    await mockInspectorFound(page);
+    await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    const card = page.getByTestId("position-aave_v3_etherfi");
+    await expect(card.getByText("Health boundary price")).toBeVisible();
+    // The not-established register, with the wire's reason exposed.
+    const row = card.getByTestId("boundary-not-established");
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("not established");
+    await expect(row).toContainText("position holds no counted collateral in the factor");
+    // The kill pin: no exact-price health assertion anywhere on the card.
+    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
+  });
+
+  test("(b) null lowest_healthy_price: a served FactorPrice without a boundary refuses too", async ({ page }) => {
+    // Single documented purpose: the null-boundary arm. Only
+    // prices[0].lowest_healthy_price flips to null (NullableDecimal);
+    // current_price stays served — a mark without a boundary is still not
+    // a health claim.
+    const body = structuredClone(ADDRESS_FOUND);
+    const price = body.positions[0]?.liquidation_price?.prices[0];
+    if (price === undefined) throw new Error("fixture shape drifted");
+    price.lowest_healthy_price = null;
+    await mockInspectorFound(page);
+    await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    const card = page.getByTestId("position-aave_v3_etherfi");
+    const row = card.getByTestId("boundary-not-established");
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("not established");
+    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
+  });
+
+  test("(c) boundary_is_healthy false: the number and the mark render WITHOUT the assertion", async ({ page }) => {
+    // Single documented purpose: the declined-assertion arm. Only
+    // boundary_is_healthy flips to false — the numeric boundary stays, the
+    // current mark stays, and the health sentence may not.
+    const body = structuredClone(ADDRESS_FOUND);
+    const aave = body.positions[0];
+    if (aave === undefined || aave.liquidation_price === null) {
+      throw new Error("fixture shape drifted");
+    }
+    aave.liquidation_price.boundary_is_healthy = false;
+    await mockInspectorFound(page);
+    await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
+    await page.goto(`/inspector/${FOUND_ADDR}`);
+    const card = page.getByTestId("position-aave_v3_etherfi");
+    // boundary value + current mark still render (p0-3's own pins, unchanged
+    // fixture numbers)…
+    await expect(card).toContainText("3,703.70370371");
+    await expect(card).toContainText("current weETH ≈ 4,000");
+    // …but the exact-price health assertion is gone — the row's kill pin.
+    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
+    // The drawer obeys the same law: no ceil-health sentence.
+    await card.getByRole("button", { name: "explain health boundary price" }).click();
+    await expect(page.getByText("EXPLAIN · HEALTH BOUNDARY PRICE")).toBeVisible();
+    await expect(page.getByText(/still HEALTHY/)).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p0-8 finding 2 · malformed deltas refuse the quiet arm.
+// Run-book bodies are JSON-cast without runtime validation, so a delta outside
+// the wire Decimal contract (api/openapi.yaml `Decimal`: ^-?[0-9]+$) can reach
+// the cell — and the old zero test read "" as zero, rendering an unknowable
+// as "no effective movement". A malformed field is its own visible register.
+// ---------------------------------------------------------------------------
+
+test.describe("p0-8 · malformed deltas refuse the quiet arm", () => {
+  test("an empty-string delta renders the malformed register, never 'no effective movement'", async ({ page }) => {
+    await mockCold(page);
+    // Single documented change to the committed run-book fixture, serving ONE
+    // purpose (the malformed arm): the first engine's bad_debt_delta_usd set
+    // to "" — outside the wire Decimal contract. Everything else
+    // byte-identical; every other read field stays contract-legal.
+    const body = structuredClone(RUN_BOOK_200);
+    const engine = body.engines[0];
+    if (!engine) throw new Error("fixture shape: engines[0] missing");
+    engine.bad_debt_delta_usd = "";
+    await mockRunBook(page, body);
+    await page.goto("/lab");
+    await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
+    const cell = aaveCell(page);
+    // Settle gate first (both the honest arm and a quiet-routed mutant reach
+    // "result"), THEN the kill pin in isolation: the quiet line must be
+    // absent. A mutant routing malformed to quiet dies exactly here.
+    await expect(cell).toHaveAttribute("data-cell-state", "result");
+    await expect(cell).not.toContainText("no effective movement");
+    // The malformed register: visible, non-quiet, naming the field.
+    await expect(cell).toHaveAttribute("data-cell-outcome", "malformed");
+    await expect(cell).toContainText("unreadable");
+    await expect(cell).toContainText("bad_debt_delta_usd");
+  });
+});
+
 test.describe("p0-5 · snapshot chip", () => {
   test("a FRESH batch still shows its age beside the live badge", async ({ page }) => {
     const harness = await mockPostureWithBatchAge(page, 42); // snapshot frame, age_seconds 42

@@ -144,6 +144,30 @@ function Cell({ state }: { state: LabCellState }) {
       // "$0" eligible-debt delta, and an all-zero engine now says so in words
       // rather than staying a bare zero.
       const outcome = cellPrimaryOutcome(state.engine);
+      // P0-8 finding 2 — a MALFORMED outcome is its own visible register, in
+      // the refusal tone (the withheld cell's own frame): the run served a
+      // body whose fields fail the wire Decimal contract, so this cell can
+      // read NOTHING from it — not a dollar value, not a quiet zero. The
+      // offending fields are named; "no effective movement" never renders
+      // here, because that sentence is a measurement claim and this cell has
+      // no measurement.
+      if (outcome.kind === "malformed") {
+        return (
+          <td
+            className={styles.cellWithheld}
+            data-testid="matrix-cell"
+            data-cell-state="result"
+            data-cell-outcome="malformed"
+            title={`batch #${String(state.batchId)} · ${outcome.fields.join(", ")} failed the wire Decimal contract (^-?[0-9]+$): version skew or a malformed body. The cell refuses to read a value it cannot parse.`}
+          >
+            <span className={styles.cellTag}>MALFORMED RESULT</span>
+            <span className={styles.cellSub}>
+              outcome unreadable — {outcome.fields.join(", ")} failed the wire contract; nothing
+              is claimed, and unreadable is not zero
+            </span>
+          </td>
+        );
+      }
       return (
         <td
           className={styles.cellResult}

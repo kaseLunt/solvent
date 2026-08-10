@@ -2769,19 +2769,62 @@ export function usd(value: string, decimals: number): string {
 
 // ————— Phase 0 fix 2: the cell's primary-outcome composition —————
 // A settled cell must not read "$0" while ANY outcome dimension moved.
-// Wire deltas are integer decimal strings scaled by usd_decimals; zero is
-// any string whose digits are all zero (sign irrelevant).
+// Wire deltas are integer decimal strings scaled by usd_decimals.
+//
+// P0-8 finding 2: run-book bodies are JSON-cast without runtime validation,
+// so a malformed or version-skewed field CAN reach this function — and the
+// old zero test (`/^-?0*\.?0*$/`) swallowed "", "-", ".", "00.00" as zeros,
+// suppressing an unreadable value into "no effective movement": an unknowable
+// rendered as a quiet zero. A field outside the wire contract is MALFORMED —
+// its own outcome arm, named by field, never quiet and never movement.
 export const CELL_QUIET_LINE = "no effective movement";
 
 export type CellOutcome =
   | { kind: "movement"; parts: string[] }
-  | { kind: "quiet" };
+  | { kind: "quiet" }
+  | { kind: "malformed"; fields: string[] };
 
+/**
+ * The wire Decimal contract, verbatim (api/openapi.yaml `Decimal` /
+ * `NullableDecimal` pattern): an exact signed integer as a decimal string —
+ * `^-?[0-9]+$`. NEVER a JSON number, never empty, never a fraction or
+ * exponent, never whitespace.
+ */
+const WIRE_DECIMAL = /^-?[0-9]+$/;
+
+/** Runtime check: the JSON-cast gives no guarantee this is even a string. */
+function isWireDecimal(value: unknown): value is string {
+  return typeof value === "string" && WIRE_DECIMAL.test(value);
+}
+
+/** Zero under the wire contract: every digit zero. Call ONLY on validated values. */
 function isZeroDecimal(value: string): boolean {
-  return /^-?0*\.?0*$/.test(value);
+  return /^-?0+$/.test(value);
 }
 
 export function cellPrimaryOutcome(engine: LabRunBookEngine): CellOutcome {
+  // P0-8 finding 2 — validation FIRST, in read order. Every field this
+  // function reads must satisfy its wire contract before any zero/movement
+  // decision is made; a failing field makes the whole outcome MALFORMED and
+  // names the field, because a partial answer over unreadable inputs is a
+  // claim the data cannot carry.
+  const mr = engine.market_realization;
+  const malformed: string[] = [];
+  if (!Number.isInteger(engine.newly_eligible_accounts)) {
+    malformed.push("newly_eligible_accounts");
+  }
+  if (!isWireDecimal(engine.eligible_debt_delta_usd)) {
+    malformed.push("eligible_debt_delta_usd");
+  }
+  if (!isWireDecimal(engine.bad_debt_delta_usd)) {
+    malformed.push("bad_debt_delta_usd");
+  }
+  if (mr && !isWireDecimal(mr.execution_shortfall_usd)) {
+    malformed.push("market_realization.execution_shortfall_usd");
+  }
+  if (malformed.length > 0) {
+    return { kind: "malformed", fields: malformed };
+  }
   const parts: string[] = [];
   if (engine.newly_eligible_accounts !== 0) {
     parts.push(`${renderSignedCount(engine.newly_eligible_accounts)} newly eligible`);
@@ -2792,7 +2835,6 @@ export function cellPrimaryOutcome(engine: LabRunBookEngine): CellOutcome {
   if (!isZeroDecimal(engine.bad_debt_delta_usd)) {
     parts.push(`Δ bad debt ${usd(engine.bad_debt_delta_usd, engine.usd_decimals)}`);
   }
-  const mr = engine.market_realization;
   if (mr && !isZeroDecimal(mr.execution_shortfall_usd)) {
     parts.push(`execution shortfall ${usd(mr.execution_shortfall_usd, mr.usd_decimals)}`);
   }

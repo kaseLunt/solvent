@@ -57,6 +57,7 @@ import {
   bookHoleEngines,
   bookRefusal,
   bookReachedEveryCoveredEngine,
+  cellPrimaryOutcome,
   isAllHoleBook,
   matrixColumns,
   rerunFailedBanner,
@@ -136,6 +137,33 @@ const NET_ELIGIBLE_SUB =
   "Healthy→eligible adds; eligible→healthy subtracts.";
 
 function EngineResult({ engine }: { engine: LabRunBookEngine }) {
+  // P0-8 finding 2 — VALIDATE BEFORE RENDERING, with the SAME decision the
+  // matrix cell reads (one law, one function). A body whose outcome fields
+  // fail the wire Decimal contract used to reach the money renderers below,
+  // which THROW on non-contract strings — and the route's error boundary took
+  // the whole page with them. This panel now refuses the engine's block
+  // alone, names the unreadable fields, and claims nothing: not a number,
+  // not a zero, and never "no effective movement".
+  const outcome = cellPrimaryOutcome(engine);
+  if (outcome.kind === "malformed") {
+    return (
+      <section
+        className={styles.panel}
+        data-testid="book-engine"
+        data-engine={engine.engine}
+        data-engine-outcome="malformed"
+      >
+        <p className={styles.panelTitle}>
+          <EngineChip engine={engine.engine} />
+        </p>
+        <p className={styles.answerLine}>
+          MALFORMED RESULT — this engine&apos;s block is unreadable: {outcome.fields.join(", ")}{" "}
+          failed the wire Decimal contract (^-?[0-9]+$), version skew or a malformed body. Nothing
+          is claimed for it, and unreadable is not zero.
+        </p>
+      </section>
+    );
+  }
   // CX-4: the Lab's ONE grouped-USD renderer.
   const money = (value: string) => renderUsdAmount(value, engine.usd_decimals);
   const cell = (row: (typeof AGGREGATE_ROWS)[number], side: "before" | "after") => {

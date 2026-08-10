@@ -7,7 +7,12 @@
 
 import { expect, test } from "@playwright/test";
 import { refinePosition } from "@solvent/client";
-import { comparatorFor, hfEvidence, totalEvidence } from "../../lib/evidence";
+import {
+  comparatorFor,
+  hfEvidence,
+  liquidationPriceEvidence,
+  totalEvidence,
+} from "../../lib/evidence";
 import { ADDRESS_FOUND } from "../fixtures/inspector";
 
 const batch = ADDRESS_FOUND.batch;
@@ -43,6 +48,58 @@ test("a stale price input travels through the chain with a visible (non-default)
   const staleRow = priceSection?.rows.find((row) => row.value.includes("stale"));
   expect(staleRow).toBeDefined();
   expect(staleRow?.tone).toBe("warn");
+});
+
+// ---------------------------------------------------------------------------
+// p0-8 finding 1, consistency leg — the DRAWER must obey the same law as the
+// row: the ceil-health sentence ("at exactly this price the position is still
+// HEALTHY") is a positive health claim, and it may only render when a numeric
+// boundary EXISTS on the wire AND the wire itself asserts
+// `boundary_is_healthy: true`. An absent boundary states "not established"
+// instead; a declined one names `boundary_is_healthy: false`.
+// ---------------------------------------------------------------------------
+
+/** Every row of every section, flattened to searchable text. */
+function drawerText(wire: NonNullable<typeof aaveWire>): string {
+  const descriptor = liquidationPriceEvidence(refinePosition(wire), batch, "—");
+  return descriptor.sections
+    .flatMap((section) => section.rows)
+    .map((row) => `${row.label}: ${row.value}`)
+    .join("\n");
+}
+
+test("the drawer refuses the ceil-health assertion when prices is empty", () => {
+  // structuredClone variant, single purpose: the contract-legal empty `prices`
+  // array (no-debt / no-factor solves serve it) must not read as ceil-health.
+  const wire = structuredClone(aaveWire);
+  if (wire.liquidation_price === null) throw new Error("fixture invariant: aave lp expected");
+  wire.liquidation_price.prices = [];
+  const text = drawerText(wire);
+  expect(text).not.toContain("still HEALTHY");
+  expect(text).toContain("not established");
+});
+
+test("the drawer refuses the ceil-health assertion when lowest_healthy_price is null", () => {
+  // structuredClone variant, single purpose: a served FactorPrice whose
+  // boundary field is null (NullableDecimal) is an absent boundary too.
+  const wire = structuredClone(aaveWire);
+  const price = wire.liquidation_price?.prices[0];
+  if (price === undefined) throw new Error("fixture invariant: factor price expected");
+  price.lowest_healthy_price = null;
+  const text = drawerText(wire);
+  expect(text).not.toContain("still HEALTHY");
+  expect(text).toContain("not established");
+});
+
+test("the drawer withholds the ceil assertion when the wire declines it (boundary_is_healthy: false)", () => {
+  // structuredClone variant, single purpose: a numeric boundary the wire does
+  // NOT certify as healthy keeps its number but loses the health sentence.
+  const wire = structuredClone(aaveWire);
+  if (wire.liquidation_price === null) throw new Error("fixture invariant: aave lp expected");
+  wire.liquidation_price.boundary_is_healthy = false;
+  const text = drawerText(wire);
+  expect(text).not.toContain("still HEALTHY");
+  expect(text).toContain("boundary_is_healthy: false");
 });
 
 test("the descriptor quotes the wire's own numbers for the HF law", () => {

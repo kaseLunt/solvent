@@ -406,10 +406,42 @@ export function InspectorPositionCard({
       );
     }
     const first = lp.prices[0];
-    const value =
-      first === undefined
-        ? EM_DASH
-        : money(first.lowest_healthy_price, { decimals: first.price_decimals });
+    /* P0-8 finding 1 — A BOUNDARY THAT DOES NOT EXIST MAY NOT BE CALLED
+       HEALTHY. The wire legally serves `liquidation_price` with an EMPTY
+       `prices` array (no-debt / no-factor solves) or with
+       `lowest_healthy_price: null` (NullableDecimal). The old row rendered an
+       em dash for those and STILL appended "still healthy at exactly this
+       price (ceil P*)" — a positive health claim about a number the wire
+       never published. This arm is the refusal register instead: the row
+       states the boundary is not established and carries the wire's own
+       `reason` inline. The diagnostic/already-breached chips are boundary
+       QUALIFIERS, so they do not render beside a row that claims no
+       boundary; the axis-scoped no-price-path badge keeps its R1 rule. */
+    if (first === undefined || first.lowest_healthy_price === null) {
+      return (
+        <div className={styles.kvRow}>
+          <span className={styles.k}>Health boundary price</span>
+          <span
+            className={`${styles.v} ${styles.vDim}`}
+            data-testid="boundary-not-established"
+            title="the solve served no numeric boundary on this axis (an empty prices array or a null lowest_healthy_price), so no exact-price health claim is made."
+          >
+            not established — the solve published no boundary price on this axis
+            {lp.reason !== undefined && lp.reason !== "" ? ` · ${lp.reason}` : ""}
+            {lp.never_liquidatable && verdict !== "liquidatable" && (
+              <span
+                className={`${styles.verdict} ${styles.verdictDim}`}
+                data-testid="no-price-path-badge"
+                title={noPricePathTitle(lp.reason)}
+              >
+                {NO_PRICE_PATH_LABEL}
+              </span>
+            )}
+          </span>
+        </div>
+      );
+    }
+    const value = money(first.lowest_healthy_price, { decimals: first.price_decimals });
     return (
       <div className={styles.kvRow}>
         <span className={styles.k}>Health boundary price</span>
@@ -427,9 +459,12 @@ export function InspectorPositionCard({
               current mark (the account can already be liquidatable with the
               mark far below the boundary). */}
           <span className={styles.vDim}>
-            {first === undefined
-              ? " · still healthy at exactly this price (ceil P*)"
-              : ` · current ${symbolForAsset(first.asset)} ≈ ${money(first.current_price, { decimals: first.price_decimals })} · still healthy at exactly this price (ceil P*)`}
+            {` · current ${symbolForAsset(first.asset)} ≈ ${money(first.current_price, { decimals: first.price_decimals })}`}
+            {/* P0-8 finding 1 — the exact-price health assertion renders ONLY
+                when the wire itself asserts it (`boundary_is_healthy: true`).
+                A boundary the wire declines to certify keeps its number and
+                the current mark, and claims nothing further. */}
+            {lp.boundary_is_healthy ? " · still healthy at exactly this price (ceil P*)" : ""}
           </span>
           {lp.diagnostic && <span className={`${styles.verdict} ${styles.verdictWarn}`}>diagnostic</span>}
           {lp.already_breached && <span className={`${styles.verdict} ${styles.verdictCrit}`}>already breached</span>}

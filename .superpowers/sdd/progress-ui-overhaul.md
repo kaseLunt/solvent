@@ -477,3 +477,129 @@ waiting for a task that owns r7-fixes.spec.ts).
   styleguide skip.
 - `npm run typecheck`: completely clean. `npm run lint`: 0 errors, the one
   pre-existing LabBookPanel.tsx:27 warning (ledgered at the seal).
+
+## p0-8 · Codex adversarial round — two HONESTY-LAW fixes (fix wave)
+
+Codex's Phase-0 adversarial round returned two findings; both fixed test-first
+on main. House laws at stake: an unknowable never looks like a zero — or like
+a health assertion.
+
+### Finding 1 [high] — absent boundaries asserted as healthy (Inspector)
+
+`renderLiquidationPriceRow` (InspectorPositionCard.tsx, reshaped by p0-3):
+with `liquidation_price` non-null but `prices` EMPTY (contract-legal:
+no-debt/no-factor solves) or `prices[0].lowest_healthy_price: null`
+(NullableDecimal), the value arm rendered an em dash and STILL appended
+"still healthy at exactly this price (ceil P*)" — and `boundary_is_healthy`
+was never consulted anywhere. An unavailable boundary rendered as a positive
+health claim (and, on the r1 blocker fixture, did so beside a liquidatable
+verdict).
+
+Fix (InspectorPositionCard.tsx):
+- The exact-price health assertion renders ONLY when a numeric boundary
+  exists (`prices[0]` present AND `lowest_healthy_price` non-null) AND
+  `lp.boundary_is_healthy === true`.
+- Absent boundary → a distinct not-established arm in the null-arm register
+  (`boundary-not-established` testid): "not established — the solve published
+  no boundary price on this axis", wire `reason` inline; the row's own
+  refusal sentence in the hover (the committed `note` is a ceil-rendering
+  instruction and does NOT carry this arm's register, so it stays off the
+  row). The diagnostic/already-breached chips are boundary QUALIFIERS and do
+  not render beside a no-boundary claim; the axis-scoped no-price-path badge
+  keeps its R1 rule (never beside a liquidatable verdict).
+- Boundary exists but `boundary_is_healthy: false` → value + current mark,
+  no assertion.
+- Consistency leg (lib/evidence.ts `liquidationPriceEvidence`): the drawer
+  had the same defect — the "ceil disclosure" row asserted still-HEALTHY
+  unconditionally for every non-null lp. Now: established+true → unchanged
+  ceil row; established+false → "withheld — the wire does not certify health
+  at exactly this boundary (boundary_is_healthy: false)" (warn); absent →
+  "boundary · not established" (dim) with the wire reason.
+
+New pins:
+- e2e p0-fixes.spec.ts "p0-8 · absent boundaries refuse the health
+  assertion": (a) empty `prices` (+ wire reason exposed), (b) null
+  `lowest_healthy_price`, (c) `boundary_is_healthy: false` — all three pin
+  `getByText(/still healthy/i)` count 0 on the card; (a)/(b) pin the
+  not-established register visible; (c) pins boundary "3,703.70370371" +
+  "current weETH ≈ 4,000" visible and opens the drawer (no "still HEALTHY").
+  All structuredClone variants of the committed ADDRESS_FOUND, one documented
+  purpose each, contract-legal per LiquidationPrice/FactorPrice.
+- unit inspector-evidence.spec.ts: three drawer pins (empty prices / null
+  boundary / declined) — no "still HEALTHY"; "not established" /
+  "boundary_is_healthy: false" named.
+
+Mutant (gate reverted — assertion unconditional): rebuild, KILLED at
+p0-fixes.spec.ts:547, the (c) `still healthy` count-0 pin, in isolation —
+(a)/(b) still pass under the mutant, exactly the discriminating pin.
+
+### Finding 2 [medium] — malformed deltas suppressed into quiet zeros (Lab)
+
+`isZeroDecimal` (matrixCells.ts, from p0-2) accepted "", "-", ".", "-.",
+"00.00" as zero; run-book bodies are JSON-cast without runtime validation,
+so a malformed/version-skewed delta was suppressed into "no effective
+movement" — an unknowable rendered as a quiet zero. (Ledgered at Task 2 as a
+deferred minor; Codex correctly re-graded the reachable path.)
+
+Fix:
+- matrixCells.ts: `WIRE_DECIMAL = /^-?[0-9]+$/` — the wire Decimal contract
+  verbatim (confirmed against api/openapi.yaml `Decimal`/`NullableDecimal`,
+  and the same pattern @solvent/client's `parseDecimal` throws on).
+  `isWireDecimal` runtime-checks type AND pattern; `isZeroDecimal` tightens
+  to `/^-?0+$/` and is called only on validated values. `CellOutcome` gains
+  `{ kind: "malformed"; fields: string[] }`; `cellPrimaryOutcome` validates
+  ALL FOUR read fields in read order (`newly_eligible_accounts` via
+  Number.isInteger; the three Decimal strings incl.
+  `market_realization.execution_shortfall_usd`) BEFORE any zero/movement
+  decision and returns the malformed arm naming every failing field.
+- LabMatrix.tsx Cell: the malformed arm renders in the withheld cell's frame
+  (`cellWithheld` class, `data-cell-outcome="malformed"`): tag "MALFORMED
+  RESULT", sub naming the fields — no dollar value, no quiet line, "and
+  unreadable is not zero".
+- LabBookPanel.tsx EngineResult: the red run EXPOSED A CRASH the finding did
+  not name — the panel below the matrix renders the same body through
+  `renderSignedUsdAmount` → `parseDecimal`, which THROWS on non-contract
+  strings, and the route's error boundary took the WHOLE /lab page ("This
+  page couldn't load"), making the mandated cell register unreachable.
+  EngineResult now consults the SAME `cellPrimaryOutcome` decision (one law,
+  one function) and renders a per-engine MALFORMED RESULT panel naming the
+  fields instead of throwing the page away. Scope note: only the four
+  outcome fields are gated; other malformed fields elsewhere in a body still
+  fail noisy (pre-existing, unchanged).
+
+New pins:
+- unit matrix-outcome.spec.ts: ""/"-"/"."/"0.0"/"1e5"/" 0"/"0 " each →
+  `{kind:"malformed", fields:["bad_debt_delta_usd"]}`; shortfall named by
+  wire path; non-integer `newly_eligible_accounts` malformed; multi-field
+  naming in read order; "-0"/"000" still quiet (contract-legal zeros).
+- e2e p0-fixes.spec.ts "p0-8 · malformed deltas refuse the quiet arm":
+  structuredClone variant, `bad_debt_delta_usd: ""` — settle gate, then the
+  kill pin `not.toContainText("no effective movement")` BEFORE the positive
+  pins (register visible, field named, `data-cell-outcome="malformed"`), so
+  the quiet-routed mutant dies at the absent-pin in isolation.
+
+Mutants (2):
+- (i) validation removed, old regex restored (unit tier, no rebuild):
+  KILLED — 10 unit deaths at the malformed pins (every bad-value case +
+  shortfall + newly-eligible + read-order), each receiving `{kind:"quiet"}`.
+- (ii) Cell malformed arm routed to quiet (EngineResult guard left intact to
+  isolate the cell): rebuild, KILLED at p0-fixes.spec.ts:582 — the
+  absent-pin, with the mutant's own rendering captured ("…net eligible
+  accounts +1 · no effective movement · batch #1").
+
+### Red-first evidence
+
+Implementation stashed (`git stash push` of the five source files), pre-fix
+build: 13 unit failures (10 matrix-outcome + 3 inspector-evidence) and 4 e2e
+failures — exactly the new pins. The malformed e2e's pre-fix failure mode was
+the whole-page crash above, which is what surfaced the EngineResult throw.
+
+### Closing counts (p0-8)
+
+- Suite: 1392 → **1410** (+18: matrix-outcome 11, inspector-evidence 3,
+  p0-fixes e2e 4).
+- Full run (final tree, `npm run build` + full p0-config suite,
+  web-3818-p08full.log): **1409 passed, 1 skipped, 0 failed (35.4s)** —
+  prior 1391 + 18 new, the same single pre-existing styleguide skip, no
+  other movement.
+- `npm run typecheck`: completely clean.
