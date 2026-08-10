@@ -846,10 +846,13 @@ test("r89: a contradictory row is OUTSIDE the sum and NAMED beside it", () => {
   // The counted entry alone reconciles with the total; the contradictory row
   // (value + no-price-witness flag) is excluded from the arithmetic and the
   // sentence says so.
+  // Symbol OMITTED, not null: the wire type is `symbol?: string` and the
+  // contract's own unpriced example carries no symbol key at all (the same
+  // no-symbol shape UNPRICED above uses).
   const contradictory = {
-    ...COUNTED,
     asset: "0x000000000000000000000000000000000000CAFE",
-    symbol: null,
+    decimals: 18,
+    amount: "2000000000000000000",
     value_usd: "12300000000",
     unpriced: true,
     note: "CONTRADICTORY",
