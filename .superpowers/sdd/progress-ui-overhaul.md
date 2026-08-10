@@ -732,3 +732,20 @@ failure (the function IS part of the fix).
   **1415 passed, 1 skipped, 0 failed (35.7s)** — prior 1409 + 6 new, the
   same single pre-existing styleguide skip, no other movement.
 - `npm run typecheck`: completely clean.
+
+## Phase 0 CLOSE (2026-08-09, owner-ratified)
+
+Codex rounds: r1 (2 findings -> p0-8), r2 (3 findings -> p0-9), r3 (NO-SHIP on the
+malformed-wire class). Owner ruling at the loop breaker: ACCEPT Phase 0 and route the
+malformed-wire class to Phase 1 Track B (program design amended in the same commit).
+Open Codex r3 findings carried to Track B: LabBookPanel gate validates a subset of the
+engine subtree (aggregates/nested monetary fields unguarded); FactorPrice entries
+trusted (null entry / malformed decimals / missing price_decimals reach money());
+tornado/set-run path uses permissive BigInt with no classification (tornadoCells.ts
+barLength). API defect (server-side, out of program scope): solver-error
+wireLiquidationPrice serializes prices:null violating the required-array contract.
+
+Phase 0 delivered: five trust fixes (p0-1..p0-5), Lab terminology border (p0-7), two
+Codex hardening waves (p0-8, p0-9). Suite 1362 -> 1415 passed + 1 skip; typecheck clean;
+lint 0 errors/1 pre-existing warning; 15 mutants killed in isolation
+(.superpowers/sdd/p0-mutations/ + p0-7/8/9 ledger sections). Commits c320d4b..8771342.

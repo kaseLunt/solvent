@@ -114,9 +114,18 @@ paths, landed serially:
     transitions = heatmap; asset movement = changed-assets delta table; multi-scenario =
     signed dot plot on %-of-engine-book; Inspector history = engine-specific treatments;
     refusals = categorical strips, never a quantitative y-axis; engines never summed).
-- **Track B — result-identity contract (parallel with A's mockups).** Typed result envelope +
-  request-context invalidation logic + tests. Pure logic; no design dependency. Phase 0 item 1
-  is its first consumer; Track B generalizes it for all async surfaces.
+- **Track B — result-identity contract + response-boundary validation (parallel with A's
+  mockups).** Typed result envelope + request-context invalidation logic + tests. Pure logic;
+  no design dependency. Phase 0 item 1 is its first consumer; Track B generalizes it for all
+  async surfaces.
+  AMENDMENT (2026-08-09, owner-ratified at Phase 0 close): Track B also owns runtime
+  validation of wire responses at the ingestion boundary (RunBookEngine subtrees,
+  SetRunEngineSummary, FactorPrice, and the general Decimal-field contract), with explicit
+  malformed-refusal states. Basis: Codex rounds 1–3 on Phase 0 showed the client JSON-casts
+  responses unvalidated while strict formatters throw on malformed data — a pre-existing
+  class partially mitigated by p0-8/p0-9; the complete fix is architectural and lands here.
+  Codex session trail: 019fe9b6…/019fe9db…/019fe9fe…; open findings enumerated in
+  .superpowers/sdd/progress-ui-overhaul.md (p0 close section).
 - **Track C — convergence fix-up (after A lands).** History, Activity, Proof, Developers
   verified against the new tokens/shell; breakage fixed; no IA changes; screenshot-verified.
 
