@@ -1322,7 +1322,7 @@ spec): **1477 tests in 87 files**.
 
 Task list:
 - [x] Task 0 — wave config + ledger section (p1a-0)
-- [ ] Task 1 — tokens.css migration + width contract (p1a-1)
+- [x] Task 1 — tokens.css migration + width contract (p1a-1)
 - [ ] Task 2 — stylelint: the structural floor (p1a-2)
 - [ ] Task 3 — freshness tier machinery (pure) + meta constants provider
       (p1a-3)
@@ -1343,3 +1343,124 @@ Task list:
 - `--list` verified from web/: `Total: 1477 tests in 87 files` — matching
   Track B's post-p1b-3 count (the two wave configs enumerate the same
   tests/ tree; only port and boot isolation differ).
+
+### p1a-1 · tokens.css migration + width contract (Task 1)
+
+The ratified foundation canon lands in production tokens: the closed
+`--t-*` type set (14 tokens, nothing below 12px EXISTS), every legacy
+`--fs-*` re-pointed by ROLE onto the closed set (the four sub-12px sizes
+floor-lift to 12px), the §04 two-grade palette amendments in every theme
+block that defines each token, and the §02 width contract (`--shell-max`
+1280, stepped 1920→1520 / 2560→1680; 1180 REPEALED). No component file
+changed — every page re-renders under the floor-lifted aliases.
+
+Delivered:
+- `web/app/tokens.css` — the `--t-*` closed set (theme-invariant, light
+  `:root` only, beside the type stacks); the `--fs-*` block re-pointed and
+  marked `LEGACY ALIASES — Phase 3 retires these; new code uses --t-*
+  (stylelint-enforced)`; §04 palette amendments (below); `--breakout-max`
+  new beside `--shell-max`; three stepped `@media (min-width)` blocks at
+  the end of the file.
+- `web/app/globals.css` — `.shell` padding `var(--sp-5) 20px 96px` →
+  `0 24px 120px` (canon §02 verbatim; max-width stays `var(--shell-max)`);
+  NEW utilities `.breakout { max-width: var(--breakout-max) }`,
+  `.prose { max-width: 720px }`, `.grid12 { repeat(12, 1fr); gap: 20px }`.
+- `web/tests/unit/tokens-contract.spec.ts` (12 specs, source-reading per
+  the book-charts-copy precedent) + `web/tests/e2e/p1a-fixes.spec.ts`
+  (4 specs, the rendered twin).
+
+**The complete `--fs-*` → `--t-*` mapping ledger** (by ROLE per canon §03;
+where a judgment call existed the canon's role wording governs — the same
+table lives in the tokens.css comment block):
+
+| Legacy | Was | Now | New px | Rationale |
+|---|---|---|---|---|
+| `--fs-h1` | 30px | `--t-display` | 32 | page h1 = "page H1 — the page's one finding" |
+| `--fs-h2` | 20px | `--t-chapter` | 24 | surface-head h2 IS an H2 = "chapter title (H2)" — maps UP by role, never sideways to `--t-section` 18 by value |
+| `--fs-lede` | 15.5px | `--t-body` | 16 | lede paragraph = "reading prose" |
+| `--fs-body` | 14.5px | `--t-ui` | 14 | surface-head p is supporting copy under a head — the register the canon itself sets at `--t-ui` (`.v-qual`, qualification prose); the LEDE is the page's reading prose, so `--t-body` would double-promote |
+| `--fs-note` | 13.5px | `--t-ui` | 14 | note blocks are read, not scanned: "captions with content", not "dense metadata floor" |
+| `--fs-table` | 13px | `--t-meta` | 13 | kv rows / feed items = "dense metadata floor" (value-preserving); the §08 table pattern's sans-14px BODY is Phase 3 per-surface work when tables rebuild against the canon pattern — an alias lift here would restyle every dense kv row unasked |
+| `--fs-mono` | 12px | `--t-mono-floor` | 12 | value-preserving; the canon's terminal body is `--t-mono-sm` 12.5 — that uplift is Phase 3 per-surface work (`.term` restyle), not an alias change that would also move every `.mono` table cell |
+| `--fs-mono-sm` | 11.5px | `--t-mono-floor` | 12 | FLOOR LIFT |
+| `--fs-caption` | 11px | `--t-floor` | 12 | FLOOR LIFT |
+| `--fs-label` | 10.5px | `--t-floor` | 12 | FLOOR LIFT |
+| `--fs-badge` | 10px | `--t-floor` | 12 | FLOOR LIFT |
+| `--fs-stat` | 21px | `--t-stat` | 21 | exact ("KPI value") |
+| `--fs-hf` | 12.5px | `--t-mono-sm` | 12.5 | exact — a mono numeral on an identity line |
+
+Visual blast radius, expected and accepted: everything under
+`--fs-mono-sm/caption/label/badge` (10–11.5px → 12px) grows, `--fs-h1`
+30→32, `--fs-h2` 20→24, `--fs-lede` 15.5→16, `--fs-body` 14.5→14,
+`--fs-note` 13.5→14; the audits demanded the floor, layout shifts are
+acceptable, and zero test pins moved (pin-map §3–4 predicted exactly
+this).
+
+**§04 palette amendments** (in every block that defines the token —
+light `:root` / dark media / `data-theme` light / `data-theme` dark):
+
+- `--ink-3` dark `#5f7178` → `#71868e` (3.39 → 4.53 on panel), light
+  `#8a979c` → `#637075` (2.65 → 4.51 on panel-2) — 2 blocks each.
+  Text-legal again but demoted by law: captions/ornament only.
+- NEW light text grade, split from the fill grade: `--accent-text
+  #2a7380` · `--ok-text #27784d` · `--warn-text #8b6219` · `--crit-text
+  #ba4136` (each ≥4.5:1 on chip-bg AND panel-2). Dark declares the same
+  four tokens AT THE FILL VALUES (`#5ab3c4/#63b98a/#d0a04a/#d96a5d`) so
+  components reference `--*-text` unconditionally — 4 declarations per
+  token across the four blocks.
+- NEW `--warn-bg` state fill: dark `rgba(208, 160, 74, 0.1)`, light
+  `rgba(176, 124, 31, 0.08)` — for refused tags.
+- `--term-dim` `#6b7d84` → `#70838a` (4.19 → 4.54 on worst term ground
+  `#10181b`) — ONE block: the terminal palette lives in the bare `:root`
+  only and is never overridden (theme-constant by design), so "every
+  block that defines it" is exactly one. The unit spec pins that count.
+- The light-first + media + data-theme override law and all four
+  `color-scheme` lines are byte-preserved.
+
+**Width contract placement decision**: the steps live ON THE TOKENS
+(`--shell-max`/`--breakout-max` redefined inside three `@media
+(min-width)` `:root` blocks at the end of tokens.css), NOT as hard
+`.shell`/`.breakout` overrides in globals.css. Reason: `.shell {
+max-width: var(--shell-max) }` keeps working verbatim, and every consumer
+of the token (`.shell`, `.breakout`, the ribbon's `.bannerInner`) steps
+together. Custom-property redefinition inside a media query is plain
+CSS; no theme block touches these two tokens, so the override law is
+untouched. Steps: base 1280 · 1440 → breakout-only 1340 · 1920 → both
+1520 · 2560 → both 1680.
+
+### Red-first evidence
+
+- `tokens-contract.spec.ts` before implementation: **12/12 failed**
+  (all four pin families: type set, aliases, palette, width).
+- `p1a-fixes.spec.ts` against the STALE build (new CSS unbuilt):
+  **4/4 failed** — 1180-era shell widths and the retired ink-3 rgb —
+  then `npm run build` → **4/4 passed**. The e2e is a build-artifact
+  pin, not a source pin; the pair proves it.
+
+### Mutation kills (p1a-1-M1, p1a-1-M2)
+
+- M1: `--ink-3` dark reverted to `#5f7178` in BOTH dark blocks; rebuild;
+  p1a-fixes in isolation: KILLED at exactly the rgb pin
+  (p1a-fixes.spec.ts:92 — `dark ink-3` received `rgb(95, 113, 120)`,
+  wanted `rgb(113, 134, 142)`); 3 passed. Reverted.
+- M2: the whole 1920 media step deleted; rebuild; p1a-fixes in
+  isolation: KILLED at exactly the 1520 width pin (p1a-fixes.spec.ts:41,
+  first assert at :45 — the shell held 1280 at 1920×1080); 3 passed.
+  Reverted; final tree rebuilt and re-verified 16/16.
+
+### Closing counts (p1a-1)
+
+- Suite: 1495 → **1511 tests in 90 files** (+12 unit tokens-contract,
+  +4 e2e p1a-fixes; the 1495/88 base = the 1477/87 Track A baseline plus
+  Track B's p1b-4 landing on the shared tests/ tree).
+- Threshold-class guards: `chart-spec-v4.spec.ts` **40/40 passed** —
+  the three AC-54 tests (12px rendered floor + 4.5:1, ×2 themes ×2
+  viewports) and AC-13 (3:1 cell boundary, ×2 themes) pass on the
+  amended values, as the canon computed they must.
+- Six-surface smoke `shell.spec.ts`: **8 passed, 1 skipped** (the
+  standing styleguide not-compiled-in skip).
+- Full p1a run (final tree, fresh `npm run build`, port 3820):
+  **1510 passed, 1 skipped, 0 failed (34.7s)** — ZERO pin movement from
+  the value-only token changes, exactly the pin-map §3–4 prediction
+  (`--shell-max` had zero pins; no test hard-codes a token value).
+- `npm run typecheck`: clean. `npx eslint` on both new specs: clean.

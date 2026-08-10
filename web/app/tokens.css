@@ -1,10 +1,11 @@
 /*
  * Solvent design tokens.
  *
- * Extracted from the visual canon: docs/specs/2026-07-29-p5-ui-concept.html.
- * Every palette value below is the mockup's value verbatim — fidelity beats
- * invention. Structural tokens (spacing / radius / type scale) are named from
- * the mockup's hand-tuned pixel values so components stop hardcoding them.
+ * Extracted from the visual canon: docs/specs/2026-07-29-p5-ui-concept.html,
+ * amended by the ratified foundation canon
+ * (docs/specs/2026-08-09-p1-foundation-canon.html §02–§04 + its decisions
+ * ledger): the closed --t-* type set, the two-grade palette (§04 amendment
+ * ledger), and the §02 width contract (the 1180 universal cap is repealed).
  *
  * Theme law (the mockup's own pattern, kept exactly):
  *   1. :root           — light values (the default).
@@ -12,28 +13,38 @@
  *   3. :root[data-theme="light"] / :root[data-theme="dark"] — explicit
  *      override that WINS IN BOTH DIRECTIONS because attribute selectors
  *      out-specify the bare :root inside the media query.
+ * Palette amendments apply in EVERY block that defines the token; the type
+ * and layout tokens are theme-invariant and live in the light :root only.
  */
 
 :root {
-  /* ---- palette (mockup :root, verbatim) ---- */
+  /* ---- palette (mockup :root + canon §04 amendments) ---- */
   --bg: #f4f6f6;
   --panel: #ffffff;
   --panel-2: #eef1f2;
   --ink: #1a2327;
   --ink-2: #56676e;
-  --ink-3: #8a979c;
+  --ink-3: #637075; /* §04 REV from #8a979c (2.65 → 4.51 on panel-2); text-legal again but demoted by law: captions/ornament only — never a value, state, or finding; never on chip or tinted grounds */
   --line: #d8dfe1;
   --accent: #2e7d8c;
   --accent-ink: #ffffff;
   --ok: #2e8c5a;
   --warn: #b07c1f;
   --crit: #c24438;
+  /* text grade (§04) — light splits text from fill: fills keep the chart
+     chroma at ≥3:1 non-text; text ALWAYS references --*-text and clears
+     4.5:1 on its worst ground including chip-bg. */
+  --accent-text: #2a7380; /* 4.56 chip · 4.79 panel-2 */
+  --ok-text: #27784d; /* 4.54 chip · 4.77 panel-2 */
+  --warn-text: #8b6219; /* 4.56 chip · 4.79 panel-2 */
+  --crit-text: #ba4136; /* 4.52 chip · 4.75 panel-2 */
   --crit-bg: rgba(194, 68, 56, 0.07);
+  --warn-bg: rgba(176, 124, 31, 0.08); /* NEW §04 state fill — refused tags */
   --refused-bg: rgba(138, 151, 156, 0.1);
   --chip-bg: #e6ecee;
   --term-bg: #10181b;
   --term-ink: #c7d4d8;
-  --term-dim: #6b7d84;
+  --term-dim: #70838a; /* §04 REV from #6b7d84 (4.19 → 4.54 on worst term ground #10181b; 4.86 on dark term-bg) */
   --term-ok: #63b98a;
   --term-accent: #5ab3c4;
   --shadow: 0 1px 2px rgba(16, 24, 27, 0.06), 0 8px 24px rgba(16, 24, 27, 0.07);
@@ -42,20 +53,59 @@
   --mono: "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
   --sans: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
-  /* ---- type scale (named from the mockup's hand-tuned sizes) ---- */
-  --fs-h1: 30px; /* page h1 */
-  --fs-h2: 20px; /* surface-head h2 */
-  --fs-lede: 15.5px; /* lede paragraph */
-  --fs-body: 14.5px; /* surface-head p */
-  --fs-note: 13.5px; /* note block */
-  --fs-table: 13px; /* table cells, kv rows, feed items */
-  --fs-mono: 12px; /* .mono cells, term body */
-  --fs-mono-sm: 11.5px; /* addr chip, scenario chips, fed-by, formula */
-  --fs-caption: 11px; /* stat sub, stampline, eyebrow, feed time */
-  --fs-label: 10.5px; /* thead th, stat k, card h4, chips/tags */
-  --fs-badge: 10px; /* PROJECTION badge */
-  --fs-stat: 21px; /* stat value */
-  --fs-hf: 12.5px; /* hf value */
+  /* ---- the closed type set (canon §03) ----
+   * Exactly these fourteen tokens exist. The floor is structural: no token
+   * below 12px exists, so a sub-12px label is impossible, not merely
+   * forbidden. Theme-invariant. New code uses --t-* only. */
+  --t-display: 32px; /* page H1 — the page's one finding */
+  --t-chapter: 24px; /* chapter title (H2) */
+  --t-section: 18px; /* section head (H3) / dek */
+  --t-fighead: 17px; /* chart finding-headline */
+  --t-body: 16px; /* reading prose */
+  --t-ui: 14px; /* metadata, table body, captions with content */
+  --t-meta: 13px; /* dense metadata floor */
+  --t-floor: 12px; /* labels, chips, axis ticks, chart text — ABSOLUTE floor */
+  --t-mono-lg: 14px; /* exact values, featured */
+  --t-mono: 13px; /* addresses, table numerals, formulas */
+  --t-mono-sm: 12.5px; /* terminal body, ledgers, identity lines */
+  --t-mono-floor: 12px; /* smallest mono — chips' embedded values */
+  --t-stat-lg: 28px; /* engine-panel / KPI hero value */
+  --t-stat: 21px; /* KPI value */
+
+  /* ---- LEGACY ALIASES — Phase 3 retires these; new code uses --t-*
+   * (stylelint-enforced) ----
+   *
+   * Every --fs-* re-points onto the closed set, mapped BY ROLE per the canon
+   * §03 role table — not by nearest value. Where a judgment call existed the
+   * canon's role wording governs; the full ledger with rationale is in
+   * .superpowers/sdd/progress-ui-overhaul.md §p1a-1:
+   *   --fs-h1        30px → --t-display    32px  page h1 = "page H1 — the page's one finding"
+   *   --fs-h2        20px → --t-chapter    24px  surface-head h2 is an H2 = "chapter title (H2)" — it maps UP, never sideways to --t-section
+   *   --fs-lede    15.5px → --t-body       16px  lede paragraph = "reading prose"
+   *   --fs-body    14.5px → --t-ui         14px  surface-head p is supporting copy under a head — the register the canon itself sets at --t-ui (.v-qual); the lede is the page's reading prose
+   *   --fs-note    13.5px → --t-ui         14px  note blocks are read, not scanned: "captions with content", not dense metadata
+   *   --fs-table     13px → --t-meta       13px  kv rows / feed items = "dense metadata floor"; the §08 table pattern's 14px body is Phase 3 per-surface work, not an alias lift
+   *   --fs-mono      12px → --t-mono-floor 12px  value-preserving; the canon's terminal body is --t-mono-sm 12.5 — that uplift is Phase 3 per-surface work
+   *   --fs-mono-sm 11.5px → --t-mono-floor 12px  FLOOR LIFT
+   *   --fs-caption   11px → --t-floor      12px  FLOOR LIFT
+   *   --fs-label   10.5px → --t-floor      12px  FLOOR LIFT
+   *   --fs-badge     10px → --t-floor      12px  FLOOR LIFT
+   *   --fs-stat      21px → --t-stat       21px  exact
+   *   --fs-hf      12.5px → --t-mono-sm    12.5px mono numeral on an identity line — exact
+   */
+  --fs-h1: var(--t-display); /* page h1 */
+  --fs-h2: var(--t-chapter); /* surface-head h2 */
+  --fs-lede: var(--t-body); /* lede paragraph */
+  --fs-body: var(--t-ui); /* surface-head p */
+  --fs-note: var(--t-ui); /* note block */
+  --fs-table: var(--t-meta); /* table cells, kv rows, feed items */
+  --fs-mono: var(--t-mono-floor); /* .mono cells, term body */
+  --fs-mono-sm: var(--t-mono-floor); /* addr chip, scenario chips, fed-by, formula */
+  --fs-caption: var(--t-floor); /* stat sub, stampline, eyebrow, feed time */
+  --fs-label: var(--t-floor); /* thead th, stat k, card h4, chips/tags */
+  --fs-badge: var(--t-floor); /* PROJECTION badge */
+  --fs-stat: var(--t-stat); /* stat value */
+  --fs-hf: var(--t-mono-sm); /* hf value */
 
   /* ---- letter-spacing (mockup) ---- */
   --track-eyebrow: 0.14em;
@@ -81,8 +131,9 @@
   --r-md: 6px; /* cards, stats, tablewrap, stampline */
   --r-lg: 8px; /* window frame, terminal */
 
-  /* ---- layout ---- */
-  --shell-max: 1180px; /* app shell width (mockup main: 1060 + window pads) */
+  /* ---- layout (canon §02 width contract) ---- */
+  --shell-max: 1280px; /* core shell — 1366 holds 1280 with no primary horizontal scroll */
+  --breakout-max: 1280px; /* analytical breakout — steps AHEAD of the shell at 1440 */
   --table-min: 860px; /* mockup table min-width */
 
   color-scheme: light;
@@ -90,20 +141,28 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* mockup @media dark block, verbatim (term-* stay constant by design) */
+    /* mockup @media dark block + canon §04 (term-* stay constant by design) */
     --bg: #0c1215;
     --panel: #131c20;
     --panel-2: #0f171a;
     --ink: #dbe5e8;
     --ink-2: #93a5ab;
-    --ink-3: #5f7178;
+    --ink-3: #71868e; /* §04 REV from #5f7178 (3.39 → 4.53 on panel); same demotion as light: captions/ornament only */
     --line: #223034;
     --accent: #5ab3c4;
     --accent-ink: #0c1215;
     --ok: #63b98a;
     --warn: #d0a04a;
     --crit: #d96a5d;
+    /* dark text grade = fill grade (§04: every dark text token already
+       clears 4.5 on panel AND chip) — declared so components can reference
+       --*-text unconditionally and stay lawful in both themes. */
+    --accent-text: #5ab3c4;
+    --ok-text: #63b98a;
+    --warn-text: #d0a04a;
+    --crit-text: #d96a5d;
     --crit-bg: rgba(217, 106, 93, 0.1);
+    --warn-bg: rgba(208, 160, 74, 0.1); /* NEW §04 state fill — refused tags */
     --refused-bg: rgba(95, 113, 120, 0.12);
     --chip-bg: #1b262b;
     --term-bg: #0a0f12;
@@ -119,14 +178,19 @@
   --panel-2: #eef1f2;
   --ink: #1a2327;
   --ink-2: #56676e;
-  --ink-3: #8a979c;
+  --ink-3: #637075;
   --line: #d8dfe1;
   --accent: #2e7d8c;
   --accent-ink: #ffffff;
   --ok: #2e8c5a;
   --warn: #b07c1f;
   --crit: #c24438;
+  --accent-text: #2a7380;
+  --ok-text: #27784d;
+  --warn-text: #8b6219;
+  --crit-text: #ba4136;
   --crit-bg: rgba(194, 68, 56, 0.07);
+  --warn-bg: rgba(176, 124, 31, 0.08);
   --refused-bg: rgba(138, 151, 156, 0.1);
   --chip-bg: #e6ecee;
   --term-bg: #10181b;
@@ -140,17 +204,52 @@
   --panel-2: #0f171a;
   --ink: #dbe5e8;
   --ink-2: #93a5ab;
-  --ink-3: #5f7178;
+  --ink-3: #71868e;
   --line: #223034;
   --accent: #5ab3c4;
   --accent-ink: #0c1215;
   --ok: #63b98a;
   --warn: #d0a04a;
   --crit: #d96a5d;
+  --accent-text: #5ab3c4;
+  --ok-text: #63b98a;
+  --warn-text: #d0a04a;
+  --crit-text: #d96a5d;
   --crit-bg: rgba(217, 106, 93, 0.1);
+  --warn-bg: rgba(208, 160, 74, 0.1);
   --refused-bg: rgba(95, 113, 120, 0.12);
   --chip-bg: #1b262b;
   --term-bg: #0a0f12;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
   color-scheme: dark;
+}
+
+/* ---- §02 stepped width contract -----------------------------------------
+ * The steps live on the TOKENS — not as hard .shell/.breakout overrides in
+ * globals.css — so `.shell { max-width: var(--shell-max) }` keeps working and
+ * every consumer of the token (.shell, .breakout, the ribbon's .bannerInner)
+ * steps together. Custom-property redefinition inside a media query is plain
+ * CSS; no theme block touches these two tokens, so the light-first + media +
+ * data-theme override law above is untouched. Breakout is max-width stepping
+ * (never a min()/max() formula) so it can never exceed its viewport row's
+ * budget: 1366 → 1280 · 1440 → breakout 1340 (shell holds 1280) ·
+ * 1920 → 1520 · 2560 → 1680, capped — whitespace is margin, not void. */
+@media (min-width: 1440px) {
+  :root {
+    --breakout-max: 1340px;
+  }
+}
+
+@media (min-width: 1920px) {
+  :root {
+    --shell-max: 1520px;
+    --breakout-max: 1520px;
+  }
+}
+
+@media (min-width: 2560px) {
+  :root {
+    --shell-max: 1680px;
+    --breakout-max: 1680px;
+  }
 }
