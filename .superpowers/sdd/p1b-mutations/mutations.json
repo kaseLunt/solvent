@@ -1,0 +1,247 @@
+{
+  "meta": {
+    "wave": "phase-1 track B close (p1b-7): the reconciled mutation record of tasks p1b-0..p1b-6",
+    "applier": "NONE — this spec is a RECONCILIATION, not a fresh loop. Every mutant below was applied, observed killed IN ISOLATION, and reverted DURING ITS OWN TASK (p1b-0 through p1b-6); the kills are recorded in the task reports (.superpowers/sdd/2026-08-09-ui-overhaul-phase1-trackb/task-{0,1,3,4,5,6}-report.md), the committed ledger (.superpowers/sdd/progress-ui-overhaul.md, the p1b sections — task 2's ONLY record lives there), and the repo-root run logs web-3819-p1b5-mut*.log / web-3819-p1b6-mut*.log (tasks 0-4 kept no per-mutant root logs; their kills are recorded prose).",
+    "notes": "Counts reconciled from the records, not predicted: 17 mutants, 17 KILLED, 0 survived (p1b-0: 1; p1b-1: 2; p1b-2: 3; p1b-3: 2; p1b-4: 2; p1b-5: 2; p1b-6: 5). Two mutants recorded MULTI-VEHICLE kills (p1b-5-M1 unit AND e2e; p1b-4-M2 both p1b-4 e2e tests). 'search' strings are the CURRENT-TREE fixed code each mutant attacked, re-verified against HEAD at transcript time (all anchors single-line or contiguous-line, CRLF sources, convention-independent matches); 'replace' is the mutant AS RECORDED, reconstructed verbatim where the record quotes it and marked reconstructed-from-description where the record describes it. Commands are the recorded invocations; where a record says only 'in isolation' the command is the house form for that isolation and is marked so in the transcript. Mutants were tested at their own task's HEAD (p1b-0 @ 5891bdc, p1b-1 @ 872fae5, p1b-2 @ 9e99684, p1b-3 @ 2568539, p1b-4 @ 42d819b, p1b-5 @ 3d81765, p1b-6 @ b9fd2a2), not re-run at close."
+  },
+  "mutations": [
+    {
+      "id": "p1b-0-M1",
+      "property": "The route boundary is the LONG-TAIL net: a render throw anywhere under layout.tsx must surface the route-refusal register (visible, named, reset affordance) — never the generic white page. Disabling the boundary (rethrow) restores the pre-fix whole-route loss.",
+      "description": "error.tsx boundary disabled: the RouteError body replaced with `throw error;` (applied via Serena replace_symbol_body)",
+      "source": "task-0-report.md §Verification transcript item 4; ledger §p1b-0 'Mutation kill (p1b-0-M1)'",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1b.config.ts (the p1b-0 spec in isolation)",
+      "edits": [
+        {
+          "file": "web/app/error.tsx",
+          "search": "  return <RouteRefusal error={error} reset={reset} />;",
+          "replace": "  throw error;"
+        }
+      ]
+    },
+    {
+      "id": "p1b-1-M1",
+      "property": "wireBigInt is the ONLY sanctioned string→bigint path and it never coerces: wireBigInt(\"\") is null where BigInt(\"\") is a silent 0n. Reverting to bare BigInt (try/catch) resurrects the whole laundering class the module exists to kill.",
+      "description": "wireGuard.wireBigInt reverted to bare BigInt in a try/catch (reconstructed from description)",
+      "source": "task-1-report.md §Mutation kills; ledger §p1b-1",
+      "test": "npx playwright test -c tests/playwright.p1b.config.ts --project=unit tests/unit/wire-guard.spec.ts -g \"THE COERCION KILL\"",
+      "edits": [
+        {
+          "file": "web/lib/wireGuard.ts",
+          "search": "  return isWireDecimal(value) ? BigInt(value) : null;",
+          "replace": "  try { return BigInt(value); } catch { return null; }"
+        }
+      ]
+    },
+    {
+      "id": "p1b-1-M2",
+      "property": "badDebtRate.sideOf refuses a malformed field BY NAME before any arithmetic; routing the null arm back to zero (wireBigInt(...) ?? 0n, refusal reduced to the scale check) resurrects the \"$0 of eligible debt\" contradiction claim read off a value nobody could read.",
+      "description": "sideOf's null arm routed back to coerced zeros; the refusal reduced to the scale check alone (reconstructed from description)",
+      "source": "task-1-report.md §Mutation kills; ledger §p1b-1",
+      "test": "npx playwright test -c tests/playwright.p1b.config.ts --project=unit tests/unit/bad-debt-rate.spec.ts -g \"p1b-1: an EMPTY eligible\"",
+      "edits": [
+        {
+          "file": "web/app/lab/badDebtRate.ts",
+          "search": "  const bad = wireBigInt(aggregate.bad_debt_usd);\n  const eligible = wireBigInt(aggregate.eligible_debt_usd);\n  if (bad === null || eligible === null || !isWireScale(usdDecimals)) {",
+          "replace": "  const bad = wireBigInt(aggregate.bad_debt_usd) ?? 0n;\n  const eligible = wireBigInt(aggregate.eligible_debt_usd) ?? 0n;\n  if (!isWireScale(usdDecimals)) {"
+        }
+      ]
+    },
+    {
+      "id": "p1b-2-M1",
+      "property": "classifyRunBookEngine walks the WHOLE engine — skipping the before/after aggregates group readmits a malformed total_debt_usd to the throwing renderer, and the route boundary takes the segment (the r3 finding-1 defect verbatim).",
+      "description": "the classifier skips the aggregates group: both aggregateChecks calls removed",
+      "source": "ledger §p1b-2 'Mutation kills' (task 2's only record — no task-2-report.md exists)",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1b.config.ts (the p1b-2 aggregate e2e pin in isolation)",
+      "edits": [
+        {
+          "file": "web/app/lab/engineClassification.ts",
+          "search": "  checks.push(...aggregateChecks(\"before\", e.before));\n  checks.push(...aggregateChecks(\"after\", e.after));",
+          "replace": ""
+        }
+      ]
+    },
+    {
+      "id": "p1b-2-M2",
+      "property": "Array fields are named PER INDEX (movers[2].hf_before_wad) — a bare group name cannot tell the reader WHICH row is unreadable, and the refusal registers render the field list verbatim.",
+      "description": "per-index naming replaced by a bare group name (movers.${field})",
+      "source": "ledger §p1b-2 'Mutation kills'",
+      "test": "npx playwright test -c tests/playwright.p1b.config.ts --project=unit tests/unit/engine-classification.spec.ts (the per-index pin in isolation)",
+      "edits": [
+        {
+          "file": "web/app/lab/engineClassification.ts",
+          "search": "        checks.push([`movers[${String(index)}].${field}`, isNullableWireDecimal(mover[field])]);",
+          "replace": "        checks.push([`movers.${field}`, isNullableWireDecimal(mover[field])]);"
+        }
+      ]
+    },
+    {
+      "id": "p1b-2-M3",
+      "property": "Controller addition 1: hf_transitions.wad_scale is IN the classifier's inventory — Task 1's review proved an empty wad_scale passed readTransitions' arithmetic untouched and wore a \"0 entered / 0 exited\" costume. Dropping the check readmits it.",
+      "description": "transitionChecks drops the hf_transitions.wad_scale check",
+      "source": "ledger §p1b-2 'Mutation kills'",
+      "test": "npx playwright test -c tests/playwright.p1b.config.ts --project=unit tests/unit/engine-classification.spec.ts (the controller's own wad_scale pin in isolation)",
+      "edits": [
+        {
+          "file": "web/app/lab/engineClassification.ts",
+          "search": "    [\"hf_transitions.wad_scale\", isWireDecimal(transitions.wad_scale)],",
+          "replace": ""
+        }
+      ]
+    },
+    {
+      "id": "p1b-3-M1",
+      "property": "tornadoCellState classifies EVERY answered engine before any reach arm: bypassing the classifier lets a malformed delta reach renderSignedUsdAmount in the ledger, the route boundary takes the lab segment, and no tornado header renders (the r3 finding-3 route-loss).",
+      "description": "the classifier bypassed in tornadoCellState: the malformed check replaced with an empty list (arm unreachable; reconstructed from description)",
+      "source": "task-3-report.md §Mutation kills; ledger §p1b-3",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1b.config.ts (the p1b-3 e2e in isolation)",
+      "edits": [
+        {
+          "file": "web/app/lab/tornadoCells.ts",
+          "search": "  const malformed = result.engines.flatMap((engine, index) =>\n    classifySetRunEngine(engine).malformedFields.map(\n      (field) => `engines[${String(index)}].${field}`,\n    ),\n  );",
+          "replace": "  const malformed: string[] = [];"
+        }
+      ]
+    },
+    {
+      "id": "p1b-3-M2",
+      "property": "barLength reads only through wireBigInt: bare BigInt turns an empty denominator into 0n and the NO DENOMINATOR sentence — \"carries no debt on the before side\", a measurement claim off a value nobody could read — and throws SyntaxError on \"-\".",
+      "description": "barLength reverted to bare BigInt on both reads",
+      "source": "task-3-report.md §Mutation kills; ledger §p1b-3",
+      "test": "npx playwright test -c tests/playwright.p1b.config.ts --project=unit tests/unit/set-run-outcome.spec.ts (the no-coercion pin in isolation)",
+      "edits": [
+        {
+          "file": "web/app/lab/tornadoCells.ts",
+          "search": "  const numerator = wireBigInt(engine.eligible_debt_delta_usd);\n  const denominator = wireBigInt(engine.total_debt_usd_before);",
+          "replace": "  const numerator = BigInt(engine.eligible_debt_delta_usd);\n  const denominator = BigInt(engine.total_debt_usd_before);"
+        }
+      ]
+    },
+    {
+      "id": "p1b-4-M1",
+      "property": "price_decimals is REQUIRED: an absent scale must classify malformed, never reach money()'s no-scale branch where the raw scaled integer wears the price costume WITH a health assertion attached (the silent-wrong-display class — nothing throws).",
+      "description": "the guard's price_decimals requirement dropped: absent admitted as legal",
+      "source": "task-4-report.md §Mutation kills; ledger §p1b-4",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1b.config.ts (the p1b-4 deleted-decimals e2e in isolation)",
+      "edits": [
+        {
+          "file": "web/lib/factorPriceGuard.ts",
+          "search": "    [\"price_decimals\", isWireScale(entry.price_decimals)],",
+          "replace": "    [\"price_decimals\", entry.price_decimals === undefined || isWireScale(entry.price_decimals)],"
+        }
+      ]
+    },
+    {
+      "id": "p1b-4-M2",
+      "property": "The card consults classifyFactorPrice BEFORE the first property read and routes {ok:false} to the boundary-malformed arm: routing to the value arm instead makes the raw read throw on prices:[null] (card never paints) and re-renders the raw integer on a missing scale.",
+      "description": "the card classifies but routes {ok:false} to the value arm (malformed branch disabled; reconstructed from description)",
+      "source": "task-4-report.md §Mutation kills; ledger §p1b-4",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1b.config.ts (both p1b-4 e2e tests in isolation)",
+      "edits": [
+        {
+          "file": "web/app/inspector/[addr]/InspectorPositionCard.tsx",
+          "search": "    const classified = first === undefined ? undefined : classifyFactorPrice(first);\n    if (classified !== undefined && !classified.ok) {",
+          "replace": "    const classified = first === undefined ? undefined : classifyFactorPrice(first);\n    if (false && classified !== undefined && !classified.ok) {"
+        }
+      ]
+    },
+    {
+      "id": "p1b-5-M1",
+      "property": "identityLine composes the FULL §5 identity in canon order — dropping the batch clause un-binds the result from its batch on the visible line, the exact under-identified-result defect the cross-page brief names.",
+      "description": "identityLine drops the batch clause",
+      "source": "task-5-report.md §Mutation kills; ledger §p1b-5; logs web-3819-p1b5-mutM1-unit.log + web-3819-p1b5-mutM1-e2e.log (+ -mutM1-build.log)",
+      "test": "npx playwright test -c tests/playwright.p1b.config.ts --project=unit tests/unit/result-identity.spec.ts; then npm run build && the p1b-5 identity e2e in isolation",
+      "edits": [
+        {
+          "file": "web/lib/resultIdentity.ts",
+          "search": "  return `results for ${subject} · batch #${String(id.batchId)} · config ${id.configVersion} · engines ${engines}`;",
+          "replace": "  return `results for ${subject} · config ${id.configVersion} · engines ${engines}`;"
+        }
+      ]
+    },
+    {
+      "id": "p1b-5-M2",
+      "property": "resultReceipt composes the receipt identity from served_at#batchId (freshness.ts Wave R5 law) — a CONSTANT receipt never re-anchors, so a new result would keep the old age's anchor (the never-re-anchors defect).",
+      "description": "resultReceipt wired to a constant receipt id (\"receipt\")",
+      "source": "task-5-report.md §Mutation kills; ledger §p1b-5; log web-3819-p1b5-mutM2-unit.log",
+      "test": "npx playwright test -c tests/playwright.p1b.config.ts --project=unit tests/unit/result-identity.spec.ts",
+      "edits": [
+        {
+          "file": "web/lib/resultIdentity.ts",
+          "search": "  return { ageSeconds, receiptId: receiptIdentity(id.servedAt, id.batchId) };",
+          "replace": "  return { ageSeconds, receiptId: \"receipt\" };"
+        }
+      ]
+    },
+    {
+      "id": "p1b-6-M1",
+      "property": "displayRatio's num/den arm reads only through wireBigInt: bare BigInt turns hf.num \"\" into a PLOTTED 0.0 point — the silent wrong chart point item 6 names; malformed must route to the existing unpublished-gap arm (null), never a value.",
+      "description": "displayRatio reverted to bare BigInt on num and den",
+      "source": "task-6-report.md §Mutation kills M1; ledger §p1b-6; log web-3819-p1b6-mutM1-unit.log",
+      "test": "npx playwright test -c tests/playwright.p1b.config.ts --project=unit tests/unit/history-series.spec.ts",
+      "edits": [
+        {
+          "file": "web/lib/history-series.ts",
+          "search": "    const den = wireBigInt(hf.den);\n    if (den === null || den === 0n) return null;\n    const num = wireBigInt(hf.num);\n    if (num === null) return null;",
+          "replace": "    const den = BigInt(hf.den);\n    if (den === 0n) return null;\n    const num = BigInt(hf.num);"
+        }
+      ]
+    },
+    {
+      "id": "p1b-6-M2",
+      "property": "The Feed gates envelope/refusal writes on the dispatch's OWN epoch (isCurrent()) — removing the gate lets a stale walk's fully-received page write its filter echo over the current walk (the deterministic closed-stream race the shim reproduces).",
+      "description": "the isCurrent() gate removed from FeedSurface's setters (reconstructed from description)",
+      "source": "task-6-report.md §Mutation kills M2; ledger §p1b-6; log web-3819-p1b6-mutM2-e2e.log",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1b.config.ts --project=e2e -g \"p1b-6\"",
+      "edits": [
+        {
+          "file": "web/app/feed/FeedSurface.tsx",
+          "search": "        if (isCurrent()) {",
+          "replace": "        if (true) {"
+        }
+      ]
+    },
+    {
+      "id": "p1b-6-M3",
+      "property": "The history batch-weld renders ONLY on a real seam (vantage !== position batch) — inverting the condition renders the weld on match and hides it on mismatch, and BOTH fix-4 pins (visible arm AND the count-0 arm) must die, proving the count-0 pin bites.",
+      "description": "the weld condition inverted: !== → ===",
+      "source": "task-6-report.md §Mutation kills M3; ledger §p1b-6; log web-3819-p1b6-mutM3-e2e.log",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1b.config.ts --project=e2e -g \"p1b-6\"",
+      "edits": [
+        {
+          "file": "web/app/inspector/[addr]/InspectorHistory.tsx",
+          "search": "    state.lookup.response.batch.id !== positionBatchId",
+          "replace": "    state.lookup.response.batch.id === positionBatchId"
+        }
+      ]
+    },
+    {
+      "id": "p1b-6-M4",
+      "property": "Item 7: the not-found stress arm states `batch {id} · computed {computed_at}` verbatim (lab-result-computed) — removing the clause re-opens the canon §05 face gap for the non-found outcomes.",
+      "description": "the not-found arm's computed clause removed (reconstructed from description)",
+      "source": "task-6-report.md §Mutation kills M4; ledger §p1b-6; log web-3819-p1b6-mutM4-e2e.log",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1b.config.ts --project=e2e -g \"p1b-6\"",
+      "edits": [
+        {
+          "file": "web/app/lab/LabClient.tsx",
+          "search": "          <p className=\"mono dim\" data-testid=\"lab-result-computed\">\n            batch {String(result.response.batch.id)} · computed{\" \"}\n            {result.response.batch.computed_at}\n          </p>\n          </div>",
+          "replace": "          </div>"
+        }
+      ]
+    },
+    {
+      "id": "p1b-6-M5",
+      "property": "Item 8: the Lab age's blind resume says RUN AGAIN (AGE_UNKNOWN_RUN_AGAIN) — the reverted phrase \"refresh failed, data retained\" reports an attempt never made (the Lab wires no resume repair by the p1b-5 sanctioned decision).",
+      "description": "LabClient reverted to the \"refresh failed, data retained\" phrase (reconstructed from description)",
+      "source": "task-6-report.md §Mutation kills M5; ledger §p1b-6; log web-3819-p1b6-mutM5-e2e.log",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1b.config.ts --project=e2e -g \"p1b-6\"",
+      "edits": [
+        {
+          "file": "web/app/lab/LabClient.tsx",
+          "search": "                      ? AGE_UNKNOWN_RUN_AGAIN",
+          "replace": "                      ? \"age UNKNOWN since resume · refresh failed, data retained\""
+        }
+      ]
+    }
+  ]
+}

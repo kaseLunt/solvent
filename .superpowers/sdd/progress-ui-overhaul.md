@@ -769,7 +769,9 @@ Task list:
 - [x] Task 4 — FactorPrice entry guard (p1b-4)
 - [x] Task 5 — result-identity module + address-mode completion (p1b-5)
 - [x] Task 6 — five-gap race/identity audit close (p1b-6)
-- [ ] Task 7 — close + Codex round
+- [x] Task 7 — close (p1b-7 seal below; the Codex adversarial round runs
+      next, controller-dispatched — its findings become a fix wave, the
+      p0-8/p0-9 precedent)
 
 ### p1b-0 · wave config + honest route refusal (Task 0)
 
@@ -1828,3 +1830,133 @@ stashed → pre-fix build → new tests run → stash popped):
   [stress-increments 4, history-series 2, freshness-blind-resume 1,
   lab-panel-lines 1, lab-runbook-lines 1], e2e +6 [p1b-6 describe]); same
   single pre-existing styleguide skip.
+
+## Phase 1 Track B CLOSE (p1b-7) — seal
+
+### Delivered scope (the wave's whole claim)
+
+- **The route boundary** (p1b-0): ROOT `error.tsx` → `RouteRefusal` — one
+  boundary above all surfaces; a render throw states its refusal (visible,
+  named, reset affordance) instead of white-paging the route. This is the
+  declared LONG-TAIL NET for everything no classifier covers.
+- **wireGuard** (p1b-1): `web/lib/wireGuard.ts` — the one sanctioned
+  wire-read vocabulary (`WIRE_DECIMAL`, `isWireDecimal`, `isZeroDecimal`,
+  `isWireScale`, `isWireCount`, `wireBigInt`, `FieldCheck`/`malformedFields`);
+  the BigInt coercion class killed at its root (`""` is null, never `0n`).
+- **The three classifier siblings**: `classifyRunBookEngine` (p1b-2, the
+  whole ~40-field subtree, per-index naming, schema-exact nullability),
+  `classifySetRunEngine` (p1b-3, the CONSUMED set by pinned decision, +
+  tornado malformed arm/header clause/ledger row), `classifyFactorPrice`
+  (p1b-4, entry-level, `price_decimals` REQUIRED, per-entry independence in
+  the evidence drawer).
+- **Result identity** (p1b-5): `web/lib/resultIdentity.ts` (`ResultIdentity`,
+  `identityLine`, `stressResultIdentity`, `resultReceipt`) + the Lab
+  address-mode §5 completion (full identity line + anchored age under the
+  stale barrier).
+- **The nine-item gap audit** (p1b-6): five brief fixes (book success-arm
+  abort, feed envelope-echo epoch gate, observatory abort+as-of, history
+  batch-weld, inspector params/activity keying) + controller items 6–9
+  (coercion residue through `wireBigInt`, computed-at on the non-found arms,
+  the run-again register, `stressStateHfInfo`/`moverRatioDisplay`).
+- **p1b-7a** (`8ad13b4`): the pre-existing `UnavailableError` unused-import
+  lint warning (LabBookPanel.tsx:27, on record since p1b-2) removed — one
+  line, the brief's sanctioned in-passing fix. `npm run lint` is now
+  warning-free.
+
+### Mutation transcript (Step 1)
+
+`.superpowers/sdd/p1b-mutations/{mutations.json,transcript.md}` — the
+t9w20-format record, RECONCILED from the task records (task reports + this
+ledger's p1b sections + the `web-3819-p1b5/p1b6-mut*.log` root logs), not
+re-run: **17 mutants, 17 KILLED, 0 survived** (p1b-0 ×1, p1b-1 ×2, p1b-2 ×3,
+p1b-3 ×2, p1b-4 ×2, p1b-5 ×2, p1b-6 ×5; two multi-vehicle kills). Every
+mutation's fixed-code anchor re-verified against the current tree (CRLF
+sources, line-convention-independent anchors); drifted kill-assertion spec
+lines re-anchored in the transcript (`recorded :N → now :M`); task 2's kills
+sourced from this ledger alone (no task-2 report exists, by record).
+
+### Closing verification (p1b-7, final tree = `8ad13b4` + this seal)
+
+- Full Track B suite (fresh `npm run build` +
+  `npx playwright test -c tests/playwright.p1b.config.ts`, port 3819):
+  **1537 passed, 1 skipped, 0 failed (32.9s)** (`web-3819-p1b7-full.log`) —
+  byte-consistent with the p1b-6 seal count; the skip is the same single
+  pre-existing styleguide skip.
+- `npm run typecheck` — completely clean (exit 0).
+- `npm run lint` — clean, **zero warnings** (the p1b-7a removal discharged
+  the only standing warning).
+- `npm run lint:css` — clean.
+
+### Deliberate OUT-of-scope inventory (declared, not drifted)
+
+1. **Un-consumed `SetRunEngineSummary` fields** (`before_bad_debt_usd`,
+   `total_debt_usd_after`, census counts, …): `classifySetRunEngine`'s scope
+   is the CONSUMED set BY DECISION — recorded in the module header and held
+   by the spec's out-of-scope pin. Any surface that starts consuming one of
+   these fields owes `setRunClassification.ts` the check first.
+2. **Non-classified surfaces are covered by the route boundary, not by
+   per-field classifiers.** Track B classified the three families whose
+   malformed bytes had OBSERVED costumes (run-book engines, set-run
+   engines, factor prices) and wire-guarded the named coercion sites; every
+   other surface's malformed-wire long tail throws into the p1b-0 refusal
+   register — segment-scoped, named, honest — instead of white-paging. That
+   is the boundary's declared job, not an accident.
+3. **Phase-3 residue list** (named candidates for the residue sweep, all
+   flagged in p1b-6):
+   - `displayRatio`'s WAD arm (`formatUnits(hf.wad, 18)`,
+     lib/history-series.ts) — a malformed wad THROWS into the route boundary
+     rather than coercing; not named by the controller, unchanged.
+   - `displayHf` (lib/history-series.ts) — the same class, same disposition.
+   - `stressStateHfInfo`'s num/den arm (app/lab/labPanelLines.ts:238-239) —
+     `Number("")` coerces to 0, so a malformed num/den pair can still yield
+     a plausible ratio (the WAD arm is wire-guarded; the num/den arm is
+     not). The p1b-6 fix guarded the wad arm the controller named; the
+     num/den arm is residue.
+   - The unpublished-gap title's "carries neither wad nor num/den" wording —
+     approximate for a malformed (vs absent) pair; controller mandated the
+     existing arm, wording refinement deferred.
+4. **Book-mode / set-run identity lines** (p1b-5 deferred observation): the
+   matrix/tornado surfaces compose their own pre-existing identity
+   statements; migrating them onto `identityLine`'s book/set arms remains
+   available, unexercised.
+
+### Still-open server defect (outside web scope, held open since p0-9)
+
+**Solver-error `prices: null` serialization**: the API's solver-error path
+(`wireLiquidationPrice`) serializes `liquidation_price.prices: null` — a Go
+nil slice — violating api/openapi.yaml's required-array contract.
+Server-side slice init needed; the web side defends meanwhile (the p0-9
+not-established fold + p1b-4's entry classification), so no UI crash and no
+false health claim, but the WIRE is still out of contract. Remains open for
+the API program; re-flagged here so the Track B close cannot be read as
+resolving it.
+
+### Vocabulary addition (for the Phase 3 clarity review)
+
+`AGE_UNKNOWN_RUN_AGAIN = "age UNKNOWN since resume · run again to refresh"`
+(lib/freshness.ts, p1b-6 item 8) — third arm of the unknown-age register,
+same composed shape as the two existing phrases, used ONLY in the Lab
+result-age path (which wires no resume repair by the p1b-5 sanctioned
+decision). The ribbon and every other surface keep the two existing phrases,
+byte-pinned. Phase 3's clarity review owns whether the three-phrase register
+stays or converges.
+
+### Deviation clause (recorded, carried forward)
+
+**Activity-reset effect timing** (p1b-6 fix 5): the inspector activity's
+address keying is expressed as an explicit drop-and-restart
+(`activityForRef` + `reset()` BEFORE the first page of a new address —
+abort in-flight, epoch discards late pages) rather than literal
+`{for: addr}` state, because `useCursorPages` owns the accumulated rows.
+Observable guarantee identical for every reader of `activity.rows` (no
+cross-address leak, no reliance on remount semantics); if a future refactor
+lifts the rows out of the hook, the literal keying becomes available. This
+is the wave's one recorded shape deviation from the brief's letter.
+
+### What runs next
+
+The controller dispatches the Codex adversarial round (fresh session;
+context = the r3 findings as the checklist + the plan's scope statement).
+The round verifies the three r3 findings CLOSED and hunts the residual
+class WITHIN the declared scope above; findings become a fix wave (the
+p0-8/p0-9 precedent).
