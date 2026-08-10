@@ -23,6 +23,7 @@ import {
   appliedShocksDetailsSummary,
   appliedShocksSummary,
   shockFlagTally,
+  statePairRowLabel,
   statesBitIdentical,
 } from "./labPanelLines";
 import styles from "./lab.module.css";
@@ -94,9 +95,11 @@ function raw(value: string | null): string {
  * presentation band and says so where it can render.
  */
 export function LabStatePair({
+  engine,
   before,
   after,
 }: {
+  engine: string;
   before: RefinedStressState | null;
   after: RefinedStressState | null;
 }) {
@@ -117,7 +120,10 @@ export function LabStatePair({
           </thead>
           <tbody>
             <tr>
-              <td>health factor</td>
+              {/* Phase 0 fix 7: the row names the engine's OWN series — the
+                  DM's num/den is its borrow-headroom DISCLOSURE, never a
+                  health factor (statePairRowLabel, p0-4's exact-match arms). */}
+              <td>{statePairRowLabel(engine)}</td>
               <td className="mono">
                 <StateCell state={before} />
               </td>
@@ -352,7 +358,7 @@ function ResultView({ result }: { result: RefinedScenarioResult }) {
               what the protocol sees · <EngineChip engine={result.engine} />
             </p>
             <HfsUnchangedBanner realization={realization} />
-            <LabStatePair before={result.before} after={result.after} />
+            <LabStatePair engine={result.engine} before={result.before} after={result.after} />
             {identical && (
               <p className={styles.bitIdentical} data-testid="bit-identical">
                 before ≡ after · the served states are bit-identical
@@ -379,7 +385,7 @@ function ResultView({ result }: { result: RefinedScenarioResult }) {
         <EngineChip engine={result.engine} /> ·{" "}
         <AddressMono address={result.account} copy={false} />
       </p>
-      <LabStatePair before={result.before} after={result.after} />
+      <LabStatePair engine={result.engine} before={result.before} after={result.after} />
       {result.projection !== null && <LabProjectionView projection={result.projection} />}
       <LabAppliedShocks shocks={result.applied_shocks} />
       <LabHeldFlat

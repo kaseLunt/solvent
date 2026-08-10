@@ -69,12 +69,15 @@ test("a served run renders BOTH distributions, the movers table and the collater
   await expect(page.getByTestId("runbook-hist-after")).toHaveCount(2);
 
   // The comparator is named per engine, and the two engines do NOT share one.
+  // Phase 0 fix 7: the wire token is an identifier, not reader copy — each
+  // pair's tag humanizes its comparator per the engine's own semantics
+  // (comparatorReaderLabel, prefix dropped), exactly as p0-4 did on Book.
   await expect(
     page.locator('[data-testid="runbook-histogram-pair"][data-engine="aave_v3_etherfi"]'),
-  ).toContainText("comparator: hf_wad");
+  ).toContainText("the pool's own health factor (wad)");
   await expect(
     page.locator('[data-testid="runbook-histogram-pair"][data-engine="debt_manager"]'),
-  ).toContainText("comparator: hf_num/hf_den");
+  ).toContainText("maxBorrowLT/borrowings — a disclosure, not the engine's trigger");
 
   // Both sides carry their refused tally — the anti-drop disclosure.
   const refused = page.getByTestId("runbook-hist-refused-before");
@@ -93,7 +96,11 @@ test("the computed reading line names the SHIFT, derived from the two sides", as
 
   const dm = page.locator('[data-testid="runbook-histogram-pair"][data-engine="debt_manager"]');
   const reading = dm.getByTestId("runbook-hist-reading");
-  await expect(reading).toContainText("What this shows: how the book's health factors moved");
+  // Phase 0 fix 7: this is the DM pair, so the head names its borrow-headroom
+  // DISCLOSURE — "health factors" belongs to the Aave head alone.
+  await expect(reading).toContainText(
+    "What this shows: how the book's borrow-headroom disclosures moved",
+  );
   // The fixture's derived delta moves exactly one Debt Manager account across
   // the 1.00 edge, and the sentence must be that arithmetic — not a label.
   //

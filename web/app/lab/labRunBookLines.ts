@@ -42,6 +42,24 @@ export function measuredCount(aggregate: RunBookAggregate): number {
 }
 
 /**
+ * Phase 0 fix 7: the shift head used to claim "health factors" over EVERY
+ * engine's pair — the Debt Manager's distribution is its borrow-headroom
+ * DISCLOSURE ratio (maxBorrowLT/borrowings), never a health factor. Exact-match
+ * engine ids with a no-claim fallback, per house convention (p0-4's
+ * `historyHead`); the sentence composes with p0-4's "Borrow headroom
+ * (disclosure)" vocabulary.
+ */
+export function histogramShiftHead(engine: string): string {
+  if (engine === "aave_v3_etherfi") {
+    return "What this shows: how the book's health factors moved under this scenario.";
+  }
+  if (engine === "debt_manager") {
+    return "What this shows: how the book's borrow-headroom disclosures moved under this scenario.";
+  }
+  return "What this shows: how the book's plotted values moved under this scenario.";
+}
+
+/**
  * The histogram pair's reading line: the NET population change AND the two
  * gross crossings that produced it.
  *
@@ -80,7 +98,7 @@ export function histogramShiftReadingLine(engine: LabRunBookEngine): string {
   const before = engine.before;
   const after = engine.after;
   const reading = readTransitions(engine);
-  const head = "What this shows: how the book's health factors moved under this scenario. ";
+  const head = `${histogramShiftHead(engine.engine)} `;
 
   // A MATRIX THIS BODY CONTRADICTS IS NOT READ, and the thing lost with it is
   // the ONE census the two sides share. While the matrix reconciles,

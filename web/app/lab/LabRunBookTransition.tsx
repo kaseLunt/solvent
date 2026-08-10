@@ -43,6 +43,7 @@
 //     applies.
 
 import type { LabRunBookEngine, RunBookTransitions } from "@/lib/runbook";
+import { comparatorReaderLabel } from "@/lib/book-copy";
 import chart from "@/components/charts/charts.module.css";
 import { useMeasuredWidth } from "@/lib/useMeasuredWidth";
 import { labUsd } from "./frontierView";
@@ -243,7 +244,10 @@ export function LabRunBookTransition({ engine }: { engine: LabRunBookEngine }) {
     >
       <p className={styles.panelTitle}>
         Lane transitions · before → after{" "}
-        <span className={styles.comparatorTag}>comparator: {t.comparator}</span>
+        {/* Phase 0 fix 7: the wire token is an identifier, not reader copy —
+            the label is self-describing, so no "comparator:" prefix (p0-4's
+            Book convention, applied at the Lab border). */}
+        <span className={styles.comparatorTag}>{comparatorReaderLabel(t.comparator)}</span>
       </p>
 
       {/* ---- ANSWER — the gross crossings the two histograms could not give -- */}

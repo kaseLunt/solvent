@@ -195,6 +195,21 @@ export function statesBitIdentical(
   return compareStatePair(before, after) === "identical";
 }
 
+/**
+ * Phase 0 fix 7: the state pair's first row label. The row renders each
+ * engine's own served ratio (`hfInfo`: the wad, else num/den), and it was
+ * labeled "health factor" for EVERY engine — on the Debt Manager the num/den
+ * is the exact rational maxBorrowLT/borrowings, a DISCLOSURE and never a
+ * health factor (its trigger is the strict boolean on the row below).
+ * Exact-match engine ids with a no-claim fallback, per house convention
+ * (p0-4's `historyHead`).
+ */
+export function statePairRowLabel(engine: string): string {
+  if (engine === "aave_v3_etherfi") return "health factor";
+  if (engine === "debt_manager") return "borrow headroom (disclosure)";
+  return "served value";
+}
+
 // ---------------------------------------------------------------------------
 // LabBoundaryGroup — the stable-snap boundary set.
 // ---------------------------------------------------------------------------

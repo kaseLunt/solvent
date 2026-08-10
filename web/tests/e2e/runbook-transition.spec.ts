@@ -263,12 +263,15 @@ test("a served run renders ONE transition matrix per engine, with the crossings 
 
   // The comparator travels with the matrix, so it is readable without the
   // histograms in scope — and the two engines do NOT share one.
+  // Phase 0 fix 7: the wire token is an identifier, not reader copy — the tag
+  // humanizes it per the engine's own semantics (comparatorReaderLabel,
+  // prefix dropped), exactly as p0-4 did on Book.
   await expect(
     page.locator('[data-testid="runbook-transition"][data-engine="aave_v3_etherfi"]'),
-  ).toContainText("comparator: hf_wad");
+  ).toContainText("the pool's own health factor (wad)");
   await expect(
     page.locator('[data-testid="runbook-transition"][data-engine="debt_manager"]'),
-  ).toContainText("comparator: hf_num/hf_den");
+  ).toContainText("maxBorrowLT/borrowings — a disclosure, not the engine's trigger");
 
   // THE GROSS CROSSINGS, which no pair of marginals could produce. The Aave row
   // of this book falls from band 3 into band 0, so exactly one row enters the

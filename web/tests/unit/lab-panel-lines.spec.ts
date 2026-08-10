@@ -59,6 +59,7 @@ import {
   runbookHistogramForensicsSummary,
   runbookHistogramMethod,
   shockFlagTally,
+  statePairRowLabel,
   statesBitIdentical,
   type RunBookEngineFacts,
 } from "../../app/lab/labPanelLines";
@@ -204,6 +205,16 @@ test("compareStatePair: a missing side is WITHHELD, never identical and never mo
   expect(compareStatePair(null, null)).toBe("withheld");
   expect(statesBitIdentical(null, null)).toBe(false);
   expect(statesBitIdentical(DM_STATE, null)).toBe(false);
+});
+
+// Phase 0 fix 7: the state pair's first row used to be labeled "health factor"
+// for EVERY engine — on the Debt Manager the rendered num/den is the exact
+// ratio maxBorrowLT/borrowings, a DISCLOSURE and never a health factor. Same
+// exact-match engine ids with a no-claim fallback as p0-4's historyHead.
+test("p0-7: the state pair's row label is engine-specific and never dresses the DM ratio as a health factor", () => {
+  expect(statePairRowLabel("aave_v3_etherfi")).toBe("health factor");
+  expect(statePairRowLabel("debt_manager")).toBe("borrow headroom (disclosure)");
+  expect(statePairRowLabel("unknown_engine")).toBe("served value");
 });
 
 test("boundaryGroupAnswer: identical, moved, withheld and not-applicable are FOUR different counts", () => {

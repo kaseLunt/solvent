@@ -364,3 +364,116 @@ Program spec: docs/specs/2026-08-09-ui-overhaul-program-design.md
 
 **Phase 0 is COMPLETE pending Codex adversarial review** (dispatched by the
 controller over the p0-0…p0-6 range per landing discipline).
+
+## Phase 0 fix wave (p0-7) — the Lab border of the terminology fix
+
+Post-review fix dispatch (final whole-branch review). Defect class: p0-4 made
+DM terminology engine-specific on Inspector and Book, but the Lab still
+dressed the same DM data in "health factor" vocabulary and printed raw wire
+comparator tokens as reader copy — the vocabulary was uniformly wrong before
+the phase and INCONSISTENTLY wrong after it. Four fixes, p0-4's conventions
+mirrored exactly (exact-match engine ids with a no-claim fallback;
+comparatorReaderLabel with the "comparator:" prefix dropped).
+
+### The four fixes
+
+1. `labRunBookLines.ts` — the histogram-shift head was a fixed "how the
+   book's health factors moved under this scenario" over EVERY engine's pair.
+   New `histogramShiftHead(engine)`: aave "…health factors moved…" / DM
+   "…borrow-headroom disclosures moved…" (composing with p0-4's "Borrow
+   headroom (disclosure)" vocabulary) / no-claim "…plotted values moved…";
+   `histogramShiftReadingLine` now opens with it (keyed on the ENGINE ID —
+   the head travels with the engine even when a test re-comparators a body).
+2. `LabScenarioDetail.tsx` — the state pair's first row was `<td>health
+   factor</td>` for DM pairs too. `result.engine` threaded into `LabStatePair`
+   (new `engine` prop; both ResultView call sites) and the row renders
+   `statePairRowLabel(engine)` (labPanelLines.ts): aave "health factor" / DM
+   "borrow headroom (disclosure)" — the num/den IS maxBorrowLT/borrowings, a
+   disclosure, never the trigger — / no-claim "served value".
+3. `LabRunBookDetail.tsx` (histogram-pair panel title) AND
+   `LabRunBookTransition.tsx` (matrix panel title) — both printed
+   `comparator: {wire token}` as reader copy. Both now render
+   `comparatorReaderLabel(token)` from web/lib/book-copy, prefix dropped,
+   exactly as p0-4's Book change.
+4. This ledger section (the migration record, the r7 anchor correction, and
+   the Phase 1 input flag below).
+
+### New pins (red-first, reds recorded)
+
+- tests/unit/lab-runbook-lines.spec.ts: "p0-7: the shift head is
+  engine-specific…" (three exact toBe arms) and "p0-7: the reading line
+  CARRIES the engine's own head…" (DM fixture carries the DM head whatever
+  the comparator token; the aave-rebadged body carries the health-factor
+  head). RED: SyntaxError at load — no export `histogramShiftHead`
+  (web-3818-p07red.log).
+- tests/unit/lab-panel-lines.spec.ts: "p0-7: the state pair's row label is
+  engine-specific…" (three exact toBe arms). RED: SyntaxError at load — no
+  export `statePairRowLabel` (web-3818-p07red.log).
+- e2e reds (web-3818-p07red-e2e.log, unfixed build): 3 failed exactly at the
+  migrated pins — bsplit:77 (raw "comparator: hf_wad" still rendered),
+  bsplit:101 (DM head still "health factors moved"), transition:271 (raw
+  token) — 40 others passed.
+
+### Pin migrations (old → new)
+
+- tests/e2e/runbook-bsplit.spec.ts:74 — aave pair containText
+  "comparator: hf_wad" → "the pool's own health factor (wad)" (now :77).
+- tests/e2e/runbook-bsplit.spec.ts:77 — DM pair containText
+  "comparator: hf_num/hf_den" → "maxBorrowLT/borrowings — a disclosure, not
+  the engine's trigger" (now :80).
+- tests/e2e/runbook-bsplit.spec.ts:96 — DM reading-line head containText
+  "What this shows: how the book's health factors moved" → "What this shows:
+  how the book's borrow-headroom disclosures moved" (now :101).
+- tests/e2e/runbook-transition.spec.ts:268 — aave matrix containText
+  "comparator: hf_wad" → "the pool's own health factor (wad)" (now :271).
+- tests/e2e/runbook-transition.spec.ts:271 — DM matrix containText
+  "comparator: hf_num/hf_den" → "maxBorrowLT/borrowings — a disclosure, not
+  the engine's trigger" (now :274).
+- Deliberately NOT added: count(0) pins on the "comparator: hf_*" prefix form
+  — the P0M6 vacuity lesson (p0-mutations/transcript.md): with the prefix
+  dropped, the prefixed pattern can never match either way, so a zero-count
+  pin is vacuous. The positive assertions carry the kills.
+
+### Mutation kills (each applied alone, observed in isolation, reverted)
+
+- Mutant A (`histogramShiftHead` returns the Aave string for every engine):
+  KILLED at lab-runbook-lines.spec.ts:249, the DM toBe — Expected
+  "…borrow-headroom disclosures moved…", Received the Aave string
+  (web-3818-p07mutA.log; unit tier, no rebuild needed).
+- Mutant B (`statePairRowLabel` returns "health factor" for every engine):
+  KILLED at lab-panel-lines.spec.ts:216, the DM toBe — Expected "borrow
+  headroom (disclosure)", Received "health factor" (web-3818-p07mutB.log).
+- Mutant C (LabRunBookDetail tag reverted to `comparator: {token}`): rebuild,
+  KILLED at runbook-bsplit.spec.ts:77, the migrated positive containText
+  (web-3818-p07mutC.log).
+- Mutant D (LabRunBookTransition tag reverted to `comparator: {token}`):
+  rebuild, KILLED at runbook-transition.spec.ts:271, the migrated positive
+  containText (web-3818-p07mutD.log).
+- Reverts proven: post-revert rebuild + covering set (lab-runbook-lines,
+  lab-panel-lines, runbook-bsplit, runbook-transition, lab, p0-fixes) —
+  140 passed (web-3818-p07post.log).
+
+### r7 anchor CORRECTION (seal erratum)
+
+The sealed pin-migration inventory and open-flags list cite the vacuous
+retired-testid toHaveCount(0) lines as "r7-fixes.spec.ts:496/:535/:567". The
+REAL lines are **:496 / :538 / :570** (`ribbon-batch-age` at :496 and :570,
+`ribbon-batch-age-unknown` at :538 — grep-verified this wave). :496 was
+right; :535→:538 and :567→:570 are corrected here; the sealed text above is
+left as written. The cleanup flag itself is unchanged (still open, still
+waiting for a task that owns r7-fixes.spec.ts).
+
+### Phase 1 input flag
+
+- snapshot # vs batch # noun fork — chip says snapshot, Feed/Proof say
+  batch; resolve in Phase 1 status model.
+
+### Closing counts (p0-7)
+
+- Suite: 1389 → **1392** (+3: lab-runbook-lines 2, lab-panel-lines 1).
+- Full run (final tree, `npm run build` + full p0-config suite,
+  web-3818-p07full.log): **1391 passed, 1 skipped, 0 failed (33.3s)** —
+  exactly inventory (1392 via `--list`) minus the 1 pre-existing
+  styleguide skip.
+- `npm run typecheck`: completely clean. `npm run lint`: 0 errors, the one
+  pre-existing LabBookPanel.tsx:27 warning (ledgered at the seal).

@@ -30,6 +30,7 @@ import { EM_DASH, renderNullableDecimal, truncateAddress } from "@/lib/format";
 import { sharePercent, shareBarWidth } from "@/lib/book-format";
 import {
   RISK_BAND_METHOD,
+  comparatorReaderLabel,
   riskBandDenominatorLine,
   riskBandNoDebtRow,
   riskBandPairAria,
@@ -271,8 +272,11 @@ export function LabRunBookHistogramPair({ engine }: { engine: LabRunBookEngine }
     >
       <p className={styles.panelTitle}>
         Risk-band distribution · before → after{" "}
+        {/* Phase 0 fix 7: the wire token is an identifier, not reader copy —
+            the label is self-describing, so no "comparator:" prefix (p0-4's
+            Book convention, applied at the Lab border). */}
         <span className={styles.comparatorTag}>
-          comparator: {engine.before.hf_histogram.comparator}
+          {comparatorReaderLabel(engine.before.hf_histogram.comparator)}
         </span>
       </p>
       {/* ---- SLOT 3: ANSWER — the computed shift, with its own limits ---- */}

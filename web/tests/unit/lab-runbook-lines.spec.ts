@@ -43,6 +43,7 @@ import {
   collateralDisclosure,
   collateralReadingLine,
   collateralRowKey,
+  histogramShiftHead,
   histogramShiftReadingLine,
   measuredCount,
   moversDisclosure,
@@ -236,6 +237,42 @@ test("measuredCount adds the no-debt accounts and NOT the refused ones", () => {
 // ---------------------------------------------------------------------------
 // The histogram-shift reading line
 // ---------------------------------------------------------------------------
+
+// Phase 0 fix 7: the head used to claim "health factors" over EVERY engine's
+// pair — the Debt Manager's distribution is its borrow-headroom DISCLOSURE
+// ratio (maxBorrowLT/borrowings), never a health factor. Same exact-match
+// engine ids with a no-claim fallback as p0-4's historyHead.
+test("p0-7: the shift head is engine-specific and never dresses the DM ratio as health factors", () => {
+  expect(histogramShiftHead("aave_v3_etherfi")).toBe(
+    "What this shows: how the book's health factors moved under this scenario.",
+  );
+  expect(histogramShiftHead("debt_manager")).toBe(
+    "What this shows: how the book's borrow-headroom disclosures moved under this scenario.",
+  );
+  expect(histogramShiftHead("unknown_engine")).toBe(
+    "What this shows: how the book's plotted values moved under this scenario.",
+  );
+});
+
+test("p0-7: the reading line CARRIES the engine's own head, keyed on the engine id", () => {
+  // `engineWith` builds on the fixture's debt_manager engine, so the sentence
+  // must open with the DM head whatever the comparator token says — the head
+  // is keyed on the ENGINE ID, exactly as p0-4 keyed historyHead.
+  const dm = engineWith("hf_num/hf_den", [
+    [0, 0, 1],
+    [4, 0, 1],
+  ]);
+  const dmLine = histogramShiftReadingLine(dm);
+  expect(dmLine).toContain("how the book's borrow-headroom disclosures moved");
+  expect(dmLine).not.toContain("how the book's health factors moved");
+  // The same shape re-badged as the Aave engine keeps the health-factor head:
+  // its comparator IS the pool's own health factor.
+  const aave: LabRunBookEngine = { ...engineWith("hf_wad", [
+    [0, 0, 1],
+    [4, 0, 1],
+  ]), engine: "aave_v3_etherfi" };
+  expect(histogramShiftReadingLine(aave)).toContain("how the book's health factors moved");
+});
 
 test("the shift line names the NET population change, computed from both sides", () => {
   // Three rows fall into the region from band 4 and nothing leaves it.
