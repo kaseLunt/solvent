@@ -74,6 +74,13 @@ test.describe("p0-1 · address-bound stress results", () => {
     await expect(barrier).toBeVisible();
     await expect(barrier).toContainText("RESULTS FOR PREVIOUS INPUT");
     await expect(barrier).toContainText(ADDR);
+    // p0-1b: the barrier ANNOUNCES itself — role="status", the house
+    // superseded-notice convention (batch-superseded-notice,
+    // risk-map-superseded-notice, DegradationBanner). It appears on typing and
+    // withdraws visible content, so screen readers must hear it.
+    await expect(
+      page.getByRole("status").filter({ hasText: "RESULTS FOR PREVIOUS INPUT" }),
+    ).toBeVisible();
     await expect(page.getByTestId("lab-found")).toHaveCount(0);
     // retype the exact original address: result restored, barrier gone
     await input.fill(ADDR);

@@ -302,7 +302,7 @@ export function LabClient() {
           )}
 
           {binding.kind === "stale" ? (
-            <p data-testid="lab-stale-result" className={styles.staleBarrier}>
+            <p data-testid="lab-stale-result" role="status" className={styles.staleBarrier}>
               {staleBarrierLine(binding.addr)}
             </p>
           ) : (
