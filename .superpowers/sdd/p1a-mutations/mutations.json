@@ -1,0 +1,224 @@
+{
+  "meta": {
+    "wave": "phase-1 track A close (p1a-8): the reconciled mutation record of tasks p1a-0..p1a-7",
+    "applier": "NONE — this spec is a RECONCILIATION, not a fresh loop. Every mutant below was applied, observed killed IN ISOLATION, and reverted DURING ITS OWN TASK (p1a-1 through p1a-6; p1a-0 and p1a-7 carried none); the kills are recorded in the task reports (.superpowers/sdd/2026-08-10-ui-overhaul-phase1-tracka/task-{1,2,3,4,5,6}-report.md), the committed ledger (.superpowers/sdd/progress-ui-overhaul.md, the p1a sections), and the repo-root run logs web-3820-p1a3-mut*.log / web-3820-p1a4-mut*.log / web-3820-p1a4b-mutM4.log / web-3820-p1a5-mut*.log / web-3820-p1a6-mut*.log (tasks 1-2 kept no per-mutant root logs; their kills are recorded prose).",
+    "notes": "Counts reconciled from the records, not predicted: 15 mutants, 15 KILLED, 0 survived (p1a-1: 2; p1a-2: 3 — the stylelint scratch-gate proof plus the two folded-in pin kills; p1a-3: 2; p1a-4: 3 + 1 fix-round mutant p1a-4b-M4; p1a-5: 2; p1a-6: 2). One mutant is a BUILD-GATE kill, not a test kill (p1a-2-M1: the kill assertion is stylelint exit 2, the structural floor firing). One recorded run carried one UNRELATED flake alongside its kills (p1a-4-M3: r7 (3)'s connection-count poll under parallel load — green in both final-tree full runs, recorded in-task). 'search' strings are the CURRENT-TREE fixed code each mutant attacked, re-verified against HEAD at transcript time (all anchors single-line or contiguous-line, CRLF sources, convention-independent matches); 'replace' is the mutant AS RECORDED, reconstructed verbatim where the record quotes it and marked reconstructed-from-description where the record describes it. Commands are the recorded invocations; where a record says only 'in isolation' the command is the house form for that isolation and is marked so in the transcript. Mutants were tested at their own task's HEAD (p1a-1 @ 5e3bb9e, p1a-2 @ 9a8d628, p1a-3 @ fbcbae9, p1a-4 @ a9881f2, p1a-4b @ fa67289, p1a-5 @ 5f43b2e, p1a-6 @ 4ff851a), not re-run at close."
+  },
+  "mutations": [
+    {
+      "id": "p1a-1-M1",
+      "property": "The §04 --ink-3 amendment is REAL in the built app, not just the source: dark #71868e (4.53:1 on panel) resolved through the full light-first + media + data-theme cascade. Reverting both dark blocks to the retired #5f7178 (3.39:1, text-illegal) must die at the rendered rgb pin.",
+      "description": "--ink-3 dark reverted to #5f7178 in BOTH dark blocks (media + data-theme)",
+      "source": "task-1-report.md §Mutation kills; ledger §p1a-1 'Mutation kills'",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1a.config.ts tests/e2e/p1a-fixes.spec.ts",
+      "edits": [
+        {
+          "file": "web/app/tokens.css",
+          "search": "    --ink-3: #71868e; /* §04 REV from #5f7178 (3.39 → 4.53 on panel); same demotion as light: captions/ornament only */",
+          "replace": "    --ink-3: #5f7178;"
+        },
+        {
+          "file": "web/app/tokens.css",
+          "search": "  --ink-3: #71868e;",
+          "replace": "  --ink-3: #5f7178;"
+        }
+      ]
+    },
+    {
+      "id": "p1a-1-M2",
+      "property": "The §02 width contract STEPS: at 1920×1080 the shell must render the 1520 step, not hold the 1280 base. Deleting the whole 1920 media block reverts the viewport to base width and must die at the rendered-width pin.",
+      "description": "the whole 1920 media step deleted from tokens.css",
+      "source": "task-1-report.md §Mutation kills; ledger §p1a-1 'Mutation kills'",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1a.config.ts tests/e2e/p1a-fixes.spec.ts",
+      "edits": [
+        {
+          "file": "web/app/tokens.css",
+          "search": "@media (min-width: 1920px) {\n  :root {\n    --shell-max: 1520px;\n    --breakout-max: 1520px;\n  }\n}",
+          "replace": ""
+        }
+      ]
+    },
+    {
+      "id": "p1a-2-M1",
+      "property": "THE STRUCTURAL FLOOR: a sub-12px font-size literal in app CSS is a BUILD ERROR, not a review comment — stylelint's declaration-property-value-allowed-list holds every font-size to /^var\\(--(t|fs)-/. The kill assertion is the gate itself: exit 2 at the exact scratch line.",
+      "description": "scratch rule `.p1a2MutationScratch { font-size: 11px; }` appended to globals.css — the gate-fires proof, killed by the linter, not by a test",
+      "source": "task-2-report.md §Proof of gate item 2; ledger §p1a-2 'THE STRUCTURAL-FLOOR PROOF'",
+      "test": "npm run lint:css",
+      "edits": [
+        {
+          "file": "web/app/globals.css",
+          "search": "    scroll-behavior: auto !important;\n  }\n}",
+          "replace": "    scroll-behavior: auto !important;\n  }\n}\n\n.p1a2MutationScratch {\n  font-size: 11px;\n}"
+        }
+      ]
+    },
+    {
+      "id": "p1a-2-M2",
+      "property": "The canon's 'holds 1280 at 1366' guard: the base --breakout-max declaration is EXACTLY 1280px, exactly once — the stepped blocks are the only other declarations, so a moved base (1300) escapes every media pin and only the exactly-once source pin can catch it.",
+      "description": "base --breakout-max mutated 1280px → 1300px (folded-in Task-1-review pin kill A)",
+      "source": "task-2-report.md §Proof of gate item 3; ledger §p1a-2 'Pin kill A'",
+      "test": "npx playwright test -c tests/playwright.p1a.config.ts --project=unit tests/unit/tokens-contract.spec.ts",
+      "edits": [
+        {
+          "file": "web/app/tokens.css",
+          "search": "  --breakout-max: 1280px; /* analytical breakout — steps AHEAD of the shell at 1440 */",
+          "replace": "  --breakout-max: 1300px; /* analytical breakout — steps AHEAD of the shell at 1440 */"
+        }
+      ]
+    },
+    {
+      "id": "p1a-2-M3",
+      "property": "--ink-3 closed accounting: declared exactly 4 times (2 light + 2 dark) — a FIFTH declaration anywhere (a sneaked per-surface override) moves the count and must die at the closed-accounting pin (the *-text tokens' pin style, applied to the demoted tier).",
+      "description": "a fifth --ink-3 declaration added to the data-theme dark block (folded-in Task-1-review pin kill B)",
+      "source": "task-2-report.md §Proof of gate item 4; ledger §p1a-2 'Pin kill B'",
+      "test": "npx playwright test -c tests/playwright.p1a.config.ts --project=unit tests/unit/tokens-contract.spec.ts",
+      "edits": [
+        {
+          "file": "web/app/tokens.css",
+          "search": "  --ink-3: #71868e;",
+          "replace": "  --ink-3: #71868e;\n  --ink-3: #71868e;"
+        }
+      ]
+    },
+    {
+      "id": "p1a-3-M1",
+      "property": "The FRESH bound is a THEOREM, not taste: fresh ≤ 2 × price_poll_seconds (the two-sample rule). Widening it to 3× lets a 121s age keep the fresh claim under the fallback trio — and the runtime-override and anchored-age pins die on the same arithmetic.",
+      "description": "freshnessTier's fresh bound widened: 2 × pricePollSeconds → 3 × (reconstructed from description)",
+      "source": "task-3-report.md §Mutation kills; ledger §p1a-3; log web-3820-p1a3-mutM1.log",
+      "test": "npx playwright test -c tests/playwright.p1a.config.ts --project=unit tests/unit/freshness-tiers.spec.ts",
+      "edits": [
+        {
+          "file": "web/lib/freshnessTiers.ts",
+          "search": "  if (ageSeconds <= 2 * c.pricePollSeconds) return \"fresh\";",
+          "replace": "  if (ageSeconds <= 3 * c.pricePollSeconds) return \"fresh\";"
+        }
+      ]
+    },
+    {
+      "id": "p1a-3-M2",
+      "property": "A threshold the page invented must never impersonate one the pipeline stated: every failed meta read answers the fallback CONSTANTS with source \"fallback\" — a failure arm claiming source \"meta\" would let the disclosure vanish, and the SchemaVersionMismatchError arm must land the SAME disclosed fallback.",
+      "description": "loadMetaConstants' failure arm claims source \"meta\" (reconstructed from description)",
+      "source": "task-3-report.md §Mutation kills; ledger §p1a-3; log web-3820-p1a3-mutM2.log",
+      "test": "npx playwright test -c tests/playwright.p1a.config.ts --project=unit tests/unit/freshness-tiers.spec.ts",
+      "edits": [
+        {
+          "file": "web/lib/meta.tsx",
+          "search": "  } catch {\n    return META_CONSTANTS_FALLBACK;\n  }",
+          "replace": "  } catch {\n    return { constants: META_CONSTANTS_FALLBACK.constants, source: \"meta\" };\n  }"
+        }
+      ]
+    },
+    {
+      "id": "p1a-4-M1",
+      "property": "Tier styling is COMPUTED from the ratified §06 bounds, never painted by hand: the snapshot chip's register is TIER_CLASS[freshnessTier(anchoredAge, constants)]. Flattening the map to cQuiet leaves every age wearing measured ink — the resolved-color pin at the AGING step (--warn-text) dies.",
+      "description": "TIER_CLASS flattened: all four tiers → styles.cQuiet (reconstructed from description)",
+      "source": "task-4-report.md §Mutation kills; ledger §p1a-4 'Proof of gate + mutation kills'; log web-3820-p1a4-mutM1.log",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1a.config.ts tests/e2e/p1a-fixes.spec.ts",
+      "edits": [
+        {
+          "file": "web/components/Ribbon.tsx",
+          "search": "const TIER_CLASS: Record<FreshnessTier, string | undefined> = {\n  fresh: styles.cQuiet,\n  aging: styles.cWarn,\n  stale: styles.cCrit,\n  critical: styles.cCritFill,\n};",
+          "replace": "const TIER_CLASS: Record<FreshnessTier, string | undefined> = {\n  fresh: styles.cQuiet,\n  aging: styles.cQuiet,\n  stale: styles.cQuiet,\n  critical: styles.cQuiet,\n};"
+        }
+      ]
+    },
+    {
+      "id": "p1a-4-M2",
+      "property": "LIVE · WATERMARKED is RETIRED and cannot resurrect: the accent arm says STREAM CONNECTED (posture, never health). Painting the retired badge back into the accent arm dies at the CONNECTED-visible pins AND the kept count-0 resurrection guards on the same renders — 4 pins across 3 files.",
+      "description": "the accent arm's label reverted to \"LIVE · WATERMARKED\" (reconstructed from description)",
+      "source": "task-4-report.md §Mutation kills; ledger §p1a-4; log web-3820-p1a4-mutM2.log",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1a.config.ts tests/e2e/p1a-fixes.spec.ts tests/e2e/p0-fixes.spec.ts tests/e2e/r7-fixes.spec.ts (command form reconstructed; the log ran 33 tests)",
+      "edits": [
+        {
+          "file": "web/lib/stream-posture.ts",
+          "search": "        ? { label: STREAM_CONNECTED, tone: \"accent\" }",
+          "replace": "        ? { label: \"LIVE · WATERMARKED\", tone: \"accent\" }"
+        }
+      ]
+    },
+    {
+      "id": "p1a-4-M3",
+      "property": "The raw watermark as-ofs are DEMOTED but never DROPPED: the Data status popover carries the full vector (per-engine heights + the sweep's own as-of). Emptying the vector (slice(0,0)) dies at the 5 retargeted watermark pins — the tests OPEN the popover and read the heights there.",
+      "description": "the popover renders asOfs.slice(0, 0) — the as-of vector emptied (as recorded)",
+      "source": "task-4-report.md §Mutation kills; ledger §p1a-4; log web-3820-p1a4-mutM3.log",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1a.config.ts tests/e2e/p1a-fixes.spec.ts tests/e2e/r7-fixes.spec.ts tests/e2e/state-matrix.spec.ts (command form reconstructed; the log ran 59 tests)",
+      "edits": [
+        {
+          "file": "web/components/Ribbon.tsx",
+          "search": "            {props.asOfs.map((asOf) => (",
+          "replace": "            {props.asOfs.slice(0, 0).map((asOf) => ("
+        }
+      ]
+    },
+    {
+      "id": "p1a-4b-M4",
+      "property": "RENDERED ONLY WHEN UNAMBIGUOUS: a refused engine with no stamp gives the coverage subtraction no honest denominator — the derivation returns null and the CHIP IS WITHHELD ENTIRELY. Deleting the unbindable guard invents {answered:1,total:2,withheld:[\"ghost_engine\"]} where null was pinned, and the chip renders where count 0 was pinned.",
+      "description": "the unbindable-withhold guard deleted from ribbonCoverage (the fix-round mutant, Task 4 review)",
+      "source": "task-4-report.md §p1a-4b; ledger §p1a-4b 'Mutation kill (M4)'; log web-3820-p1a4b-mutM4.log",
+      "test": "npm run build && npx playwright test -c tests/playwright.p1a.config.ts tests/e2e/p1a-fixes.spec.ts tests/unit/coverage.spec.ts",
+      "edits": [
+        {
+          "file": "web/lib/coverage.ts",
+          "search": "  if (withheld.some((engine) => !stamped.includes(engine))) return null;\n",
+          "replace": ""
+        }
+      ]
+    },
+    {
+      "id": "p1a-5-M1",
+      "property": "THE RATIFIED LAW is structural, not advisory: a verdict banner composed without its identity strip renders the warn-register structural refusal NAMING the omission — never the happy sentence. Deleting the refusal branch from verdictBannerModel lets every render-empty shape wear the requested variant's banner.",
+      "description": "the refusal branch deleted from verdictBannerModel — identity enforcement removed (reconstructed from description)",
+      "source": "task-5-report.md §Mutation kills; ledger §p1a-5 'Red-first evidence + mutation kills'; log web-3820-p1a5-mutM1.log",
+      "test": "npx playwright test -c tests/playwright.p1a.config.ts --project=unit tests/unit/kit.spec.ts",
+      "edits": [
+        {
+          "file": "web/lib/kit.ts",
+          "search": "  if (identityMissing(identity)) {\n    return {\n      kind: \"refusal\",\n      toneClass: \"vWarn\",\n      answer: VERDICT_IDENTITY_REFUSAL.answer,\n      qualification: VERDICT_IDENTITY_REFUSAL.qualification,\n    };\n  }\n",
+          "replace": ""
+        }
+      ]
+    },
+    {
+      "id": "p1a-5-M2",
+      "property": "The false-scent law's FORBIDDEN arm: human === exact renders PLAIN — no affordance, no title, no glyph (a copy cue over an identical value is a lie about layers). Forcing exactValueMode to a constant \"affordance\" dies at exactly the forbidden-arm pin.",
+      "description": "exactValueMode → constant \"affordance\" (reconstructed from description)",
+      "source": "task-5-report.md §Mutation kills; ledger §p1a-5; log web-3820-p1a5-mutM2.log",
+      "test": "npx playwright test -c tests/playwright.p1a.config.ts --project=unit tests/unit/kit.spec.ts",
+      "edits": [
+        {
+          "file": "web/lib/kit.ts",
+          "search": "  return human === exact ? \"plain\" : \"affordance\";",
+          "replace": "  return \"affordance\";"
+        }
+      ]
+    },
+    {
+      "id": "p1a-6-M1",
+      "property": "The styleguide MEASURES its swatches — nothing prints the canon's numbers. The known-bad probe (--ink-3 on --chip-bg) renders its failing ratio computed live per theme (4.29 light · 4.05 dark): a contrastRatio stubbed to a constant 4.53 cannot produce the per-theme values and dies at the probe's exact-ratio attribute pin.",
+      "description": "contrastRatio → constant 4.53 (reconstructed from description)",
+      "source": "task-6-report.md §Verification; ledger §p1a-6; log web-3820-p1a6-mutM1.log",
+      "test": "NEXT_PUBLIC_SHOW_STYLEGUIDE=1 npm run build && npx playwright test -c tests/playwright.p1a.config.ts tests/e2e/p1a-fixes.spec.ts -g \"p1a-6\" (command form reconstructed; the log ran the 8 styleguide pins)",
+      "edits": [
+        {
+          "file": "web/lib/contrast.ts",
+          "search": "  const a = relativeLuminance(fg);\n  const b = relativeLuminance(bg);\n  const hi = Math.max(a, b);\n  const lo = Math.min(a, b);\n  return (hi + 0.05) / (lo + 0.05);",
+          "replace": "  return 4.53;"
+        }
+      ]
+    },
+    {
+      "id": "p1a-6-M2",
+      "property": "The §11 interaction register is a WORKING reference implementation, not a static picture: ArrowRight moves the focus ring in data order. Removing the svg's onKeyDown handler leaves a chart that can be focused but never traversed — dead at the ArrowRight data-focus-index pin.",
+      "description": "the demo svg's onKeyDown wiring removed (reconstructed from description)",
+      "source": "task-6-report.md §Verification; ledger §p1a-6; log web-3820-p1a6-mutM2.log",
+      "test": "NEXT_PUBLIC_SHOW_STYLEGUIDE=1 npm run build && npx playwright test -c tests/playwright.p1a.config.ts tests/e2e/p1a-fixes.spec.ts -g \"p1a-6\" (command form reconstructed; the log ran the 8 styleguide pins)",
+      "edits": [
+        {
+          "file": "web/app/styleguide/InteractionRegisterDemo.tsx",
+          "search": "        onKeyDown={onKeyDown}\n",
+          "replace": ""
+        }
+      ]
+    }
+  ]
+}

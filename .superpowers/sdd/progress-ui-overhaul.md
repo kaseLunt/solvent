@@ -1429,12 +1429,12 @@ Task list:
       (p1a-3)
 - [x] Task 4 — THE MIGRATION WAVE: canon appbar + tiered chip (badge
       retirement) (p1a-4)
-- [ ] Task 5 — shared component kit (verdict banner, exact affordance,
+- [x] Task 5 — shared component kit (verdict banner, exact affordance,
       chips, states) (p1a-5)
-- [ ] Task 6 — styleguide rebuild (p1a-6)
-- [ ] Task 7 — Track C convergence pass (History, Activity, Proof,
+- [x] Task 6 — styleguide rebuild (p1a-6)
+- [x] Task 7 — Track C convergence pass (History, Activity, Proof,
       Developers) (p1a-7)
-- [ ] Task 8 — Track A close + Codex round (p1a-8)
+- [x] Task 8 — Track A close + Codex round (p1a-8)
 
 ### p1a-0 · wave config (Task 0)
 
@@ -3035,3 +3035,215 @@ this commit carries only this ledger entry.
 - FULL p1a suite, CI-mirror (`NEXT_PUBLIC_SHOW_STYLEGUIDE=1` build,
   port 3820): **1613 passed, 0 failed, 0 skipped (41.0s)** — the p1a-6
   1608 baseline plus exactly the 5 p1b-11 pins that landed since.
+
+## Phase 1 Track A CLOSE (p1a-8) — seal
+
+### Delivered scope (the wave's whole claim)
+
+- **The closed type set + floor-lifted aliases (p1a-1)**: the 14-token
+  `--t-*` set — nothing below 12px EXISTS — with every legacy `--fs-*`
+  re-pointed by ROLE onto it (four sub-12px sizes floor-lifted to 12px);
+  the full mapping ledger lives in §p1a-1 and in the tokens.css comment
+  block.
+- **The two-grade palette (p1a-1)**: `--ink-3` amended text-legal in all
+  four theme blocks (demoted by law to captions/ornament); the light text
+  grade split from the fill grade (`--accent/ok/warn/crit-text`, each
+  ≥ 4.5:1, declared at fill values in dark so components reference
+  `--*-text` unconditionally); `--warn-bg`; `--term-dim` amended in its
+  one defining block.
+- **The width contract / 1180 REPEALED (p1a-1)**: `--shell-max` 1280 base,
+  stepped ON THE TOKENS at 1440 (breakout 1340) / 1920 (both 1520) /
+  2560 (both 1680); `.breakout`/`.prose`/`.grid12` utilities; canon §02
+  shell padding verbatim.
+- **The structural floor (p1a-2)**: stylelint 17.14.1,
+  `declaration-property-value-allowed-list` holding every `font-size` in
+  app/ + components/ CSS to `/^var\(--(t|fs)-/`, `font` shorthand held to
+  `inherit`; the 44-literal debt paid (one 9→12 floor lift, the sole
+  visual change); `lint:css` wired into CI directly after lint (commit
+  owner-ratified after the recorded gate event).
+- **Freshness tiers + meta provider (p1a-3)**: `freshnessTier` — every
+  bound a theorem about the pipeline's constants (2×poll / ceiling /
+  sweep-worst-case; unknown age is NOT an input); `MetaConstantsProvider`
+  — one `/v1/meta` ask, abort-guarded, no retry, every rejection
+  (including `SchemaVersionMismatchError`) landing the DISCLOSED fallback;
+  the p0-5 hand-picked-hour machinery retired.
+- **The canon appbar + the retirement (p1a-4/4b)**: STREAM / SNAPSHOT+TIER
+  / BATCH / COVERAGE each its own chip; the Data status popover carrying
+  the raw watermark vector; `LIVE · WATERMARKED` RETIRED with liveness
+  made UNREPRESENTABLE in the posture type; **the 61-pin migration**
+  (45 header-vocabulary + snapshot-chip migrations, 5 @-payload retargets
+  INTO the popover, 11 count-0 pins KEPT as permanent resurrection
+  guards — the full tables live in §p1a-4); the coverage chip derived
+  from the envelope and WITHHELD when unbindable (p1a-4b).
+- **The component kit (p1a-5)**: pure `lib/kit.ts` models under thin
+  components — VerdictBanner (identity-strip law enforced structurally),
+  ExactValue (§7 affordance + forbidden arm), StatusChip/ChipVal/
+  RefusedChip/EngineTag, the six §8 states. Additive: zero page-consumer
+  changes.
+- **The living styleguide (p1a-6)**: the /styleguide route rebuilt
+  canon-structured (19 specimen sections), the §04 palette self-verified
+  by a LIVE contrast lab (17 pairs measured, known-bad probe pinned to
+  its per-theme failing ratios), the §11 interaction register's reference
+  implementation; the standing-red CI env-var build fixed structurally
+  (RSC boundary violation in the old page).
+- **The convergence pass (p1a-7)**: History / Activity / Proof /
+  Developers all HOLD under the new foundation — zero fixes, zero pin
+  updates; 32-render matrix audited (zero sub-12px, zero overflow).
+
+### Mutation transcript (Step 1)
+
+`.superpowers/sdd/p1a-mutations/{mutations.json,transcript.md}` — the
+reconciled record: **15 mutants, 15 KILLED, 0 survived** (p1a-1 ×2,
+p1a-2 ×3 — one stylelint BUILD-GATE kill + two folded pin kills,
+p1a-3 ×2, p1a-4 ×3 + the p1a-4b fix-round mutant, p1a-5 ×2, p1a-6 ×2;
+p1a-0 and p1a-7 carried none). Every kill as-recorded-in-source (task
+reports + this ledger's p1a sections + the `web-3820-p1a*-mut*.log`
+artifacts); every search anchor re-verified against the sealed tree,
+drifted kill-assertion lines re-anchored (`recorded :N → now :M`).
+
+### Closing verification (p1a-8, final tree = `4a0f27c` + this seal)
+
+- `npm run typecheck` — clean (exit 0)
+- `npm run lint` — clean (exit 0)
+- `npm run lint:css` — clean (exit 0)
+- **FULL suite, CI-mirror shape** (`NEXT_PUBLIC_SHOW_STYLEGUIDE=1
+  npm run build && npx playwright test -c tests/playwright.p1a.config.ts`,
+  port 3820): **1617 passed, 0 failed, 0 skipped (40.0s)**
+  (`web-3820-p1a8-full-var.log`)
+- **FULL suite, no-var shape** (plain `npm run build`, same invocation):
+  **1608 passed, 9 skipped, 0 failed (39.1s)**
+  (`web-3820-p1a8-full-novar.log`) — the 9 skips are exactly the
+  styleguide-not-compiled-in shape (the 8 p1a-6 pins + shell.spec's
+  specimen walk), skip-never-fail as designed.
+- **Count reconciliation (the drift caveat discharged)** — Track A
+  baseline 1477/87 (p1a-0), interleaved with Track B on the shared
+  tests/ tree:
+
+  | seal | enumerated | delta |
+  |---|---|---|
+  | p1a-0 baseline | 1477 | — |
+  | + p1b-4 (Track B) | 1495 | +18 |
+  | p1a-1 | 1511 | +16 |
+  | + p1b-5 | 1521 | +10 |
+  | p1a-2 | 1523 | +2 |
+  | + p1b-6/8/9/10 | 1566 | +43 |
+  | p1a-3 | 1575 | +9 (+11 −2 retired) |
+  | p1a-4 | 1582 | +7 |
+  | p1a-4b | 1589 | +7 |
+  | p1a-5 | 1600 | +11 |
+  | p1a-6 | 1608 | +8 |
+  | + p1b-11 | 1613 | +5 |
+  | p1a-7 | 1613 | +0 (ledger-only) |
+  | + p1b-12 | 1617 | +4 |
+  | **p1a-8 close** | **1617** | +0 (transcript + seal only) |
+
+### Debt inventory (declared, carried — nothing silently dropped)
+
+**Structural debt (Phase 3 owns):**
+- The `--fs-*` alias retirement: every alias resolves onto `--t-*` today
+  (the floor holds through the alias); Phase 3 retires them PER-SURFACE
+  and tightens the stylelint pattern to `--t-*` only. Includes the two
+  deliberate value-preserving holds: `--fs-table` at `--t-meta` 13 (the
+  §08 table pattern's sans-14 body is per-surface rebuild work) and
+  `--fs-mono` at `--t-mono-floor` 12 (the canon terminal body's 12.5
+  uplift is the `.term` restyle).
+- The token-redefinition stylelint hole (p1a-2 minor): a module could
+  declare `--t-tiny: 8px` locally; closure = a rule forbidding
+  `--t-*`/`--fs-*` declarations outside tokens.css.
+- `lint:css` globs are enumerated (`app/`, `components/`) — a new
+  top-level CSS dir would escape; closure = structural glob + `.next`
+  ignore (p1a-2 minor).
+- The stylelint config comment overstates its anchor (head-bound, not
+  whole-value tail); harmless — invalid CSS drops (p1a-2 minor).
+- RefusedTag → kit RefusedChip across the 15 page consumers; the chart
+  primitive library builds against the styleguide reference (declared
+  scope-outs).
+- Page-surface `LIVE · WATERMARKED` / `NO SERVABLE BATCH` / SERVING prose
+  echoes (11 sites, §p1a-4 out-of-scope list) — KEPT deliberately; the
+  Phase-3 clarity review owns the prose-vocabulary question.
+
+**Cosmetic divergences (ruled, standing):**
+- humanAge-vs-canon compact ages: production prints `SNAPSHOT 18h 12m ·
+  CRITICAL` where canon specimens print `18h` — precision is house law
+  (p0-5); ruled in §p1a-4, re-affirmed in §p1a-6.
+- `COVERAGE 2/2 ENGINES` (§05 dimension 3's fuller form) vs canon §10's
+  `COVERAGE 2/2`.
+
+**Track B envelope gap (ledgered for the schema owner):**
+- `refused_engines` is `string[]` with no structural binding to the
+  watermark stamp vector — the coverage chip withholds itself when a
+  refused name carries no stamp (p1a-4b pins the withhold); a
+  schema-level binding would retire the null arm.
+
+**Open rulings:**
+- DegradationBanner overlap reconciliation (p1a-4 note): due when a
+  future task touches the banner; neither Task 5 nor 7 did.
+- r7:516's details-open assumption (the popover's DOM open state across
+  re-renders) holds only while the popover is unkeyed.
+
+**Deferred minors, carried by task (the workspace ledger's full
+inventory; dispositions noted):**
+- T1: breakout-base unpinned + no 1366 test → CLOSED by the p1a-2
+  fold-in (pin kills A/B); `--ink-3` count pin → CLOSED (same).
+- T3: `freshness.ts` R4 narrative names the retired
+  `ribbonBatchAgeSuffix` without a tombstone marker at the site.
+- T3→T4: the fallback title's false "unreachable" cause → CLOSED in
+  p1a-4 (the disclosed-fallback wording landed and is pinned).
+- T4: no anti-arm pin for the fallback disclosure (every appbar test
+  aborts /v1/meta; a reachable-meta arm would pin the disclosure's
+  ABSENCE). — T4: popover keyboard operability implemented but unpinned
+  (all retargets click(); one Enter/Space pin closes the canon gate;
+  Task 6 pinned the CHART register, not the popover). — T4: the
+  unavailable branch's stale-for value lost the mono register
+  (§6 embedded-values-mono law; cosmetic). — T4: `.sep` dividers absent
+  before SUPERSEDED/Data-status (canon sketch has all segments). —
+  T4: comment drift `meta.tsx:23` ("unreachable") and `AppHeader.tsx:39`
+  ("integrity Ribbon slot").
+- T5: `identityMissing` inspects unrendered ReactNode (empty-fragment
+  evasion possible) → mitigated by the p1a-6 DOM pin (`data-slot=
+  "identity"` non-empty on all five specimens); the model-level gap
+  stands. — T5: refusal renders stamp the caller's `data-variant` →
+  CLOSED (Task 6 evaluated, AGREED, pinned). — T5: clipboard
+  writeText-absent edge (no real-browser exercise); Enter-only
+  activation (canon-verbatim; Space/click worth a Phase-3 look). —
+  T5: the kit ledger framing omits `.cUnknown`'s hollow dot as a third
+  divergence (canon-mandated).
+- T6: contrast composite base is body bg, not nearest-opaque-ancestor
+  (inert today — all grounds opaque). — T6: the ≥4.5 loop asserts a 2dp
+  string (~0.005 tolerance); a raw-ratio attribute would close it. —
+  T6 (Phase-3 advisory): the interaction readout is not `aria-live`;
+  SRs are routed to the ledger twin per canon — production copy may want
+  a polite live region. — T6: TierChip takes a declared tier prop rather
+  than deriving through `freshnessTier` (specimens map correctly; the
+  deriver is pinned elsewhere). — T6: `SPECIMEN_ROWS` dead `marks`
+  field; `contrast.ts` uses the 0.04045 sRGB linearization constant vs
+  WCAG's 0.03928 (negligible; agrees at 2dp).
+- T7: the capture/audit spec was deleted after the 32-render matrix —
+  future convergence passes should leave the throwaway spec beside
+  `audit.json`.
+
+**Forward law (binds Phase 2/3 surfaces, not Track A code):**
+engine-separation, the number law, and the chart-form obligations of the
+ratified canon attach to the surfaces Phase 2/3 build; recorded here so
+the next planner inherits them as law, not as taste.
+
+### CI inheritance (by name, from the p1a-7 record)
+
+- **web job**: known standing-failure set EMPTY at HEAD — the lane's
+  last recorded failure (TS2322 at `lab-runbook-lines.spec.ts:858`,
+  seen at origin/main `f36b4d4`) was repaired in unpushed `c2b74e8`
+  (p0-6a); typecheck / lint / lint:css exit 0 and the CI-mirror suite
+  is green at this seal. CI itself has still never run the Track A/B
+  commits (all local-only).
+- **race job** (`go test -race`) and **go job** (`gofmt`): pre-existing
+  Go-side failures, untouched by any Track A/B commit, inherited by
+  name — owed to whichever track next touches the Go tree, not to this
+  web wave.
+
+### What runs next
+
+The controller dispatches the Codex adversarial round (context: the canon
+as the contract, the appbar migration as the attack surface — vocabulary
+consistency, tier arithmetic, pin-migration fidelity, contrast claims);
+findings return as a fix wave under the standing gate rules (bypasses
+FORBIDDEN — a blocked gate means BLOCKED).
