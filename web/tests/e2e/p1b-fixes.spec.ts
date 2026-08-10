@@ -1009,3 +1009,58 @@ test.describe("p1b-12 · Codex round-4 fix", () => {
     await expect(dmPanel.getByTestId("book-engine-answer")).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-13 · the Codex round-5 fix wave: the LAST -0-blind scale gate.
+// p1b-12 closed `isWireScale`, but the UNCLASSIFIED surfaces (/v1/book's
+// bad-debt/stat rows, Observatory series) feed the wire `usd_decimals`
+// straight into `formatUnits`, whose own `assertScale` still admitted -0
+// (`Number.isInteger(-0)` true, `-0 < 0` false) — so `"usd_decimals":-1e-324`
+// rendered base units at ZERO decimal places: $239,603,961 where the honest
+// figure is $239.603961. The fix is IN THE CLIENT PACKAGE (a controller-
+// sanctioned, contract-enforcing exception): `assertScale` now refuses
+// `Object.is(value, -0)`, so the throw lands in the p1b-0 route boundary —
+// the honest arm on a surface with no classifier: the route REFUSES by name
+// and no mis-scaled number exists anywhere on the page.
+//
+// The -0 payload is produced exactly as p1b-12's (see that block): sentinel
+// scale spliced in the RAW body string, because `JSON.stringify(-0)`
+// normalizes to the token `0`.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-13 · Codex round-5 fix", () => {
+  test("a /v1/book usd_decimals token that parses to -0 refuses the ROUTE — never a mis-scaled dollar figure", async ({
+    page,
+  }) => {
+    // Single documented change to the committed /v1/book fixture: the
+    // debt_manager bad-debt row's usd_decimals carries the raw token -1e-324.
+    // Everything else byte-identical.
+    const SENTINEL = 987654321; // no legal scale (>1000): unmistakable in the body text
+    const body = structuredClone(BOOK);
+    const dm = body.bad_debt.find((row) => row.engine === "debt_manager");
+    if (!dm) throw new Error("fixture shape: debt_manager bad_debt row missing");
+    dm.usd_decimals = SENTINEL;
+    const serialized = JSON.stringify(body);
+    const needle = `"usd_decimals":${String(SENTINEL)}`;
+    // The sentinel must appear EXACTLY once or the splice would corrupt more
+    // than the documented field.
+    expect(serialized.split(needle).length).toBe(2);
+    const raw = serialized.replace(needle, '"usd_decimals":-1e-324');
+    await mockBookWith(page, body);
+    // Registered AFTER mockBookWith, so this RAW fulfillment wins for /v1/book
+    // (Playwright matches routes newest-first); stream/positions mocks stand.
+    await page.route("**/v1/book", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", headers: CORS, body: raw }),
+    );
+    await page.goto("/book");
+    // THE HONEST ARM: the p1b-0 route boundary catches the DecimalFormatError
+    // formatUnits now throws at the -0 scale — the route refuses by name…
+    const refusal = page.getByTestId("route-refusal");
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toContainText("refused to render");
+    await expect(page.getByRole("banner")).toBeVisible();
+    // …and the MIS-SCALED figure (base units rendered at zero decimal places;
+    // the fixture's honest render is $239.603961) exists NOWHERE.
+    await expect(page.getByText("239,603,961")).toHaveCount(0);
+  });
+});

@@ -271,6 +271,30 @@ test.describe("the bodyless-settlement register names its own arm", () => {
     expect(reason).not.toContain("no servable batch");
   });
 
+  test("p1b-13: NULL busy gauges speak the unknown register — never a fabricated count", () => {
+    // A null gauge is an UNREADABLE gauge (runbookSet's `positiveInt` refused
+    // the envelope's number: absent, fractional-rounded -0, out of range).
+    // The sentence states capacity unknown; it never claims "at most 0" — a
+    // zero the service never sent, and one production cannot mean (a busy
+    // refusal implies max_in_flight > 0).
+    const reason = setRunFailureReason({
+      kind: "busy",
+      message: "m",
+      maxInFlight: null,
+      inFlight: null,
+    });
+    expect(reason).toContain("SERVICE BUSY (503 set_run_busy)");
+    expect(reason).toContain("no count is claimed");
+    expect(reason).toContain("nothing about the book");
+    expect(reason).toContain("no retry time exists to offer");
+    // No numeric capacity claim of ANY size, and the busy arm's standing
+    // vocabulary constraints hold in this register too.
+    expect(reason).not.toMatch(/at most \d/);
+    expect(reason).not.toMatch(/\b0\b/);
+    expect(reason).not.toContain("rate");
+    expect(reason).not.toContain("no servable batch");
+  });
+
   test("each arm names itself", () => {
     expect(
       setRunFailureReason({ kind: "no-batch", message: "no complete batch", retryAfterSeconds: 5 }),

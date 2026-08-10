@@ -309,6 +309,24 @@ export function healthFactorRatio(hf: HealthFactor): { num: bigint; den: bigint 
 }
 
 function assertScale(decimals: number, field: string): void {
+  if (Object.is(decimals, -0)) {
+    // NEGATIVE ZERO is refused BY NAME (p1b-13, Codex round 5; a controller-
+    // sanctioned, contract-ENFORCING tightening): the contract's scale is a
+    // JSON integer >= 0, no conforming JSON integer token parses to -0
+    // (`JSON.parse("0")` is +0; Go's encoding/json never emits -0 for an
+    // int), so a -0 here is the surviving fingerprint of an out-of-contract
+    // fractional token — `-1e-324` rounds to -0 during JSON.parse — that the
+    // generic check below would wave through (`Number.isInteger(-0)` is true
+    // and `-0 < 0` is false), rendering base units at ZERO decimal places.
+    // Refusing it matches `parseDecimal`'s strictness: anything the contract
+    // would not have produced throws rather than becoming a silently
+    // different number. Named explicitly because `String(-0)` is `"0"`.
+    throw new DecimalFormatError(
+      decimals,
+      `${field} must be an integer in [0, 1000], got -0 (a fractional token's rounding fingerprint; ` +
+        `no conforming JSON integer parses to negative zero)`,
+    );
+  }
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 1000) {
     throw new DecimalFormatError(decimals, `${field} must be an integer in [0, 1000], got ${String(decimals)}`);
   }

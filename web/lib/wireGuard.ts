@@ -34,12 +34,14 @@ export function isZeroDecimal(value: string): boolean {
 /**
  * A decimals scale the renderer may exponentiate: an integer in [0, 1000] —
  * mirrors `assertScale`'s bounds in `@solvent/client`'s decimal.ts, so what
- * this guard admits the renderer will not throw on. One deliberate asymmetry
- * (p1b-12, Codex round 4): `assertScale` ADMITS -0 (`Number.isInteger(-0)`
- * is true and `-0 < 0` is false) and would render base-unit strings at ZERO
- * decimal places — a plausible, severely mis-scaled price — so this guard
- * refuses the -0 fingerprint before the renderer ever sees it (the NEGATIVE
- * ZERO block below).
+ * this guard admits the renderer will not throw on. The -0 refusal landed
+ * here first (p1b-12, Codex round 4), when `assertScale` still ADMITTED -0
+ * (`Number.isInteger(-0)` is true and `-0 < 0` is false) and would render
+ * base-unit strings at ZERO decimal places — a plausible, severely
+ * mis-scaled price. Since p1b-13 (round 5, controller-sanctioned)
+ * `assertScale` refuses -0 too, closing the unclassified surfaces that feed
+ * it directly; the asymmetry is history and the two gates agree (the
+ * NEGATIVE ZERO block below).
  */
 export function isWireScale(value: unknown): value is number {
   return (

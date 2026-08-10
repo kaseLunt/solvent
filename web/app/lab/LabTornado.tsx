@@ -1066,10 +1066,14 @@ function SettledView({
       );
     }
     case "busy":
+      // p1b-13: a null gauge renders the unknown register — "unreadable" —
+      // never a fabricated 0 (a busy refusal implies max_in_flight > 0, so a
+      // zero here would be a capacity claim the service never made).
       return (
         <div className={styles.errorState} data-testid="tornado-busy">
           <b>SERVICE BUSY (503 set_run_busy).</b> {outcome.message} (max_in_flight{" "}
-          {String(outcome.maxInFlight)} · in_flight {String(outcome.inFlight)}). A statement about
+          {outcome.maxInFlight === null ? "unreadable" : String(outcome.maxInFlight)} · in_flight{" "}
+          {outcome.inFlight === null ? "unreadable" : String(outcome.inFlight)}). A statement about
           the evaluator&apos;s CAPACITY and about nothing in the book: the batch is fine. It is
           distinct from no-servable-batch (503 unavailable) and from the rate limit (429), and no
           retry time is offered because nothing computes when a slot frees.

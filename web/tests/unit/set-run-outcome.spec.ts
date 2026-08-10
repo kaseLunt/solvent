@@ -83,12 +83,13 @@ test.describe("the set-run's refusal register dispatches on the CODE", () => {
     expect(busy.kind).not.toBe(noBatch.kind);
   });
 
-  test("p1b-12: busy gauges that parse to -0 are refused into the 0 fallback, never carried", () => {
-    // The p1b-12 negative-zero class at THIS gate: `positiveInt` judged
-    // `Number.isInteger(value) && value >= 0` — both true of -0 — so a
-    // fractional token (`-1e-324` rounds to NEGATIVE ZERO during JSON.parse)
-    // rode into the busy arm as a capacity gauge. `.toBe` is Object.is, so
-    // these pins see the sign bit that String() would hide.
+  test("p1b-13: unreadable busy gauges are carried as NULL — capacity unknown, never a fabricated zero", () => {
+    // p1b-12 taught `positiveInt` to refuse -0 (the fingerprint of a
+    // fractional token: `-1e-324` rounds to NEGATIVE ZERO during JSON.parse),
+    // but BOTH call sites then substituted `?? 0` — so a malformed busy
+    // envelope rendered `max_in_flight 0 · in_flight 0`, a capacity claim
+    // production never makes (busy implies max > 0). The null arm now RIDES
+    // to the outcome: unreadable is stated as unknown, never as zero.
     const outcome = classifySetRunRefusal(
       503,
       headers(),
@@ -96,9 +97,25 @@ test.describe("the set-run's refusal register dispatches on the CODE", () => {
     );
     expect(outcome.kind).toBe("busy");
     if (outcome.kind !== "busy") return;
-    expect(outcome.maxInFlight).toBe(0);
-    expect(outcome.inFlight).toBe(0);
-    // Ordinary zero gauges stay legal — the refusal is the sign bit.
+    expect(outcome.maxInFlight).toBeNull();
+    expect(outcome.inFlight).toBeNull();
+    // The busy sentence states capacity UNKNOWN and claims no zero — the
+    // "0 of 0"-shaped claim ("at most 0 … and 0 are running") is pinned out.
+    const reason = setRunFailureReason(outcome);
+    expect(reason).toContain("SERVICE BUSY (503 set_run_busy)");
+    expect(reason).toContain("no count is claimed");
+    expect(reason).not.toMatch(/at most 0 set-run/);
+    expect(reason).not.toMatch(/\b0 are running/);
+    expect(reason).not.toMatch(/\b0 of 0\b/);
+    // ABSENT gauges are the same unknown, not a different zero.
+    const absent = classifySetRunRefusal(503, headers(), '{"error":{"code":"set_run_busy","message":"m"}}');
+    expect(absent.kind).toBe("busy");
+    if (absent.kind !== "busy") return;
+    expect(absent.maxInFlight).toBeNull();
+    expect(absent.inFlight).toBeNull();
+    // Ordinary zero gauges stay legal (`.toBe` is Object.is — the sign bit
+    // would show): a served 0 is the wire's own claim, and the wire's claim
+    // is kept.
     const zeroes = classifySetRunRefusal(
       503,
       headers(),

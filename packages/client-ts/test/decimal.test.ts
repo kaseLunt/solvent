@@ -277,6 +277,49 @@ describe("formatUnits and parseUnits are exact inverses", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// p1b-13 (Codex round 5) — the scale gate refuses NEGATIVE ZERO.
+//
+// `JSON.parse("-1e-324")` rounds to -0, which passed `assertScale`
+// (`Number.isInteger(-0)` is true and `-0 < 0` is false), so any surface
+// feeding a wire `usd_decimals` straight into `formatUnits` rendered base
+// units at ZERO decimal places: `formatUnits("239603961", -0)` was
+// `"239603961"` — a plausible, severely mis-scaled money string. The
+// contract's scale is a JSON integer >= 0, and no conforming JSON integer
+// token parses to -0 (Go's encoding/json never emits -0 for an int), so the
+// sign bit is the surviving fingerprint of an out-of-contract token and is
+// refused with the same strictness `parseDecimal` applies to its strings.
+// ---------------------------------------------------------------------------
+
+describe("p1b-13: the scale gate refuses negative zero", () => {
+  const NEG_ZERO = JSON.parse("-1e-324") as number;
+
+  it("pins the defect input: the raw token -1e-324 parses to -0, never to +0", () => {
+    expect(Object.is(NEG_ZERO, -0)).toBe(true);
+  });
+
+  it("formatUnits REFUSES a -0 scale instead of rendering base units", () => {
+    expect(() => formatUnits(PINNED.dm.badDebtAtPar, NEG_ZERO)).toThrow(DecimalFormatError);
+    expect(() => formatUnits("239603961", -0)).toThrow(DecimalFormatError);
+  });
+
+  it("parseUnits and rescale refuse -0 on every scale parameter", () => {
+    expect(() => parseUnits("42", NEG_ZERO)).toThrow(DecimalFormatError);
+    expect(() => rescale("1", NEG_ZERO, 2)).toThrow(DecimalFormatError);
+    expect(() => rescale("1", 2, NEG_ZERO)).toThrow(DecimalFormatError);
+  });
+
+  it('names -0 in the refusal — String(-0) is "0" and would hide the sign', () => {
+    expect(() => formatUnits("239603961", NEG_ZERO)).toThrow(/-0/);
+  });
+
+  it("ordinary zero stays a legal scale — the refusal is the sign bit alone", () => {
+    expect(formatUnits("42", 0)).toBe("42");
+    expect(parseUnits("42", 0)).toBe(42n);
+    expect(rescale("1", 0, 2)).toBe(100n);
+  });
+});
+
 describe("comparisons stay exact — no division anywhere", () => {
   it("compares rationals by cross-multiplication", () => {
     const num = parseDecimal(PINNED.dm.hfNum);

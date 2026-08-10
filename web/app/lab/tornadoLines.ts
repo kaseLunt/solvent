@@ -362,13 +362,24 @@ export type BodylessSetOutcome = Exclude<SetRunOutcome, { kind: "ok" }>;
  */
 export function setRunFailureReason(outcome: BodylessSetOutcome): string {
   switch (outcome.kind) {
-    case "busy":
+    case "busy": {
+      // p1b-13 (Codex round 5): a null gauge is an UNREADABLE gauge — the
+      // envelope's number did not survive runbookSet's `positiveInt` — and
+      // the sentence states capacity UNKNOWN rather than claiming a zero the
+      // service never sent (a busy refusal implies max_in_flight > 0, so
+      // "at most 0" is a statement production cannot make). The busy FACT
+      // itself needs no gauge: the code `set_run_busy` is the claim.
+      const capacity =
+        outcome.maxInFlight === null || outcome.inFlight === null
+          ? `is at its set-run capacity, but the refusal's capacity gauges were unreadable — ` +
+            `no count is claimed, and unreadable is never zero`
+          : `evaluates at most ${String(outcome.maxInFlight)} set-run(s) at once and ` +
+            `${String(outcome.inFlight)} are running`;
       return (
-        `SERVICE BUSY (503 set_run_busy): this deployment evaluates at most ` +
-        `${String(outcome.maxInFlight)} set-run(s) at once and ${String(outcome.inFlight)} ` +
-        `are running, so the set was refused before any batch was read. This says nothing ` +
-        `about the book, and no retry time exists to offer.`
+        `SERVICE BUSY (503 set_run_busy): this deployment ${capacity}, so the set was refused ` +
+        `before any batch was read. This says nothing about the book, and no retry time exists to offer.`
       );
+    }
     case "no-batch":
       return (
         `NO SERVABLE BATCH (503 unavailable): ${outcome.message}` +

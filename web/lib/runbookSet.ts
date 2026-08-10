@@ -56,7 +56,15 @@ export const MAX_SET_RUN_SCENARIOS = 24;
 export type SetRunOutcome =
   | { kind: "ok"; response: RunBookSetResponse }
   | { kind: "not-served" }
-  | { kind: "busy"; message: string; maxInFlight: number; inFlight: number }
+  /**
+   * A null gauge is an UNREADABLE gauge (p1b-13, Codex round 5): the busy
+   * envelope's `max_in_flight`/`in_flight` did not survive `positiveInt` —
+   * absent, non-numeric, fractional-rounded -0, out of range. Null rides to
+   * every consumer, which renders the unknown register; NOBODY substitutes a
+   * numeric zero, because `max_in_flight 0 · in_flight 0` is a capacity
+   * claim production never makes (a busy refusal implies max > 0).
+   */
+  | { kind: "busy"; message: string; maxInFlight: number | null; inFlight: number | null }
   | { kind: "no-batch"; message: string; retryAfterSeconds: number | null }
   | { kind: "rate-limited"; message: string; retryAfterSeconds: number | null }
   | { kind: "refused"; status: number; code: string; message: string }
@@ -112,8 +120,14 @@ function retryAfter(header: string | null, envelope: Envelope | null): number | 
  * busy arm as a capacity gauge (`maxInFlight`/`inFlight` render in the busy
  * sentence). A conforming integer marshal never emits a token that parses to
  * -0, so the sign bit is the fingerprint of an out-of-contract token —
- * refused into the same 0 fallback as every other unreadable gauge (the wire
- * guard's law, applied at this local gate; see wireGuard.ts).
+ * refused to null (the wire guard's law, applied at this local gate; see
+ * wireGuard.ts).
+ *
+ * The null CARRIES (p1b-13, Codex round 5). Both call sites used to
+ * substitute `?? 0`, so a malformed busy envelope rendered
+ * `max_in_flight 0 · in_flight 0` — fabricated zeros wearing a measured
+ * costume. An unreadable gauge is now stated as unknown at every surface,
+ * never as a number the service did not send.
  */
 function positiveInt(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && !Object.is(value, -0)
@@ -146,8 +160,8 @@ export function classifySetRunRefusal(
       message:
         message ??
         "this deployment is evaluating as many set-runs as it will run at once. Nothing here computes when a slot frees, so no retry time is offered.",
-      maxInFlight: positiveInt(body.max_in_flight) ?? 0,
-      inFlight: positiveInt(body.in_flight) ?? 0,
+      maxInFlight: positiveInt(body.max_in_flight),
+      inFlight: positiveInt(body.in_flight),
     };
   }
   if (code === "unavailable") {

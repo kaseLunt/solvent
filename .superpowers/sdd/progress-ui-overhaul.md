@@ -3247,3 +3247,128 @@ as the contract, the appbar migration as the attack surface — vocabulary
 consistency, tier arithmetic, pin-migration fidelity, contrast claims);
 findings return as a fix wave under the standing gate rules (bypasses
 FORBIDDEN — a blocked gate means BLOCKED).
+
+## Phase 1 Track B Codex fix wave 5 (p1b-13)
+
+Codex round 5 returned TWO findings — the -0 class's LAST scale gate
+(inside the client package) and a fabricated-zero substitution the p1b-12
+fix itself left behind — both fixed test-first in one commit
+(`fix(web): p1b-13 codex round 5 - assertScale refuses negative zero at
+the contract gate, busy gauges never fabricate capacity`).
+
+### Finding 1 (HIGH) — assertScale admits -0 (client-ts, controller-authorized exception)
+
+`packages/client-ts/src/decimal.ts:311` (pre-fix): `assertScale` judged
+`Number.isInteger(decimals) && decimals >= 0 && decimals <= 1000` — all
+true of -0 — so the UNCLASSIFIED surfaces (/v1/book bad-debt/stat rows,
+Observatory series: any path feeding wire `usd_decimals` straight into
+`formatUnits` with no `isWireScale` classifier in front) rendered
+`formatUnits("239603961", -0)` as `"239603961"`: base units at ZERO
+decimal places, a plausible, severely mis-scaled dollar figure
+($239,603,961 where the honest figure is $239.603961).
+
+**CONTROLLER AUTHORIZATION (recorded)**: tightening `assertScale` is a
+sanctioned NARROW EXCEPTION to the no-client-ts-behavioral-changes rule,
+because it is contract-ENFORCING, not contract-changing: the openapi
+scale is an integer >= 0, no conforming JSON integer token parses to -0
+(Go's encoding/json never emits -0 for an int), and the refusal matches
+`parseDecimal`'s standing strictness philosophy — anything the contract
+would not have produced throws rather than becoming a silently different
+number.
+
+**Fix**: `assertScale` throws its existing `DecimalFormatError` on
+`Object.is(value, -0)`, BEFORE the generic bounds check; the message
+names `-0` explicitly (`String(-0)` is `"0"` and would hide the sign);
+the rationale lives in the site comment. Every scale parameter is
+covered at once: `formatUnits`, `parseUnits`, `rescale` (both ends).
+The p1b-12 wireGuard doc's "asymmetry against assertScale" note would
+have become a present-tense falsehood — reworded (comment-only, in this
+commit) to record the asymmetry as history: both gates now refuse -0.
+
+### Finding 2 (MEDIUM) — busy gauges fabricated `0` for malformed envelopes
+
+`web/lib/runbookSet.ts:149` (pre-fix): p1b-12 taught `positiveInt` to
+refuse -0 to null, but BOTH call sites substituted `?? 0` — so a
+malformed busy envelope rendered `max_in_flight 0 · in_flight 0`:
+fabricated zeros wearing a measured costume, a capacity claim production
+never makes (a busy refusal implies max > 0).
+
+**Fix**: the busy arm's gauges are `number | null` and the null CARRIES
+(`maxInFlight: positiveInt(...)`, no fallback). Consumers (the only
+two, per grep + `find_referencing_symbols`): `setRunFailureReason`'s
+busy sentence (tornadoLines.ts) states capacity UNKNOWN — "the refusal's
+capacity gauges were unreadable — no count is claimed, and unreadable is
+never zero" — when EITHER gauge is null, and keeps the exact numeric
+sentence otherwise; LabTornado.tsx's busy state renders each null gauge
+as `unreadable` in place of the number. A wire-served literal `0` stays
+legal and renders as 0 — the wire's own claim is kept.
+
+### Pins (red-first, all witnessed)
+
+- **client-ts unit (decimal.test.ts, +5)**: `JSON.parse("-1e-324")` IS
+  -0 (the defect input pinned); formatUnits refuses a -0 scale
+  (`DecimalFormatError`); parseUnits + rescale (both parameters) refuse;
+  the refusal NAMES -0; ordinary 0 stays legal on all three helpers.
+  RED: 3 of 5 failed (no throw anywhere).
+- **web unit (set-run-outcome.spec.ts, p1b-12 pin REWRITTEN to the
+  p1b-13 law)**: raw `-1e-324` gauges → busy outcome with NULL gauges
+  (`toBeNull`), the busy sentence contains "no count is claimed" and no
+  "0 of 0"-shaped claim (`at most 0 set-run` / `0 are running` pinned
+  out); ABSENT gauges are the same null; wire-served 0 gauges stay 0
+  (`.toBe` is Object.is). RED: `Received: 0` — the fabricated zero.
+- **web unit (tornado-lines.spec.ts, +1)**: null-gauge busy sentence
+  speaks the unknown register — no numeric capacity claim of ANY size
+  (`at most \d` pinned out, `\b0\b` pinned out), and the busy arm's
+  standing vocabulary constraints (no "rate", no "no servable batch")
+  hold in this register too. RED: sentence claimed "at most 0".
+- **web e2e (p1b-fixes.spec.ts "p1b-13", +1)**: the committed /v1/book
+  fixture with the debt_manager bad-debt row's `"usd_decimals":-1e-324`
+  SPLICED AS RAW TEXT (sentinel-uniqueness asserted; same honest -0
+  payload production as p1b-12's block). GREEN law: the p1b-0 route
+  boundary catches the DecimalFormatError — `route-refusal` visible,
+  "refused to render", banner mounted, and the mis-scaled figure
+  `239,603,961` has count 0. RED witnessed the exact defect: NO refusal
+  and the mis-scaled $239,603,961 rendered 6 times on the page.
+
+### Kills (2 mutants, 2 KILLED, 0 survived, unit-in-isolation)
+
+- **p1b-13-M1**: the `Object.is` arm removed from `assertScale` →
+  client-ts decimal.test.ts in isolation dies at exactly the 3 p1b-13
+  -0 pins (3 failed / 27 passed); restored, `cmp`-verified
+  byte-identical, 30/30 green.
+- **p1b-13-M2**: the null arm reverted to `?? 0` at both call sites →
+  set-run-outcome.spec.ts in isolation dies at exactly the p1b-13
+  no-zero-claim pin (1 failed / 36 passed); restored, `cmp`-verified
+  byte-identical, 37/37 green.
+
+### Closing counts (p1b-13)
+
+- client-ts `npm run verify` (typecheck + vitest + build) — clean:
+  **355 passed** (350 + the 5 new pins); dist rebuilt with the fix
+  (web's ensure-client prebuild path rebuilds it on every web build too)
+- `npm run typecheck` / `npm run lint` / `npm run lint:css` — clean
+  (exit 0)
+- touched web unit specs (set-run-outcome + tornado-lines) —
+  **100 passed** (99 pre-existing incl. the rewritten pin + 1 new)
+- `npm run build` — clean (fresh, post-restore)
+- e2e book + lab + p1b-fixes — **75 passed** (74 + the 1 new pin)
+- FULL Track B suite (`npx playwright test -c
+  tests/playwright.p1b.config.ts`, port 3819, fresh build):
+  **1610 passed, 9 skipped, 0 failed (35.6s)**
+  (`web-3819-p1b13-full.log`) — the p1b-12 count (1608 + 9 skipped, the
+  p1a-6 styleguide no-var shape) plus exactly the 2 new playwright pins
+  (1 tornado-lines unit + 1 e2e; the set-run-outcome change is a
+  REWRITE of the p1b-12 pin, not an addition; the 5 client-ts pins live
+  in vitest, outside this suite's count).
+
+### Standing notes
+
+- The A2 information boundary (p1b-11) still stands: -0 is the ONLY
+  fractional-rounding fingerprint a post-parse guard can see; closure
+  still requires raw-text response validation or server-side contract
+  testing (Phase-3+ candidate).
+- The `retryAfter` twins (runbookSet.ts, runbook.ts) remain the
+  recorded future-round candidate (any-number posture, p1b-12 table).
+- The client-ts exception is NARROW and closed: `assertScale` only.
+  No other client-ts behavior changed; the package's other 350 pins
+  passed untouched.
