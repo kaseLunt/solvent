@@ -1174,3 +1174,37 @@ sentence and state in those laws is UNCHANGED. No other pin moved; all
   served body.
 - `npm run typecheck`: completely clean.
 - `npx eslint` on all eight touched files: 0 errors, 0 warnings.
+
+## Phase 1 Track A — foundation build
+
+Plan: docs/plans/2026-08-10-ui-overhaul-phase1-tracka.md. Verification runs
+on its OWN wave config, `web/tests/playwright.p1a.config.ts` (port 3820; a
+byte-mirror of `playwright.p0.config.ts` except port + header comment).
+
+**Track A baseline inventory** (`npx playwright test -c
+tests/playwright.p1a.config.ts --list`, recorded BEFORE the first Track A
+spec): **1477 tests in 87 files**.
+
+Task list:
+- [x] Task 0 — wave config + ledger section (p1a-0)
+- [ ] Task 1 — tokens.css migration + width contract (p1a-1)
+- [ ] Task 2 — stylelint: the structural floor (p1a-2)
+- [ ] Task 3 — freshness tier machinery (pure) + meta constants provider
+      (p1a-3)
+- [ ] Task 4 — THE MIGRATION WAVE: canon appbar + tiered chip (badge
+      retirement) (p1a-4)
+- [ ] Task 5 — shared component kit (verdict banner, exact affordance,
+      chips, states) (p1a-5)
+- [ ] Task 6 — styleguide rebuild (p1a-6)
+- [ ] Task 7 — Track C convergence pass (History, Activity, Proof,
+      Developers) (p1a-7)
+- [ ] Task 8 — Track A close + Codex round (p1a-8)
+
+### p1a-0 · wave config (Task 0)
+
+- `web/tests/playwright.p1a.config.ts` created — mirror of the p0 config,
+  PORT 3820, header "Phase 1 Track A verification config." + the standard
+  invocation line.
+- `--list` verified from web/: `Total: 1477 tests in 87 files` — matching
+  Track B's post-p1b-3 count (the two wave configs enumerate the same
+  tests/ tree; only port and boot isolation differ).
