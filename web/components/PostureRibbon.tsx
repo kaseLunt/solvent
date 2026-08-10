@@ -1,19 +1,14 @@
 "use client";
 
-import type { Batch } from "@solvent/client";
 import { usePosture, usePostureRefresh } from "@/lib/posture";
+import { ribbonCoverage } from "@/lib/coverage";
 import { formatBlock } from "@/lib/format";
 import { snapshotChipParts, snapshotChipUnknown, staleSinceReading } from "@/lib/freshness";
 import { freshnessTier } from "@/lib/freshnessTiers";
 import { useMetaConstants, type MetaConstantsSource } from "@/lib/meta";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { ribbonEmptyPosture, ribbonStreamPosture } from "@/lib/stream-posture";
-import {
-  Ribbon,
-  type RibbonAsOf,
-  type RibbonCoverage,
-  type RibbonSnapshotChip,
-} from "./Ribbon";
+import { Ribbon, type RibbonAsOf, type RibbonSnapshotChip } from "./Ribbon";
 import styles from "./ribbon.module.css";
 
 /**
@@ -46,29 +41,11 @@ function snapshotTitle(batchId: number, source: MetaConstantsSource | null): str
   return source === "fallback" ? `${base} · ${TIER_FALLBACK_DISCLOSURE}` : base;
 }
 
-/**
- * The coverage chip's HONEST derivation from the batch envelope.
- *
- * `watermarks` is the stamp vector — one entry per engine the batch binds —
- * and `refused_engines` names every engine whose WHOLE book is withheld
- * (schema: it exists on the summary precisely because `refused_count` counts
- * position rows and is zero for an engine withheld with no accounts behind
- * it). So: total = stamped engines, answered = stamped − withheld.
- *
- * RENDERED ONLY WHEN UNAMBIGUOUS: if the wire ever names a refused engine
- * that carries no stamp, the arithmetic above has no honest denominator and
- * the chip is withheld entirely rather than invented (ledgered §p1a-4 as a
- * Track B envelope gap). An empty stamp vector cannot occur on a served
- * batch (completeness requires ≥1 stamp) but is refused here for the same
- * reason.
- */
-function ribbonCoverage(batch: Batch): RibbonCoverage | null {
-  const stamped = batch.watermarks.map((stamp) => stamp.engine);
-  if (stamped.length === 0) return null;
-  const withheld = [...new Set(batch.refused_engines)];
-  if (withheld.some((engine) => !stamped.includes(engine))) return null;
-  return { answered: stamped.length - withheld.length, total: stamped.length, withheld };
-}
+// The coverage chip's HONEST derivation is `ribbonCoverage` (lib/coverage.ts,
+// pure and unit-pinned since p1a-4b): total = stamp vector, answered =
+// total − deduped refused_engines, and an UNBINDABLE refusal (a refused name
+// with no stamp) returns null — the chip is withheld entirely rather than
+// invented (Track B envelope gap, ledgered §p1a-4).
 
 export function PostureRibbon() {
   const posture = usePosture();

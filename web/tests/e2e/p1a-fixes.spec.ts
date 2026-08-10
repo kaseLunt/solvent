@@ -328,6 +328,52 @@ test.describe("p1a-4 · the canon appbar", () => {
     await expect(header.getByText("debt_manager sweep")).toBeVisible();
   });
 
+  test("partial coverage WARNS and NAMES the withheld engine", async ({ page }) => {
+    // p1a-4b (review finding): every stream fixture ships refused_engines: [],
+    // so the warn arm was reachable but unpinned. debt_manager IS stamped and
+    // its whole book is withheld — the chip counts it and names it.
+    await page.clock.install();
+    await muteAppbarMeta(page);
+    await mockAppbarStream(page, 42, (batch) => {
+      batch.refused_engines = ["debt_manager"];
+    });
+    await mockAppbarBook(page);
+    await page.goto("/book?engine=aave_v3_etherfi");
+
+    const chip = page.getByRole("banner").getByTestId("ribbon-coverage");
+    await expect(chip).toHaveText("COVERAGE 1/2 ENGINES · debt_manager WITHHELD");
+    // The warn register, resolved — a chip that stops warning dies here.
+    const register = await chip.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { color: cs.color, border: cs.borderTopColor };
+    });
+    expect(register.color).toBe(await resolveAppbarToken(page, "--warn-text"));
+    expect(register.border).toBe(await resolveAppbarToken(page, "--warn"));
+  });
+
+  test("an UNBINDABLE refusal withholds the coverage chip entirely — never an invented count", async ({
+    page,
+  }) => {
+    // The wire names a refused engine that carries NO stamp: the arithmetic
+    // has no honest denominator, so there is no chip — rather than a fraction
+    // computed over a vector that does not bind the name (Track B envelope
+    // gap, ledgered §p1a-4).
+    await page.clock.install();
+    await muteAppbarMeta(page);
+    await mockAppbarStream(page, 42, (batch) => {
+      batch.refused_engines = ["ghost_engine"];
+    });
+    await mockAppbarBook(page);
+    await page.goto("/book?engine=aave_v3_etherfi");
+
+    const header = page.getByRole("banner");
+    // The rest of the appbar still renders — only the underivable chip is
+    // withheld.
+    await expect(header.getByTestId("ribbon-batch")).toHaveText("BATCH #1");
+    await expect(header.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 42s");
+    await expect(header.getByTestId("ribbon-coverage")).toHaveCount(0);
+  });
+
   test("SUPERSEDED is a chip in the warn register", async ({ page }) => {
     await page.clock.install();
     await muteAppbarMeta(page);

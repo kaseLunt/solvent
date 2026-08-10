@@ -1,3 +1,4 @@
+import type { RibbonCoverage } from "@/lib/coverage";
 import type { FreshnessTier } from "@/lib/freshnessTiers";
 import type { SnapshotChipParts } from "@/lib/freshness";
 import type { RibbonPostureTone, RibbonStreamPosture } from "@/lib/stream-posture";
@@ -47,18 +48,12 @@ export interface RibbonSnapshotChip {
   readonly title: string;
 }
 
-/**
- * The coverage chip's honest derivation, computed by the caller from the
- * batch envelope (see PostureRibbon). `answered < total` renders the warn
- * variant with the withheld engines NAMED — counts reconcile visibly, no
- * silent shrinkage (canon §05 dimension 3).
- */
-export interface RibbonCoverage {
-  readonly answered: number;
-  readonly total: number;
-  /** Wire names of engines whose whole book is withheld on this batch. */
-  readonly withheld: readonly string[];
-}
+// The coverage chip's reading is derived by the caller through the PURE
+// `ribbonCoverage` (lib/coverage.ts — unit-pinned honesty arms: partial
+// warns, unbindable → null → no chip). `answered < total` renders the warn
+// variant with the withheld engines NAMED — counts reconcile visibly, no
+// silent shrinkage (canon §05 dimension 3).
+export type { RibbonCoverage } from "@/lib/coverage";
 
 export type RibbonProps =
   | {

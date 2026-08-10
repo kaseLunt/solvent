@@ -1946,6 +1946,53 @@ full-suite rerun):
 - Red-first: 5/5 new appbar pins failed pre-implementation
   (`web-3820-p1a4-red.log`).
 
+### p1a-4b · the coverage chip's honesty arms are pinned (Task 4 review fix)
+
+Review finding (IMPORTANT): every stream fixture ships
+`refused_engines: []`, `ribbonCoverage` was module-private with no unit
+spec, and the only pin was the happy `COVERAGE 2/2 ENGINES` — mutants
+that survived the whole suite: (i) unbindable-withhold guard deleted,
+(ii) `answered = total`, (iii) warn class dropped on partial coverage.
+Commit `test(web): p1a-4b the coverage chip's honesty arms are pinned -
+partial warns, unbindable withholds`.
+
+- **`web/lib/coverage.ts` — NEW, pure**: `ribbonCoverage(envelope)` and
+  the `RibbonCoverage` / `CoverageEnvelope` types lifted out of
+  PostureRibbon (same bytes of logic — total = stamp vector, answered =
+  total − deduped refused, unbindable → null). Ribbon.tsx re-exports the
+  type; PostureRibbon imports the fn; zero behavior change (full suite
+  proves it).
+- **`web/tests/unit/coverage.spec.ts` — NEW, 5 tests, red-first** (died
+  at collection: `Cannot find module '…\lib\coverage'`,
+  `web-3820-p1a4b-red.log`; then 5/5 green). Pins: happy 2/2; partial
+  `{answered:1,total:2,withheld:["debt_manager"]}` (kills mutant ii);
+  UNBINDABLE → null, including one unbindable name alongside a bindable
+  one (poisons the whole denominator); deduped refused names (a repeated
+  name is one withholding); empty stamp vector → null.
+- **p1a-fixes appbar describe +2 e2e pins** (the same
+  `appbarSnapshotFrame` mutate harness as the SUPERSEDED pin):
+  - partial: `refused_engines: ["debt_manager"]` (stamped) → chip
+    `toHaveText("COVERAGE 1/2 ENGINES · debt_manager WITHHELD")` +
+    resolved `--warn-text`/`--warn` register (kills mutants ii and iii);
+  - unbindable: `refused_engines: ["ghost_engine"]` (no stamp) →
+    `ribbon-coverage` `toHaveCount(0)` while BATCH #1 and SNAPSHOT 42s
+    still render (only the underivable chip is withheld).
+- **Mutation kill (M4, in isolation, reverted)**: unbindable guard
+  deleted (`if (withheld.some(…)) return null` removed), rebuilt, run
+  `npx playwright test -c tests/playwright.p1a.config.ts
+  tests/e2e/p1a-fixes.spec.ts tests/unit/coverage.spec.ts` →
+  KILLED at exactly the two withheld-arm pins: unit received
+  `{"answered": 1, "total": 2, "withheld": ["ghost_engine"]}` where
+  null was pinned; e2e `ribbon-coverage` count 1 where 0 was pinned.
+  2 failed / 14 passed (`web-3820-p1a4b-mutM4.log`). Guard restored;
+  targeted 16/16 green.
+
+**Closing counts (p1a-4b)**: suite 1582 → **1589 tests** (+5 unit
+coverage, +2 e2e appbar). Full p1a run (final tree, fresh build):
+**1588 passed, 1 skipped, 0 failed (35.8s)**
+(`web-3820-p1a4b-final-full.log`) — same single styleguide skip.
+`npm run typecheck` / `npm run lint` / `npm run lint:css`: clean.
+
 ### p1b-6 · the identity gap audit closes (Task 6)
 
 The §5 audit's remaining rows plus four controller additions (items 6–9),
