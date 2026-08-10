@@ -443,3 +443,99 @@ test.describe("p1b-4 · factor-price entries are classified before they are read
     await expect(card.getByText(/still healthy/i)).toHaveCount(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-5 · stress results carry their full identity (cross-page brief §5).
+//
+// The Lab's address mode bound ONLY the address (p0-1's `results for {addr}`
+// line); batch and config version were display-only in the stamp below, no
+// age was anchored, and the answered engines were nowhere. The done arm now
+// renders the §5 identity line — address · batch · config · answered engines,
+// every field from the RESPONSE — under the SAME `lab-result-address` testid
+// (p0-1's text pin migrated, ledgered old→new), plus its own anchored age
+// (`lab-result-age`), the wire's `age_seconds` under lib/freshness law 1.
+//
+// Lab mock shapes reused from p0-fixes.spec.ts: cold routes pinned, the
+// stress GET served from the committed stress-aave.json (structuredClone +
+// one documented change where a test needs a discriminating age), the
+// hydration-race fill idiom for the input.
+// ---------------------------------------------------------------------------
+
+type StressBody = components["schemas"]["StressResponse"];
+const STRESS_200 = JSON.parse(fixture("stress-aave.json")) as StressBody;
+/** The found-arm address the committed fixture answers for. */
+const STRESS_ADDR = STRESS_200.address;
+
+/** Serve one stress body for the fixture's own address. */
+async function mockStress(page: Page, body: StressBody) {
+  await page.route(`${API}/v1/address/${STRESS_ADDR}/stress`, (route) =>
+    json(route, JSON.stringify(body)),
+  );
+}
+
+/** Enter address mode, run the committed set, wait for the found arm. */
+async function runStress(page: Page) {
+  await page.goto("/lab");
+  await page.getByTestId("mode-address").click();
+  const input = page.getByTestId("lab-address-input");
+  const button = page.getByTestId("run-stress-button");
+  // A fill can land BEFORE React hydrates — refill until React acknowledges
+  // it (p0-fixes' idiom; the enable is driven only by React state).
+  await expect(async () => {
+    await input.fill(STRESS_ADDR);
+    await expect(button).toBeEnabled({ timeout: 250 });
+  }).toPass();
+  await button.click();
+  await expect(page.getByTestId("lab-found")).toBeVisible();
+}
+
+test.describe("p1b-5 · stress results carry their full identity", () => {
+  test("the settled result renders the §5 identity line and its own anchored age", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    // Single documented change to the committed stress fixture, serving ONE
+    // purpose (a DISCRIMINATING age): batch.age_seconds 0 → 42, so the age
+    // pin cannot be satisfied by a hardcoded zero, an empty slot, or a
+    // computed_at-vs-browser-clock recomputation (the fixture's computed_at
+    // is weeks old — that path would render hours, not 42s). Everything else
+    // byte-identical.
+    const body = structuredClone(STRESS_200);
+    body.batch.age_seconds = 42;
+    await mockStress(page, body);
+    await runStress(page);
+    // THE IDENTITY LINE (the grown p0-1 pin, same testid): address · batch ·
+    // config · answered engines, each field from the response, in canon
+    // order. The answered engines are the DISTINCT engines in the RESULTS —
+    // the fixture's scenario definitions name debt_manager too, but only
+    // aave answers for this address, so the line must not claim it.
+    await expect(page.getByTestId("lab-result-address")).toHaveText(
+      `results for ${STRESS_ADDR} · batch #1 · config v1 · engines aave_v3_etherfi`,
+    );
+    // THE ANCHORED AGE: the wire's own age_seconds through humanAge — its
+    // own element, never a clause frozen into the identity string.
+    await expect(page.getByTestId("lab-result-age")).toHaveText("42s old");
+  });
+
+  test("the stale barrier still interposes: identity and age withdraw and return together", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    await mockStress(page, STRESS_200);
+    await runStress(page);
+    // The committed fixture verbatim: age_seconds 0 renders "0s old".
+    await expect(page.getByTestId("lab-result-age")).toHaveText("0s old");
+    // p0-1's barrier law, unchanged by the grown line: editing the input
+    // withdraws the WHOLE identity — line and age both — behind the barrier…
+    const input = page.getByTestId("lab-address-input");
+    await input.fill(STRESS_ADDR.slice(0, -1) + "0");
+    await expect(page.getByTestId("lab-stale-result")).toBeVisible();
+    await expect(page.getByTestId("lab-result-address")).toHaveCount(0);
+    await expect(page.getByTestId("lab-result-age")).toHaveCount(0);
+    // …and retyping the exact address restores both (pure derivation, no
+    // data destruction — the p0-1 round-trip).
+    await input.fill(STRESS_ADDR);
+    await expect(page.getByTestId("lab-result-address")).toContainText("batch #1");
+    await expect(page.getByTestId("lab-result-age")).toHaveText("0s old");
+  });
+});

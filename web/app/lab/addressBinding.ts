@@ -4,6 +4,7 @@
 // identity — so the moment they disagree, the render must stop presenting the
 // result as an answer for what is in the box (cross-page brief §5).
 import type { StressLookup } from "@solvent/client";
+import { identityLine, stressResultIdentity } from "@/lib/resultIdentity";
 
 export type StressPhase =
   | { status: "idle" }
@@ -27,6 +28,13 @@ export function staleBarrierLine(addr: string): string {
   return `RESULTS FOR PREVIOUS INPUT · ${addr} · the box above no longer matches these results — run committed set to answer for the new address`;
 }
 
-export function boundResultLine(addr: string): string {
-  return `results for ${addr}`;
+/**
+ * p1b-5: the p0-1 `boundResultLine` (`results for {addr}`), grown into the
+ * full §5 identity — address, batch, config version, answered engines —
+ * composed from the SETTLED result (phase.addr + the refined response), never
+ * from the input box. Pure; pinned in address-binding.spec.ts and rendered
+ * under the `lab-result-address` testid (name unchanged, text grown).
+ */
+export function settledIdentityLine(addr: string, result: StressLookup): string {
+  return identityLine(stressResultIdentity(addr, result.response));
 }

@@ -89,8 +89,13 @@ test.describe("p0-1 · address-bound stress results", () => {
     }).toPass();
     await button.click();
     await expect(page.getByTestId("lab-found")).toBeVisible();
-    // the settled result names its address
-    await expect(page.getByTestId("lab-result-address")).toContainText(`results for ${ADDR}`);
+    // the settled result names its address — p1b-5 MIGRATED PIN (old:
+    // `results for ${ADDR}`): the bound-result line grew into the full §5
+    // identity, same testid, text grown; ledgered old→new in
+    // .superpowers/sdd/progress-ui-overhaul.md (p1b-5).
+    await expect(page.getByTestId("lab-result-address")).toContainText(
+      `results for ${ADDR} · batch #1 · config v1 · engines aave_v3_etherfi`,
+    );
     // edit one character: barrier up, result body gone
     await input.fill(ADDR.slice(0, -1) + "0");
     const barrier = page.getByTestId("lab-stale-result");

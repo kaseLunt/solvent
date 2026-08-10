@@ -379,6 +379,16 @@
   overflow-wrap: anywhere;
 }
 
+/* p1b-5: the anchored-age line directly under the identity line — the same
+   muted mono caption register, drawn tight to the line it qualifies. */
+.resultAge {
+  margin-top: var(--sp-1);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
 .notApplicable {
   border: 1px dashed var(--ink-3);
   border-radius: var(--r-md);

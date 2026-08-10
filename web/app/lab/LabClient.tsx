@@ -38,6 +38,9 @@ import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { getSolventClient } from "@/lib/api";
 import { isAddress, renderLookupOutcome } from "@/lib/format";
+import { humanAge, unknownAgePhrase } from "@/lib/freshness";
+import { useAnchoredAgeSeconds } from "@/lib/live-age";
+import { resultReceipt, stressResultIdentity } from "@/lib/resultIdentity";
 import { LabBatchStamp } from "./LabBatchStamp";
 import { LabBookPanel, bookDekFor, type BookState } from "./LabBookPanel";
 import { LabBoundaryGroup } from "./LabBoundaryGroup";
@@ -45,7 +48,7 @@ import { LabScenarioChips } from "./LabScenarioChips";
 import { LabScenarioDetail } from "./LabScenarioDetail";
 import {
   addressBinding,
-  boundResultLine,
+  settledIdentityLine,
   staleBarrierLine,
   type StressPhase,
 } from "./addressBinding";
@@ -157,6 +160,24 @@ export function LabClient() {
   // the settled result. A pure derivation — editing the box never destroys
   // the phase, so retyping the exact address restores the result.
   const binding = addressBinding(input, phase);
+
+  // p1b-5: THIS result's own batch age, anchored at receipt and advanced on
+  // the minute tick — mirrors InspectorSurface's usage of the same hook: the
+  // wire's `age_seconds` pinned to the receipt identity `served_at#batchId`
+  // (freshness.ts's receiptIdentity, composed in resultReceipt so the line
+  // and the anchor read ONE identity). NO repair is wired (recorded p1b-5
+  // decision): an address stress is a reader-DISPATCHED run, not an ambient
+  // read, so on a blind resume this surface does not re-run the stress
+  // uninvited — the age enters the unknown register immediately, in its
+  // "refresh failed, data retained" form, and only a new run restates it.
+  const age = useAnchoredAgeSeconds(
+    phase.status === "done"
+      ? resultReceipt(
+          stressResultIdentity(phase.addr, phase.result.response),
+          phase.result.response.batch.age_seconds,
+        )
+      : null,
+  );
 
   /**
    * The per-address scenarios AS THE WIRE SERVED THEM, for the address panel
@@ -315,8 +336,20 @@ export function LabClient() {
 
               {phase.status === "done" ? (
                 <>
+                  {/* p1b-5: the p0-1 bound-result line grown into the full §5
+                      identity — same testid, text grown (pin migrated,
+                      ledgered old→new). */}
                   <p data-testid="lab-result-address" className={styles.resultAddress}>
-                    {boundResultLine(phase.addr)}
+                    {settledIdentityLine(phase.addr, phase.result)}
+                  </p>
+                  {/* p1b-5: the anchored age, never the frozen wire number —
+                      and on a blind resume the unknown register (the
+                      snapshot-chip composition: `age UNKNOWN since resume ·
+                      …`), never an understated "Xs old". */}
+                  <p data-testid="lab-result-age" className={styles.resultAge}>
+                    {age.unresolved
+                      ? unknownAgePhrase(age.refreshFailed)
+                      : `${humanAge(age.seconds ?? phase.result.response.batch.age_seconds)} old`}
                   </p>
                   <StressResult
                     result={phase.result}

@@ -767,7 +767,7 @@ Task list:
 - [x] Task 2 — full RunBookEngine classifier (p1b-2)
 - [x] Task 3 — SetRunEngineSummary classifier + tornado malformed arm (p1b-3)
 - [x] Task 4 — FactorPrice entry guard (p1b-4)
-- [ ] Task 5 — result-identity module + address-mode completion
+- [x] Task 5 — result-identity module + address-mode completion (p1b-5)
 - [ ] Task 6 — five-gap race/identity audit close
 - [ ] Task 7 — close + Codex round
 
@@ -1309,6 +1309,105 @@ byte-identical.
   no served body.
 - `npm run typecheck`: completely clean.
 - `npx eslint` on all six touched files: 0 errors, 0 warnings.
+
+### p1b-5 · shared result-identity module + Lab address-mode completion (Task 5)
+
+Cross-page brief §5: every async result bound to scope / address / batch /
+config-version / engines / computed-at, with the identity VISIBLE. The Lab's
+address mode bound only the address (p0-1); batch/config were display-only in
+the stamp, no age was anchored, and the answered engines were nowhere.
+
+- New module `web/lib/resultIdentity.ts`: `ResultIdentity` (the §5 sextuple),
+  `identityLine` (canon order: subject · batch · config · answered engines),
+  `stressResultIdentity` (extractor over a structural `StressIdentitySource`,
+  so the REFINED response LabClient holds assigns without a cast), and
+  `resultReceipt` (wire `age_seconds` + `receiptIdentity(served_at, batch.id)`
+  — freshness.ts Wave R5's law, composed in ONE place).
+- `addressBinding.ts`: `boundResultLine` RETIRED, replaced by
+  `settledIdentityLine(addr, result)` — the same pure-composition seam, text
+  grown. `find_referencing_symbols` on the old name after the change: 0
+  references.
+- `LabClient.tsx` done arm: `lab-result-address` (testid unchanged) renders
+  the full identity line; NEW `lab-result-age` renders the ANCHORED age via
+  `useAnchoredAgeSeconds(resultReceipt(...))` — `humanAge(seconds) + " old"`,
+  or the unknown register (`unknownAgePhrase`, the snapshot-chip composition)
+  while a blind resume stands. Both lines live inside the stale-barrier
+  conditional, so p0-1's withdrawal law covers them unchanged.
+
+**Migrated pin (old→new)** — p0-fixes.spec.ts:93 (p0-1) and
+address-binding.spec.ts:48:
+- OLD: `lab-result-address` toContainText `results for ${ADDR}`;
+  `boundResultLine(A) === "results for ${A}"`.
+- NEW: `lab-result-address` toContainText
+  `results for ${ADDR} · batch #1 · config v1 · engines aave_v3_etherfi`
+  (the p1b-5 e2e pins the FULL line with toHaveText);
+  `settledIdentityLine(A, result)` contains the verbatim address AND
+  `batch #7` / `config v9` / `engines aave_v3_etherfi`.
+- All other p0-1 pins (barrier text, role="status", withdrawal, round-trip)
+  byte-unchanged.
+
+**Recorded decisions (p1b-5)**
+1. ANSWERED engines = the DISTINCT engines present in `scenarios[].results[]`,
+   in wire order — never the scenario definitions' `engines` lists (they name
+   what a scenario models, not who answered for THIS address), never a
+   hardcoded vocabulary. The committed fixture proves the difference: its
+   definitions name debt_manager, only aave answers, the line says only aave.
+   Empty list renders `engines none answered` (the unknowable arm's identity),
+   never silence.
+2. NO resume repair is wired on the Lab age (`useAnchoredAgeSeconds` called
+   without `onResume`): an address stress is a reader-DISPATCHED run, not an
+   ambient read — re-running it uninvited on resume is a request the reader
+   never made. On a blind resume the hook therefore marks the unknown
+   exhausted immediately and the line renders
+   `age UNKNOWN since resume · refresh failed, data retained`. A new run is
+   the discharge. (InspectorSurface keeps its repair; its lookup is an ambient
+   read of the page's own subject.)
+3. `identityLine` carries NO computed-at clause: `ResultIdentity` has no
+   computed-at field by the brief's interface; the canon's computed-at slot is
+   served by LabBatchStamp (verbatim `computed_at` on the batch stamp, already
+   on the done arm) and the age by the anchored `lab-result-age` line — an age
+   frozen into a string would violate freshness law 1.
+4. The address renders VERBATIM (never ellipsized) in the line — p0-1's
+   "names the address verbatim" law and the migrated pin both require the
+   full address; the canon mock's `0x80b3…6e1d` shortening is a display
+   treatment Phase 3 typography may add, the composition keeps the fact.
+
+**Red-first evidence (recorded)**
+- Unit (web-3819-p1b5-red-unit.log): both specs die at collection —
+  `Cannot find module '…/web/lib/resultIdentity'`;
+  `addressBinding` `does not provide an export named 'settledIdentityLine'`.
+- E2E vs the STALE baseline build (web-3819-p1b5-red-e2e.log): 3 failed —
+  the migrated p0-1 pin (p0-fixes.spec.ts:96, old text still
+  `results for {addr}` alone), the p1b-5 identity line (p1b-fixes.spec.ts:512)
+  and `lab-result-age` element not found (:527). The barrier test (p0-1 error
+  arm) stayed green — the reds are exactly the growth, not a regression.
+
+**Mutation kills (p1b-5-M1, p1b-5-M2; each in isolation, reverted)**
+- M1 — `identityLine` drops the batch clause: unit result-identity in
+  isolation KILLED at the exact-composition pins (received line missing
+  ` · batch #18251`, 3 failed / 4 passed); rebuild + the p1b-5 identity e2e
+  in isolation KILLED at the batch-id pin (p1b-fixes.spec.ts:512, received
+  `results for 0xAAaA… · config v1 · engines aave_v3_etherfi`). Reverted.
+- M2 — `resultReceipt` wired to a CONSTANT receipt (`"receipt"`, the
+  never-re-anchors defect): unit result-identity in isolation KILLED at
+  exactly the receipt-composition pin (expected `2026-08-01T19:23:59Z#18251`,
+  received `receipt`); the other 6 tests stayed green, isolating the kill.
+  Reverted; final tree rebuilt and re-verified.
+
+### Closing counts (p1b-5)
+
+- Suite: 1511 → **1521 tests** (+10: result-identity 7, address-binding
+  6→7 net +1, p1b-fixes e2e +2).
+- Baseline full run BEFORE any edit (fresh build, full p1b config, port
+  3819): **1510 passed, 1 skipped, 0 failed (35.9s)** — byte-consistent with
+  p1a-1's closing count.
+- Full run (final tree, fresh `npm run build`, full p1b config, port 3819):
+  **1520 passed, 1 skipped, 0 failed (35.1s)** — the same single
+  pre-existing styleguide skip, no other movement.
+- Targeted (final tree): lab.spec.ts + p0-fixes.spec.ts + p1b-fixes.spec.ts
+  e2e + address-binding + result-identity unit → **70/70 green**.
+- `npm run typecheck`: completely clean.
+- `npx eslint` on all seven touched files: 0 errors, 0 warnings.
 
 ## Phase 1 Track A — foundation build
 

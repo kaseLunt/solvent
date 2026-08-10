@@ -4,9 +4,10 @@
 // phases bind nothing. Pure-function pins — the e2e pins in p0-fixes.spec.ts
 // hold the render consequences.
 import { expect, test } from "@playwright/test";
+import type { StressLookup } from "@solvent/client";
 import {
   addressBinding,
-  boundResultLine,
+  settledIdentityLine,
   staleBarrierLine,
   type StressPhase,
 } from "../../app/lab/addressBinding";
@@ -42,8 +43,30 @@ test("retyping the original address restores current (pure round-trip)", () => {
   expect(addressBinding(A, phase).kind).toBe("current");
 });
 
-test("barrier and binding lines name the address verbatim", () => {
+test("barrier line names the address verbatim", () => {
   expect(staleBarrierLine(A)).toContain(A);
   expect(staleBarrierLine(A)).toContain("PREVIOUS INPUT");
-  expect(boundResultLine(A)).toBe(`results for ${A}`);
+});
+
+// p1b-5: the p0-1 `boundResultLine` pin (`results for ${A}`) MIGRATED — the
+// bound-result line grew into the full §5 identity, composed from the SETTLED
+// result. Old pin: `boundResultLine(A) === "results for ${A}"`; new pin: the
+// composed line still opens with the verbatim address AND now carries the
+// batch id (+ config version) the response answered from.
+test("the settled identity line names the address AND the batch it answered from", () => {
+  // Minimal settled-result shape: only the identity fields the composition
+  // reads (the spec file's own `{} as never` precedent for phase results).
+  const result = {
+    response: {
+      served_at: "2026-07-29T10:00:00Z",
+      batch: { id: 7 },
+      scenario_config_version: "v9",
+      scenarios: [{ results: [{ engine: "aave_v3_etherfi" }] }],
+    },
+  } as unknown as StressLookup;
+  const line = settledIdentityLine(A, result);
+  expect(line).toContain(`results for ${A}`);
+  expect(line).toContain("batch #7");
+  expect(line).toContain("config v9");
+  expect(line).toContain("engines aave_v3_etherfi");
 });
