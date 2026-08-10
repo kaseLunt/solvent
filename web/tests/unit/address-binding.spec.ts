@@ -69,6 +69,34 @@ test("p1b-9: the mismatch line names BOTH addresses verbatim and claims nothing"
   expect(line).not.toContain("results for");
 });
 
+// p1b-10 (Codex round 2, finding 1 completion): the NESTED mismatch — a body
+// whose top-level address is honest but whose scenarios[].results[].account
+// contradicts the dispatch. Same refusal register, with the offending PATH
+// named so the reader knows WHICH field contradicted the identity.
+
+test("p1b-10: the nested-mismatch line names the offending PATH and both addresses, claims nothing", () => {
+  const path = "scenarios[2].results[0].account";
+  const line = addressMismatchLine(A, B, path);
+  expect(line).toContain("ADDRESS MISMATCH");
+  expect(line).toContain(path);
+  expect(line).toContain(A);
+  expect(line).toContain(B);
+  expect(line).toContain("nothing is claimed for either address");
+  // The refusal register never wears the results head.
+  expect(line).not.toContain("results for");
+});
+
+test("p1b-10: a nested mismatch phase binds like the top-level one — the stale barrier still interposes", () => {
+  const mismatch: StressPhase = {
+    status: "mismatch",
+    addr: A,
+    echoed: B,
+    path: "scenarios[0].results[1].account",
+  };
+  expect(addressBinding(A, mismatch)).toEqual({ kind: "current", addr: A });
+  expect(addressBinding(B, mismatch)).toEqual({ kind: "stale", addr: A });
+});
+
 // p1b-5: the p0-1 `boundResultLine` pin (`results for ${A}`) MIGRATED — the
 // bound-result line grew into the full §5 identity, composed from the SETTLED
 // result. Old pin: `boundResultLine(A) === "results for ${A}"`; new pin: the

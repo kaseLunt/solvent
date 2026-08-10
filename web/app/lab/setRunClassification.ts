@@ -59,8 +59,8 @@
 
 import type { SetRunEngineSummary } from "../../lib/runbookSet";
 import {
-  isWireCount,
   isWireDecimal,
+  isWirePopulation,
   isWireScale,
   malformedFields,
   type FieldCheck,
@@ -71,9 +71,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-/** The schema's nullable counts: null is an engine's own statement, non-null must be an integer. */
-function isNullableWireCount(value: unknown): boolean {
-  return value === null || isWireCount(value);
+/**
+ * The schema's nullable movement subjects: null is an engine's own vocabulary
+ * statement; non-null is a POPULATION ("flips FALSE to TRUE, never a net" /
+ * "health factors that STRICTLY DROPPED") — nonnegative safe integer per the
+ * p1b-10 assignment table in wireGuard.ts. Were a surface to start consuming
+ * `eligible_accounts_delta` (the schema's "NET — may be negative"), it takes
+ * `isWireSignedCount`, not this.
+ */
+function isNullableWirePopulation(value: unknown): boolean {
+  return value === null || isWirePopulation(value);
 }
 
 /**
@@ -87,10 +94,10 @@ export function classifySetRunEngine(engine: SetRunEngineSummary): { malformedFi
   const e = engine as unknown as Record<string, unknown>;
   const checks: FieldCheck[] = [
     ["usd_decimals", isWireScale(e.usd_decimals)],
-    ["accounts", isWireCount(e.accounts)],
-    ["movement_excluded_accounts", isWireCount(e.movement_excluded_accounts)],
-    ["flipped_to_eligible", isNullableWireCount(e.flipped_to_eligible)],
-    ["hf_dropped_accounts", isNullableWireCount(e.hf_dropped_accounts)],
+    ["accounts", isWirePopulation(e.accounts)],
+    ["movement_excluded_accounts", isWirePopulation(e.movement_excluded_accounts)],
+    ["flipped_to_eligible", isNullableWirePopulation(e.flipped_to_eligible)],
+    ["hf_dropped_accounts", isNullableWirePopulation(e.hf_dropped_accounts)],
     ["eligible_debt_delta_usd", isWireDecimal(e.eligible_debt_delta_usd)],
     ["total_debt_usd_before", isWireDecimal(e.total_debt_usd_before)],
   ];

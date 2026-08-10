@@ -2094,3 +2094,110 @@ restored → green.
 - Mutations: **3 mutants, 3 KILLED, 0 survived** (M1 e2e-in-isolation,
   M2/M3 unit-in-isolation), every mutant restored and the restoration
   diff-verified against the pre-mutation bytes.
+
+## Phase 1 Track B Codex fix wave 2 (p1b-10)
+
+Codex round 2 judged both p1b-9 closures PARTIAL; both completions land
+here, test-first, in one commit (`fix(web): p1b-10 codex round 2 - nested
+accounts join the weld, populations are nonnegative safe integers`).
+
+### Finding 1 completion (HIGH) — the nested accounts join the weld
+
+`web/lib/resultIdentity.ts:82-100` (pre-fix): the p1b-9 weld compared only
+dispatch vs the TOP-LEVEL `response.address`, but each
+`scenarios[].results[]` carries its own `account`
+(`ScenarioResult.account`, generated schema — verified it survives
+refinement: `RefinedScenarioResult` omits only before/after/projection). A
+body with an honest envelope and one nested result for another account
+reached `done` and rendered B's state under "results for A".
+
+**Fix**: `StressIdentitySource`'s nested results gain `account`;
+`stressNestedAccountMismatch(addr, response)` walks scenarios/results in
+wire order and returns the FIRST offender as
+`{path: "scenarios[i].results[j].account", account}` (case-insensitive,
+same law as the top-level weld). LabClient's settle path consults it AFTER
+the top-level weld, BEFORE admission: a mismatch settles the existing
+`mismatch` phase arm grown with optional `path`, carrying NO result, and
+`addressMismatchLine(dispatched, echoed, path?)` names the exact wire
+field plus both addresses under the same `lab-address-mismatch` testid —
+nothing claimed for either.
+
+**Pins**: unit — result-identity.spec.ts ×3 (all-echo admits incl.
+lowercased nested + committed fixture + empty scenarios; mismatch named BY
+PATH `scenarios[2].results[0].account`; FIRST offender in wire order) +
+address-binding.spec.ts ×2 (the line names path + both addresses, claims
+nothing, never wears "results for"; a pathed mismatch phase still binds
+like done/error so the stale barrier interposes). e2e —
+p1b-fixes.spec.ts "p1b-10 f1": structuredClone of the committed stress
+fixture with ONE nested account moved (top-level address honest) →
+refusal visible naming path + both accounts;
+`lab-found`/`lab-result-address`/`lab-result-age` all count 0; route
+live. RED witnessed before the fix (missing-export load failure on the
+unit pins; e2e: no refusal element — the body settled as done under the
+dispatched head).
+
+**Kill (p1b-10-M1)**: nested loop removed
+(`stressNestedAccountMismatch` returns null unconditionally) → the
+nested-mismatch BY-PATH unit pin dies in isolation (1 failed);
+restored → diff-verified byte-identical.
+
+### Finding 2 completion (HIGH) — populations are nonnegative safe integers
+
+`web/lib/wireGuard.ts:44-46` (pre-fix): p1b-9's `isWireCount` was
+`Number.isInteger` alone — it admitted NEGATIVE populations (bucket
+counts, `movers_total: -1` → "Showing all -1 accounts" as a
+computed-looking clause) and UNSAFE integers (JSON.parse rounds
+9007199254740992.5 to 2^53; exact arithmetic downstream renders a
+computed-looking WRONG answer).
+
+**Fix**: the guard is SPLIT by schema semantics — `isWirePopulation`
+(nonnegative safe integer: `Number.isSafeInteger && >= 0`) and
+`isWireSignedCount` (safe integer, sign kept). `isWireCount` is DELETED,
+not aliased: find_referencing_symbols showed no consumer outside the two
+classifiers and the guard's own spec, so no call site can dodge the
+choice. Every consumed count field was assigned by READING its schema
+description first; the full assignment table lives in wireGuard.ts's
+module comment. Summary:
+
+| Guard | Fields (schema evidence) |
+|---|---|
+| `isWirePopulation` | RunBookAggregate `accounts`/`eligible_accounts`; histogram `buckets[].count`/`infinite_count` ("accounts with NO DEBT")/`refused_count` ("COUNTED here"); transitions `lanes[].index`/`outflows[].from`/`cells[].to` (lane indices), `cells[].rows` ("a COUNT of position rows"), `from_rows[]`/`to_rows[]` ("whole BEFORE/AFTER population"), the five census totals, nullable `held_rows`/`lane_changed_rows` (measured-row tallies; null stays a statement — `isNullableWirePopulation` in both classifiers); `movers_total` ("the FULL count of accounts that moved"); SetRun `accounts` ("measurable positions"), `movement_excluded_accounts` ("could not TEST"), nullable `flipped_to_eligible` ("flips FALSE to TRUE, never a net")/`hf_dropped_accounts` ("STRICTLY DROPPED") |
+| `isWireSignedCount` | RunBookEngine `newly_eligible_accounts` ("a NET count that also subtracts any flip back to healthy"; "a signed net") — the ONLY consumed signed count; SetRun `eligible_accounts_delta` ("NET — may be negative") is recorded for it IF a surface ever consumes it (today out of scope per p1b-3's decision) |
+
+**Pins**: unit — wire-guard.spec.ts ×2 (population: -1 and 2^53 refused,
+MAX_SAFE_INTEGER admitted; signed: -3 and MIN_SAFE_INTEGER admitted, ±2^53
+refused) + engine-classification.spec.ts ×3 (NEGATIVE bucket
+count/movers_total/measured_rows named per path; UNSAFE 2^53
+total_rows/infinite_count named; `newly_eligible_accounts = -3` STILL
+LEGAL and unsafe named) + set-run-classification.spec.ts ×1 (negative
+`accounts` named; 2^53 `movement_excluded_accounts` named; negative
+non-null `hf_dropped_accounts` named while null stays a statement). RED
+witnessed: 5 assertion failures pre-fix (classifier returned `[]` for
+every negative/unsafe injection) + the wire-guard spec's missing-export
+load failure.
+
+**Kills (2/2)**: (p1b-10-M2) population guard loses `>= 0` → the three
+negative pins die in isolation (3 failed); (p1b-10-M3) loses
+`Number.isSafeInteger` (weakened to `Number.isInteger`) → the three
+unsafe pins die in isolation (3 failed). Both restorations diff-verified
+byte-identical.
+
+### Closing counts (p1b-10)
+
+- `npm run typecheck` — clean (exit 0)
+- `npm run lint` — clean, zero warnings
+- `npm run lint:css` — clean
+- `npm run build` — clean (fresh, post-restore)
+- touched unit specs (result-identity, address-binding, wire-guard,
+  engine-classification, set-run-classification) — **71 passed**
+- e2e lab + inspector + p1b-fixes — **66 passed**
+- FULL Track B suite (`npx playwright test -c
+  tests/playwright.p1b.config.ts`, port 3819, fresh build):
+  **1565 passed, 1 skipped, 0 failed (34.7s)**
+  (`web-3819-p1b10-full.log`) — the p1b-9 baseline (1554) plus exactly
+  the 11 net new pins (3 identity + 2 binding + 1 net wire-guard [2 new,
+  1 `isWireCount` test deleted with its symbol] + 3 engine-classification
+  + 1 set-run + 1 e2e); the skip is the same single pre-existing
+  styleguide skip.
+- Mutations: **3 mutants, 3 KILLED, 0 survived**, all unit-in-isolation,
+  every restoration diff-verified against the pre-mutation bytes.

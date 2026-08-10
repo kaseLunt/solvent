@@ -15,16 +15,19 @@
 //     contract matches: it NEVER throws and NEVER coerces.
 //   - ZERO IS EVERY-DIGIT-ZERO (`^-?0+$`), judged only on validated values.
 //   - A SCALE mirrors `assertScale`'s bounds (packages/client-ts decimal.ts):
-//     an integer in [0, 1000]. A COUNT is an integer, full stop.
+//     an integer in [0, 1000]. A POPULATION is a nonnegative SAFE integer; a
+//     SIGNED count (the schema's nets/deltas) keeps the sign, not the slack
+//     (p1b-10 split — the field's schema semantics choose the guard).
 //   - `malformedFields` names exactly the failed checks, in check order, so a
 //     refusal arm can say WHICH fields are unreadable rather than gesture.
 
 import { expect, test } from "@playwright/test";
 import {
   WIRE_DECIMAL,
-  isWireCount,
   isWireDecimal,
+  isWirePopulation,
   isWireScale,
+  isWireSignedCount,
   isZeroDecimal,
   malformedFields,
   wireBigInt,
@@ -98,15 +101,44 @@ test("isWireScale mirrors assertScale's bounds: an integer in [0, 1000]", () => 
   expect(isWireScale(Number.NaN)).toBe(false);
 });
 
-test("isWireCount is Number.isInteger — a count is an integer, sign allowed, nothing fractional", () => {
-  expect(isWireCount(0)).toBe(true);
-  expect(isWireCount(31)).toBe(true);
-  expect(isWireCount(-3)).toBe(true);
-  expect(isWireCount(2.5)).toBe(false);
-  expect(isWireCount("8")).toBe(false);
-  expect(isWireCount(Number.NaN)).toBe(false);
-  expect(isWireCount(Number.POSITIVE_INFINITY)).toBe(false);
-  expect(isWireCount(null)).toBe(false);
+// p1b-10 (Codex round 2, finding 2 completion): the single `isWireCount`
+// (Number.isInteger, sign unexamined) split by SCHEMA SEMANTICS. A POPULATION
+// is a tally of things that exist — nonnegative, and a SAFE integer, because
+// Number.isInteger admits both -1 ("Showing all -1 accounts" as a computed
+// clause) and 2^53 (JSON parses 9007199254740992.5 into it, and exact
+// arithmetic over the rounded value renders a computed-looking wrong answer).
+// A SIGNED count keeps the sign — the schema's own nets/deltas — but still
+// demands exactness.
+
+test("p1b-10: isWirePopulation is a NONNEGATIVE SAFE integer — no negative tallies, nothing past exactness", () => {
+  expect(isWirePopulation(0)).toBe(true);
+  expect(isWirePopulation(31)).toBe(true);
+  expect(isWirePopulation(Number.MAX_SAFE_INTEGER)).toBe(true);
+  // The negative arm: Number.isInteger(-1) is true, and the p1b-9 guard
+  // admitted it into "Showing all -1 accounts".
+  expect(isWirePopulation(-1)).toBe(false);
+  expect(isWirePopulation(-3)).toBe(false);
+  // The exactness arm: 2^53 — what JSON.parse makes of 9007199254740992.5.
+  expect(isWirePopulation(9007199254740992)).toBe(false);
+  expect(isWirePopulation(2.5)).toBe(false);
+  expect(isWirePopulation("8")).toBe(false);
+  expect(isWirePopulation(Number.NaN)).toBe(false);
+  expect(isWirePopulation(Number.POSITIVE_INFINITY)).toBe(false);
+  expect(isWirePopulation(null)).toBe(false);
+});
+
+test("p1b-10: isWireSignedCount keeps the sign but still demands exactness", () => {
+  expect(isWireSignedCount(0)).toBe(true);
+  expect(isWireSignedCount(31)).toBe(true);
+  expect(isWireSignedCount(-3)).toBe(true);
+  expect(isWireSignedCount(Number.MIN_SAFE_INTEGER)).toBe(true);
+  expect(isWireSignedCount(9007199254740992)).toBe(false);
+  expect(isWireSignedCount(-9007199254740992)).toBe(false);
+  expect(isWireSignedCount(2.5)).toBe(false);
+  expect(isWireSignedCount("8")).toBe(false);
+  expect(isWireSignedCount(Number.NaN)).toBe(false);
+  expect(isWireSignedCount(Number.POSITIVE_INFINITY)).toBe(false);
+  expect(isWireSignedCount(null)).toBe(false);
 });
 
 test("malformedFields names exactly the failed checks, in check order", () => {

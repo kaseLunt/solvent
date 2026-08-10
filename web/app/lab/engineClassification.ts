@@ -35,9 +35,10 @@
 
 import type { LabRunBookEngine } from "../../lib/runbook";
 import {
-  isWireCount,
   isWireDecimal,
+  isWirePopulation,
   isWireScale,
+  isWireSignedCount,
   malformedFields,
   type FieldCheck,
 } from "../../lib/wireGuard";
@@ -55,10 +56,13 @@ function isNullableWireDecimal(value: unknown): boolean {
 /**
  * The schema's `number | null` movement counts (`held_rows`,
  * `lane_changed_rows`): null is the wire's own "not measured" statement and
- * is NEVER malformed; a non-null value must be an integer (p1b-9, finding 2).
+ * is NEVER malformed; a non-null value is a POPULATION — a diagonal or
+ * off-diagonal tally of MEASURED rows, nonnegative safe integer (p1b-9
+ * finding 2 brought them into the walk; p1b-10 assigned the guard by the
+ * schema's semantics — see wireGuard.ts's assignment table).
  */
-function isNullableWireCount(value: unknown): boolean {
-  return value === null || isWireCount(value);
+function isNullableWirePopulation(value: unknown): boolean {
+  return value === null || isWirePopulation(value);
 }
 
 /**
@@ -72,14 +76,16 @@ function isNullableWireCount(value: unknown): boolean {
  * walk entirely — the schema types them `number`, but the JSON cast
  * guarantees nothing, and `count: ""` passed the gate to coerce into a
  * zero-share costume in `belowOneCount`/`measuredCount` (`0 + ""` is `"0"`).
- * Every count the reductions consume is now judged by `isWireCount`, per
- * side and per index.
+ * Every count the reductions consume is judged per side and per index —
+ * since p1b-10 by `isWirePopulation` (these are all tallies of rows and
+ * accounts that exist: nonnegative safe integers, per the assignment table
+ * in wireGuard.ts).
  */
 function aggregateChecks(side: "before" | "after", aggregate: unknown): FieldCheck[] {
   if (!isRecord(aggregate)) return [[side, false]];
   const checks: FieldCheck[] = [
-    [`${side}.accounts`, isWireCount(aggregate.accounts)],
-    [`${side}.eligible_accounts`, isWireCount(aggregate.eligible_accounts)],
+    [`${side}.accounts`, isWirePopulation(aggregate.accounts)],
+    [`${side}.eligible_accounts`, isWirePopulation(aggregate.eligible_accounts)],
     [`${side}.total_collateral_usd`, isWireDecimal(aggregate.total_collateral_usd)],
     [`${side}.total_debt_usd`, isWireDecimal(aggregate.total_debt_usd)],
     [`${side}.eligible_debt_usd`, isWireDecimal(aggregate.eligible_debt_usd)],
@@ -102,11 +108,11 @@ function aggregateChecks(side: "before" | "after", aggregate: unknown): FieldChe
           return;
         }
         checks.push([`${at}.upper_wad`, isNullableWireDecimal(bucket.upper_wad)]);
-        checks.push([`${at}.count`, isWireCount(bucket.count)]);
+        checks.push([`${at}.count`, isWirePopulation(bucket.count)]);
       });
     }
-    checks.push([`${side}.hf_histogram.infinite_count`, isWireCount(histogram.infinite_count)]);
-    checks.push([`${side}.hf_histogram.refused_count`, isWireCount(histogram.refused_count)]);
+    checks.push([`${side}.hf_histogram.infinite_count`, isWirePopulation(histogram.infinite_count)]);
+    checks.push([`${side}.hf_histogram.refused_count`, isWirePopulation(histogram.refused_count)]);
   }
   const assets = aggregate.collateral_by_asset;
   if (!Array.isArray(assets)) {
@@ -157,7 +163,7 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
         checks.push([at, false]);
         return;
       }
-      checks.push([`${at}.index`, isWireCount(lane.index)]);
+      checks.push([`${at}.index`, isWirePopulation(lane.index)]);
       checks.push([`${at}.upper_wad`, isNullableWireDecimal(lane.upper_wad)]);
     });
   }
@@ -170,7 +176,7 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
         checks.push([`hf_transitions.outflows[${String(from)}]`, false]);
         return;
       }
-      checks.push([`hf_transitions.outflows[${String(from)}].from`, isWireCount(outflow.from)]);
+      checks.push([`hf_transitions.outflows[${String(from)}].from`, isWirePopulation(outflow.from)]);
       const cells = outflow.cells;
       if (!Array.isArray(cells)) {
         checks.push([`hf_transitions.outflows[${String(from)}].cells`, false]);
@@ -182,8 +188,8 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
           checks.push([at, false]);
           return;
         }
-        checks.push([`${at}.to`, isWireCount(cell.to)]);
-        checks.push([`${at}.rows`, isWireCount(cell.rows)]);
+        checks.push([`${at}.to`, isWirePopulation(cell.to)]);
+        checks.push([`${at}.rows`, isWirePopulation(cell.rows)]);
         checks.push([`${at}.debt_before_usd`, isNullableWireDecimal(cell.debt_before_usd)]);
         checks.push([`${at}.debt_after_usd`, isNullableWireDecimal(cell.debt_after_usd)]);
       });
@@ -197,26 +203,26 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
       checks.push([`hf_transitions.${margin}`, false]);
     } else {
       values.forEach((value: unknown, index) => {
-        checks.push([`hf_transitions.${margin}[${String(index)}]`, isWireCount(value)]);
+        checks.push([`hf_transitions.${margin}[${String(index)}]`, isWirePopulation(value)]);
       });
     }
   }
   // THE CENSUS TOTALS, then the two nullable movement counts.
-  checks.push(["hf_transitions.total_rows", isWireCount(transitions.total_rows)]);
-  checks.push(["hf_transitions.measured_rows", isWireCount(transitions.measured_rows)]);
-  checks.push(["hf_transitions.unmeasured_rows", isWireCount(transitions.unmeasured_rows)]);
+  checks.push(["hf_transitions.total_rows", isWirePopulation(transitions.total_rows)]);
+  checks.push(["hf_transitions.measured_rows", isWirePopulation(transitions.measured_rows)]);
+  checks.push(["hf_transitions.unmeasured_rows", isWirePopulation(transitions.unmeasured_rows)]);
   checks.push([
     "hf_transitions.unmeasured_refused_in_batch_rows",
-    isWireCount(transitions.unmeasured_refused_in_batch_rows),
+    isWirePopulation(transitions.unmeasured_refused_in_batch_rows),
   ]);
   checks.push([
     "hf_transitions.unmeasured_excluded_by_this_layer_rows",
-    isWireCount(transitions.unmeasured_excluded_by_this_layer_rows),
+    isWirePopulation(transitions.unmeasured_excluded_by_this_layer_rows),
   ]);
-  checks.push(["hf_transitions.held_rows", isNullableWireCount(transitions.held_rows)]);
+  checks.push(["hf_transitions.held_rows", isNullableWirePopulation(transitions.held_rows)]);
   checks.push([
     "hf_transitions.lane_changed_rows",
-    isNullableWireCount(transitions.lane_changed_rows),
+    isNullableWirePopulation(transitions.lane_changed_rows),
   ]);
   return checks;
 }
@@ -236,7 +242,9 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
   checks.push(...aggregateChecks("before", e.before));
   checks.push(...aggregateChecks("after", e.after));
   checks.push(...transitionChecks(e.hf_transitions));
-  checks.push(["newly_eligible_accounts", isWireCount(e.newly_eligible_accounts)]);
+  // The schema's own SIGNED net ("a NET count that also subtracts any flip
+  // back to healthy") — a negative value is an ANSWER, never malformed.
+  checks.push(["newly_eligible_accounts", isWireSignedCount(e.newly_eligible_accounts)]);
   checks.push(["eligible_debt_delta_usd", isWireDecimal(e.eligible_debt_delta_usd)]);
   checks.push(["bad_debt_delta_usd", isWireDecimal(e.bad_debt_delta_usd)]);
 
@@ -261,7 +269,7 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
   // p1b-9 (finding 2): the FULL mover count — `moversDisclosure`'s own
   // denominator ("top 20 of N"). A malformed total rendered "NaN are not on
   // this page" as a computed-looking clause.
-  checks.push(["movers_total", isWireCount(e.movers_total)]);
+  checks.push(["movers_total", isWirePopulation(e.movers_total)]);
 
   const realization = e.market_realization;
   if (realization !== null) {

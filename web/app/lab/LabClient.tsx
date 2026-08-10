@@ -43,6 +43,7 @@ import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import {
   resultReceipt,
   stressAddressMatchesDispatch,
+  stressNestedAccountMismatch,
   stressResultIdentity,
 } from "@/lib/resultIdentity";
 import { LabBatchStamp } from "./LabBatchStamp";
@@ -218,6 +219,16 @@ export function LabClient() {
           setPhase({ status: "mismatch", addr, echoed: result.response.address });
           return;
         }
+        // p1b-10 (finding 1 completion): the weld reaches every NESTED
+        // `scenarios[].results[].account` — a body whose envelope is honest
+        // can still smuggle another account's state in a nested result. The
+        // first offender refuses the WHOLE body, named by its wire path;
+        // nothing is admitted, so no arm can render B's state under A's head.
+        const nested = stressNestedAccountMismatch(addr, result.response);
+        if (nested !== null) {
+          setPhase({ status: "mismatch", addr, echoed: nested.account, path: nested.path });
+          return;
+        }
         setPhase({ status: "done", addr, result });
         // r83: a lookup that just served proves the service is answering —
         // a stored book refusal is stale the moment this lands, so it is
@@ -361,7 +372,7 @@ export function LabClient() {
                   role="alert"
                   data-testid="lab-address-mismatch"
                 >
-                  {addressMismatchLine(phase.addr, phase.echoed)}
+                  {addressMismatchLine(phase.addr, phase.echoed, phase.path)}
                 </div>
               ) : null}
 

@@ -432,6 +432,51 @@ test("p1b-9: movers_total joins the classifier — the disclosure sentence's own
   expect(corrupted((engine) => (engine.movers_total = 2.5))).toEqual(["movers_total"]);
 });
 
+// ---------------------------------------------------------------------------
+// p1b-10 (Codex round 2, finding 2 completion) — the counts are classified by
+// their SCHEMA SEMANTICS. p1b-9's `isWireCount` was Number.isInteger alone: it
+// admitted NEGATIVE populations (a bucket count of -1; movers_total -1 →
+// "Showing all -1 accounts" as a computed clause) and UNSAFE integers (JSON
+// parses 9007199254740992.5 into 2^53, and exact arithmetic over the rounded
+// value renders a computed-looking wrong answer). Populations — tallies of
+// rows/accounts that exist, and the lane indices — are nonnegative SAFE
+// integers; `newly_eligible_accounts` is the schema's own SIGNED net ("a NET
+// count that also subtracts any flip back to healthy") and keeps its sign.
+// ---------------------------------------------------------------------------
+
+test("p1b-10: a NEGATIVE population is named — a tally of things that exist cannot be -1", () => {
+  expect(
+    corrupted((engine) => {
+      const bucket = engine.before.hf_histogram.buckets[0];
+      if (!bucket) throw new Error("fixture shape: bucket missing");
+      bucket.count = -1;
+    }),
+  ).toEqual(["before.hf_histogram.buckets[0].count"]);
+  // movers_total -1 is the disclosure sentence's "-1 are not on this page".
+  expect(corrupted((engine) => (engine.movers_total = -1))).toEqual(["movers_total"]);
+  expect(corrupted((engine) => (engine.hf_transitions.measured_rows = -2))).toEqual([
+    "hf_transitions.measured_rows",
+  ]);
+});
+
+test("p1b-10: an UNSAFE integer population is named — 2^53 is JSON's rounding, not a measurement", () => {
+  expect(corrupted((engine) => (engine.hf_transitions.total_rows = 9007199254740992))).toEqual([
+    "hf_transitions.total_rows",
+  ]);
+  expect(
+    corrupted((engine) => (engine.after.hf_histogram.infinite_count = 9007199254740992)),
+  ).toEqual(["after.hf_histogram.infinite_count"]);
+});
+
+test("p1b-10: newly_eligible_accounts is the schema's SIGNED net — negative stays legal, unsafe does not", () => {
+  // "a NET count that also subtracts any flip back to healthy" — a scenario
+  // that flips accounts back to healthy nets negative, and that is an ANSWER.
+  expect(corrupted((engine) => (engine.newly_eligible_accounts = -3))).toEqual([]);
+  expect(
+    corrupted((engine) => (engine.newly_eligible_accounts = -9007199254740992)),
+  ).toEqual(["newly_eligible_accounts"]);
+});
+
 test("p1b-2: fields are named in wire read order across the whole subtree", () => {
   expect(
     corrupted((engine) => {

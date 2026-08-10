@@ -80,7 +80,15 @@ export interface StressIdentitySource {
   readonly address: string;
   readonly scenario_config_version: string;
   readonly scenarios: readonly {
-    readonly results: readonly { readonly engine: string }[];
+    /**
+     * p1b-10 (Codex round 2, finding 1 completion): each nested result
+     * carries its own `account` (`ScenarioResult.account`, generated
+     * schema — present on the refined shape too, `RefinedScenarioResult`
+     * omits only before/after/projection). The weld must read it: a body
+     * whose top-level address is honest can still smuggle another
+     * account's state in a nested result.
+     */
+    readonly results: readonly { readonly engine: string; readonly account: string }[];
   }[];
 }
 
@@ -98,6 +106,44 @@ export function stressAddressMatchesDispatch(
   response: StressIdentitySource,
 ): boolean {
   return response.address.toLowerCase() === addr.toLowerCase();
+}
+
+/** The first nested account that contradicts the dispatch, named by wire path. */
+export interface NestedAccountMismatch {
+  /** The offending field's wire path, e.g. `scenarios[2].results[0].account`. */
+  readonly path: string;
+  /** The account that field says the result answers for, verbatim. */
+  readonly account: string;
+}
+
+/**
+ * THE NESTED WELD (p1b-10, Codex round 2 finding 1 completion): the p1b-9
+ * weld read only the TOP-LEVEL `address`, but each `scenarios[].results[]`
+ * carries its own `account` — and a body whose envelope is honest can still
+ * smuggle another account's state in a nested result (the same
+ * cache/proxy/server mislabel class, one level down). Every nested account
+ * must case-insensitively equal the dispatched address (which the top-level
+ * weld has already bound to `response.address`); the FIRST offender in wire
+ * order is returned with its exact path, so the refusal can point at the
+ * field that contradicted the identity. Null = every nested claim welds —
+ * the body may be admitted.
+ */
+export function stressNestedAccountMismatch(
+  addr: string,
+  response: StressIdentitySource,
+): NestedAccountMismatch | null {
+  const dispatched = addr.toLowerCase();
+  for (const [i, scenario] of response.scenarios.entries()) {
+    for (const [j, result] of scenario.results.entries()) {
+      if (result.account.toLowerCase() !== dispatched) {
+        return {
+          path: `scenarios[${String(i)}].results[${String(j)}].account`,
+          account: result.account,
+        };
+      }
+    }
+  }
+  return null;
 }
 
 /** The §5 identity of one settled address-stress result. */

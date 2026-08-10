@@ -40,9 +40,61 @@ export function isWireScale(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 1000;
 }
 
-/** A wire count: an integer, full stop. Sign is the field's business. */
-export function isWireCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value);
+/**
+ * THE COUNT SPLIT (p1b-10, Codex round 2 finding 2). p1b-9's single
+ * `isWireCount` was `Number.isInteger` alone — it admitted NEGATIVE
+ * populations (a bucket count of -1; `movers_total: -1` rendered
+ * "Showing all -1 accounts" as a computed-looking clause) and UNSAFE
+ * integers (JSON.parse rounds 9007199254740992.5 to 2^53, and the exact
+ * BigInt arithmetic downstream then renders a computed-looking WRONG
+ * answer). The guard is now chosen by the field's SCHEMA SEMANTICS, and the
+ * old name is gone so no call site can dodge the choice.
+ *
+ * THE ASSIGNMENT TABLE (every consumed count field, schema description read
+ * before assigning — generated schema `packages/client-ts/src/generated/
+ * schema.ts` is the authority):
+ *
+ * `isWirePopulation` — tallies of rows/accounts that exist, and lane
+ * indices; nonnegative by meaning:
+ *   - RunBookAggregate `accounts` / `eligible_accounts` (one engine's book
+ *     reduced at one side);
+ *   - RunBookHistogram `buckets[].count`, `infinite_count` ("accounts with
+ *     NO DEBT on this side"), `refused_count` ("positions ... COUNTED here");
+ *   - RunBookTransitions `lanes[].index` / `outflows[].from` / `cells[].to`
+ *     ("this lane's position" — an index into the dense margins),
+ *     `cells[].rows` ("a COUNT of position rows"), `from_rows[]` /
+ *     `to_rows[]` ("each lane's whole BEFORE/AFTER population"),
+ *     `total_rows` / `measured_rows` / `unmeasured_rows` /
+ *     `unmeasured_refused_in_batch_rows` /
+ *     `unmeasured_excluded_by_this_layer_rows` (the census totals), and the
+ *     nullable `held_rows` / `lane_changed_rows` (diagonal/off-diagonal
+ *     tallies of MEASURED rows — null is a statement, a negative is not);
+ *   - RunBookEngine `movers_total` ("the FULL count of accounts that
+ *     moved");
+ *   - SetRunEngineSummary `accounts` ("measurable positions of this
+ *     engine"), `movement_excluded_accounts` ("of those, accounts the
+ *     movement rule could not TEST"), and the nullable
+ *     `flipped_to_eligible` ("flips FALSE to TRUE, never a net") /
+ *     `hf_dropped_accounts` ("health factors that STRICTLY DROPPED").
+ *
+ * `isWireSignedCount` — the schema's own nets/deltas, negative by design:
+ *   - RunBookEngine `newly_eligible_accounts` ("a NET count that also
+ *     subtracts any flip back to healthy" — movers_total's description; "a
+ *     signed net" — lane_changed_rows's);
+ *   - SetRunEngineSummary `eligible_accounts_delta` ("NET — after minus
+ *     before, and it may be negative") WHEN a surface starts consuming it —
+ *     today it is outside the consumed set by p1b-3's recorded scope
+ *     decision.
+ */
+
+/** A wire POPULATION: a tally of things that exist. Nonnegative SAFE integer. */
+export function isWirePopulation(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** A wire SIGNED count: a net/delta the schema declares may be negative. Still a SAFE integer. */
+export function isWireSignedCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
 }
 
 /**

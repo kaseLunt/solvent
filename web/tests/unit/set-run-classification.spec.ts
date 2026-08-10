@@ -157,6 +157,40 @@ test("p1b-3: the movement counts are named — the denominator's two inputs", ()
   ).toEqual(["movement_excluded_accounts"]);
 });
 
+// p1b-10 (Codex round 2, finding 2 completion): the set-run counts are
+// POPULATIONS by their schema descriptions ("Measurable positions of this
+// engine"; "accounts the movement rule could not TEST"; "flips FALSE to TRUE,
+// never a net"; "health factors that STRICTLY DROPPED") — nonnegative SAFE
+// integers, the same law as the run-book classifier. `eligible_accounts_delta`
+// (the schema's "NET — may be negative") stays out of scope by the recorded
+// p1b-3 decision; a surface that starts consuming it owes `isWireSignedCount`.
+
+test("p1b-10: a NEGATIVE or UNSAFE set-run population is named; the nullable subjects stay statements", () => {
+  expect(
+    corrupted("ethfi_minus_50", "debt_manager", (engine) => {
+      engine.accounts = -1;
+    }),
+  ).toEqual(["accounts"]);
+  // 2^53 — what JSON.parse makes of 9007199254740992.5.
+  expect(
+    corrupted("ethfi_minus_50", "debt_manager", (engine) => {
+      engine.movement_excluded_accounts = 9007199254740992;
+    }),
+  ).toEqual(["movement_excluded_accounts"]);
+  // The nullable movement subjects are populations too: null stays the
+  // engine's own vocabulary statement; a negative non-null is named.
+  expect(
+    corrupted("eth_minus_30", "aave_v3_etherfi", (engine) => {
+      engine.hf_dropped_accounts = -2;
+    }),
+  ).toEqual(["hf_dropped_accounts"]);
+  expect(
+    corrupted("ethfi_minus_50", "debt_manager", (engine) => {
+      engine.flipped_to_eligible = null;
+    }),
+  ).toEqual([]);
+});
+
 test("p1b-3: the two nullable movement subjects are judged only when non-null", () => {
   expect(
     corrupted("eth_minus_30", "aave_v3_etherfi", (engine) => {

@@ -837,3 +837,55 @@ test.describe("p1b-9 · Codex-round fixes", () => {
     await expect(dmPanel.getByTestId("book-engine-answer")).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-10 · the Codex round-2 fix wave: the weld reaches every nested
+// `scenarios[].results[].account` (finding 1 completion — finding 2's
+// population/signed split is pinned at unit level: the guard's own law in
+// wire-guard.spec.ts, the field assignments in the two classifier specs, and
+// the render consequence is the SAME malformed register the p1b-9 f2 pin
+// above already holds).
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-10 · Codex round-2 fixes", () => {
+  test("f1: a nested result for ANOTHER account refuses the whole body by path — top-level honesty is not admission", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    // Single documented change to the committed stress fixture, serving ONE
+    // purpose (the nested-mislabel arm): the top-level `address` stays
+    // honest, and exactly ONE nested `scenarios[2].results[0].account` is
+    // moved to a different account. With only the p1b-9 top-level weld, this
+    // body settles as done and renders B's nested state under "results for
+    // A" — the exact defect class the weld exists to kill.
+    const body = structuredClone(STRESS_200);
+    const NESTED = "0xbBbB000000000000000000000000000000000002";
+    const nested = body.scenarios[2]?.results[0];
+    if (!nested) throw new Error("fixture shape: scenarios[2].results[0] missing");
+    nested.account = NESTED;
+    await mockStress(page, body);
+    await page.goto("/lab");
+    await page.getByTestId("mode-address").click();
+    const input = page.getByTestId("lab-address-input");
+    const button = page.getByTestId("run-stress-button");
+    await expect(async () => {
+      await input.fill(STRESS_ADDR);
+      await expect(button).toBeEnabled({ timeout: 250 });
+    }).toPass();
+    await button.click();
+    // THE REFUSAL, in the identity-refusal register: the offending PATH and
+    // both addresses named, nothing claimed for either.
+    const refusal = page.getByTestId("lab-address-mismatch");
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toContainText("scenarios[2].results[0].account");
+    await expect(refusal).toContainText(STRESS_ADDR);
+    await expect(refusal).toContainText(NESTED);
+    // NO scenario content, NO identity line, NO anchored age — the body was
+    // never admitted, so no arm can read its numbers.
+    await expect(page.getByTestId("lab-found")).toHaveCount(0);
+    await expect(page.getByTestId("lab-result-address")).toHaveCount(0);
+    await expect(page.getByTestId("lab-result-age")).toHaveCount(0);
+    // The route stays live: a refusal is a rendered statement, not a throw.
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+  });
+});

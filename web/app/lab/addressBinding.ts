@@ -15,8 +15,13 @@ export type StressPhase =
    * contradicts the dispatch — a mislabeled response (cache/proxy/server
    * fault). The result is NOT admitted: no `result` is carried, so no arm can
    * read the body's numbers, and the render is the contract-refusal line.
+   *
+   * p1b-10 (finding 1 completion): a NESTED `scenarios[].results[].account`
+   * contradicting the dispatch takes the same arm, with `path` naming the
+   * offending field (`scenarios[2].results[0].account`) and `echoed` carrying
+   * that nested account. `path` absent = the top-level `address` contradicted.
    */
-  | { status: "mismatch"; addr: string; echoed: string }
+  | { status: "mismatch"; addr: string; echoed: string; path?: string }
   | { status: "error"; addr: string; message: string };
 
 export type AddressBinding =
@@ -47,11 +52,20 @@ export function staleBarrierLine(addr: string): string {
  * tone): BOTH addresses named verbatim, nothing claimed for either, the way
  * forward stated. Rendered under `lab-address-mismatch` in the done-rendering
  * slot — the body's numbers are never read.
+ *
+ * p1b-10 (finding 1 completion): with a `path`, the contradiction is a
+ * NESTED result's `account` — the sentence names the exact wire field
+ * (`scenarios[2].results[0].account`) so the reader knows WHERE the body
+ * contradicted itself, in the same register, still claiming nothing.
  */
-export function addressMismatchLine(dispatched: string, echoed: string): string {
+export function addressMismatchLine(dispatched: string, echoed: string, path?: string): string {
+  const claim =
+    path === undefined
+      ? `the response says it answers for ${echoed}`
+      : `the response's ${path} says its result answers for ${echoed}`;
   return (
     `ADDRESS MISMATCH · refusing to render: the run was dispatched for ${dispatched} ` +
-    `and the response says it answers for ${echoed}. One of them is mislabeled, so ` +
+    `and ${claim}. One of them is mislabeled, so ` +
     `nothing is claimed for either address — run committed set to answer again`
   );
 }

@@ -13,6 +13,7 @@ import {
   identityLine,
   resultReceipt,
   stressAddressMatchesDispatch,
+  stressNestedAccountMismatch,
   stressResultIdentity,
   type ResultIdentity,
 } from "../../lib/resultIdentity";
@@ -77,14 +78,20 @@ test("stressResultIdentity extracts the sextuple from the refined response", () 
 });
 
 test("answered engines are distinct, in first-answer wire order", () => {
-  const identity = stressResultIdentity("0x1111111111111111111111111111111111111111", {
+  const A1 = "0x1111111111111111111111111111111111111111";
+  const identity = stressResultIdentity(A1, {
     served_at: "2026-07-29T11:00:00Z",
     batch: { id: 2 },
-    address: "0x1111111111111111111111111111111111111111",
+    address: A1,
     scenario_config_version: "v1",
     scenarios: [
-      { results: [{ engine: "debt_manager" }, { engine: "aave_v3_etherfi" }] },
-      { results: [{ engine: "aave_v3_etherfi" }] },
+      {
+        results: [
+          { engine: "debt_manager", account: A1 },
+          { engine: "aave_v3_etherfi", account: A1 },
+        ],
+      },
+      { results: [{ engine: "aave_v3_etherfi", account: A1 }] },
     ],
   });
   expect(identity.engines).toEqual(["debt_manager", "aave_v3_etherfi"]);
@@ -131,6 +138,64 @@ test("p1b-9: a response answering for ANOTHER account is refused — the mislabe
       sourceFor("0xbBbB000000000000000000000000000000000002"),
     ),
   ).toBe(false);
+});
+
+// ---------------------------------------------------------------------------
+// p1b-10 (Codex round 2, finding 1 completion) — THE NESTED WELD. The p1b-9
+// weld read only the TOP-LEVEL `address`; each `scenarios[].results[]` carries
+// its own `account` (generated schema, ScenarioResult), and a body whose
+// top-level address is honest can still smuggle another account's state in a
+// nested result. Every nested account must echo the dispatch (case-insensitive,
+// same law as the top-level weld); the FIRST offender in wire order is named
+// BY PATH — `scenarios[i].results[j].account` — so the refusal points at the
+// exact field that contradicted the identity.
+// ---------------------------------------------------------------------------
+
+const DISPATCHED = "0xAAaA000000000000000000000000000000000001";
+const OTHER = "0xbBbB000000000000000000000000000000000002";
+
+/** A source whose nested accounts the test controls, scenario by scenario. */
+function nestedSource(scenarios: readonly (readonly string[])[]) {
+  return {
+    served_at: "2026-07-29T11:00:00Z",
+    batch: { id: 2 },
+    address: DISPATCHED,
+    scenario_config_version: "v1",
+    scenarios: scenarios.map((accounts) => ({
+      results: accounts.map((account) => ({ engine: "aave_v3_etherfi", account })),
+    })),
+  };
+}
+
+test("p1b-10: every nested account echoing the dispatch admits the body — casing is not an identity", () => {
+  expect(
+    stressNestedAccountMismatch(
+      DISPATCHED,
+      nestedSource([[DISPATCHED], [DISPATCHED.toLowerCase()]]),
+    ),
+  ).toBe(null);
+  // No scenarios, no nested claim to contradict.
+  expect(stressNestedAccountMismatch(DISPATCHED, nestedSource([]))).toBe(null);
+  // The committed fixture itself welds clean end to end.
+  expect(stressNestedAccountMismatch(STRESS_200.address, STRESS_200)).toBe(null);
+});
+
+test("p1b-10: a nested result for ANOTHER account is refused BY PATH — scenarios[2].results[0].account", () => {
+  expect(
+    stressNestedAccountMismatch(DISPATCHED, nestedSource([[DISPATCHED], [DISPATCHED], [OTHER]])),
+  ).toEqual({ path: "scenarios[2].results[0].account", account: OTHER });
+});
+
+test("p1b-10: the FIRST offender in wire order is the one named", () => {
+  expect(
+    stressNestedAccountMismatch(
+      DISPATCHED,
+      nestedSource([
+        [DISPATCHED, OTHER],
+        ["0xCccC000000000000000000000000000000000003"],
+      ]),
+    ),
+  ).toEqual({ path: "scenarios[0].results[1].account", account: OTHER });
 });
 
 test("resultReceipt composes the age receipt from served_at + batch id (p1b-5-M2 pin)", () => {
