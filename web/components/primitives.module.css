@@ -129,6 +129,70 @@
   white-space: nowrap;
 }
 
+/* ---- RouteRefusal (.route-refusal) ---- */
+/* The refused register at ROUTE scale (p1b-0): the same dashed --ink-3
+ * border and muted inks .refusedTag carries, sized as a block. Existing
+ * tokens only — no invented ones. */
+.routeRefusal {
+  margin: var(--sp-4) auto;
+  padding: 16px 18px;
+  max-width: 560px;
+  border: 1px dashed var(--ink-3);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--ink-2);
+}
+
+/* The head renders uppercase the .statLabel way (text-transform, not literal
+ * caps), so the DOM text stays a readable sentence. */
+.routeRefusalHead {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-refused);
+  text-transform: uppercase;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.routeRefusalBody {
+  margin-top: 8px;
+  color: var(--ink-2);
+}
+
+/* The evidence layer: the throw's own words, mono, behind a disclosure. */
+.routeRefusalEvidence {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+.routeRefusalEvidence summary {
+  cursor: pointer;
+}
+
+.routeRefusalEvidence p {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.routeRefusalReset {
+  margin-top: 12px;
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.routeRefusalReset:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* ---- ProjectionBadge (.projection) ---- */
 .projection {
   font-family: var(--mono);

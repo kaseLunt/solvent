@@ -749,3 +749,79 @@ Phase 0 delivered: five trust fixes (p0-1..p0-5), Lab terminology border (p0-7),
 Codex hardening waves (p0-8, p0-9). Suite 1362 -> 1415 passed + 1 skip; typecheck clean;
 lint 0 errors/1 pre-existing warning; 15 mutants killed in isolation
 (.superpowers/sdd/p0-mutations/ + p0-7/8/9 ledger sections). Commits c320d4b..8771342.
+
+## Phase 1 Track B — response-boundary validation
+
+Program design: the malformed-wire class Phase 0's Codex r3 NO-SHIP routed
+here (owner ruling at the loop breaker). Verification runs on its OWN wave
+config, `web/tests/playwright.p1b.config.ts` (port 3819; a byte-mirror of
+`playwright.p0.config.ts` except port + header comment).
+
+**Track B baseline inventory** (`npx playwright test -c
+tests/playwright.p1b.config.ts --list`, recorded BEFORE the first Track B
+spec): **1416 tests in 83 files**.
+
+Task list:
+- [x] Task 0 — wave config + honest route error boundary (p1b-0)
+- [ ] Task 1 — wire-guard module + BigInt coercion kill
+- [ ] Task 2 — full RunBookEngine classifier
+- [ ] Task 3 — SetRunEngineSummary classifier + tornado malformed arm
+- [ ] Task 4 — FactorPrice entry guard
+- [ ] Task 5 — result-identity module + address-mode completion
+- [ ] Task 6 — five-gap race/identity audit close
+- [ ] Task 7 — close + Codex round
+
+### p1b-0 · wave config + honest route refusal (Task 0)
+
+No `error.tsx`, `global-error.tsx`, or custom React boundary existed
+anywhere under `web/app`: a client-render throw (e.g. a wire Decimal outside
+`^-?[0-9]+$` reaching a throwing money renderer) replaced the ENTIRE route —
+header included — with Next's generic error page. On this Next build the
+generic page reads `heading "This page couldn’t load"` + Reload/Back (the
+recorded red run's page snapshot), not the older "Application error: a
+client-side exception" body; the spec pins BOTH copies absent.
+
+Delivered:
+- `web/tests/playwright.p1b.config.ts` — the Track B wave config (above).
+- `web/app/error.tsx` — ROOT boundary, one boundary above all surfaces
+  (every surface is one client component under `layout.tsx`; per-route
+  boundaries add nothing). It replaces only the segment BELOW `layout.tsx`,
+  so the header/nav stay mounted — pinned via `getByRole("banner")`.
+- `web/components/RouteRefusal.tsx` — the refusal register at route scale:
+  head "THIS VIEW REFUSED TO RENDER" (DOM text is the readable sentence;
+  uppercase is CSS `text-transform`, the `.statLabel` pattern), body "A
+  value in the served data could not be read, and an unreadable value is
+  never rendered as a number. Nothing is claimed for this view.", the
+  throw's message (+ digest when present) behind a mono `<details>`
+  evidence disclosure, and a "try again" button calling `reset()`.
+  Testid `route-refusal`, `role="alert"`.
+- `primitives.module.css` `.routeRefusal*` — the `RefusedTag` refused tone
+  (dashed `--ink-3` border, muted inks, mono label at `--track-refused`) at
+  block scale; existing tokens only.
+- `web/tests/e2e/p1b-fixes.spec.ts` — the Track B pin file, mock helpers in
+  p0-fixes.spec.ts's register (`mockBookWith`: stream aborted, CORS on every
+  fulfilled response, cursor-aware positions pages; single documented
+  fixture change: `BOOK.engines[0].total_debt = ""`, which throws
+  `DecimalFormatError` in `BookStatRows`' total-debt stat row).
+
+### Red-first evidence
+
+Pre-fix build (HEAD source + the new spec + the new config): 1 failure,
+exactly the defect pin — dead at the `route-refusal` visibility assertion
+(p1b-fixes.spec.ts:69), page snapshot showing the generic error page with NO
+banner (the whole route, header included, was gone).
+
+### Mutation kill (p1b-0-M1)
+
+Mutant: `web/app/error.tsx` rethrows (`throw error;` — boundary disabled).
+Rebuild, spec run in isolation: KILLED at exactly the `route-refusal`
+visibility assertion (p1b-fixes.spec.ts:69). Reverted; final tree rebuilt.
+
+### Closing counts (p1b-0)
+
+- Track B suite: 1416 → **1417** (+1: p1b-fixes e2e).
+- Full run (final tree, `npm run build` + full p1b config, port 3819):
+  **1416 passed, 1 skipped, 0 failed (34.2s)** — the same single
+  pre-existing styleguide skip, no other movement.
+- `npm run typecheck`: completely clean.
+- `npx eslint` on all four touched files: 0 errors, 0 warnings.
