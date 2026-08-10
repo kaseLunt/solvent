@@ -1,0 +1,1902 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solvent — Foundation canon (synthesized final)</title>
+<style>
+/* ============================================================
+   SOLVENT FOUNDATION CANON — SYNTHESIZED FINAL · 2026-08-09
+   Winner skeleton: draft-editorial (finding-first house frame).
+   Grafts: instrument (two-grade color, amendment ledger, refused
+   cells, anti-state panel, comp-read captions, provenance kv,
+   gate self-audit, mono engine tags) + restraint (zero-is-an-answer,
+   app header strip, result identity, SLA tier table, glyph
+   vocabulary, welded dataset discipline).
+   Invented here (all three drafts lacked them): the verdict-banner
+   page-answer component, the exact-layer affordance, the chart
+   interaction register (hover/focus/tabular twin), the closed
+   type-token set (structural 12px floor), one shared welded
+   demo dataset.
+   Register: the finding is the headline; the proof is one
+   gesture away; refusal is ink, not absence.
+
+   Theme law: this specimen is DARK-FIRST (the observatory leads).
+   Production tokens.css keeps its light-first + media-query +
+   data-theme override law; only the amended hex values and the
+   usage laws migrate (see §04 amendment ledger).
+
+   Every contrast ratio printed in this document was computed
+   from the hex values shown (WCAG 2.x relative luminance,
+   translucent grounds composited first). Every specimen number
+   derives from ONE shared fictional dataset (batch #18251) and
+   reconciles across every chart, table, and ledger.
+   ============================================================ */
+:root {
+  /* ---- surfaces & ink (dark = observatory default) ---- */
+  --bg: #0c1215;
+  --panel: #131c20;
+  --panel-2: #0f171a;
+  --ink: #dbe5e8;
+  --ink-2: #93a5ab;
+  --ink-3: #71868e;          /* REV from #5f7178 (3.39:1) -> 4.53:1 on panel */
+  --line: #223034;
+  /* ---- identity hues: FILL/GLYPH grade (marks, borders, tints) ---- */
+  --accent: #5ab3c4;
+  --accent-ink: #0c1215;
+  --ok: #63b98a;
+  --warn: #d0a04a;
+  --crit: #d96a5d;
+  /* ---- identity hues: TEXT grade (>=4.5:1 on worst text ground).
+     In dark the palette already passes: text grade = fill grade. ---- */
+  --accent-text: #5ab3c4;
+  --ok-text: #63b98a;
+  --warn-text: #d0a04a;
+  --crit-text: #d96a5d;
+  /* ---- state fills ---- */
+  --crit-bg: rgba(217, 106, 93, 0.10);
+  --warn-bg: rgba(208, 160, 74, 0.10);
+  --refused-bg: rgba(95, 113, 120, 0.12);
+  --chip-bg: #1b262b;
+  /* ---- terminal (constant across themes by design) ---- */
+  --term-bg: #0a0f12;
+  --term-ink: #c7d4d8;
+  --term-dim: #70838a;       /* REV from #6b7d84 (4.19:1) -> 4.54:1 on worst term ground */
+  --term-ok: #63b98a;
+  --term-accent: #5ab3c4;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35); /* overlays ONLY — data surfaces are flat */
+  --mono: "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* ---- THE CLOSED TYPE SET. No component declares a px font-size;
+     production enforces this with a stylelint rule (font-size must be
+     a var(--t-*) reference). The floor is structural: no token < 12px
+     exists, so a sub-12px label is impossible, not merely forbidden. ---- */
+  --t-display: 32px;   /* page H1 — the page's one finding */
+  --t-chapter: 24px;   /* chapter title (H2) */
+  --t-section: 18px;   /* section head (H3) / dek */
+  --t-fighead: 17px;   /* chart finding-headline */
+  --t-body: 16px;      /* reading prose */
+  --t-ui: 14px;        /* metadata, table body, captions with content */
+  --t-meta: 13px;      /* dense metadata floor */
+  --t-floor: 12px;     /* labels, chips, axis ticks, chart text — ABSOLUTE floor */
+  --t-mono-lg: 14px;   /* exact values, featured */
+  --t-mono: 13px;      /* addresses, table numerals, formulas */
+  --t-mono-sm: 12.5px; /* terminal body, ledgers, identity lines */
+  --t-mono-floor: 12px;/* smallest mono — chips' embedded values */
+  --t-stat-lg: 28px;   /* engine-panel / KPI hero value */
+  --t-stat: 21px;      /* KPI value */
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f4f6f6;
+  --panel: #ffffff;
+  --panel-2: #eef1f2;
+  --ink: #1a2327;
+  --ink-2: #56676e;
+  --ink-3: #637075;          /* REV from #8a979c (2.65:1) -> 4.51:1 on panel-2 */
+  --line: #d8dfe1;
+  /* fill/glyph grade keeps the canonical chroma (>=3:1 non-text) */
+  --accent: #2e7d8c;
+  --accent-ink: #ffffff;
+  --ok: #2e8c5a;
+  --warn: #b07c1f;
+  --crit: #c24438;
+  /* text grade: >=4.5:1 on the worst text ground INCLUDING chip-bg */
+  --accent-text: #2a7380;    /* 4.56 chip · 4.79 panel-2 */
+  --ok-text: #27784d;        /* 4.54 chip · 4.77 panel-2 */
+  --warn-text: #8b6219;      /* 4.56 chip · 4.79 panel-2 */
+  --crit-text: #ba4136;      /* 4.52 chip · 4.75 panel-2 */
+  --crit-bg: rgba(194, 68, 56, 0.07);
+  --warn-bg: rgba(176, 124, 31, 0.08);
+  --refused-bg: rgba(138, 151, 156, 0.10);
+  --chip-bg: #e6ecee;
+  --term-bg: #10181b;
+  --shadow: 0 1px 2px rgba(16,24,27,.06), 0 8px 24px rgba(16,24,27,.07);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--t-body);
+  line-height: 1.6;
+  min-height: 100dvh;
+}
+a { color: var(--accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::selection { background: var(--accent); color: var(--accent-ink); }
+
+/* ---------------- WIDTH CONTRACT (the brief's table, live) ----------------
+   1366 -> shell 1280 · 1440 -> 1280 core + 1340 breakout · 1920 -> 1520 ·
+   2560 -> 1680 · prose <= 720. Max-width stepping: the breakout can never
+   exceed the viewport row it sits in (fixes restraint's min()/max() formula,
+   which reached ~1318px at a 1366 viewport). */
+.shell { max-width: 1280px; margin: 0 auto; padding: 0 24px 120px; }
+.breakout { max-width: 1280px; margin-left: auto; margin-right: auto; }
+@media (min-width: 1440px) { .breakout { max-width: 1340px; } }
+@media (min-width: 1920px) { .shell { max-width: 1520px; } .breakout { max-width: 1520px; } }
+@media (min-width: 2560px) { .shell { max-width: 1680px; } .breakout { max-width: 1680px; } }
+.prose { max-width: 720px; }   /* reading measure, ~66–72ch at 16px */
+
+/* ---------------- type ---------------- */
+.kicker {
+  font-family: var(--mono); font-size: var(--t-floor); letter-spacing: .14em;
+  text-transform: uppercase; color: var(--accent-text); margin: 0 0 12px;
+}
+h1 { font-size: var(--t-display); line-height: 1.15; letter-spacing: -.015em; margin: 0 0 16px; text-wrap: balance; font-weight: 700; }
+h2 { font-size: var(--t-chapter); line-height: 1.2; letter-spacing: -.01em; margin: 0 0 12px; font-weight: 650; }
+h3 { font-size: var(--t-section); line-height: 1.3; margin: 0 0 8px; font-weight: 620; }
+.dek { color: var(--ink-2); font-size: var(--t-section); line-height: 1.55; margin: 0 0 12px; }
+.meta { color: var(--ink-2); font-size: var(--t-ui); }
+.meta-sm { color: var(--ink-2); font-size: var(--t-meta); }
+.mono { font-family: var(--mono); }
+.tnum { font-variant-numeric: tabular-nums; }
+.faint { color: var(--ink-3); } /* captions/ornament only; never a value, state, or finding; never on chip/tinted grounds */
+
+/* ---------------- page chrome ---------------- */
+.masthead {
+  border-bottom: 3px double var(--line);
+  padding: 40px 0 24px; margin-bottom: 8px;
+  display: flex; align-items: flex-start; gap: 24px;
+}
+.masthead .grow { flex: 1; }
+.themebtn {
+  font: inherit; font-size: var(--t-meta); font-family: var(--mono);
+  color: var(--ink-2); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 4px; padding: 7px 14px; cursor: pointer; white-space: nowrap;
+}
+.themebtn:hover { color: var(--ink); border-color: var(--ink-3); }
+.standfirst { border-bottom: 1px solid var(--line); padding: 20px 0 28px; margin-bottom: 48px; }
+.toc { columns: 2; column-gap: 48px; max-width: 900px; font-size: var(--t-ui); margin-top: 20px; }
+.toc a { display: block; color: var(--ink-2); padding: 3px 0; break-inside: avoid; }
+.toc a b { color: var(--ink); font-weight: 550; }
+.toc a:hover { color: var(--accent-text); text-decoration: none; }
+.chapter { margin: 0 0 88px; }
+.chapter-rule {
+  display: flex; align-items: baseline; gap: 16px;
+  border-top: 3px solid var(--ink); padding-top: 14px; margin-bottom: 20px;
+}
+.chapter-rule .no { font-family: var(--mono); font-size: var(--t-meta); color: var(--accent-text); letter-spacing: .1em; }
+.finding {
+  font-size: var(--t-fighead); line-height: 1.55; color: var(--ink);
+  border-left: 3px solid var(--accent); padding: 2px 0 2px 16px; margin: 20px 0;
+  max-width: 720px;
+}
+.finding b { font-weight: 650; }
+
+/* ---------------- panels / cards (FLAT — no elevation on data surfaces) ---------------- */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.card-h {
+  padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--panel-2);
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+}
+.card-h .t { font-size: var(--t-ui); font-weight: 620; }
+.card-b { padding: 18px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+@media (max-width: 980px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+
+/* ---------------- chips: SANS status vocabulary; mono is quoted inside ----------------
+   Sans carries the state word (mono is reserved for the verbatim layer);
+   the embedded .val — an age, a count, a wire code — is mono because it IS
+   verbatim. Outline-first: a fill is the top escalation register only. */
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--sans); font-size: var(--t-floor); font-weight: 600;
+  letter-spacing: .05em; text-transform: uppercase;
+  border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px;
+  color: var(--ink-2); background: var(--panel); white-space: nowrap;
+}
+.chip .val { font-family: var(--mono); font-size: var(--t-mono-floor); font-weight: 500; text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.chip.c-ok { color: var(--ok-text); border-color: var(--ok); }
+.chip.c-ok .dot { background: var(--ok); }
+.chip.c-accent { color: var(--accent-text); border-color: var(--accent); }
+.chip.c-accent .dot { background: var(--accent); }
+.chip.c-warn { color: var(--warn-text); border-color: var(--warn); }
+.chip.c-warn .dot { background: var(--warn); }
+.chip.c-crit { color: var(--crit-text); border-color: var(--crit); }
+.chip.c-crit .dot { background: var(--crit); }
+.chip.c-crit-fill { color: var(--crit-text); border-color: var(--crit); background: var(--crit-bg); }
+.chip.c-crit-fill .dot { background: var(--crit); }
+.chip.c-quiet { border-color: var(--line); color: var(--ink-2); }
+.chip.c-unknown { border-style: dashed; border-color: var(--ink-3); color: var(--ink-2); }
+.chip.c-unknown .dot { background: transparent; border: 1.5px solid var(--ink-3); width: 6px; height: 6px; }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--sans); font-size: var(--t-floor); font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; padding: 2px 9px; border-radius: 4px; vertical-align: middle;
+}
+.badge .val { font-family: var(--mono); font-size: var(--t-mono-floor); font-weight: 500; text-transform: none; letter-spacing: 0; }
+/* PROJECTION is dashed amber OUTLINE — visibly not-solid, visibly not-current.
+   (Editorial's solid amber fill outranked a LIQUIDATABLE outline chip in
+   visual volume; fills are rationed to the critical escalation register.) */
+.badge.projection { border: 1px dashed var(--warn); color: var(--warn-text); background: transparent; }
+.badge.current { border: 1px solid var(--line); color: var(--ink-2); background: var(--panel-2); }
+.refused-tag {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--sans); font-size: var(--t-floor); font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase;
+  border: 1px dashed var(--warn); border-radius: 4px; padding: 3px 9px;
+  color: var(--warn-text); background: var(--warn-bg);
+}
+.refused-tag .val { font-family: var(--mono); font-size: var(--t-mono-floor); font-weight: 500; text-transform: none; letter-spacing: 0; }
+.engine-tag {
+  font-family: var(--mono); font-size: var(--t-mono-floor); padding: 2px 8px; border-radius: 3px;
+  background: var(--chip-bg); color: var(--ink-2); border: 1px solid var(--line);
+}
+.compose {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 12px 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+}
+.compose .sep { color: var(--ink-3); }
+.comp-read { font-size: var(--t-meta); color: var(--ink-2); margin: 6px 0 0; }
+
+/* ---------------- the verdict banner (page-answer component) ---------------- */
+.verdict { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--panel); padding: 18px 22px; }
+.verdict.v-crit { border-left-color: var(--crit); }
+.verdict.v-warn { border-left-color: var(--warn); }
+.verdict.v-quiet { border-left-color: var(--line); }
+.verdict .v-answer { font-size: var(--t-chapter); font-weight: 650; line-height: 1.3; letter-spacing: -.01em; margin: 0 0 6px; text-wrap: balance; }
+.verdict .v-qual { font-size: var(--t-ui); color: var(--ink-2); margin: 0 0 12px; max-width: 720px; }
+.verdict .v-id { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* ---------------- exact-layer affordance ---------------- */
+.exact {
+  text-decoration: underline dotted var(--ink-3); text-underline-offset: 3px;
+  cursor: help; border-radius: 2px;
+}
+.exact:hover, .exact:focus-visible { text-decoration-color: var(--accent); background: var(--chip-bg); }
+.exact::after { content: " ⧉"; font-size: var(--t-floor); color: var(--ink-3); }
+.exact:hover::after, .exact:focus-visible::after { color: var(--accent-text); }
+
+/* ---------------- tables ---------------- */
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+table.house { border-collapse: collapse; width: 100%; font-size: var(--t-ui); }
+table.house thead th {
+  font-family: var(--sans); font-size: var(--t-floor); letter-spacing: .04em; text-transform: uppercase;
+  color: var(--ink-2); font-weight: 600; text-align: left; padding: 10px 14px;
+  border-bottom: 2px solid var(--ink); background: var(--panel); white-space: nowrap;
+}
+table.house tbody td { padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.house tbody tr:last-child td { border-bottom: none; }
+table.house td.num, table.house th.num { text-align: right; }
+table.house td.num { font-family: var(--mono); font-size: var(--t-mono); font-variant-numeric: tabular-nums; }
+table.house td.addr { font-family: var(--mono); font-size: var(--t-mono); }
+table.house td.refcell { font-family: var(--sans); font-size: var(--t-meta); color: var(--warn-text); text-align: right; }
+tr.crit-row td { background: var(--crit-bg); }
+tr.crit-row td:first-child { box-shadow: inset 3px 0 0 var(--crit); }
+tr.refused-row td { background: var(--refused-bg); color: var(--ink-2); }
+table.house tfoot td {
+  padding: 9px 14px; font-size: var(--t-meta); color: var(--ink-2); border-top: 1px solid var(--line);
+  background: var(--panel-2); white-space: normal;
+}
+
+/* ---------------- evidence drawer ---------------- */
+details.evidence { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+details.evidence > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px;
+  padding: 11px 16px; font-size: var(--t-ui); color: var(--ink);
+}
+details.evidence > summary::-webkit-details-marker { display: none; }
+details.evidence > summary .tw { transition: transform .15s; color: var(--accent-text); font-size: var(--t-floor); }
+details.evidence[open] > summary { border-bottom: 1px solid var(--line); }
+details.evidence[open] > summary .tw { transform: rotate(90deg); }
+details.evidence .ev-body { padding: 14px 16px; }
+.kv div { display: flex; justify-content: space-between; gap: 18px; padding: 6px 14px; font-size: var(--t-meta); border-top: 1px solid var(--line); }
+.kv div:first-child { border-top: none; }
+.kv .k { color: var(--ink-2); }
+.kv .v { font-family: var(--mono); font-size: var(--t-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.term {
+  background: var(--term-bg); color: var(--term-ink); border-radius: 6px;
+  border: 1px solid var(--line); padding: 14px 16px;
+  font-family: var(--mono); font-size: var(--t-mono-sm); line-height: 1.75; overflow-x: auto;
+}
+.term .c { color: var(--term-dim); }
+.term .a { color: var(--term-accent); }
+.term .p { color: var(--term-ok); }
+.term pre { margin: 0; white-space: pre; }
+
+/* ---------------- figure house frame (chart-spec v4's seven slots) ----------------
+   HEAD (kicker) -> finding-HEADLINE -> STATE -> VISUAL -> LEDGER -> METHOD -> FORENSICS */
+.fig { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.fig .fig-kicker {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 12px 18px 0; font-family: var(--mono); font-size: var(--t-mono-floor); color: var(--ink-2);
+}
+.fig h4.fig-headline {
+  font-family: var(--sans); font-size: var(--t-fighead); font-weight: 650; letter-spacing: -.005em;
+  margin: 8px 0 2px; padding: 0 18px; line-height: 1.35; color: var(--ink);
+}
+.fig .fig-state { padding: 2px 18px 0; font-size: var(--t-meta); color: var(--ink-2); }
+.fig .fig-state .must { color: var(--warn-text); }
+.fig .fig-plot { padding: 10px 18px 4px; overflow-x: auto; }
+.fig .fig-ledger {
+  margin: 6px 18px 0; border-top: 1px solid var(--line); padding: 10px 0 4px;
+  font-family: var(--mono); font-size: var(--t-mono-sm); color: var(--ink-2);
+  font-variant-numeric: tabular-nums; overflow-x: auto;
+}
+.fig .fig-method { padding: 6px 18px 14px; font-size: var(--t-mono-sm); font-family: var(--sans); color: var(--ink-2); }
+svg text { font-family: var(--sans); font-size: 12px; } /* 12px floor holds INSIDE charts too */
+svg .axis { stroke: var(--line); stroke-width: 1; }
+svg .tick { fill: var(--ink-2); }
+svg .lbl { fill: var(--ink-2); }
+svg .lbl-ink { fill: var(--ink); font-weight: 600; }
+svg .anno { fill: var(--ink); }
+svg .anno-line { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 3; }
+svg .refline { stroke: var(--crit); stroke-width: 1; stroke-dasharray: 4 3; }
+svg .mk-accent { fill: var(--accent); }
+svg .mk-crit { fill: var(--crit); }
+svg .mk-warn { fill: var(--warn); }
+svg .mk-open { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; }
+svg .mk-open-quiet { fill: none; stroke: var(--ink-2); stroke-width: 1.5; }
+svg .ln-accent { fill: none; stroke: var(--accent); stroke-width: 2; }
+svg .stem { stroke: var(--accent); stroke-width: 1.5; }
+svg .zero-tick { stroke: var(--ink-2); stroke-width: 2.5; }
+svg .bar-share { fill: var(--accent); opacity: .85; }
+svg .bar-dim { fill: var(--accent); opacity: .55; }
+svg .band-range { fill: var(--accent); opacity: .15; }
+svg .region-crit { fill: var(--crit); opacity: .08; }
+svg .cell-quiet { fill: var(--chip-bg); stroke: var(--line); }
+svg .cell-move { fill: var(--warn); opacity: .22; stroke: var(--line); }
+svg .cell-danger { fill: var(--crit); opacity: .20; stroke: var(--crit); stroke-width: 1.5; }
+svg .cell-refused { fill: var(--warn-bg); stroke: var(--warn); stroke-dasharray: 2 2; }
+svg .cell-withheld { fill: none; stroke: var(--warn); stroke-dasharray: 2 2; }
+svg .cell-none { fill: none; stroke: var(--line); }
+svg .lbl-mono { fill: var(--ink-2); font-family: var(--mono); }
+svg .lbl-mono-ink { fill: var(--ink); font-family: var(--mono); font-weight: 600; }
+svg .focus-ring { fill: none; stroke: var(--accent); stroke-width: 2; }
+
+/* ---------------- interaction readout (crosshair / focused mark) ---------------- */
+.readout {
+  display: inline-block; border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--panel-2); padding: 8px 12px;
+  font-family: var(--mono); font-size: var(--t-mono-sm); color: var(--ink);
+  box-shadow: var(--shadow); /* an overlay — the one place elevation is lawful */
+}
+.readout .k { color: var(--ink-2); }
+
+/* ---------------- grid overlay specimen ---------------- */
+.gridspec { position: relative; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 20px; }
+.gridspec .cols {
+  position: absolute; inset: 0; display: grid; grid-template-columns: repeat(12, 1fr);
+  gap: 20px; padding: 0 20px; pointer-events: none;
+}
+.gridspec .cols i { background: rgba(90, 179, 196, 0.07); border-left: 1px dashed rgba(90,179,196,.35); border-right: 1px dashed rgba(90,179,196,.35); }
+:root[data-theme="light"] .gridspec .cols i { background: rgba(44, 119, 133, 0.06); border-color: rgba(44,119,133,.3); }
+.gridspec .content { position: relative; display: grid; grid-template-columns: repeat(12, 1fr); gap: 20px; }
+.gs-block {
+  border: 1px solid var(--accent); border-radius: 4px; background: var(--panel-2);
+  padding: 10px 12px; font-family: var(--mono); font-size: var(--t-mono-floor); color: var(--ink-2);
+}
+.gs-block b { color: var(--accent-text); font-weight: 550; }
+
+/* ---------------- swatch tables ---------------- */
+.swatchset { border-radius: 8px; overflow: hidden; border: 1px solid var(--line); }
+.swatchset .set-h { padding: 10px 16px; font-family: var(--mono); font-size: var(--t-mono-floor); letter-spacing: .08em; text-transform: uppercase; }
+.swatch { display: flex; align-items: center; gap: 14px; padding: 9px 16px; font-size: var(--t-meta); }
+.swatch .well { width: 44px; height: 26px; border-radius: 4px; flex: none; border: 1px solid rgba(127,127,127,.25); }
+.swatch .nm { font-family: var(--mono); font-size: var(--t-mono-sm); width: 190px; flex: none; }
+.swatch .hex { font-family: var(--mono); font-size: var(--t-mono-floor); width: 170px; flex: none; }
+.swatch .ratio { font-family: var(--mono); font-size: var(--t-mono-sm); font-variant-numeric: tabular-nums; width: 130px; flex: none; text-align: right; }
+.swatch .note { font-size: var(--t-mono-sm); }
+.pass { font-weight: 650; }
+.na { opacity: .75; }
+
+/* ---------------- state components ---------------- */
+.skeleton { position: relative; overflow: hidden; background: var(--panel-2); border-radius: 4px; }
+.skeleton::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(147,165,171,.09) 50%, transparent 80%);
+  animation: shimmer 1.6s infinite;
+}
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+.state-card { border: 1px solid var(--line); border-radius: 6px; padding: 16px; background: var(--panel); }
+.state-card h5 { margin: 0 0 8px; font-size: var(--t-meta); font-family: var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; }
+.tierline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.agebar { display: flex; height: 28px; border-radius: 4px; overflow: hidden; border: 1px solid var(--line); font-family: var(--sans); font-size: var(--t-floor); font-weight: 600; letter-spacing: .04em; }
+.agebar > div { display: flex; align-items: center; justify-content: center; white-space: nowrap; padding: 0 6px; }
+.appbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  padding: 12px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+}
+.appbar .sep { width: 1px; height: 16px; background: var(--line); }
+.deltacell { display: inline-flex; align-items: center; gap: 8px; }
+.bar-neg-mark { background: var(--crit); height: 10px; border-radius: 2px; }
+kbd.tokref { font-family: var(--mono); font-size: var(--t-mono-floor); background: var(--chip-bg); border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; color: var(--ink-2); }
+kbd.key { font-family: var(--mono); font-size: var(--t-mono-floor); background: var(--panel-2); border: 1px solid var(--ink-3); border-bottom-width: 2px; border-radius: 4px; padding: 1px 7px; color: var(--ink); }
+hr.thin { border: none; border-top: 1px solid var(--line); margin: 28px 0; }
+ul.lawlist { margin: 8px 0 0; padding-left: 20px; }
+ul.lawlist li { margin-bottom: 10px; }
+ul.tight { margin: 6px 0 10px; padding-left: 20px; } ul.tight li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- ================= MASTHEAD ================= -->
+<header class="masthead">
+  <div class="grow">
+    <p class="kicker">Solvent · ether.fi risk observatory · foundation canon — SYNTHESIZED FINAL</p>
+    <h1>The finding is the headline. The proof is one gesture away. Refusal is ink, not absence.</h1>
+    <p class="dek prose">The foundation every page inherits: one shell, one closed type set, one measured
+    palette per theme, nine status dimensions, a derived freshness SLA, a three-layer number law, one table
+    and evidence pattern, six designed states, the committed chart conventions with their interaction
+    register — every component rendered as a working specimen from one welded demo dataset.</p>
+    <p class="meta-sm mono">final-canon · 2026-08-09 · synthesized from drafts editorial (winner) + instrument + restraint under three judge verdicts · binds to: cross-page-ui-brief (AUTHORITATIVE) · program-design Track A · page audits (evidence)</p>
+  </div>
+  <button class="themebtn" id="themeToggle" type="button" aria-pressed="false">THEME: DARK ◐</button>
+</header>
+
+<div class="standfirst">
+  <p class="prose" style="margin:0 0 4px"><b>Shared demo dataset.</b> Every number below is drawn from one
+  fictional batch — <span class="mono">#18251</span>, Aave book $22.8M / DM book $412.7K — and reconciles across
+  every specimen: distribution counts reappear as heatmap row sums, deltas sum to zero, ledgers weld to their
+  denominators. The styleguide is welded the way the product is.</p>
+  <nav class="toc" aria-label="Contents">
+    <a href="#ch-doctrine"><b>00</b> · Doctrine — three laws, one voice</a>
+    <a href="#ch-verdict"><b>01</b> · The verdict banner — every page&#8217;s first component</a>
+    <a href="#ch-shell"><b>02</b> · The shell — width contract &amp; grid</a>
+    <a href="#ch-type"><b>03</b> · Type — the closed token set</a>
+    <a href="#ch-color"><b>04</b> · Color — two grades, both themes, measured</a>
+    <a href="#ch-status"><b>05</b> · Status — nine dimensions, composed</a>
+    <a href="#ch-freshness"><b>06</b> · Freshness SLA — theorems, pending ratification</a>
+    <a href="#ch-numbers"><b>07</b> · Numbers — three layers &amp; the exact affordance</a>
+    <a href="#ch-tables"><b>08</b> · Tables &amp; the evidence drawer</a>
+    <a href="#ch-states"><b>09</b> · States — designed absence + the anti-state</a>
+    <a href="#ch-charts"><b>10</b> · Charts — committed conventions + interaction</a>
+    <a href="#ch-engines"><b>11</b> · Engine separation — never summed</a>
+    <a href="#ch-law"><b>12</b> · House law</a>
+    <a href="#ch-gates"><b>13</b> · Gate conformance self-audit</a>
+    <a href="#design-notes"><b>14</b> · Design notes — synthesis record</a>
+  </nav>
+</div>
+
+<!-- ================= 00 DOCTRINE ================= -->
+<section class="chapter" id="ch-doctrine">
+  <div class="chapter-rule"><span class="no">00</span><h2>Doctrine: the register every surface obeys</h2></div>
+  <div class="finding prose"><b>Every analytical surface reads top-down as: finding → qualification → picture →
+  exact ledger → method → forensics.</b> Nothing that qualifies a picture may render after it; nothing exact may
+  interrupt the reading line; nothing that carries meaning renders below 12px — structurally (§03).</div>
+  <div class="grid3">
+    <div class="state-card">
+      <h5>Mono marks exactness</h5>
+      <p class="meta" style="margin:0">If it is monospace, it is verbatim: an address, a block number, an exact
+      value, a formula, a wire code, raw evidence. If it is sans-serif, it is for a human. The typeface itself
+      is a provenance claim — mono&#8217;s presence carries information instead of noise.</p>
+    </div>
+    <div class="state-card">
+      <h5>Quiet is the healthy state</h5>
+      <p class="meta" style="margin:0">Fresh and healthy render as the <em>absence</em> of signal — measured ink,
+      no green celebration. Color appears when the instrument has something to say: amber for degraded knowledge
+      (stale · refused · withheld · projected), coral for adverse. A fill is the final escalation, never
+      decoration.</p>
+    </div>
+    <div class="state-card">
+      <h5>Refusal is ink, not absence</h5>
+      <p class="meta" style="margin:0">A refused value is visible, counted, and named — by its plain cause first,
+      its wire code second. An unknowable never dresses as zero. Live transport never vouches for snapshot age.
+      Engine books are never summed.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 01 VERDICT BANNER ================= -->
+<section class="chapter" id="ch-verdict">
+  <div class="chapter-rule"><span class="no">01</span><h2>The verdict banner: the page answers first</h2></div>
+  <div class="finding prose"><b>The brief&#8217;s first acceptance gate — &#8220;each page answers its defining question in
+  the first viewport&#8221; — is a component, not an aspiration.</b> Every page opens with one verdict banner: a
+  computed sentence in a fixed grammar (finding + named denominator), one qualification line, and the identity
+  strip (batch · age · coverage · current/projected). No draft rendered this; the synthesis invents it.</div>
+
+  <p class="meta-sm" style="margin:0 0 10px">Books — <i>what is at risk now?</i> — the current-state variant:</p>
+  <div class="verdict breakout" style="margin-bottom:18px">
+    <p class="v-answer">At risk now: <span class="exact tnum" tabindex="0" title="$8,468.238278">$8.5K</span> of Aave eligible debt across 3 accounts — 0.04% of that engine&#8217;s $22.8M book. Debt Manager: $0.</p>
+    <p class="v-qual">One account carries <span class="exact tnum" tabindex="0" title="$8,467.90">$8.5K</span> of the total; the other two are dust (&lt;$0.01 and $0.33). 6 accounts refused per engine — counted below, never folded in.</p>
+    <div class="v-id">
+      <span class="badge current">CURRENT · <span class="val">batch #18251</span></span>
+      <span class="chip c-quiet">SNAPSHOT <span class="val">48s</span></span>
+      <span class="chip c-quiet">COVERAGE <span class="val">2/2</span> ENGINES</span>
+      <span class="chip c-accent">EVIDENCE · <span class="val">3 pins</span></span>
+    </div>
+  </div>
+
+  <div class="grid2 breakout">
+    <div class="verdict v-warn">
+      <p class="v-answer" style="font-size:var(--t-section)">Verdict unavailable — the engine won&#8217;t guess.</p>
+      <p class="v-qual">The Debt Manager sweep failed twice at this batch, so it refuses to value this account
+      rather than serve an unproven number. Chain activity is retained below.</p>
+      <div class="v-id">
+        <span class="refused-tag">REFUSED · sweep failed twice <span class="val">· sweep_failed_no_success</span></span>
+        <span class="chip c-quiet">SNAPSHOT <span class="val">48s</span></span>
+      </div>
+    </div>
+    <div class="verdict v-warn">
+      <p class="v-answer" style="font-size:var(--t-section)">Results for previous input.</p>
+      <p class="v-qual">Bound to 0x80b3…6e1d · batch #18251 · eth_-20 v3 · computed 04:11:07Z. The address field
+      has changed; run again for the new address. A late response never overwrites a newer request context.</p>
+      <div class="v-id"><span class="chip c-warn">SUPERSEDED</span>
+        <span class="badge projection">PROJECTION · <span class="val">ETH −20% v3</span></span></div>
+    </div>
+    <div class="verdict v-quiet">
+      <p class="v-answer" style="font-size:var(--t-section)">No position — definitively.</p>
+      <p class="v-qual">Both engines cover this address and both report no balances at batch #18251. Absence is
+      a computed answer, not a failed lookup.</p>
+      <div class="v-id"><span class="chip c-quiet">COVERAGE <span class="val">2/2</span></span>
+        <span class="chip c-quiet">SNAPSHOT <span class="val">48s</span></span></div>
+    </div>
+    <div class="verdict v-warn">
+      <p class="v-answer" style="font-size:var(--t-section)">Partial answer: 1 of 2 engines.</p>
+      <p class="v-qual">Aave answered; the Debt Manager withheld (missing observation). Findings below cover the
+      Aave book only — no figure on this page includes Debt Manager values.</p>
+      <div class="v-id"><span class="chip c-warn">COVERAGE <span class="val">1/2</span> · DM WITHHELD</span>
+        <span class="badge current">CURRENT · <span class="val">batch #18251</span></span></div>
+    </div>
+  </div>
+  <p class="prose meta-sm" style="margin-top:12px">Grammar, binding: <b>answer sentence</b> (a computed finding
+  with its denominator named) · <b>qualification</b> (what would change the reading: dust split, refusals,
+  coverage) · <b>identity strip</b> (batch · age · coverage · current/projected · evidence). The banner never
+  renders without its identity strip; a banner whose data is superseded, refused, or partial switches variant —
+  it never silently keeps the happy sentence.</p>
+</section>
+
+<!-- ================= 02 SHELL ================= -->
+<section class="chapter" id="ch-shell">
+  <div class="chapter-rule"><span class="no">02</span><h2>The shell: one width contract, twelve columns</h2></div>
+  <div class="finding prose"><b>The 1180px universal cap is repealed.</b> The analytical shell steps with the
+  viewport per the brief&#8217;s table; prose keeps a fixed reading measure inside it. This document runs the
+  contract — resize it at 1366/1440/1920/2560 and watch the shell step. The breakout is implemented as
+  max-width stepping, so it can never exceed its viewport row&#8217;s budget (at 1366 it holds 1280).</div>
+
+  <div class="tablewrap" style="max-width:720px">
+    <table class="house">
+      <thead><tr><th>CSS viewport</th><th class="num">Analytical shell</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>1366px</td><td class="num">1280px</td><td class="meta-sm">no primary horizontal scroll — acceptance gate</td></tr>
+        <tr><td>1440px</td><td class="num">1280px core</td><td class="meta-sm">analytical breakout up to 1340px</td></tr>
+        <tr><td>1920px</td><td class="num">1520px</td><td class="meta-sm">density rises; prose measure does not</td></tr>
+        <tr><td>2560px</td><td class="num">1680px</td><td class="meta-sm">capped — whitespace is margin, not void</td></tr>
+        <tr><td>Prose</td><td class="num">≤ 720px</td><td class="meta-sm">≈ 66–72 characters at 16px</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="3">Gutter 20px · 12 columns · breakpoints are content-driven, never one blanket rule · wide exhibits scroll inside their own frame, never the page</td></tr></tfoot>
+    </table>
+  </div>
+
+  <h3 style="margin-top:32px">The 12-column grid, visible</h3>
+  <p class="prose meta">Overlay shown live. Prose spans columns 1–7 (≤720px); analytical surfaces span 1–12;
+  a chart with its evidence rail splits 8 + 4. One grid, three page compositions (brief §3): Books =
+  overview/chapter · Inspector = detail canvas + evidence rail · Scenarios = library + result workspace.</p>
+  <div class="gridspec breakout" role="img" aria-label="12-column grid overlay with span specimens">
+    <div class="cols" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="content">
+      <div class="gs-block" style="grid-column: 1 / span 12"><b>verdict banner</b> · cols 1–12 — the page&#8217;s first component (§01)</div>
+      <div class="gs-block" style="grid-column: 1 / span 7"><b>prose</b> · cols 1–7 · max 720px — findings, method, narrative</div>
+      <div class="gs-block" style="grid-column: 8 / span 5"><b>aside</b> · cols 8–12 — status, freshness, coverage</div>
+      <div class="gs-block" style="grid-column: 1 / span 8"><b>chart canvas</b> · cols 1–8</div>
+      <div class="gs-block" style="grid-column: 9 / span 4"><b>evidence rail</b> · cols 9–12 · sticky where the page allows</div>
+      <div class="gs-block" style="grid-column: 1 / span 12"><b>analytical breakout</b> · cols 1–12 — tables, heatmaps, stress panels (1340px at a 1440 viewport)</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 03 TYPE ================= -->
+<section class="chapter" id="ch-type">
+  <div class="chapter-rule"><span class="no">03</span><h2>Type: a closed token set makes the floor structural</h2></div>
+  <div class="finding prose"><b>The 12px floor is not a rule to obey — it is the smallest token that exists.</b>
+  Two drafts legislated the floor and then broke it in their own specimens (11–11.5px badges, chips, and
+  in-chart labels). The cure is structural: components may only reference the closed <span class="mono">--t-*</span>
+  set below; production enforces it with a stylelint rule (every <span class="mono">font-size</span> must be a
+  <span class="mono">var(--t-*)</span> reference). No token below 12px exists.</div>
+
+  <div class="tablewrap breakout">
+    <table class="house">
+      <thead><tr><th style="width:210px">Token</th><th>Specimen</th><th style="width:300px">Role</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">--t-display · 32px/700</td><td><span style="font-size:var(--t-display); font-weight:700; letter-spacing:-.015em">Eligible debt is $8.5K on one engine.</span></td><td class="meta-sm">Page H1 — the page&#8217;s one finding, in sentence form.</td></tr>
+        <tr><td class="mono">--t-chapter · 24px/650</td><td><span style="font-size:var(--t-chapter); font-weight:650; letter-spacing:-.01em">Three accounts sit near their boundary.</span></td><td class="meta-sm">Chapter title (H2) — a chapter-level conclusion.</td></tr>
+        <tr><td class="mono">--t-section · 18px/620</td><td><span style="font-size:var(--t-section); font-weight:620">Aave v3 · what the protocol sees</span></td><td class="meta-sm">Section head (H3) · dek size.</td></tr>
+        <tr><td class="mono">--t-fighead · 17px/650</td><td><span style="font-size:var(--t-fighead); font-weight:650">New eligibility first appears at the −20% sample.</span></td><td class="meta-sm">Chart finding-headline (§10 house frame).</td></tr>
+        <tr><td class="mono">--t-body · 16px/400</td><td style="white-space:normal"><span class="prose" style="display:inline-block; max-width:560px">The engine refuses to value what it cannot prove. A refused row stays on the book as a counted, named object.</span></td><td class="meta-sm">All reading prose, findings, method.</td></tr>
+        <tr><td class="mono">--t-stat-lg / --t-stat</td><td><span class="tnum" style="font-size:var(--t-stat-lg); font-weight:650">$22.8M</span> &nbsp; <span class="tnum" style="font-size:var(--t-stat); font-weight:650">$8.5K</span> <span class="meta-sm">eligible</span></td><td class="meta-sm">KPI values, tabular numerals, unit beside.</td></tr>
+        <tr><td class="mono">--t-ui · 14px</td><td><span style="font-size:var(--t-ui); color:var(--ink-2)">Batch #18251 · computed 2026-08-09 04:11:07Z · coverage 2/2 engines</span></td><td class="meta-sm">Metadata, table body, captions with content.</td></tr>
+        <tr><td class="mono">--t-meta · 13px</td><td><span style="font-size:var(--t-meta); color:var(--ink-2)">Held flat: USDC, rates, non-ETH collateral · values between samples were not computed</span></td><td class="meta-sm">Dense metadata floor for running text.</td></tr>
+        <tr><td class="mono">--t-floor · 12px</td><td><span style="font-size:var(--t-floor); color:var(--ink-2)">−20% · −30% · −40% · $0 · $1.5M · $3M</span></td><td class="meta-sm">Chips, labels, axis ticks, chart text. THE floor — nothing smaller exists.</td></tr>
+        <tr><td class="mono">--t-mono · 13px mono</td><td><span class="mono tnum" style="font-size:var(--t-mono)">0x80b3f19e2a6c…6e1d · block 25,641,730 · HF = wadDiv(Σ(Cᵢ·LTᵢ), D)</span></td><td class="meta-sm">Addresses, chain coordinates, formulas — verbatim.</td></tr>
+        <tr><td class="mono">--t-mono-lg · 14px mono</td><td><span class="mono tnum" style="font-size:var(--t-mono-lg)">$2,835,019.429399</span></td><td class="meta-sm">Exact values, featured (layer 2, §07).</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="3">Weights: findings 650–700 · table emphasis 600 · body 400. Uppercase+tracking survives only in the sans status vocabulary (chips, kickers) at ≥12px — never for section headings. Numerals in data contexts are always tabular.</td></tr></tfoot>
+    </table>
+  </div>
+
+  <div class="grid2" style="margin-top:20px">
+    <div class="card">
+      <div class="card-h"><span class="t">Monospace: the evidence voice — exactly six things</span></div>
+      <div class="card-b">
+        <p class="meta-sm" style="margin:0 0 10px">If it is not one of these, it is sans.</p>
+        <p class="mono" style="font-size:var(--t-mono); margin:0 0 8px">0x80b3f19e2a6c…6e1d <span class="meta-sm">— address</span></p>
+        <p class="mono" style="font-size:var(--t-mono); margin:0 0 8px">block 25,641,730 · log 44 <span class="meta-sm">— chain coordinates</span></p>
+        <p class="mono" style="font-size:var(--t-mono); margin:0 0 8px">HF = floor(Σ(Cᵢ·LTᵢ)·1e18 / D) <span class="meta-sm">— formula</span></p>
+        <p class="mono" style="font-size:var(--t-mono); margin:0 0 8px">$2,835,019.429399 <span class="meta-sm">— exact value (on demand)</span></p>
+        <p class="mono" style="font-size:var(--t-mono); margin:0 0 8px">sweep_failed_no_success <span class="meta-sm">— wire code (quoted, never leading)</span></p>
+        <p class="mono" style="font-size:var(--t-mono); margin:0">2835019429399 @ 6 dec <span class="meta-sm">— raw evidence</span></p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="t">Engine identity: mono wire names only</span></div>
+      <div class="card-b meta" style="font-size:var(--t-ui)">
+        <p style="margin:0 0 10px"><span class="engine-tag">aave_v3</span> <span class="engine-tag">debt_manager</span>
+        — the engine tag is the wire name, in mono, everywhere: table cells, chart kickers, coverage chips.
+        No sans &#8220;AAVE&#8221;/&#8220;DM&#8221; abbreviations as identity.</p>
+        <p style="margin:0">A Debt Manager ratio is never labeled or styled as an Aave health factor; comparators
+        carry their engine&#8217;s own name in the cell (&#8220;HF 0.4971&#8221; · &#8220;DM ratio 0.992&#8221;).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 04 COLOR ================= -->
+<section class="chapter" id="ch-color">
+  <div class="chapter-rule"><span class="no">04</span><h2>Color: two grades, both themes, every ratio measured</h2></div>
+  <div class="finding prose"><b>Marks and labels have different jobs and different lawful thresholds — so the
+  palette splits into a text grade (≥4.5:1 on its worst text ground, including chip-bg) and a fill/glyph grade
+  (≥3:1 non-text) that keeps the chart chroma.</b> The dark observatory palette already passes as text and
+  serves both grades verbatim; light needs the split. Cyan stays measured, amber stays degraded-knowledge,
+  coral stays adverse. Every ratio below is computed from the hex values shown (WCAG relative luminance,
+  translucent grounds composited first).</div>
+  <p class="prose meta-sm">Worst text grounds: dark = <kbd class="tokref">--panel #131c20</kbd> for page text,
+  <kbd class="tokref">--chip-bg #1b262b</kbd> for chip text · light = <kbd class="tokref">--panel-2 #eef1f2</kbd>
+  for page text, <kbd class="tokref">--chip-bg #e6ecee</kbd> for chip text. A token certified on its worst
+  ground passes everywhere it is allowed to sit.</p>
+
+  <div class="grid2 breakout" style="margin-top:16px">
+    <!-- DARK, pinned surfaces -->
+    <div class="swatchset" style="background:#131c20; border-color:#223034">
+      <div class="set-h" style="color:#93a5ab; border-bottom:1px solid #223034">Dark (default) · text = fill grade, vs worst grounds</div>
+      <div class="swatch"><span class="well" style="background:#dbe5e8"></span><span class="nm" style="color:#dbe5e8">--ink</span><span class="hex" style="color:#93a5ab">#dbe5e8</span><span class="ratio pass" style="color:#dbe5e8">13.49:1 ✓</span><span class="note" style="color:#93a5ab">primary text (panel)</span></div>
+      <div class="swatch"><span class="well" style="background:#93a5ab"></span><span class="nm" style="color:#93a5ab">--ink-2</span><span class="hex" style="color:#93a5ab">#93a5ab</span><span class="ratio pass" style="color:#93a5ab">6.76 · 6.04 chip ✓</span><span class="note" style="color:#93a5ab">secondary text, axis labels</span></div>
+      <div class="swatch"><span class="well" style="background:#71868e"></span><span class="nm" style="color:#71868e">--ink-3 · REV</span><span class="hex" style="color:#93a5ab">#71868e <s style="opacity:.6">#5f7178</s></span><span class="ratio pass" style="color:#71868e">4.53:1 ✓</span><span class="note" style="color:#93a5ab">captions/ornament only (was 3.39 ✗)</span></div>
+      <div class="swatch"><span class="well" style="background:#5ab3c4"></span><span class="nm" style="color:#5ab3c4">--accent(-text)</span><span class="hex" style="color:#93a5ab">#5ab3c4</span><span class="ratio pass" style="color:#5ab3c4">7.15 · 6.39 chip ✓</span><span class="note" style="color:#93a5ab">measured / interactive</span></div>
+      <div class="swatch"><span class="well" style="background:#63b98a"></span><span class="nm" style="color:#63b98a">--ok(-text)</span><span class="hex" style="color:#93a5ab">#63b98a</span><span class="ratio pass" style="color:#63b98a">7.28 · 6.50 chip ✓</span><span class="note" style="color:#93a5ab">comfortably healthy only</span></div>
+      <div class="swatch"><span class="well" style="background:#d0a04a"></span><span class="nm" style="color:#d0a04a">--warn(-text)</span><span class="hex" style="color:#93a5ab">#d0a04a</span><span class="ratio pass" style="color:#d0a04a">7.25 · 6.48 chip ✓</span><span class="note" style="color:#93a5ab">stale · refused · projected</span></div>
+      <div class="swatch"><span class="well" style="background:#d96a5d"></span><span class="nm" style="color:#d96a5d">--crit(-text)</span><span class="hex" style="color:#93a5ab">#d96a5d</span><span class="ratio pass" style="color:#d96a5d">5.08 · 4.54 chip ✓</span><span class="note" style="color:#93a5ab">adverse outcomes</span></div>
+      <div class="set-h" style="color:#93a5ab; border-top:1px solid #223034; border-bottom:1px solid #223034">Dark · composites (measured on composite)</div>
+      <div class="swatch"><span class="well" style="background:#272426"></span><span class="nm" style="color:#d96a5d">crit on --crit-bg</span><span class="hex" style="color:#93a5ab">10% over panel → #272426</span><span class="ratio pass" style="color:#93a5ab">4.51 · ink 11.99 ✓</span><span class="note" style="color:#93a5ab">crit rows / CRITICAL tier</span></div>
+      <div class="swatch"><span class="well" style="background:#262924"></span><span class="nm" style="color:#d0a04a">warn on --warn-bg</span><span class="hex" style="color:#93a5ab">10% over panel → #262924</span><span class="ratio pass" style="color:#93a5ab">6.18 ✓</span><span class="note" style="color:#93a5ab">refused tags</span></div>
+      <div class="swatch"><span class="well" style="background:#1c262b"></span><span class="nm" style="color:#93a5ab">ink-2 on --refused-bg</span><span class="hex" style="color:#93a5ab">12% over panel → #1c262b</span><span class="ratio pass" style="color:#93a5ab">6.03 ✓ (ink-3 4.04 ✗)</span><span class="note" style="color:#93a5ab">refused-row text = ink-2, by law</span></div>
+      <div class="swatch"><span class="well" style="background:#5ab3c4"></span><span class="nm" style="color:#0c1215; background:#5ab3c4; border-radius:3px; text-align:center">--accent-ink</span><span class="hex" style="color:#93a5ab">#0c1215 on accent</span><span class="ratio pass" style="color:#93a5ab">7.80 ✓</span><span class="note" style="color:#93a5ab">filled buttons</span></div>
+      <div class="swatch"><span class="well" style="background:#223034"></span><span class="nm" style="color:#93a5ab">--line</span><span class="hex" style="color:#93a5ab">#223034</span><span class="ratio na" style="color:#93a5ab">1.27 · n/a</span><span class="note" style="color:#93a5ab">hairline — never carries meaning alone</span></div>
+    </div>
+
+    <!-- LIGHT, pinned surfaces -->
+    <div class="swatchset" style="background:#eef1f2; border-color:#d8dfe1">
+      <div class="set-h" style="color:#56676e; border-bottom:1px solid #d8dfe1">Light · TEXT grade vs worst grounds (panel-2 · chip)</div>
+      <div class="swatch"><span class="well" style="background:#1a2327"></span><span class="nm" style="color:#1a2327">--ink</span><span class="hex" style="color:#56676e">#1a2327</span><span class="ratio pass" style="color:#1a2327">14.08:1 ✓</span><span class="note" style="color:#56676e">primary text</span></div>
+      <div class="swatch"><span class="well" style="background:#56676e"></span><span class="nm" style="color:#56676e">--ink-2</span><span class="hex" style="color:#56676e">#56676e</span><span class="ratio pass" style="color:#56676e">5.20 · 4.94 chip ✓</span><span class="note" style="color:#56676e">secondary text, axis labels</span></div>
+      <div class="swatch"><span class="well" style="background:#637075"></span><span class="nm" style="color:#637075">--ink-3 · REV</span><span class="hex" style="color:#56676e">#637075 <s style="opacity:.6">#8a979c</s></span><span class="ratio pass" style="color:#637075">4.51 ✓ (chip 4.29 ✗)</span><span class="note" style="color:#56676e">captions only; never on chip/tints (was 2.65 ✗)</span></div>
+      <div class="swatch"><span class="well" style="background:#2a7380"></span><span class="nm" style="color:#2a7380">--accent-text</span><span class="hex" style="color:#56676e">#2a7380</span><span class="ratio pass" style="color:#2a7380">4.79 · 4.56 chip ✓</span><span class="note" style="color:#56676e">measured / interactive text</span></div>
+      <div class="swatch"><span class="well" style="background:#27784d"></span><span class="nm" style="color:#27784d">--ok-text</span><span class="hex" style="color:#56676e">#27784d</span><span class="ratio pass" style="color:#27784d">4.77 · 4.54 chip ✓</span><span class="note" style="color:#56676e">comfortably healthy text</span></div>
+      <div class="swatch"><span class="well" style="background:#8b6219"></span><span class="nm" style="color:#8b6219">--warn-text</span><span class="hex" style="color:#56676e">#8b6219</span><span class="ratio pass" style="color:#8b6219">4.79 · 4.56 chip ✓</span><span class="note" style="color:#56676e">degraded-knowledge text</span></div>
+      <div class="swatch"><span class="well" style="background:#ba4136"></span><span class="nm" style="color:#ba4136">--crit-text</span><span class="hex" style="color:#56676e">#ba4136</span><span class="ratio pass" style="color:#ba4136">4.75 · 4.52 chip ✓</span><span class="note" style="color:#56676e">adverse text</span></div>
+      <div class="set-h" style="color:#56676e; border-top:1px solid #d8dfe1; border-bottom:1px solid #d8dfe1">Light · FILL/GLYPH grade (≥3:1 non-text — chart marks keep chroma)</div>
+      <div class="swatch"><span class="well" style="background:#2e7d8c"></span><span class="nm" style="color:#2a7380">--accent</span><span class="hex" style="color:#56676e">#2e7d8c</span><span class="ratio pass" style="color:#56676e">4.74 vs white ✓</span><span class="note" style="color:#56676e">marks, borders; white-on-accent 4.74 ✓</span></div>
+      <div class="swatch"><span class="well" style="background:#2e8c5a"></span><span class="nm" style="color:#27784d">--ok</span><span class="hex" style="color:#56676e">#2e8c5a</span><span class="ratio pass" style="color:#56676e">4.19 vs white ✓≥3</span><span class="note" style="color:#56676e">glyph/fill only — never running text</span></div>
+      <div class="swatch"><span class="well" style="background:#b07c1f"></span><span class="nm" style="color:#8b6219">--warn</span><span class="hex" style="color:#56676e">#b07c1f</span><span class="ratio pass" style="color:#56676e">3.65 vs white ✓≥3</span><span class="note" style="color:#56676e">glyph/fill only — never running text</span></div>
+      <div class="swatch"><span class="well" style="background:#c24438"></span><span class="nm" style="color:#ba4136">--crit</span><span class="hex" style="color:#56676e">#c24438</span><span class="ratio pass" style="color:#56676e">5.03 vs white ✓</span><span class="note" style="color:#56676e">glyph/fill; white-on-crit 5.03 ✓</span></div>
+      <div class="set-h" style="color:#56676e; border-top:1px solid #d8dfe1; border-bottom:1px solid #d8dfe1">Light · composites</div>
+      <div class="swatch"><span class="well" style="background:#fbf2f1; border-color:#d8dfe1"></span><span class="nm" style="color:#ba4136">crit-text on --crit-bg</span><span class="hex" style="color:#56676e">7% over panel → #fbf2f1</span><span class="ratio pass" style="color:#56676e">4.89 · ink 14.52* ✓</span><span class="note" style="color:#56676e">crit rows (*ink measured on same ground)</span></div>
+      <div class="swatch"><span class="well" style="background:#f9f5ed; border-color:#d8dfe1"></span><span class="nm" style="color:#8b6219">warn-text on --warn-bg</span><span class="hex" style="color:#56676e">8% over panel → #f9f5ed</span><span class="ratio pass" style="color:#56676e">5.00 ✓</span><span class="note" style="color:#56676e">refused tags</span></div>
+      <div class="swatch"><span class="well" style="background:#f3f5f5; border-color:#d8dfe1"></span><span class="nm" style="color:#56676e">ink-2 on --refused-bg</span><span class="hex" style="color:#56676e">10% over panel → #f3f5f5</span><span class="ratio pass" style="color:#56676e">5.39 ✓</span><span class="note" style="color:#56676e">refused rows</span></div>
+      <div class="swatch"><span class="well" style="background:#d8dfe1; border-color:#c6ced1"></span><span class="nm" style="color:#56676e">--line</span><span class="hex" style="color:#56676e">#d8dfe1</span><span class="ratio na" style="color:#56676e">1.35 · n/a</span><span class="note" style="color:#56676e">hairline — never carries meaning alone</span></div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">The amendment ledger (production tokens.css changes, binding)</h3>
+  <div class="tablewrap breakout">
+    <table class="house">
+      <thead><tr><th>Token</th><th>Was</th><th>Amended</th><th class="num">Worst-ground ratio</th><th>Ruling</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">--ink-3 dark</td><td class="mono">#5f7178 · 3.39 ✗</td><td class="mono">#71868e</td><td class="num">4.53</td><td class="meta-sm" style="white-space:normal">Text-legal again, but demoted by law: captions/ornament only — never a value, state, or finding; never on chip or tinted grounds.</td></tr>
+        <tr><td class="mono">--ink-3 light</td><td class="mono">#8a979c · 2.65 ✗</td><td class="mono">#637075</td><td class="num">4.51</td><td class="meta-sm" style="white-space:normal">Same demotion; chip ground measures 4.29, hence the never-on-chip law.</td></tr>
+        <tr><td class="mono">--accent-text light (new)</td><td class="mono">— (accent 4.18 on panel-2 ✗)</td><td class="mono">#2a7380</td><td class="num">4.56 chip</td><td class="meta-sm" style="white-space:normal">Text grade split from fill grade; --accent #2e7d8c survives as the mark/fill color.</td></tr>
+        <tr><td class="mono">--ok-text light (new)</td><td class="mono">— (ok 3.69 on panel-2 ✗)</td><td class="mono">#27784d</td><td class="num">4.54 chip</td><td class="meta-sm" style="white-space:normal">Same split.</td></tr>
+        <tr><td class="mono">--warn-text light (new)</td><td class="mono">— (warn 3.22 on panel-2 ✗)</td><td class="mono">#8b6219</td><td class="num">4.56 chip</td><td class="meta-sm" style="white-space:normal">Same split — light amber was the worst text offender.</td></tr>
+        <tr><td class="mono">--crit-text light (new)</td><td class="mono">— (crit 4.43 on panel-2 ✗)</td><td class="mono">#ba4136</td><td class="num">4.52 chip</td><td class="meta-sm" style="white-space:normal">Barely moved; coral identity intact.</td></tr>
+        <tr><td class="mono">--term-dim</td><td class="mono">#6b7d84 · 4.19 ✗</td><td class="mono">#70838a</td><td class="num">4.54</td><td class="meta-sm" style="white-space:normal">Terminal comments are text too. Measured on the worst term ground (#10181b); on dark term-bg #0a0f12 it reads 4.86.</td></tr>
+        <tr><td class="mono">dark text tokens</td><td colspan="2" class="meta-sm">unchanged — every dark text token clears 4.5 on panel AND chip (worst: crit on chip, 4.54)</td><td class="num">✓</td><td class="meta-sm" style="white-space:normal">The observatory dark identity survives verbatim.</td></tr>
+      </tbody>
+      <tfoot><tr><td colspan="5">Restraint&#8217;s light text values (#2c7785 / #297c50 / #906519 / #c04338) were certified against panel-2 only; on chip-bg they measure 4.29–4.33 ✗. The synthesis adopts instrument&#8217;s hexes, which clear the chip ground — the computation decided, not taste.</td></tr></tfoot>
+    </table>
+  </div>
+
+  <div class="grid2" style="margin-top:20px">
+    <div class="card">
+      <div class="card-h"><span class="t">Terminal register (constant across themes)</span></div>
+      <div class="card-b">
+        <div class="term"><pre><span class="c">// worst term ground #10181b: term-ink 11.84 ✓ · term-ok 7.56 ✓ · term-accent 7.43 ✓</span>
+<span class="c">// term-dim REV #70838a: 4.54 ✓ — comments are lawful text again</span>
+<span class="a">"status"</span>: <span class="p">"computed"</span>   <span class="c">// verbatim wire, layer 3</span>
+<span class="a">"batch"</span>:  <span class="p">"bk_019fb0a2"</span></pre></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="t">Usage law</span></div>
+      <div class="card-b meta" style="font-size:var(--t-ui)">
+        <ul class="lawlist" style="margin-top:0">
+          <li>Text always uses the <b>-text</b> grade; SVG marks, borders, and tints use the fill grade. In dark
+            the two grades share values, so components reference <kbd class="tokref">--*-text</kbd> for text
+            unconditionally and stay lawful in both themes.</li>
+          <li><kbd class="tokref">--ink-3</kbd> never carries a value, a state, or a finding, and never sits on
+            chip or tinted grounds. Refused-row text is always <kbd class="tokref">--ink-2</kbd> (dark refused
+            tint measures ink-3 at 4.04).</li>
+          <li>Semantic color never travels alone: every ok/warn/crit use pairs with text, an icon, or a shape.</li>
+          <li>Green is rationed: <kbd class="tokref">--ok</kbd> means comfortably healthy. Fresh data, completed
+            lookups, and near-threshold positions never render green.</li>
+          <li>Chart series identity uses accent + ink tiers, never ok/warn/crit; status colors are reserved for state.</li>
+          <li>Data surfaces are flat: <kbd class="tokref">--shadow</kbd> is lawful only on overlays (readouts,
+            popovers, drawers rendered above content) — never on cards, figs, or tables.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 05 STATUS ================= -->
+<section class="chapter" id="ch-status">
+  <div class="chapter-rule"><span class="no">05</span><h2>Status: nine dimensions, never one badge</h2></div>
+  <div class="finding prose"><b>A risk answer has nine independent coordinates; each renders on its own
+  component and they compose with middots.</b> No dimension may recolor another: dust cannot green a true
+  liquidation verdict; a true verdict cannot make dust look catastrophic; a live stream cannot vouch for an old
+  snapshot. Chips are sans (the state word is narration); embedded ages, counts, and wire codes are mono
+  (they are verbatim). Refusal chips lead with the plain cause; the wire code rides secondary.</div>
+
+  <div class="tablewrap breakout">
+    <table class="house">
+      <thead><tr><th style="width:230px">Dimension</th><th>Rendered states (the components, live)</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>1 · Connection</b><div class="meta-sm">transport posture only</div></td>
+          <td style="white-space:normal"><span class="chip c-accent"><span class="dot"></span>STREAM CONNECTED</span>
+              <span class="chip c-warn"><span class="dot"></span>RECONNECTING · <span class="val">3rd attempt</span></span>
+              <span class="chip c-crit"><span class="dot"></span>DISCONNECTED <span class="val">02:41</span></span>
+              <div class="comp-read">Never green — connection is posture, not health. Says nothing about snapshot age (dimension 2).</div></td>
+        </tr>
+        <tr>
+          <td><b>2 · Snapshot age</b><div class="meta-sm">SLA tiers, §06</div></td>
+          <td style="white-space:normal"><span class="chip c-quiet">SNAPSHOT <span class="val">48s</span></span>
+              <span class="chip c-warn">SNAPSHOT <span class="val">4m 12s</span> · AGING</span>
+              <span class="chip c-crit">SNAPSHOT <span class="val">22m</span> · STALE</span>
+              <span class="chip c-crit-fill">SNAPSHOT <span class="val">18h</span> · CRITICAL</span>
+              <span class="chip c-unknown"><span class="dot"></span>AGE UNKNOWN</span>
+              <div class="comp-read">The age always prints; the tier word rides beside it so severity survives color-blindness and grayscale. Unknown is a register, not a tier.</div></td>
+        </tr>
+        <tr>
+          <td><b>3 · Coverage</b><div class="meta-sm">who answered</div></td>
+          <td style="white-space:normal"><span class="chip c-quiet">COVERAGE <span class="val">2/2</span> ENGINES</span>
+              <span class="chip c-warn">COVERAGE <span class="val">1/2</span> · DM WITHHELD</span>
+              <span class="chip c-quiet"><span class="val">9,958 / 9,964</span> COMPUTED · <span class="val">6</span> REFUSED</span>
+              <div class="comp-read">Counts reconcile visibly: on book → computed → refused/unknown. No silent shrinkage.</div></td>
+        </tr>
+        <tr>
+          <td><b>4 · Run state</b><div class="meta-sm">of this request</div></td>
+          <td style="white-space:normal"><span class="chip c-quiet">IDLE</span>
+              <span class="chip c-accent"><span class="dot"></span>RUNNING <span class="val">2 scenarios…</span></span>
+              <span class="chip c-quiet">COMPLETE <span class="val">04:11:07Z</span></span>
+              <span class="chip c-warn">PARTIAL <span class="val">3/5</span></span>
+              <span class="chip c-warn">SUPERSEDED — RESULTS FOR PREVIOUS INPUT</span>
+              <span class="chip c-crit">RUN FAILED · RETRY</span>
+              <div class="comp-read">Completion is not health; a complete run can still carry a refused or adverse answer.</div></td>
+        </tr>
+        <tr>
+          <td><b>5 · Knowledge state</b><div class="meta-sm">computed · refused · withheld · unanswered</div></td>
+          <td style="white-space:normal"><span class="chip c-quiet">COMPUTED</span>
+              <span class="refused-tag">REFUSED · sweep failed twice <span class="val">· sweep_failed_no_success</span></span>
+              <span class="refused-tag">WITHHELD · missing observation</span>
+              <span class="chip c-unknown"><span class="dot"></span>UNANSWERED · not asked of this engine</span>
+              <div class="comp-read">The plain cause leads; the wire code is quoted mono, secondary — and repeats in the evidence drawer. All four are visible, counted objects, never a dash that reads as zero.</div></td>
+        </tr>
+        <tr>
+          <td><b>6 · Risk verdict</b><div class="meta-sm">the engine&#8217;s answer</div></td>
+          <td style="white-space:normal"><span class="chip c-ok"><span class="dot"></span>HEALTHY · <span class="val">HF 1.539</span></span>
+              <span class="chip c-warn"><span class="dot"></span>NEAR THRESHOLD · <span class="val">0.8% of cap</span></span>
+              <span class="chip c-crit-fill"><span class="dot"></span>LIQUIDATABLE · <span class="val">HF 0.4971</span></span>
+              <span class="chip c-warn"><span class="dot"></span>VERDICT UNAVAILABLE</span>
+              <div class="comp-read">Green means comfortably healthy only. Near-boundary is amber even when the boolean says &#8220;not liquidatable&#8221;. Engine comparators keep their own names — a DM ratio is never styled as an Aave HF.</div></td>
+        </tr>
+        <tr>
+          <td><b>7 · Current vs projected</b><div class="meta-sm">which world is this?</div></td>
+          <td style="white-space:normal"><span class="badge current">CURRENT · <span class="val">batch #18251</span></span>
+              <span class="badge projection">PROJECTION · <span class="val">ETH −20% v3</span></span>
+              <div class="comp-read">Projection is a dashed amber outline naming its scenario and config version — visibly not-solid, visibly not-current. It never wears a fill: fills are the escalation register, and a routine projection marker must not outrank a LIQUIDATABLE chip.</div></td>
+        </tr>
+        <tr>
+          <td><b>8 · Economic materiality</b><div class="meta-sm">size, separately from truth</div></td>
+          <td style="white-space:normal"><span class="chip c-quiet" style="font-weight:650">$8.5K ELIGIBLE</span>
+              <span class="chip c-quiet">DUST · <span class="val">&lt;$0.01</span></span>
+              <span class="chip c-quiet">DUST · <span class="val">$0.33</span></span>
+              <div class="comp-read">Dust is a materiality label, not a verdict modifier: it never recolors dimension 6 and never hides a row.</div></td>
+        </tr>
+        <tr>
+          <td><b>9 · Evidence availability</b><div class="meta-sm">can I verify it?</div></td>
+          <td style="white-space:normal"><span class="chip c-accent">EVIDENCE · <span class="val">6 rows</span></span>
+              <span class="chip c-quiet">EVIDENCE · <span class="val">3 pins</span></span>
+              <span class="chip c-unknown"><span class="dot"></span>EVIDENCE UNAVAILABLE — CLAIM STANDS UNVERIFIED</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="margin-top:32px">Composition: the middot sentence</h3>
+  <p class="prose meta">Dimensions compose left-to-right in fixed order: verdict · materiality · knowledge ·
+  freshness · (projection) · (evidence). Each chip keeps its own dimension&#8217;s color; the sentence never
+  collapses into one badge. Under each specimen, one plain sentence states what the reader must conclude.</p>
+  <div style="display:flex; flex-direction:column; gap:16px; max-width:1000px">
+    <div>
+      <div class="compose">
+        <span class="chip c-crit-fill"><span class="dot"></span>LIQUIDATABLE</span><span class="sep">·</span>
+        <span class="chip c-quiet">DUST · <span class="val">&lt;$0.01</span></span><span class="sep">·</span>
+        <span class="chip c-quiet">COMPUTED</span><span class="sep">·</span>
+        <span class="chip c-crit-fill">SNAPSHOT <span class="val">18h</span> · CRITICAL</span>
+      </div>
+      <p class="comp-read">The brief&#8217;s canonical sentence: a true verdict on a dust position against an outdated
+      batch. Dust does not green the verdict; the verdict does not inflate dust; the age escalates independently.</p>
+    </div>
+    <div>
+      <div class="compose">
+        <span class="chip c-ok"><span class="dot"></span>HEALTHY · <span class="val">HF 1.539</span></span><span class="sep">·</span>
+        <span class="chip c-quiet" style="font-weight:650">$2.2M DEBT</span><span class="sep">·</span>
+        <span class="chip c-quiet">COMPUTED</span><span class="sep">·</span>
+        <span class="chip c-quiet">SNAPSHOT <span class="val">48s</span></span><span class="sep">·</span>
+        <span class="chip c-accent">EVIDENCE · <span class="val">6 rows</span></span>
+      </div>
+      <p class="comp-read">The boring ideal. Fresh is the absence of alarm, not green — the only green on the row
+      is the verdict, which earned it.</p>
+    </div>
+    <div>
+      <div class="compose">
+        <span class="chip c-warn"><span class="dot"></span>VERDICT UNAVAILABLE</span><span class="sep">·</span>
+        <span class="refused-tag">REFUSED · sweep failed twice <span class="val">· sweep_failed_no_success</span></span><span class="sep">·</span>
+        <span class="chip c-warn">SNAPSHOT <span class="val">4m 12s</span> · AGING</span><span class="sep">·</span>
+        <span class="chip c-quiet">ACTIVITY RETAINED</span>
+      </div>
+      <p class="comp-read">A refusal leads with its cause in words; the wire code is quoted beside it. Chain
+      activity survives the refusal — the engine refused to value, not to remember.</p>
+    </div>
+    <div>
+      <div class="compose">
+        <span class="chip c-crit"><span class="dot"></span>2 NEWLY ELIGIBLE</span><span class="sep">·</span>
+        <span class="chip c-quiet" style="font-weight:650">+$159.1K ELIGIBLE DEBT</span><span class="sep">·</span>
+        <span class="badge projection">PROJECTION · <span class="val">ETH −20% v3</span></span><span class="sep">·</span>
+        <span class="badge current">CURRENT · <span class="val">batch #18251</span></span>
+      </div>
+      <p class="comp-read">A projected adverse outcome: coral for the outcome, dashed amber for the world it
+      happens in, and the current batch it was computed from named beside it.</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top:32px">The app header strip: live ≠ fresh, rendered</h3>
+  <div class="appbar breakout" style="margin-bottom:8px">
+    <span class="chip c-accent"><span class="dot"></span>STREAM CONNECTED</span>
+    <span class="sep"></span>
+    <span class="chip c-crit-fill">SNAPSHOT <span class="val">18h</span> · CRITICAL</span>
+    <span class="sep"></span>
+    <span class="chip c-quiet">BATCH <span class="val">#18251</span></span>
+    <span class="sep"></span>
+    <span class="chip c-quiet">COVERAGE <span class="val">2/2</span></span>
+    <span style="margin-left:auto" class="meta-sm">Data status →</span>
+  </div>
+  <p class="prose meta-sm">The audited <span class="mono">LIVE · WATERMARKED</span> single badge is retired. A
+  connected stream and an 18-hour snapshot are both true — both always show, separately. Raw block heights and
+  poll marks live in the &#8220;Data status&#8221; popover, not the bar.</p>
+
+  <h3 style="margin-top:28px">The result identity line (brief §5, binding)</h3>
+  <div class="card" style="max-width:900px">
+    <div class="card-b">
+      <p class="mono tnum" style="font-size:var(--t-mono-sm); margin:0 0 12px; color:var(--ink-2)">RESULT · 0x80b3…6e1d · BATCH #18251 · eth_-20 · scenario-config v3 · engines: aave_v3 · computed 04:11:07Z</p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+        <span class="chip c-warn">RESULTS FOR PREVIOUS INPUT — <span class="val">0x80b3…6e1d</span></span>
+        <span class="meta-sm">shown only when the input has been edited; otherwise the result hides</span>
+      </div>
+      <p class="meta-sm" style="margin:12px 0 0">Every async result binds scope + submitted address (if any) +
+      batch + scenario/set ID + config version + engines + computed-at. Late responses never overwrite a newer
+      request context; supersession, partial completion, reruns, and batch changes all switch the §01 banner
+      variant. (Track B owns the envelope; this is its rendered face.)</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 06 FRESHNESS SLA ================= -->
+<section class="chapter" id="ch-freshness">
+  <div class="chapter-rule"><span class="no">06</span><h2>Freshness: four tiers derived, not chosen</h2></div>
+  <div class="finding prose"><b>Every threshold is a theorem about the pipeline&#8217;s own constants.</b>
+  60s price samples (D-012), 180s budget, 360s ceiling — past it an input is REFUSED, never served stale —
+  and a 5,580s worst-case Debt Manager sweep. A healthy pipeline bounds served-batch age at ~62s + pass time.
+  <span class="warnt" style="color:var(--warn-text)">Status: ratified-pending-owner — until the owner ratifies
+  with the styleguide approval, the age renders WITHOUT severity styling (age always shows; tiers stay dormant).</span></div>
+
+  <div class="grid2 breakout">
+    <div class="card">
+      <div class="card-h"><span class="t">Grounding constants (provenance, file:line)</span></div>
+      <div class="kv">
+        <div><span class="k">price_poll_seconds</span><span class="v">60 <span style="color:var(--ink-2)">· cmd/api/seeded_db_test.go:963 · D-012</span></span></div>
+        <div><span class="k">price_budget_seconds</span><span class="v">180 <span style="color:var(--ink-2)">· cmd/api/main.go:333 · cmd/riskd/main.go:67</span></span></div>
+        <div><span class="k">price_ceiling_seconds</span><span class="v">360 <span style="color:var(--ink-2)">· cmd/api/meta.go:577 · openapi.yaml:3565–3568</span></span></div>
+        <div><span class="k">dm_sweep_worst_case</span><span class="v">5,580 <span style="color:var(--ink-2)">· cmd/api/main.go:129–133 · 3600 + 1980</span></span></div>
+        <div><span class="k">riskd batch cadence</span><span class="v"><span style="color:var(--ink-2)">event-driven · 2s vector poll + forced budget/ceiling passes · cmd/riskd/main.go:642–691</span></span></div>
+      </div>
+      <div class="card-b" style="border-top:1px solid var(--line)">
+        <p class="meta-sm" style="margin:0">Healthy bound on served age: <span class="mono tnum">~62s</span> +
+        pass time (one poll interval + one 2s tick). Past the ceiling an input is <b>refused, never served stale</b>.</p>
+      </div>
+    </div>
+    <div>
+      <div class="agebar" role="img" aria-label="Age spectrum: fresh to 120 seconds, aging to 360, stale to 5580, critical beyond">
+        <div style="flex:2.2; background:var(--panel); color:var(--ink-2); border-right:1px solid var(--line)">FRESH 0–120s</div>
+        <div style="flex:2.2; background:var(--panel); color:var(--warn-text); border-right:1px solid var(--warn)">AGING ≤360s</div>
+        <div style="flex:4.2; background:var(--panel); color:var(--crit-text); border-right:1px solid var(--crit)">STALE ≤5,580s</div>
+        <div style="flex:3; background:var(--crit-bg); color:var(--crit-text)">CRITICAL &gt;5,580s</div>
+      </div>
+      <p class="meta-sm" style="margin:6px 0 14px">Spectrum not to scale. The age always prints beside the tier;
+      the tier never replaces the number.</p>
+      <div class="state-card" style="border-style:dashed">
+        <h5>The unknown register — not a tier</h5>
+        <p class="tierline" style="margin:0 0 8px"><span class="chip c-unknown"><span class="dot"></span>AGE UNKNOWN — NO BATCH METADATA</span></p>
+        <p class="meta" style="margin:0">A tier claims a measured age. When the age itself is unknowable (no
+        batch metadata, meta endpoint refused, pre-first-batch), the component wears the unknown vocabulary —
+        dashed border, stated cause — and never any tier&#8217;s color. Unknown age must not read as fresh, and must
+        never read as zero seconds.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="tablewrap breakout" style="margin-top:20px">
+    <table class="house">
+      <thead><tr><th>Tier (rendered)</th><th class="num">Bound</th><th>Render</th><th>Why the number is a theorem, not a taste</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="chip c-quiet">SNAPSHOT <span class="val">48s</span></span></td>
+          <td class="num">≤ 120s<br><span class="meta-sm">= 2 × poll</span></td>
+          <td class="meta-sm">measured ink · no signal · <b>no green</b></td>
+          <td class="meta-sm" style="white-space:normal">Two-sample rule: under two poll intervals, phase alone explains the age — zero missed
+          cycles proven. D-012 makes intra-interval wicks invisible by construction, so &#8220;fresh&#8221; claims currency
+          at the system&#8217;s own 60s resolution and nothing stronger — a claim green ink would overstate. Fresh is
+          the <em>absence</em> of an alarm.</td>
+        </tr>
+        <tr>
+          <td><span class="chip c-warn">SNAPSHOT <span class="val">4m 12s</span> · AGING</span></td>
+          <td class="num">≤ 360s<br><span class="meta-sm">= price ceiling</span></td>
+          <td class="meta-sm">amber text + border</td>
+          <td class="meta-sm" style="white-space:normal">A recompute cycle has provably been missed, but claims degrade gracefully: a price the
+          batch flagged fresh (≤180s at compute) is at worst servable-stale now, riskd&#8217;s forced budget pass
+          (latest ~182s) means a fresh batch is imminent while the daemon lives, and every price basis carries a
+          bounded error (≤ batch age) with per-row verdicts disclosed.</td>
+        </tr>
+        <tr>
+          <td><span class="chip c-crit">SNAPSHOT <span class="val">22m</span> · STALE</span></td>
+          <td class="num">≤ 5,580s<br><span class="meta-sm">= DM sweep worst case</span></td>
+          <td class="meta-sm">coral text · <b>no fill</b></td>
+          <td class="meta-sm" style="white-space:normal">Past 360s every valued price in the batch — even one sampled the instant before compute —
+          is past the ceiling at which riskd itself REFUSES to value. Asked to recompute from these inputs, the
+          service would refuse the whole vector. A surface the service would refuse to produce may not wear the
+          measured or amber registers. It reads &#8220;past the service&#8217;s own refusal line&#8221;, not &#8220;incident&#8221;.</td>
+        </tr>
+        <tr>
+          <td><span class="chip c-crit-fill">SNAPSHOT <span class="val">18h</span> · CRITICAL</span></td>
+          <td class="num">&gt; 5,580s</td>
+          <td class="meta-sm">coral + fill — the tables&#8217; critical-HF escalation</td>
+          <td class="meta-sm" style="white-space:normal">5,580s (3600s sweep interval + 1980s pass) is the slowest lawful cadence anywhere in the
+          pipeline. Past it no healthy configuration explains the silence: the daemon is down, wedged, or
+          partitioned. The incident register — coral-with-fill — is shared by exactly two things: critical
+          comparators and critical age. That scarcity is what makes it an incident register.</td>
+        </tr>
+      </tbody>
+      <tfoot><tr><td colspan="4">Tier word AND age render together on every chip, so severity survives grayscale and color-blindness without a legend. Owner ratifies these bounds with the styleguide approval; until then ages render in measured ink only.</td></tr></tfoot>
+    </table>
+  </div>
+</section>
+
+<!-- ================= 07 NUMBERS ================= -->
+<section class="chapter" id="ch-numbers">
+  <div class="chapter-rule"><span class="no">07</span><h2>Numbers: three layers, one truth, a visible scent</h2></div>
+  <div class="finding prose"><b>Every number exists in three registers — human in the reading line, exact on
+  demand, raw in evidence — and they are the same number.</b> Rounding is presentational; the exact string is
+  the value of record. And the exact layer is never a hidden drawer: any human value whose exact string differs
+  from what is shown wears the visible affordance below.</div>
+
+  <div class="grid3">
+    <div class="card">
+      <div class="card-h"><span class="t">1 · Human — the reading line</span></div>
+      <div class="card-b">
+        <p class="tnum" style="font-size:var(--t-stat-lg); font-weight:650; margin:0">$2.84M</p>
+        <p class="meta-sm" style="margin:8px 0 0">sans, adaptive precision, unit attached. Headlines, KPIs, chart
+        annotations. Never more than 3–4 significant figures in prose.</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="t">2 · Exact — on demand</span></div>
+      <div class="card-b">
+        <p class="mono tnum" style="font-size:var(--t-mono-lg); margin:0">$2,835,019.429399</p>
+        <p class="meta-sm" style="margin:8px 0 0">mono, grouped, unrounded — hover/focus title, copy action, and
+        the ledger/evidence drawer. Character-for-character from the wire through one formatter.</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="t">3 · Raw — in evidence</span></div>
+      <div class="card-b">
+        <p class="mono tnum" style="font-size:var(--t-mono-lg); margin:0">2835019429399 <span class="meta-sm">@ 6 dec</span></p>
+        <p class="meta-sm" style="margin:8px 0 0">the integer the chain and the engine actually hold, with its
+        scale named. Evidence drawers only — never where <span class="mono">10182739877</span> could read as dollars.</p>
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">The exact affordance (invented here — no draft rendered the scent)</h3>
+  <div class="card" style="max-width:900px">
+    <div class="card-b">
+      <p style="margin:0 0 12px">Eligible debt reaches
+      <span class="exact tnum" tabindex="0" title="$2,835,019.429399" role="button" aria-label="2.84 million dollars — exact: $2,835,019.429399. Press Enter to copy the exact value.">$2.84M</span>
+      at the −40% sample, held by
+      <span class="exact tnum" tabindex="0" title="17 accounts — enumerated in evidence">17 accounts</span>.</p>
+      <p class="meta-sm" style="margin:0 0 8px">Dotted underline + the copy glyph on hover/focus = &#8220;an exact
+      string is underneath.&#8221; Hover or focus shows it (title/aria-label); <kbd class="key">Enter</kbd> copies it;
+      the drawer holds layer 3. <b>Mandatory</b> wherever human ≠ exact: KPIs, chart annotations, table money at
+      display precision, banner values. Forbidden on values that are already exact — a false scent is a lie.</p>
+      <p class="meta-sm" style="margin:0">Progressive disclosure without a visible cue is a hidden drawer. The
+      cue is the contract.</p>
+    </div>
+  </div>
+
+  <h3 style="margin-top:28px">Zero is an answer; dust and unknown are not zero</h3>
+  <div class="tablewrap" style="max-width:900px">
+    <table class="house">
+      <thead><tr><th>Case</th><th class="num">Rendered</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>Computed zero</td><td class="num">$0</td><td class="meta-sm" style="white-space:normal">The engine answered, and the answer is zero.</td></tr>
+        <tr><td>Nonzero dust</td><td class="num">&lt;$0.01</td><td class="meta-sm" style="white-space:normal">Nonzero. Never rounds to $0 (acceptance gate). Exact one gesture away: <span class="exact mono tnum" tabindex="0" title="exact: $0.004212">&lt;$0.01</span></td></tr>
+        <tr><td>Refused</td><td class="num" style="font-family:var(--sans)"><span class="refused-tag">REFUSED · sweep failed twice</span></td><td class="meta-sm" style="white-space:normal">No value exists. Visible, counted, never a dash that reads as zero. Wire code in the drawer.</td></tr>
+        <tr><td>Not covered</td><td class="num" style="font-family:var(--sans)"><span class="chip c-unknown"><span class="dot"></span>NOT COVERED</span></td><td class="meta-sm" style="white-space:normal">The engine does not model this — a modeling boundary, distinct from refusing to answer.</td></tr>
+        <tr><td>Structurally absent</td><td class="num">— <span class="meta-sm">(with title)</span></td><td class="meta-sm" style="white-space:normal">An em dash is legal ONLY for a column that does not apply to this engine, and always carries a title naming why.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="grid2" style="margin-top:20px">
+    <div class="card">
+      <div class="card-h"><span class="t">Dust, deltas, units</span></div>
+      <div class="card-b meta" style="font-size:var(--t-ui)">
+        <p style="margin:0 0 8px"><span class="mono tnum">+164 · −3 · 0</span> — deltas always signed: plus sign,
+        U+2212 minus, bare zero. Tone follows the outcome, not the sign — a favourable metric movement is not a
+        favourable scenario.</p>
+        <p style="margin:0 0 8px"><span class="mono tnum">$8.5K eligible · 0.04% of the $22.8M Aave book · 48s</span> —
+        units and denominators ride the value or the axis title, locally, never only in a distant caption.</p>
+        <p style="margin:0">Ratios render at engine-meaningful precision (<span class="mono tnum">HF 0.4971</span>),
+        never 18 decimals in the reading line — the 18-decimal string is layer 2.</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="t">Distance to boundary — words, one definition</span></div>
+      <div class="card-b meta" style="font-size:var(--t-ui)">
+        <p style="margin:0 0 8px">A bare signed percentage in a &#8220;distance&#8221; column reads as a mystery (the
+        instrument draft&#8217;s −34.9% on a HEALTHY row). Distance renders in words, one definition per engine:</p>
+        <p class="mono tnum" style="margin:0 0 6px; font-size:var(--t-mono)">HF 1.539 · 53.9% above boundary</p>
+        <p class="mono tnum" style="margin:0 0 6px; font-size:var(--t-mono)">HF 0.4971 · 50.3% below boundary</p>
+        <p class="mono tnum" style="margin:0 0 8px; font-size:var(--t-mono)">headroom $0.31 · 0.8% of cap</p>
+        <p style="margin:0">Aave: (comparator − 1) as % of the boundary, worded above/below. Debt Manager:
+        headroom against the disclosure cap — its own vocabulary, never HF language.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 08 TABLES & EVIDENCE ================= -->
+<section class="chapter" id="ch-tables">
+  <div class="chapter-rule"><span class="no">08</span><h2>Tables: triage first, forensics beneath</h2></div>
+  <div class="finding prose"><b>The desktop table is a briefing table:</b> sans 14px body, uppercase sans 12px
+  headers under a 2px ink rule, right-aligned mono-numeral money, severity carried by row tint + spine + chip,
+  refused rows visible with cells that say the word — and a footer that reconciles the population, per engine,
+  never summed across engines.</div>
+
+  <div class="tablewrap breakout">
+    <table class="house">
+      <thead><tr>
+        <th>Engine</th><th>Account</th><th class="num">Collateral (LT-wtd)</th><th class="num">Debt</th>
+        <th class="num">Comparator</th><th>Distance to boundary</th><th>Status</th><th>Evidence</th>
+      </tr></thead>
+      <tbody>
+        <tr class="crit-row">
+          <td><span class="engine-tag">aave_v3</span></td><td class="addr">0x80b3…6e1d</td>
+          <td class="num">$4,209.39</td><td class="num">$8,467.90</td>
+          <td class="num" style="color:var(--crit-text); font-weight:650">HF 0.4971</td>
+          <td class="meta-sm" style="color:var(--crit-text)">50.3% below</td>
+          <td><span class="chip c-crit-fill"><span class="dot"></span>LIQUIDATABLE</span></td>
+          <td><a href="#ch-tables" class="meta-sm">6 rows</a></td>
+        </tr>
+        <tr class="crit-row">
+          <td><span class="engine-tag">aave_v3</span></td><td class="addr">0x9a04…e6c2</td>
+          <td class="num">$14.02</td><td class="num">$14.55</td>
+          <td class="num" style="color:var(--crit-text); font-weight:650">HF 0.964</td>
+          <td class="meta-sm" style="color:var(--crit-text)">3.6% below</td>
+          <td><span class="chip c-crit"><span class="dot"></span>LIQUIDATABLE</span> <span class="chip c-quiet">DUST</span></td>
+          <td><a href="#ch-tables" class="meta-sm">3 rows</a></td>
+        </tr>
+        <tr>
+          <td><span class="engine-tag">debt_manager</span></td><td class="addr">0xb2f1…7d30</td>
+          <td class="num">$38.92 <span class="meta-sm">cap</span></td><td class="num">$38.61</td>
+          <td class="num" style="color:var(--warn-text); font-weight:650">DM ratio 0.992</td>
+          <td class="meta-sm" style="color:var(--warn-text)">headroom $0.31 · 0.8% of cap</td>
+          <td><span class="chip c-warn"><span class="dot"></span>NEAR THRESHOLD</span></td>
+          <td><a href="#ch-tables" class="meta-sm">4 rows</a></td>
+        </tr>
+        <tr class="refused-row">
+          <td><span class="engine-tag">debt_manager</span></td><td class="addr">0x8f24…c11d</td>
+          <td class="refcell">refused</td>
+          <td class="refcell">refused</td>
+          <td class="refcell">refused</td>
+          <td class="refcell">refused</td>
+          <td><span class="chip c-warn"><span class="dot"></span>VERDICT UNAVAILABLE</span></td>
+          <td><a href="#ch-tables" class="meta-sm">activity kept</a></td>
+        </tr>
+        <tr>
+          <td><span class="engine-tag">aave_v3</span></td><td class="addr">0x3c19…88af</td>
+          <td class="num">$3,388,192.95</td><td class="num">$2,201,554.87</td>
+          <td class="num" style="color:var(--ok-text); font-weight:650">HF 1.539</td>
+          <td class="meta-sm">53.9% above</td>
+          <td><span class="chip c-ok"><span class="dot"></span>HEALTHY</span></td>
+          <td><a href="#ch-tables" class="meta-sm">6 rows</a></td>
+        </tr>
+      </tbody>
+      <tfoot><tr><td colspan="8">Showing 5 rows · <span class="mono">aave_v3</span>: 9,958 of 9,964 computed · <b style="color:var(--ink)">6 refused (all named)</b> · 3 liquidatable pinned — <span class="mono">debt_manager</span>: 546 of 552 computed · <b style="color:var(--ink)">6 refused (all named)</b> · 0 liquidatable. Liquidatable and refused rows are pinned; they cannot page away. Engine populations reconcile separately — never one summed count.</td></tr></tfoot>
+    </table>
+  </div>
+  <p class="prose meta-sm" style="margin-top:10px">Column law: identity columns left-aligned sans; money and
+  comparators right-aligned mono <kbd class="tokref">.tnum</kbd>; one status column, chips not prose. Refused
+  cells print the word <i>refused</i> in amber text — no em dash that reads as an empty zero, no chip repeated
+  four times per row (the Inspector audit&#8217;s chip-soup). The dust row keeps its true verdict color; DUST rides
+  as a separate materiality chip.</p>
+
+  <h3 style="margin-top:32px">The evidence drawer</h3>
+  <p class="prose meta">Collapsed by default; the summary line states a finding plus a count, so the reader knows
+  the weight of what is folded. Open, it serves layers 2 and 3 without exceeding one viewport (acceptance gate).
+  The drawer may <b>never</b> hold a refusal, a withheld count, or a supersession — those render in the
+  always-visible STATE layer above it (chart-spec R3).</p>
+
+  <div style="display:flex; flex-direction:column; gap:14px; max-width:920px">
+    <details class="evidence">
+      <summary><span class="tw">▶</span> Proof of inputs — 6 rows, all marks present, reorg posture clean <span class="meta-sm" style="margin-left:auto">batch bk_019fb0a2</span></summary>
+    </details>
+    <details class="evidence" open>
+      <summary><span class="tw">▶</span> Proof of inputs — 6 rows, all marks present, reorg posture clean <span class="meta-sm" style="margin-left:auto">batch bk_019fb0a2</span></summary>
+      <div class="ev-body">
+        <div class="tablewrap" style="margin-bottom:12px">
+          <table class="house" style="font-size:var(--t-meta)">
+            <thead><tr><th>Check</th><th>Verdict</th><th class="num">Exact</th><th>Raw</th></tr></thead>
+            <tbody>
+              <tr><td>Balances mark</td><td><span class="chip c-quiet">PRESENT</span></td><td class="num">block 25,641,730</td><td class="mono" style="font-size:var(--t-mono-floor); color:var(--ink-2)">0x18747c2</td></tr>
+              <tr><td>Params mark</td><td><span class="chip c-quiet">PRESENT</span></td><td class="num">block 25,641,730</td><td class="mono" style="font-size:var(--t-mono-floor); color:var(--ink-2)">param_history @ (20,713,917 · log 178)</td></tr>
+              <tr><td>weETH price</td><td><span class="chip c-quiet">ADAPTER-OUTPUT</span></td><td class="num">$2,106.520000</td><td class="mono" style="font-size:var(--t-mono-floor); color:var(--ink-2)">210652000000 @ 8 dec · anchor 25,641,728</td></tr>
+              <tr><td>Debt leg</td><td><span class="chip c-quiet">CHAIN-EXACT</span></td><td class="num">$8,467.901234</td><td class="mono" style="font-size:var(--t-mono-floor); color:var(--ink-2)">8467901234 @ 6 dec · rayMulCeil idx 1.0841…</td></tr>
+              <tr><td>Reorg epochs</td><td><span class="chip c-quiet">NONE UNACKED</span></td><td class="num" title="structurally absent: no epoch to name">—</td><td class="mono" style="font-size:var(--t-mono-floor); color:var(--ink-2)">watermark 25,641,730</td></tr>
+              <tr><td>Reconciliation</td><td><span class="chip c-quiet">12/12 EXACT</span></td><td class="num">welded at pins</td><td class="mono" style="font-size:var(--t-mono-floor); color:var(--ink-2)">key m9a41c… (deterministic)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="term"><pre><span class="c">// raw wire, verbatim — layer 3</span>
+<span class="a">"hf"</span>: <span class="p">"497100000000000000"</span> <span class="c">// wad, 18 dec</span>
+<span class="a">"marks"</span>: { <span class="a">"balances"</span>: 25641730, <span class="a">"params"</span>: 25641730, <span class="a">"sweep"</span>: null }</pre></div>
+        <p class="meta-sm" style="margin:10px 0 0">Keyboard: the summary is a native disclosure button —
+        <kbd class="key">Enter</kbd>/<kbd class="key">Space</kbd> toggles; focus ring per the global rule.
+        Anything longer than one viewport paginates inside the drawer.</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ================= 09 STATES ================= -->
+<section class="chapter" id="ch-states">
+  <div class="chapter-rule"><span class="no">09</span><h2>States: absence is designed, never blank</h2></div>
+  <div class="finding prose"><b>Six non-happy states, each with its own component — plus the anti-state panel:
+  the renders that are forbidden everywhere.</b> Loading holds layout; empty states are definitive sentences;
+  invalid input is retained; refusals are visible and counted; unavailable says why and what survives;
+  superseded names its binding.</div>
+
+  <div class="grid3">
+    <div class="state-card">
+      <h5>Loading — skeleton, stable layout</h5>
+      <div class="skeleton" style="height:22px; width:60%; margin-bottom:10px"></div>
+      <div class="skeleton" style="height:14px; width:90%; margin-bottom:6px"></div>
+      <div class="skeleton" style="height:14px; width:84%; margin-bottom:6px"></div>
+      <div class="skeleton" style="height:96px; width:100%"></div>
+      <p class="meta-sm" style="margin:10px 0 0">Summary, history, activity load independently; the skeleton
+      reserves the exact final geometry — nothing appears or disappears. Shimmer is gated by
+      prefers-reduced-motion.</p>
+    </div>
+    <div class="state-card">
+      <h5>Empty — a definitive sentence</h5>
+      <p style="font-size:var(--t-body); margin:6px 0 4px"><b>No position — definitively.</b></p>
+      <p class="meta" style="margin:0">Both engines cover this address and both report no balances at batch
+      #18251. This absence is computed, not assumed.</p>
+      <p class="meta-sm" style="margin:10px 0 0"><span class="chip c-quiet">COVERAGE <span class="val">2/2</span></span>
+      <span class="chip c-quiet">SNAPSHOT <span class="val">48s</span></span></p>
+    </div>
+    <div class="state-card">
+      <h5>Invalid — input retained, nothing dispatched</h5>
+      <p style="font-size:var(--t-body); margin:6px 0 4px; color:var(--crit-text)"><b>Invalid address.</b></p>
+      <p class="mono" style="font-size:var(--t-mono); margin:0 0 6px; text-decoration: underline dotted var(--crit)">0x80b3f19e2a6cZZZZ</p>
+      <p class="meta" style="margin:0">Not a valid EVM address (bad characters at positions 13–16). Nothing was
+      looked up: no request left this page.</p>
+    </div>
+    <div class="state-card" style="background:var(--warn-bg); border-color:transparent">
+      <h5 style="color:var(--warn-text)">Refused — visible, counted, named</h5>
+      <p style="font-size:var(--t-body); margin:6px 0 4px"><b style="color:var(--warn-text)">Verdict unavailable — the engine won&#8217;t guess.</b></p>
+      <p class="meta" style="margin:0 0 8px">The Debt Manager sweep failed twice at this batch, so the engine
+      refuses to value this position rather than serve a stale number. Values remain unknown — not zero.</p>
+      <p style="margin:0"><span class="refused-tag">REFUSED · sweep failed twice <span class="val">· sweep_failed_no_success</span></span></p>
+      <p class="meta-sm" style="margin:10px 0 0">Counted in every denominator it is excluded from · activity and
+      history remain below · no dash-filled KPI skeleton.</p>
+    </div>
+    <div class="state-card">
+      <h5>Unavailable — scoped, with survivors</h5>
+      <p style="font-size:var(--t-body); margin:6px 0 4px"><b>History unavailable for this window.</b></p>
+      <p class="meta" style="margin:0">Batches 18,110–18,140 were not retained. The current verdict and activity
+      are unaffected and remain below.</p>
+      <p class="meta-sm" style="margin:10px 0 0"><span class="chip c-unknown"><span class="dot"></span>30 BATCHES NOT RETAINED</span></p>
+    </div>
+    <div class="state-card">
+      <h5>Superseded — the identity contract</h5>
+      <p style="font-size:var(--t-body); margin:6px 0 4px"><b style="color:var(--warn-text)">Results for previous input.</b></p>
+      <p class="meta" style="margin:0">Bound to 0x80b3…6e1d · batch #18251 · eth_-20 v3 · computed 04:11:07Z.
+      The address field has changed; run again for the new address.</p>
+      <p class="meta-sm" style="margin:10px 0 0"><span class="chip c-warn">SUPERSEDED</span> — a late response
+      never overwrites a newer request context.</p>
+    </div>
+  </div>
+
+  <div class="state-card breakout" style="margin-top:20px; border-color:var(--crit)">
+    <h5 style="color:var(--crit-text)">The anti-state: never render</h5>
+    <ul class="tight meta" style="margin:0; font-size:var(--t-ui)">
+      <li>A refused metric shown as <span class="mono tnum">—</span> in a KPI grid, or an unknown rendered <span class="mono tnum">$0</span>.</li>
+      <li>A spinner replacing a previously valid result (loading states hold the old result with its identity line, or skeleton a new region).</li>
+      <li>A stale result silently retained after its input changed (result-identity contract, §05).</li>
+      <li>A quantitative axis over a refused window; a blank chart frame that reads as &#8220;flat at zero&#8221;.</li>
+      <li>A wire refusal code as the leading text of any chip a reader meets before its plain cause.</li>
+      <li>A combined absolute across engine books, anywhere, in any unit (§11).</li>
+      <li>A green &#8220;fresh&#8221; or green &#8220;complete&#8221; — green belongs to the comfortable verdict alone.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================= 10 CHARTS ================= -->
+<section class="chapter" id="ch-charts">
+  <div class="chapter-rule"><span class="no">10</span><h2>Charts: titled with conclusions, annotated at the proof, operable by keyboard</h2></div>
+  <div class="finding prose"><b>The committed conventions, rendered — inside the house frame, with an
+  interaction register no draft had.</b> Sampled stress = unconnected lollipops; distributions = ordered 0–100%
+  categorical bars; before/after = signed pp deltas; transitions = heatmap; asset movement = changed-assets
+  delta table; multi-scenario = signed dots on %-of-engine-book; history = engine-specific; refusals =
+  categorical strips. Every specimen carries chart-spec v4&#8217;s slots: kicker (HEAD) → finding-headline → STATE →
+  plot → ledger → method. Chart text never renders below 12px; the minimum residual glyph is <b>1.5px</b> —
+  a codified number, drawn below wherever a truthful bar would vanish.</div>
+
+  <div class="card breakout" style="margin:0 0 24px">
+    <div class="card-h"><span class="t">10.0 · The interaction register (binding for every chart)</span></div>
+    <div class="card-b">
+      <div class="grid2">
+        <div class="meta" style="font-size:var(--t-ui)">
+          <p style="margin:0 0 8px"><b>Pointer.</b> Hovering a mark shows the readout — the exact strings for
+          that mark (value · Δ · identity), mono, in an elevated card. Hover adds precision; it never carries
+          meaning that exists nowhere else (annotations are printed).</p>
+          <p style="margin:0 0 8px"><b>Keyboard.</b> <kbd class="key">Tab</kbd> enters the chart (one tab stop);
+          <kbd class="key">←</kbd><kbd class="key">→</kbd> traverse marks in data order; <kbd class="key">Home</kbd>/<kbd class="key">End</kbd>
+          jump to first/last; <kbd class="key">Enter</kbd> opens the mark&#8217;s evidence; <kbd class="key">Esc</kbd> leaves.
+          The focused mark wears a 2px accent ring and its readout persists — focus or click populates it;
+          hover is never the only path.</p>
+          <p style="margin:0"><b>Tabular twin.</b> Every chart&#8217;s LEDGER is its concise tabular alternative — same
+          scale module, exact strings, one row per mark. A visible <i>Exact data</i> control moves focus to it
+          (<span class="mono">aria-details</span> points there; <span class="mono">aria-describedby</span> points
+          at METHOD). Screen readers get the twin, not 100 verbose point descriptions.</p>
+        </div>
+        <div>
+          <p class="meta-sm" style="margin:0 0 8px">The focused-mark state, drawn (from specimen 10.1 below):</p>
+          <svg width="300" height="120" viewBox="0 0 300 120" role="img" aria-label="A focused lollipop mark with its persistent readout ring">
+            <line class="axis" x1="20" y1="96" x2="280" y2="96"/>
+            <line x1="80" y1="96" x2="80" y2="70" class="stem"/><circle cx="80" cy="70" r="5" class="mk-accent"/>
+            <line x1="170" y1="96" x2="170" y2="40" class="stem"/><circle cx="170" cy="40" r="5" class="mk-accent"/>
+            <circle cx="170" cy="40" r="10" class="focus-ring"/>
+            <text class="tick" x="80" y="112" text-anchor="middle">−20%</text>
+            <text class="tick" x="170" y="112" text-anchor="middle">−30%</text>
+          </svg>
+          <div class="readout" style="margin-top:6px"><span class="k">−30% · eligible</span> $1,213,020.108619 <span class="k">· Δ</span> +$1,204,551.870341 <span class="k">· batch</span> #18251</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 10.1 sampled stress lollipop -->
+  <figure class="fig breakout" style="margin:0 0 24px">
+    <div class="fig-kicker"><span class="engine-tag">aave_v3</span><span>SAMPLED STRESS</span><span style="margin-left:auto">batch #18251 · <span class="badge projection">PROJECTION · <span class="val">ETH shocks</span></span></span></div>
+    <h4 class="fig-headline">New eligibility first appears at the −20% sample: 2 accounts, +$159.1K.</h4>
+    <p class="fig-state">This grid samples discrete shocks — values between samples were <span class="must">not computed</span>. Held flat: USDC, rates, non-ETH collateral; debt legs stable-denominated. Coverage 2/2 engines; 0 refused at this batch.</p>
+    <div class="fig-plot">
+      <svg width="960" height="250" viewBox="0 0 960 250" role="img" aria-label="Total eligible debt at four sampled ETH shocks plus unshocked; unconnected lollipops; new eligibility first at minus 20 percent" aria-describedby="m101" aria-details="l101">
+        <line class="axis" x1="70" y1="200" x2="930" y2="200"/>
+        <line class="axis" x1="70" y1="200" x2="70" y2="40"/>
+        <text class="tick" x="62" y="204" text-anchor="end">$0</text>
+        <line class="axis" x1="66" y1="125" x2="70" y2="125"/><text class="tick" x="62" y="129" text-anchor="end">$1.5M</text>
+        <line class="axis" x1="66" y1="50" x2="70" y2="50"/><text class="tick" x="62" y="54" text-anchor="end">$3M</text>
+        <text class="tick" x="110" y="220" text-anchor="middle">unshocked</text>
+        <text class="tick" x="310" y="220" text-anchor="middle">−10%</text>
+        <text class="tick" x="510" y="220" text-anchor="middle">−20%</text>
+        <text class="tick" x="710" y="220" text-anchor="middle">−30%</text>
+        <text class="tick" x="910" y="220" text-anchor="middle">−40%</text>
+        <text class="lbl" x="500" y="242" text-anchor="middle">ETH shock (sampled) · total eligible debt, $ of this engine only</text>
+        <line class="anno-line" x1="510" y1="30" x2="510" y2="200"/>
+        <text class="anno" x="518" y="42">first sampled shock with new eligibility · 2 accounts · +$159.1K</text>
+        <text class="lbl" x="518" y="58">true threshold lies between the −10% and −20% samples</text>
+        <!-- unshocked and −10%: nonzero, sub-1.5px at this scale -> open baseline marker with printed value -->
+        <circle cx="110" cy="196" r="4.5" class="mk-open"/>
+        <text class="lbl" x="110" y="186" text-anchor="middle">$8.5K</text>
+        <circle cx="310" cy="196" r="4.5" class="mk-open"/>
+        <text class="lbl" x="310" y="186" text-anchor="middle">$8.5K</text>
+        <!-- −20%: y = 200 − 167,570.352371 × 150/3e6 = 191.6 -->
+        <line x1="510" y1="200" x2="510" y2="191.6" class="stem"/>
+        <circle cx="510" cy="191.6" r="5" class="mk-accent"/>
+        <text class="lbl-ink" x="524" y="188">$167.6K</text>
+        <!-- −30%: y = 139.3 · drawn focused: ring + persistent readout -->
+        <line x1="710" y1="200" x2="710" y2="139.3" class="stem"/>
+        <circle cx="710" cy="139.3" r="5" class="mk-accent"/>
+        <circle cx="710" cy="139.3" r="10" class="focus-ring"/>
+        <text class="lbl-ink" x="710" y="127" text-anchor="middle">$1.21M</text>
+        <!-- −40%: y = 57.8 -->
+        <line x1="910" y1="200" x2="910" y2="57.8" class="stem"/>
+        <circle cx="910" cy="57.8" r="5" class="mk-accent"/>
+        <text class="lbl-ink" x="902" y="48" text-anchor="end">$2.84M</text>
+      </svg>
+    </div>
+    <div class="fig-ledger" id="l101">total eligible · unshocked $8,468.238278 · −10% $8,468.238278 · −20% $167,570.352371 · −30% $1,213,020.108619 · −40% $2,843,487.667677 — Δ at −20% = +$159,102.114093, exactly the debt of the 2 crossers (weld with 10.4)</div>
+    <p class="fig-method" id="m101">Unconnected marks: no line implies no interpolation. A nonzero whose stem would draw under 1.5px becomes an open baseline marker with its value printed — dust never vanishes into the baseline. The −30% mark is drawn in its focused state (10.0); the ledger is this chart&#8217;s tabular twin.</p>
+  </figure>
+
+  <div class="grid2 breakout" style="margin-bottom:24px">
+    <!-- 10.2 ordered categorical distribution -->
+    <figure class="fig" style="margin:0">
+      <div class="fig-kicker"><span class="engine-tag">aave_v3</span><span>RISK-BAND DISTRIBUTION</span><span style="margin-left:auto">batch #18251 · <span class="badge current">CURRENT</span></span></div>
+      <h4 class="fig-headline">93.2% of debt-bearing accounts hold at least 1.5× headroom.</h4>
+      <p class="fig-state">Denominator: 8,412 debt-bearing accounts with a finite comparator. Bands are policy bands of unequal width; shares rounded to 0.1pp.</p>
+      <div class="fig-plot">
+        <svg width="600" height="228" viewBox="0 0 600 228" role="img" aria-label="Share of accounts per risk band on a common zero to one hundred percent axis; three liquidatable accounts drawn at the minimum glyph">
+          <line class="axis" x1="150" y1="18" x2="150" y2="196"/>
+          <text class="tick" x="150" y="212" text-anchor="middle">0</text>
+          <text class="tick" x="355" y="212" text-anchor="middle">50</text>
+          <text class="tick" x="560" y="212" text-anchor="middle">100%</text>
+          <line class="axis" x1="355" y1="190" x2="355" y2="196"/>
+          <line class="axis" x1="560" y1="190" x2="560" y2="196"/>
+          <text class="lbl" x="144" y="38" text-anchor="end">HF &lt; 1.00</text>
+          <rect x="150" y="28" width="1.5" height="14" class="mk-crit"/>
+          <text class="lbl" x="158" y="38">3 · 0.04% — liquidatable, never hidden (1.5px floor; computed 0.15px)</text>
+          <text class="lbl" x="144" y="68" text-anchor="end">1.00–1.05</text>
+          <rect x="150" y="58" width="1.7" height="14" class="mk-warn"/>
+          <text class="lbl" x="158" y="68">34 · 0.4%</text>
+          <text class="lbl" x="144" y="98" text-anchor="end">1.05–1.20</text>
+          <rect x="150" y="88" width="7.4" height="14" class="bar-share"/>
+          <text class="lbl" x="163" y="98">151 · 1.8%</text>
+          <text class="lbl" x="144" y="128" text-anchor="end">1.20–1.50</text>
+          <rect x="150" y="118" width="18.9" height="14" class="bar-share"/>
+          <text class="lbl" x="175" y="128">387 · 4.6%</text>
+          <text class="lbl" x="144" y="158" text-anchor="end">1.50–2.00</text>
+          <rect x="150" y="148" width="93.9" height="14" class="bar-share"/>
+          <text class="lbl" x="250" y="158">1,927 · 22.9%</text>
+          <text class="lbl" x="144" y="188" text-anchor="end">≥ 2.00</text>
+          <rect x="150" y="178" width="288.1" height="14" class="bar-share"/>
+          <text class="lbl-ink" x="444" y="188">5,910 · 70.3%</text>
+        </svg>
+      </div>
+      <div class="fig-ledger">Σ bands = 8,412 · accounting rows, never folded silently: no debt (no comparator) 1,546 · refused 6 · 8,412 + 1,546 + 6 = 9,964 on book (weld)</div>
+      <p class="fig-method">Ordered bands on one 0–100% axis, risk-first; sub-1.5px bands keep the 1.5px minimum glyph in their status color — the printed count carries the truth. Share of the named denominator, not of the largest bucket.</p>
+    </figure>
+
+    <!-- 10.3 signed pp delta -->
+    <figure class="fig" style="margin:0">
+      <div class="fig-kicker"><span class="engine-tag">aave_v3</span><span>BEFORE/AFTER</span><span style="margin-left:auto">batch #18251 · <span class="badge projection">PROJECTION · <span class="val">ETH −20% v3</span></span></span></div>
+      <h4 class="fig-headline">ETH −20% moves 390 accounts down-band — 4.6% of the qualifying book.</h4>
+      <p class="fig-state">Signed percentage-point change per band, after minus before, on the same 8,412 denominator as 10.2. If before and after were identical this chart is replaced by one distribution plus the marker <b>NO CHANGE</b>.</p>
+      <div class="fig-plot">
+        <svg width="600" height="228" viewBox="0 0 600 228" role="img" aria-label="Signed percentage point change in account share per risk band under ETH minus twenty percent">
+          <line class="axis" x1="355" y1="18" x2="355" y2="196"/>
+          <text class="tick" x="184" y="212" text-anchor="middle">−5pp</text>
+          <text class="tick" x="355" y="212" text-anchor="middle">0</text>
+          <text class="tick" x="526" y="212" text-anchor="middle">+5pp</text>
+          <text class="lbl" x="144" y="38" text-anchor="end">HF &lt; 1.00</text>
+          <rect x="355" y="28" width="1.5" height="14" class="mk-crit"/>
+          <text class="lbl" x="362" y="38">+0.02pp · 2 accounts cross under (1.5px floor; computed 0.8px)</text>
+          <text class="lbl" x="144" y="68" text-anchor="end">1.00–1.05</text>
+          <rect x="355" y="58" width="6.5" height="14" class="mk-warn"/>
+          <text class="lbl" x="368" y="68">+0.19pp</text>
+          <text class="lbl" x="144" y="98" text-anchor="end">1.05–1.20</text>
+          <rect x="355" y="88" width="7.9" height="14" class="mk-warn"/>
+          <text class="lbl" x="369" y="98">+0.23pp</text>
+          <text class="lbl" x="144" y="128" text-anchor="end">1.20–1.50</text>
+          <rect x="355" y="118" width="23.6" height="14" class="mk-warn"/>
+          <text class="lbl" x="385" y="128">+0.69pp</text>
+          <text class="lbl" x="144" y="158" text-anchor="end">1.50–2.00</text>
+          <rect x="355" y="148" width="58.1" height="14" class="bar-share"/>
+          <text class="lbl" x="419" y="158">+1.70pp</text>
+          <text class="lbl" x="144" y="188" text-anchor="end">≥ 2.00</text>
+          <rect x="258.2" y="178" width="96.8" height="14" class="bar-share"/>
+          <text class="lbl-ink" x="252" y="188" text-anchor="end">−2.83pp</text>
+        </svg>
+      </div>
+      <div class="fig-ledger">signed, U+2212 · count deltas +2 +16 +19 +58 +143 −238 = 0 of 8,412 · Σ pp = 0.00 exactly (weld) · rounding rule: displayed pp round half-even to 0.01</div>
+      <p class="fig-method">One chart, not two distributions: the delta is the finding. Risk-ward growth wears amber below 1.5× and coral below 1.0; all else stays measured. Polarity by direction of risk, not by sign.</p>
+    </figure>
+  </div>
+
+  <div class="grid2 breakout" style="margin-bottom:24px">
+    <!-- 10.4 transition heatmap -->
+    <figure class="fig" style="margin:0">
+      <div class="fig-kicker"><span class="engine-tag">aave_v3</span><span>SCENARIO TRANSITIONS</span><span style="margin-left:auto"><span class="badge projection">PROJECTION · <span class="val">ETH −20% v3</span></span></span></div>
+      <h4 class="fig-headline">All movement is one band deep; 2 accounts end below the boundary.</h4>
+      <p class="fig-state">Rows: band before. Columns: band after. Diagonal (unchanged) is muted by design; computed-zero cells print a muted 0 — zero is an answer. Counts shown; the debt-weighted view is the same grid with Σ debt per cell.</p>
+      <div class="fig-plot">
+        <svg width="600" height="330" viewBox="0 0 600 330" role="img" aria-label="Transition matrix of accounts between six risk bands, before rows and after columns; two accounts cross into the liquidatable band">
+          <text class="lbl" x="150" y="14">after →</text>
+          <text class="lbl" x="16" y="34">before ↓</text>
+          <text class="tick" x="182" y="34" text-anchor="middle">&lt;1.00</text>
+          <text class="tick" x="250" y="34" text-anchor="middle">1.00–1.05</text>
+          <text class="tick" x="318" y="34" text-anchor="middle">1.05–1.20</text>
+          <text class="tick" x="386" y="34" text-anchor="middle">1.20–1.50</text>
+          <text class="tick" x="454" y="34" text-anchor="middle">1.50–2.00</text>
+          <text class="tick" x="522" y="34" text-anchor="middle">≥2.00</text>
+          <text class="tick" x="144" y="62" text-anchor="end">&lt;1.00</text>
+          <text class="tick" x="144" y="104" text-anchor="end">1.00–1.05</text>
+          <text class="tick" x="144" y="146" text-anchor="end">1.05–1.20</text>
+          <text class="tick" x="144" y="188" text-anchor="end">1.20–1.50</text>
+          <text class="tick" x="144" y="230" text-anchor="end">1.50–2.00</text>
+          <text class="tick" x="144" y="272" text-anchor="end">≥2.00</text>
+          <!-- grid: all 36 cells outlined; zeros printed muted -->
+          <g>
+            <rect x="150" y="40" width="64" height="36" class="cell-quiet"/><text class="lbl-mono" x="182" y="62" text-anchor="middle">3</text>
+            <rect x="218" y="40" width="64" height="36" class="cell-none"/><text class="lbl" x="250" y="62" text-anchor="middle">0</text>
+            <rect x="286" y="40" width="64" height="36" class="cell-none"/><text class="lbl" x="318" y="62" text-anchor="middle">0</text>
+            <rect x="354" y="40" width="64" height="36" class="cell-none"/><text class="lbl" x="386" y="62" text-anchor="middle">0</text>
+            <rect x="422" y="40" width="64" height="36" class="cell-none"/><text class="lbl" x="454" y="62" text-anchor="middle">0</text>
+            <rect x="490" y="40" width="64" height="36" class="cell-none"/><text class="lbl" x="522" y="62" text-anchor="middle">0</text>
+
+            <rect x="150" y="82" width="64" height="36" class="cell-danger"/><text class="lbl-mono-ink" x="182" y="104" text-anchor="middle">2</text>
+            <rect x="218" y="82" width="64" height="36" class="cell-quiet"/><text class="lbl-mono" x="250" y="104" text-anchor="middle">32</text>
+            <rect x="286" y="82" width="64" height="36" class="cell-none"/><text class="lbl" x="318" y="104" text-anchor="middle">0</text>
+            <rect x="354" y="82" width="64" height="36" class="cell-none"/><text class="lbl" x="386" y="104" text-anchor="middle">0</text>
+            <rect x="422" y="82" width="64" height="36" class="cell-none"/><text class="lbl" x="454" y="104" text-anchor="middle">0</text>
+            <rect x="490" y="82" width="64" height="36" class="cell-none"/><text class="lbl" x="522" y="104" text-anchor="middle">0</text>
+
+            <rect x="150" y="124" width="64" height="36" class="cell-none"/><text class="lbl" x="182" y="146" text-anchor="middle">0</text>
+            <rect x="218" y="124" width="64" height="36" class="cell-move"/><text class="lbl-mono-ink" x="250" y="146" text-anchor="middle">18</text>
+            <rect x="286" y="124" width="64" height="36" class="cell-quiet"/><text class="lbl-mono" x="318" y="146" text-anchor="middle">133</text>
+            <rect x="354" y="124" width="64" height="36" class="cell-none"/><text class="lbl" x="386" y="146" text-anchor="middle">0</text>
+            <rect x="422" y="124" width="64" height="36" class="cell-none"/><text class="lbl" x="454" y="146" text-anchor="middle">0</text>
+            <rect x="490" y="124" width="64" height="36" class="cell-none"/><text class="lbl" x="522" y="146" text-anchor="middle">0</text>
+
+            <rect x="150" y="166" width="64" height="36" class="cell-none"/><text class="lbl" x="182" y="188" text-anchor="middle">0</text>
+            <rect x="218" y="166" width="64" height="36" class="cell-none"/><text class="lbl" x="250" y="188" text-anchor="middle">0</text>
+            <rect x="286" y="166" width="64" height="36" class="cell-move"/><text class="lbl-mono-ink" x="318" y="188" text-anchor="middle">37</text>
+            <rect x="354" y="166" width="64" height="36" class="cell-quiet"/><text class="lbl-mono" x="386" y="188" text-anchor="middle">350</text>
+            <rect x="422" y="166" width="64" height="36" class="cell-none"/><text class="lbl" x="454" y="188" text-anchor="middle">0</text>
+            <rect x="490" y="166" width="64" height="36" class="cell-none"/><text class="lbl" x="522" y="188" text-anchor="middle">0</text>
+
+            <rect x="150" y="208" width="64" height="36" class="cell-none"/><text class="lbl" x="182" y="230" text-anchor="middle">0</text>
+            <rect x="218" y="208" width="64" height="36" class="cell-none"/><text class="lbl" x="250" y="230" text-anchor="middle">0</text>
+            <rect x="286" y="208" width="64" height="36" class="cell-none"/><text class="lbl" x="318" y="230" text-anchor="middle">0</text>
+            <rect x="354" y="208" width="64" height="36" class="cell-move"/><text class="lbl-mono-ink" x="386" y="230" text-anchor="middle">95</text>
+            <rect x="422" y="208" width="64" height="36" class="cell-quiet"/><text class="lbl-mono" x="454" y="230" text-anchor="middle">1,832</text>
+            <rect x="490" y="208" width="64" height="36" class="cell-none"/><text class="lbl" x="522" y="230" text-anchor="middle">0</text>
+
+            <rect x="150" y="250" width="64" height="36" class="cell-none"/><text class="lbl" x="182" y="272" text-anchor="middle">0</text>
+            <rect x="218" y="250" width="64" height="36" class="cell-none"/><text class="lbl" x="250" y="272" text-anchor="middle">0</text>
+            <rect x="286" y="250" width="64" height="36" class="cell-none"/><text class="lbl" x="318" y="272" text-anchor="middle">0</text>
+            <rect x="354" y="250" width="64" height="36" class="cell-none"/><text class="lbl" x="386" y="272" text-anchor="middle">0</text>
+            <rect x="422" y="250" width="64" height="36" class="cell-move"/><text class="lbl-mono-ink" x="454" y="272" text-anchor="middle">238</text>
+            <rect x="490" y="250" width="64" height="36" class="cell-quiet"/><text class="lbl-mono" x="522" y="272" text-anchor="middle">5,672</text>
+          </g>
+          <line class="anno-line" x1="182" y1="120" x2="182" y2="300"/>
+          <text class="anno" x="150" y="316">2 accounts jump 1.00–1.05 → &lt;1.00: the only boundary crossing</text>
+        </svg>
+      </div>
+      <div class="fig-ledger">Σ cells = 8,412 (denominator weld with 10.2/10.3) · unchanged 8,022 · moved 390 · crossed into &lt;1.00: 2 · Σ eligible debt of crossers $159,102.114093 (weld with 10.1)</div>
+      <p class="fig-method">Heatmap, not alluvial lanes: cells are countable and keyboard-focusable (10.0). The danger cell carries the only coral; row and column sums reproduce 10.2&#8217;s before and after distributions exactly.</p>
+    </figure>
+
+    <!-- 10.5 changed-assets delta table -->
+    <figure class="fig" style="margin:0">
+      <div class="fig-kicker"><span class="engine-tag">aave_v3</span><span>ASSET MOVEMENT</span><span style="margin-left:auto"><span class="badge projection">PROJECTION · <span class="val">ETH −20% v3</span></span></span></div>
+      <h4 class="fig-headline">Only weETH and wstETH move — both exactly −20.0%; six non-ETH assets are computed zeros.</h4>
+      <p class="fig-state">Changed-assets delta table — the default. A waterfall is used only where additive reconciliation is guaranteed by the wire, never assembled client-side.</p>
+      <div class="fig-plot" style="padding-bottom:10px">
+        <table class="house" style="min-width:0">
+          <thead><tr><th>Asset</th><th class="num">Before</th><th class="num">After</th><th class="num">Δ counted collateral</th><th style="width:130px"></th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="mono" style="font-size:var(--t-mono)">weETH</td>
+              <td class="num">$9,614,220.15</td><td class="num">$7,691,376.12</td>
+              <td class="num" style="color:var(--crit-text); font-weight:650">−$1,922,844.03</td>
+              <td><span class="deltacell"><span class="bar-neg-mark" style="width:96px"></span></span></td>
+            </tr>
+            <tr>
+              <td class="mono" style="font-size:var(--t-mono)">wstETH</td>
+              <td class="num">$2,101,882.40</td><td class="num">$1,681,505.92</td>
+              <td class="num" style="color:var(--crit-text); font-weight:650">−$420,376.48</td>
+              <td><span class="deltacell"><span class="bar-neg-mark" style="width:21px"></span></span></td>
+            </tr>
+          </tbody>
+          <tfoot><tr><td colspan="5">6 unchanged assets collapsed (USDC, WBTC, liquidBTC, DAI, cbBTC, USDT — each Δ $0 computed, not unknown) · expand in evidence</td></tr></tfoot>
+        </table>
+      </div>
+      <div class="fig-ledger">weld: 9,614,220.15 × 0.8 = 7,691,376.12 · 2,101,882.40 × 0.8 = 1,681,505.92 · bars share one scale from zero (96px : 21px = Δ ratio)</div>
+      <p class="fig-method">Unchanged inventory is evidence, not reading. The Δ column is exact; the bars are the comparison; collapsed rows are computed zeros, never unknowns.</p>
+    </figure>
+  </div>
+</section>
+
+<section class="chapter" aria-label="Charts, continued" style="margin-top:-64px">
+  <!-- 10.6 multi-scenario signed dot plot -->
+  <figure class="fig breakout" style="margin:0 0 24px">
+    <div class="fig-kicker"><span class="engine-tag">aave_v3</span><span>COMPARE SCENARIOS · action: RUN 5 SCENARIOS</span><span style="margin-left:auto">batch #18251 · <span class="badge projection">PROJECTION</span></span></div>
+    <h4 class="fig-headline">ETH −20% is the only scenario that moves more than 0.1% of the Aave book.</h4>
+    <p class="fig-state">Signed dots on a stable % of this engine&#8217;s own debt ($22.8M, named). Absolute dollars ride each dot; exact strings in the ledger. One scenario is <span class="must">refused</span> — it renders as a counted in-plot refusal, never an empty row.</p>
+    <div class="fig-plot">
+      <svg width="960" height="240" viewBox="0 0 960 240" role="img" aria-label="Five scenarios compared as signed dots on percent of engine book; one computed zero; one refused row with no mark">
+        <line class="axis" x1="240" y1="20" x2="240" y2="196"/>
+        <text class="tick" x="240" y="216" text-anchor="middle">0</text>
+        <text class="tick" x="570" y="216" text-anchor="middle">+0.4%</text>
+        <text class="tick" x="900" y="216" text-anchor="middle">+0.8%</text>
+        <text class="lbl" x="20" y="216" text-anchor="start">Δ eligible debt · % of this engine&#8217;s $22.8M book</text>
+        <line class="axis" x1="570" y1="192" x2="570" y2="198"/>
+        <line class="axis" x1="900" y1="192" x2="900" y2="198"/>
+        <!-- eth −20: +0.69782% → x = 240 + 0.69782 × 825 = 815.7 -->
+        <text class="lbl" x="228" y="44" text-anchor="end">ETH −20%</text>
+        <line x1="240" y1="40" x2="815.7" y2="40" class="stem" style="stroke:var(--line)"/>
+        <circle cx="815.7" cy="40" r="6" class="mk-crit"/>
+        <text class="lbl-ink" x="829" y="44">+0.70% · $159.1K · 2 accounts</text>
+        <!-- rates +200bp: +0.08983% → x = 314.1 -->
+        <text class="lbl" x="228" y="84" text-anchor="end">rates +200bp</text>
+        <line x1="240" y1="80" x2="314.1" y2="80" class="stem" style="stroke:var(--line)"/>
+        <circle cx="314.1" cy="80" r="6" class="mk-crit"/>
+        <text class="lbl" x="328" y="84">+0.09% · $20.5K · 1 account</text>
+        <!-- btc −30: +0.02107% → x = 257.4 -->
+        <text class="lbl" x="228" y="124" text-anchor="end">BTC −30%</text>
+        <line x1="240" y1="120" x2="257.4" y2="120" class="stem" style="stroke:var(--line)"/>
+        <circle cx="257.4" cy="120" r="6" class="mk-crit"/>
+        <text class="lbl" x="271" y="124">+0.02% · $4.8K · 1 account</text>
+        <!-- usdc snap: computed zero → flat tick, labeled -->
+        <text class="lbl" x="228" y="164" text-anchor="end">USDC snap −5% (control)</text>
+        <line x1="234" y1="160" x2="246" y2="160" class="zero-tick"/>
+        <text class="lbl" x="254" y="164">$0 — computed control, no effective movement (a valid outcome, not a failure)</text>
+        <!-- refused: in-plot refusal row, no mark, counted -->
+        <text class="lbl" x="228" y="204" text-anchor="end">base + rate joint</text>
+        <text x="254" y="204" class="lbl-mono" style="letter-spacing:.05em">⟪ REFUSED · factor composition undefined — by design ⟫</text>
+      </svg>
+    </div>
+    <div class="fig-ledger">exact Δ eligible · eth_-20 $159,102.114093 (weld with 10.1/10.4) · rates_+200bp $20,481.006112 · btc_-30 $4,802.995310 · usdc_snap_-5 $0 · joint — refused, counted: 1 of 5 · denominator $22,800,000 (this engine only)</div>
+    <p class="fig-method">Stable axis: % of this engine&#8217;s own book — never another engine&#8217;s, never a sum. A tiny absolute can no longer look enormous: the $38.64 full-width-bar failure mode is structurally impossible on a fixed denominator. A computed $0 is a tick with a label; the refused scenario is a row inside the plot with no mark and a counted ledger entry.</p>
+  </figure>
+
+  <h3 style="margin:8px 0 12px">Inspector history: engine-specific, never generic</h3>
+  <div class="grid2 breakout" style="margin-bottom:20px">
+    <!-- 10.7 Aave threshold-aware HF -->
+    <figure class="fig" style="margin:0">
+      <div class="fig-kicker"><span class="engine-tag">aave_v3</span><span>AAVE HEALTH FACTOR</span><span style="margin-left:auto">100 batches · <span class="badge current">CURRENT</span></span></div>
+      <h4 class="fig-headline">50.3% below the liquidation boundary — for 41 consecutive batches.</h4>
+      <p class="fig-state">Threshold-aware: the boundary and the shaded liquidatable region are drawn from the protocol comparator, exactly. Current distance and small recent movement are different questions — movement gets its own strip, never this axis.</p>
+      <div class="fig-plot">
+        <svg width="600" height="240" viewBox="0 0 600 240" role="img" aria-label="Aave health factor across batches with liquidatable region shaded below one; crossed under at batch 18210">
+          <rect x="60" y="120" width="500" height="80" class="region-crit"/>
+          <line class="refline" x1="60" y1="120" x2="560" y2="120"/>
+          <text class="lbl" x="66" y="114">liquidatable below HF 1.00 — protocol comparator, exact</text>
+          <line class="axis" x1="60" y1="200" x2="560" y2="200"/>
+          <line class="axis" x1="60" y1="200" x2="60" y2="30"/>
+          <text class="tick" x="52" y="204" text-anchor="end">0.4</text>
+          <text class="tick" x="52" y="124" text-anchor="end">1.0</text>
+          <text class="tick" x="52" y="44" text-anchor="end">1.6</text>
+          <text class="tick" x="60" y="220" text-anchor="start">#18151</text>
+          <text class="tick" x="560" y="220" text-anchor="end">#18251</text>
+          <!-- 5px per batch · crossing at #18210 → x = 60 + 59×5 = 355 · current 0.4971 → y = 187.1 -->
+          <polyline points="60,92 160,98 260,108 330,116 355,120 380,158 420,186 480,187 560,187.1" class="ln-accent"/>
+          <circle cx="560" cy="187.1" r="5" class="mk-accent"/>
+          <text class="lbl-ink" x="548" y="176" text-anchor="end">0.4971 now</text>
+          <line class="anno-line" x1="355" y1="60" x2="355" y2="120"/>
+          <text class="anno" x="349" y="54" text-anchor="end">crossed under at #18210 · 41 batches below</text>
+        </svg>
+      </div>
+      <div class="fig-ledger">current 0.497100000000000000 (18 dec — evidence) · min 0.496800… · max 1.210300… · boundary distance 50.3% below · crossing #18210 at x=355 (5px/batch, weld)</div>
+      <p class="fig-method">Named Aave health factor. Real vertical space; endpoint batches labeled; no interpolation through refused windows — a refused window breaks the line and switches to the categorical strip (10.10).</p>
+    </figure>
+
+    <!-- 10.8 DM headroom -->
+    <figure class="fig" style="margin:0">
+      <div class="fig-kicker"><span class="engine-tag">debt_manager</span><span>BORROWING HEADROOM</span><span style="margin-left:auto">6 batches · <span class="badge current">CURRENT</span></span></div>
+      <h4 class="fig-headline">Headroom has narrowed to $0.31 — 0.8% of the disclosure cap remaining.</h4>
+      <p class="fig-state">Debt Manager capacity view — <span class="must">never</span> styled as an Aave health factor. The engine&#8217;s strict boolean, not this ratio, decides the verdict; no coral threshold line is drawn at 1.0.</p>
+      <div class="fig-plot">
+        <svg width="600" height="240" viewBox="0 0 600 240" role="img" aria-label="Borrowing headroom in dollars across six batches, narrowing from about thirty eight dollars to thirty one cents">
+          <line class="axis" x1="70" y1="200" x2="560" y2="200"/>
+          <line class="axis" x1="70" y1="200" x2="70" y2="30"/>
+          <text class="tick" x="62" y="204" text-anchor="end">$0</text>
+          <text class="tick" x="62" y="126" text-anchor="end">$20</text>
+          <text class="tick" x="62" y="48" text-anchor="end">$40</text>
+          <text class="lbl" x="315" y="226" text-anchor="middle">batch → · headroom $ (this engine&#8217;s own unit)</text>
+          <!-- 3.9px per $ · $0 at y=200, $40 at y=44 -->
+          <rect x="90" y="51.0" width="40" height="149.0" class="bar-dim"/>
+          <rect x="170" y="79.1" width="40" height="120.9" class="bar-dim"/>
+          <rect x="250" y="113.8" width="40" height="86.2" class="bar-dim"/>
+          <rect x="330" y="153.2" width="40" height="46.8" class="bar-dim"/>
+          <rect x="410" y="184.0" width="40" height="16.0" class="mk-warn"/>
+          <rect x="490" y="198.5" width="40" height="1.5" class="mk-warn"/>
+          <line class="anno-line" x1="510" y1="60" x2="510" y2="196"/>
+          <text class="anno" x="504" y="54" text-anchor="end">$0.31 · 0.8% of cap — near threshold, amber</text>
+        </svg>
+      </div>
+      <div class="fig-ledger">exact · $38.204119 · $31.008777 · $22.114530 · $12.008443 · $4.115209 · $0.310272 · cap basis $38.916412 (weld: 38.916412 − 0.310272 = 38.606140 debt → §08 row)</div>
+      <p class="fig-method">Bars from zero (magnitude); the final nonzero draws at the 1.5px minimum residual glyph (computed 1.2px). Amber begins inside the engine-specific presentation band while the strict boolean is still false — presentation bands never replace protocol comparators.</p>
+    </figure>
+  </div>
+
+  <div class="grid2 breakout" style="margin-bottom:24px">
+    <!-- 10.9 constant strip -->
+    <figure class="fig" style="margin:0">
+      <div class="fig-kicker"><span class="engine-tag">aave_v3</span><span>CONSTANT SERIES</span><span style="margin-left:auto">100 batches · <span class="badge current">CURRENT</span></span></div>
+      <h4 class="fig-headline">No material change across 100 batches: 1.5388 → 1.5391.</h4>
+      <p class="fig-state">Constant series get a compact range strip, not a full chart — a flat line at chart scale would manufacture false drama out of ±0.0003. A flat series is allowed to look flat.</p>
+      <div class="fig-plot">
+        <svg width="600" height="96" viewBox="0 0 600 96" role="img" aria-label="Compact range strip: health factor effectively constant across one hundred batches">
+          <rect x="40" y="44" width="520" height="8" class="band-range"/>
+          <line x1="40" y1="48" x2="560" y2="48" class="ln-accent"/>
+          <text class="lbl" x="40" y="30">min 1.5388</text>
+          <text class="lbl" x="560" y="30" text-anchor="end">max 1.5391</text>
+          <text class="lbl-ink" x="300" y="78" text-anchor="middle">Δ 0.0003 over 100 batches — not material at this engine&#8217;s comparator</text>
+        </svg>
+      </div>
+      <div class="fig-ledger">first 1.538800… (#18151) · last 1.539100… (#18251) · span shown is the full observed range · current = §08 healthy row&#8217;s HF 1.539 (weld)</div>
+      <p class="fig-method">The strip states min, max, Δ; exact endpoints live here in the ledger. Expandable to the full chart on demand.</p>
+    </figure>
+
+    <!-- 10.10 refused categorical strip -->
+    <figure class="fig" style="margin:0">
+      <div class="fig-kicker"><span class="engine-tag">debt_manager</span><span>REFUSED WINDOW</span><span style="margin-left:auto">100 batches</span></div>
+      <h4 class="fig-headline">All 100 batches in this window are refused — one cause, stated once.</h4>
+      <p class="fig-state">0 values · 100 refused · <span class="must">no quantitative y-axis exists for a refused window</span> — an empty chart frame would read as data. Categorical strip only.</p>
+      <div class="fig-plot">
+        <svg width="600" height="120" viewBox="0 0 600 120" role="img" aria-label="Categorical status strip: one hundred refused batches, no quantitative axis">
+          <g>
+            <rect x="20" y="20" width="10" height="22" class="cell-refused"/><rect x="34" y="20" width="10" height="22" class="cell-refused"/><rect x="48" y="20" width="10" height="22" class="cell-refused"/><rect x="62" y="20" width="10" height="22" class="cell-refused"/><rect x="76" y="20" width="10" height="22" class="cell-refused"/><rect x="90" y="20" width="10" height="22" class="cell-refused"/><rect x="104" y="20" width="10" height="22" class="cell-refused"/><rect x="118" y="20" width="10" height="22" class="cell-refused"/><rect x="132" y="20" width="10" height="22" class="cell-refused"/><rect x="146" y="20" width="10" height="22" class="cell-refused"/>
+            <rect x="160" y="20" width="10" height="22" class="cell-refused"/><rect x="174" y="20" width="10" height="22" class="cell-refused"/><rect x="188" y="20" width="10" height="22" class="cell-refused"/><rect x="202" y="20" width="10" height="22" class="cell-refused"/><rect x="216" y="20" width="10" height="22" class="cell-refused"/><rect x="230" y="20" width="10" height="22" class="cell-refused"/><rect x="244" y="20" width="10" height="22" class="cell-refused"/><rect x="258" y="20" width="10" height="22" class="cell-refused"/><rect x="272" y="20" width="10" height="22" class="cell-refused"/><rect x="286" y="20" width="10" height="22" class="cell-refused"/>
+            <rect x="300" y="20" width="10" height="22" class="cell-refused"/><rect x="314" y="20" width="10" height="22" class="cell-refused"/><rect x="328" y="20" width="10" height="22" class="cell-refused"/><rect x="342" y="20" width="10" height="22" class="cell-refused"/><rect x="356" y="20" width="10" height="22" class="cell-refused"/><rect x="370" y="20" width="10" height="22" class="cell-refused"/><rect x="384" y="20" width="10" height="22" class="cell-refused"/><rect x="398" y="20" width="10" height="22" class="cell-refused"/><rect x="412" y="20" width="10" height="22" class="cell-refused"/><rect x="426" y="20" width="10" height="22" class="cell-refused"/>
+            <rect x="440" y="20" width="10" height="22" class="cell-refused"/><rect x="454" y="20" width="10" height="22" class="cell-refused"/><rect x="468" y="20" width="10" height="22" class="cell-refused"/><rect x="482" y="20" width="10" height="22" class="cell-refused"/><rect x="496" y="20" width="10" height="22" class="cell-refused"/><rect x="510" y="20" width="10" height="22" class="cell-refused"/><rect x="524" y="20" width="10" height="22" class="cell-refused"/><rect x="538" y="20" width="10" height="22" class="cell-refused"/><rect x="552" y="20" width="10" height="22" class="cell-refused"/><rect x="566" y="20" width="10" height="22" class="cell-refused"/>
+          </g>
+          <text class="tick" x="20" y="58" text-anchor="start">#18151</text>
+          <text class="tick" x="576" y="58" text-anchor="end">#18251 · 1 cell = 2.5 batches</text>
+          <text class="lbl-ink" x="20" y="82">REFUSED · missing sweep observation (wire: G1) — reason shown once; per-batch detail on focus</text>
+          <g>
+            <rect x="20" y="96" width="10" height="12" class="cell-quiet"/><text class="lbl" x="36" y="106">computed</text>
+            <rect x="110" y="96" width="10" height="12" class="cell-refused"/><text class="lbl" x="126" y="106">refused</text>
+            <rect x="190" y="96" width="10" height="12" class="cell-withheld"/><text class="lbl" x="206" y="106">withheld</text>
+            <rect x="272" y="96" width="10" height="12" class="cell-none"/><text class="lbl" x="288" y="106">no row</text>
+          </g>
+        </svg>
+      </div>
+      <div class="fig-ledger">computed 0 · refused 100 (all G1) · withheld 0 · no row 0 — counts weld to the 100-batch window (40 cells × 2.5)</div>
+      <p class="fig-method">Focus or click a cell populates a persistent detail area — hover is never the only interaction (10.0). Four categorical states; no vertical position encodes quantity.</p>
+    </figure>
+  </div>
+</section>
+
+<!-- ================= 11 ENGINES NEVER SUMMED ================= -->
+<section class="chapter" id="ch-engines">
+  <div class="chapter-rule"><span class="no">11</span><h2>Engine separation: two books, no total</h2></div>
+  <div class="finding prose"><b>Absolute values from different engine books never sum, anywhere, ever.</b>
+  Cross-engine alignment is legal only as % of each engine&#8217;s own book (dimensionless), each panel naming its own
+  denominator. The specimen below is the law made visible: two complete panels and no combined figure between
+  them.</div>
+
+  <div class="grid2 breakout">
+    <div class="card">
+      <div class="card-h"><span class="engine-tag">aave_v3</span><span class="t">Aave v3 book</span><span class="meta-sm" style="margin-left:auto">batch #18251</span></div>
+      <div class="card-b">
+        <p class="tnum" style="font-size:var(--t-stat-lg); font-weight:650; margin:0">$22.8M <span class="meta" style="font-size:var(--t-ui); font-weight:400">debt · this engine&#8217;s own USD</span></p>
+        <p class="meta" style="margin:8px 0 0">9,958 of 9,964 computed · 3 liquidatable · eligible debt
+        <span class="exact tnum" tabindex="0" title="$8,468.238278">$8.5K</span> (0.04% of book) · 6 refused (all named)</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="engine-tag">debt_manager</span><span class="t">Debt Manager book</span><span class="meta-sm" style="margin-left:auto">batch #18251</span></div>
+      <div class="card-b">
+        <p class="tnum" style="font-size:var(--t-stat-lg); font-weight:650; margin:0">$412.7K <span class="meta" style="font-size:var(--t-ui); font-weight:400">debt · this engine&#8217;s own USD</span></p>
+        <p class="meta" style="margin:8px 0 0">546 of 552 computed · 0 liquidatable · eligible debt $0 (computed) ·
+        6 refused (all named) · nearest account: headroom $0.31 · 0.8% of cap</p>
+      </div>
+    </div>
+  </div>
+  <div class="state-card breakout" style="margin-top:16px; border-color:var(--crit); background:var(--crit-bg)">
+    <p style="margin:0; font-size:var(--t-ui)"><b style="color:var(--crit-text)">Forbidden:</b>
+    <s class="mono tnum" style="font-size:var(--t-ui)">total book $23.2M</s> — the two engines value different
+    collateral under different laws at different marks; their dollars are not the same dollars. No surface
+    renders a combined absolute — and no combined account count either, since one address can hold positions on
+    both books. Side-by-side %-of-own-book panels (10.2, 10.6) are the only lawful cross-engine view.</p>
+  </div>
+</section>
+
+<!-- ================= 12 HOUSE LAW ================= -->
+<section class="chapter" id="ch-law">
+  <div class="chapter-rule"><span class="no">12</span><h2>House law: three rules that outrank taste</h2></div>
+  <div class="grid3">
+    <div class="state-card">
+      <h5>Law 1 · Refusals render honestly</h5>
+      <p class="meta" style="margin:0 0 10px">A refused value is a visible, counted object with a plain-language
+      cause and a quoted wire code. It appears in every denominator it is excluded from.</p>
+      <p style="margin:0 0 6px"><span class="refused-tag">REFUSED · sweep failed twice <span class="val">· sweep_failed_no_success</span></span> <span class="chip c-quiet"><span class="val">6 of 9,964</span></span></p>
+      <p class="meta-sm" style="margin:0"><b>Never:</b> a bare em dash in a numeric column, a zero, an omitted
+      row, or a refusal folded into a forensics drawer (chart-spec R3: forensics may never hold a refusal).</p>
+    </div>
+    <div class="state-card">
+      <h5>Law 2 · Unknowable never looks like zero</h5>
+      <p class="meta" style="margin:0 0 10px">A computed zero and an unanswered question are different facts and
+      never share glyphs, color, or position treatment.</p>
+      <p class="mono tnum" style="font-size:var(--t-mono-lg); margin:0 0 6px">$0 <span class="meta-sm">— the engine answered: zero</span></p>
+      <p style="margin:0 0 6px"><span class="chip c-unknown"><span class="dot"></span>NOT SERVED — VALUE UNKNOWN</span></p>
+      <p class="meta-sm" style="margin:0"><b>Never:</b> $0 for a hole, a blank chart frame over a refused window,
+      or dust styling on an unknown.</p>
+    </div>
+    <div class="state-card">
+      <h5>Law 3 · Live ≠ fresh</h5>
+      <p class="meta" style="margin:0 0 10px">Connection posture and snapshot age are separate dimensions and
+      always render as separate components — even when the news is bad in opposite directions.</p>
+      <p style="margin:0 0 6px"><span class="chip c-accent"><span class="dot"></span>STREAM CONNECTED</span>
+      <span class="chip c-crit-fill">SNAPSHOT <span class="val">18h</span> · CRITICAL</span></p>
+      <p class="meta-sm" style="margin:0"><b>Never:</b> LIVE · WATERMARKED as one green unit beside an 18-hour
+      batch. A healthy transport must not launder a stale analysis.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 13 GATE CONFORMANCE ================= -->
+<section class="chapter" id="ch-gates">
+  <div class="chapter-rule"><span class="no">13</span><h2>Gate conformance: this document, self-audited</h2></div>
+  <div class="card"><div class="card-b">
+    <ul class="tight meta" style="margin:0; font-size:var(--t-ui)">
+      <li><b>First-viewport answer:</b> the verdict banner (§01) is the component that satisfies the gate; its grammar binds all three pages.</li>
+      <li><b>No unknown/refused renders as zero:</b> §05 D5, §07 zero-table, §08 refused cells, §09 anti-state, 10.6 in-plot refusal, 10.10 categorical strip.</li>
+      <li><b>No nonzero rounds to $0:</b> dust renders <span class="mono tnum">&lt;$0.01</span> with the exact affordance (§07); sub-glyph chart values draw the 1.5px minimum or the open baseline marker (10.1, 10.2, 10.8).</li>
+      <li><b>Every result exposes batch, age, coverage, projection status, identity:</b> §01 identity strip, §05 result-identity line, every fig kicker carries batch + CURRENT/PROJECTION.</li>
+      <li><b>No primary horizontal scroll at 1366+:</b> shell/breakout via max-width stepping (§02); wide exhibits scroll inside their own frames.</li>
+      <li><b>Exact evidence ≤ one viewport:</b> drawer paginates internally (§08).</li>
+      <li><b>Engines never summed:</b> §11 rendered prohibition; 10.6 %-of-own-book axis; §08 per-engine footer reconciliation.</li>
+      <li><b>Current vs projected distinguishable:</b> dashed amber PROJECTION outline vs neutral CURRENT badge, on every projected surface (§05 D7, 10.1, 10.3, 10.4, 10.6).</li>
+      <li><b>Normal text ≥ 4.5:1 both themes:</b> §04 two-grade palette, every ratio computed on its worst ground; usage laws for ink-3 and refused rows.</li>
+      <li><b>Keyboard-operable charts/drawers with tabular alternatives:</b> the interaction register (10.0) + ledger-as-twin on every fig + native disclosure drawers (§08).</li>
+      <li><b>12px floor:</b> structural — the closed token set has no smaller member (§03); SVG text inherits the 12px default; this document contains no font-size below 12px.</li>
+      <li><b>Specimen integrity:</b> one shared dataset; welds printed in the ledgers (10.1 ↔ 10.4 ↔ 10.6; 10.2 ↔ 10.3 ↔ 10.4; §08 ↔ 10.8/10.9; §01 ↔ §11).</li>
+    </ul>
+  </div></div>
+</section>
+
+<!-- ================= 14 DESIGN NOTES ================= -->
+<section class="chapter" id="design-notes">
+  <div class="chapter-rule"><span class="no">14</span><h2>Design notes: the synthesis record</h2></div>
+  <div class="prose meta" style="font-size:14.5px">
+    <p><b>Winner.</b> draft-editorial, on aggregate judge scoring (8 / 8.5 / 8.5 across the design-taste,
+    information-clarity, and cold-visitor judges; instrument 7/8/8, restraint 8.5/7.5/n.r.). Its skeleton — the
+    finding-first house frame, conclusion headlines, annotation-at-the-proof, the middot status sentence, the
+    fig ledger — is the structure that enforces the house laws rather than exhibiting them. The design-taste
+    judge&#8217;s restraint pick was carried in as the welded-dataset discipline: this document&#8217;s deepest debt to
+    draft-restraint is that every number now reconciles.</p>
+    <p><b>Grafts from instrument.</b> The two-grade color architecture (§04) — text grade ≥4.5:1 on worst
+    ground incl. chip-bg, fill/glyph grade ≥3:1 keeping light-theme chart chroma; the amendment ledger format
+    (Token / Was / Amended / Worst-ground / Ruling); refused table cells that print the word <i>refused</i>
+    (§08); the anti-state panel (§09); comp-read one-sentence captions under every composition (§05); the
+    freshness provenance kv with file:line citations (§06); mono wire-name engine tags as the only engine
+    identity (§03); the mono-marks-exactness doctrine (§00); the gate-conformance self-audit (§13);
+    freshness chips carrying tier word AND age (§05 D2).</p>
+    <p><b>Grafts from restraint.</b> The zero-is-an-answer Case/Rendered/Meaning table (§07); the app header
+    strip retiring LIVE·WATERMARKED (§05); the rendered result-identity line + RESULTS FOR PREVIOUS INPUT
+    (§05, §09); the single Tier/Bound/Render/Why SLA table (§06); the glyph vocabulary — computed-zero flat
+    tick, open dust marker with printed value, words for NOT COVERED, broken lines for gaps, hatched refused
+    strips, muted printed zeros in the heatmap (§10); the fully-welded shared demo dataset discipline
+    (standfirst; every ledger prints its weld); calm flat surfaces — elevation stripped from all data panels.</p>
+    <p><b>Defects fixed (each judge-flagged).</b> Editorial&#8217;s false 9.4 weld → the 10.4 matrix is rebuilt from
+    the shared dataset and its row/column sums reproduce 10.2 exactly (Σ 8,412; moved 390; unchanged 8,022).
+    Editorial&#8217;s 11px badge + 11.5px chips → the closed token set has no sub-12px member; chips and badges sit
+    at 12px. Editorial&#8217;s solid-amber PROJECTION fill → dashed amber outline; fills are rationed to the
+    critical escalation register. term-dim 4.19 → #70838a (4.54 on the worst term ground). Uppercase-mono chip
+    shout → sans chips with mono only for embedded verbatim values. Card shadows on data surfaces → flat; the
+    shadow token survives for overlays only. Instrument&#8217;s false C2 headline (93% vs bars summing 91%) and its
+    8,740-vs-8,742 heatmap → every headline here is recomputed from the drawn data and welded in the ledger.
+    Instrument&#8217;s signed &#8220;Boundary distance −34.9% on a HEALTHY row&#8221; → distance in words, one definition per
+    engine (§07). Instrument&#8217;s thin result-identity treatment → restraint&#8217;s full contract rendered (§05).
+    Restraint&#8217;s 11.5px chart text (&#8220;DM: NOT COVERED&#8221;, &#8220;no data served&#8221;) → all SVG text ≥12px structurally.
+    Restraint&#8217;s breakout formula exceeding 1280 at 1366 → max-width stepping (§02). Restraint&#8217;s 14px .answer
+    caption + topic-label-first order → the 17px finding-headline leads every fig. Restraint&#8217;s
+    ground-mixed appendix ratios → every ratio in this document is computed and names its ground.
+    Restraint&#8217;s sans AAVE/DM chips → mono wire names. Refusal chips led by wire codes (all three drafts) →
+    plain cause leads, wire code quoted secondary (§05 D5).</p>
+    <p><b>Invented here (all three drafts lacked them).</b> The verdict banner and its variant grammar (§01) —
+    the missing page-answer component behind the brief&#8217;s first acceptance gate. The exact-layer affordance
+    (§07) — a visible scent (dotted underline + copy glyph + focus/copy behavior), mandatory wherever
+    human ≠ exact. The chart interaction register (10.0) — crosshair/focus readout of exact strings, keyboard
+    traversal order, focused-mark state, and the ledger as each chart&#8217;s concise tabular twin. The closed type
+    token set (§03) making the 12px floor structural plus its stylelint enforcement rule. The one-dataset weld
+    discipline applied to the styleguide itself, with welds printed in ledgers.</p>
+    <p><b>Verification note.</b> Every contrast ratio printed here was recomputed from the printed hex values
+    (WCAG 2.x relative luminance; translucent grounds composited first). One judged graft was overridden by
+    arithmetic: restraint&#8217;s light text hexes certify only against panel-2 (4.51–4.56) and fail on chip-bg
+    (4.29–4.33), so the text grade adopts instrument&#8217;s hexes, which clear the chip ground (4.52–4.56). Chart
+    geometry is derived from the data at 0.1px precision (e.g. eth_-20 dot at x=815.7 from
+    159,102.114093 / 22,800,000 × 825px; DM bars at 3.9px/$).</p>
+    <p><b>Theme mechanics.</b> This specimen is dark-first (the observatory leads); production tokens.css keeps
+    its light-first + media-query + data-theme override law — only the §04 amendment ledger values and the new
+    *-text tokens migrate. The toggle is this file&#8217;s only JavaScript.</p>
+    <p><b>Open questions for the owner (the only five that are owner-level):</b></p>
+    <ol style="font-size:14.5px; margin:0; padding-left:22px">
+      <li><b>Freshness SLA ratification.</b> The tiers (FRESH ≤120s · AGING ≤360s · STALE ≤5,580s · CRITICAL
+      beyond · AGE UNKNOWN as a register) are encoded ratified-pending-owner; until ratified, ages render
+      without severity styling. Ratify the bounds, or amend them?</li>
+      <li><b>Light-theme two-grade palette.</b> Ratify the parallel *-text tokens (text ≥4.5:1) beside the
+      chroma-keeping fill tokens — or collapse to single darkened tokens (simpler API, muddier light-theme
+      charts)? The canon recommends the split.</li>
+      <li><b>The chart interaction register (10.0) is invented in this canon</b> — no draft carried it and no
+      mockup has exercised it. Approve it as binding for Phase 3 builds, or commission a dedicated interaction
+      mockup round first?</li>
+      <li><b>Refusal plain-cause phrasebook.</b> Chips now lead with a plain-language cause and quote the wire
+      code secondary. Each wire code needs one owner-approved sentence (e.g. sweep_failed_no_success → &#8220;sweep
+      failed twice&#8221;). Approve the phrasebook mechanism and its initial entries?</li>
+      <li><b>Verdict-banner grammar as the binding page-answer contract.</b> §01&#8217;s grammar (computed finding +
+      named denominator · qualification · identity strip, with refused/stale/empty/partial/superseded variants)
+      would become the acceptance-gate test for all three pages. Ratify it as the contract?</li>
+    </ol>
+  </div>
+</section>
+
+<footer style="border-top: 3px double var(--line); padding: 20px 0 8px">
+  <p class="meta-sm mono" style="margin:0">solvent foundation canon · SYNTHESIZED FINAL · 2026-08-09 · specimen document — every component above is rendered, not described · awaiting owner ratification (styleguide approval + the five §14 questions)</p>
+</footer>
+
+</div><!-- /shell -->
+<script>
+(function () {
+  var btn = document.getElementById('themeToggle');
+  var root = document.documentElement;
+  function label() {
+    var t = root.getAttribute('data-theme') === 'light' ? 'LIGHT' : 'DARK';
+    btn.textContent = 'THEME: ' + t + ' ◐';
+    btn.setAttribute('aria-pressed', t === 'LIGHT' ? 'true' : 'false');
+  }
+  btn.addEventListener('click', function () {
+    root.setAttribute('data-theme', root.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+    label();
+  });
+  label();
+})();
+</script>
+</body>
+</html>
