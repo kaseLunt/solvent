@@ -122,6 +122,13 @@ test("p1a-1: --ink-3 is amended in all four theme blocks; the failed hexes are g
   expect(tokensCss).not.toContain("#8a979c");
 });
 
+test("p1a-2: --ink-3 closed accounting — declared exactly 4 times (2 light + 2 dark)", () => {
+  // The *-text tokens' pin style (below), applied to the demoted tier: a
+  // fifth --ink-3 declaration anywhere (a sneaked per-surface override) or
+  // a dropped theme block both move this count.
+  expect(countOf(tokensCss, "--ink-3:")).toBe(4);
+});
+
 test("p1a-1: --term-dim is amended in the one block that defines it (terminal palette is theme-constant by design)", () => {
   // The term-* set lives in the bare :root only and is never overridden —
   // the amendment applies to every block that defines the token: exactly one.
@@ -165,6 +172,16 @@ test("p1a-1: --shell-max is 1280px and 1180 appears nowhere", () => {
   expect(tokensCss).toContain("--shell-max: 1280px");
   expect(tokensCss).not.toContain("1180");
   expect(globalsCss).not.toContain("1180");
+});
+
+test("p1a-2: base --breakout-max is exactly 1280px — the canon's 'holds 1280 at 1366' guard", () => {
+  // §02: breakout is max-width STEPPING, never a min()/max() formula, "so it
+  // can never exceed its viewport row's budget (at 1366 it holds 1280)". The
+  // base declaration is the guard; the stepped blocks (1340/1520/1680, pinned
+  // below) are the only other declarations, so exactly-once pins the base.
+  expect(countOf(tokensCss, "--breakout-max: 1280px"), "base :root declaration, exactly once").toBe(
+    1,
+  );
 });
 
 test("p1a-1: the three stepped media blocks exist with the canon widths", () => {

@@ -797,20 +797,20 @@
 
 .histLabel {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   fill: var(--ink-2);
 }
 
 .histCount {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   fill: var(--ink-2);
 }
 
 /* CX-6: the common 0 to 100 percent axis' own tick labels. */
 .histAxisLabel {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   fill: var(--ink-2);
 }
 
@@ -818,7 +818,7 @@
    disclosure. */
 .denominatorLine {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   color: var(--ink-2);
   margin: 0 0 6px;
 }
@@ -894,7 +894,7 @@
 
 .dumbbellBoundaryLabel {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   font-weight: 600;
   fill: var(--crit);
 }
@@ -988,7 +988,7 @@
 
 .flowLaneLabel {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   fill: var(--ink-2);
 }
 
@@ -996,7 +996,7 @@
    vocabulary stays complete without claiming a population. */
 .flowLaneLabelEmpty {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   fill: var(--ink-3);
 }
 
@@ -1045,14 +1045,14 @@
   gap: 4px;
   margin: 0 0 12px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   color: var(--ink-2);
   max-width: 96ch;
 }
 
 /* ANSWER: one computed sentence, 14px, --ink (template slot 3). */
 .answerLine {
-  font-size: 14px;
+  font-size: var(--t-ui);
   color: var(--ink);
   max-width: 82ch;
   margin: 0 0 10px;
@@ -1061,7 +1061,7 @@
 /* METHOD: one 12px line — encoding, unit, as-of (template slot 6). */
 .methodLine {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   color: var(--ink-2);
   max-width: 96ch;
   margin: 10px 0 8px;
@@ -1076,14 +1076,14 @@
   margin: 6px 0 0;
   padding: 6px 0 2px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   color: var(--ink-2);
 }
 
 /* LF-10 / RM-14: the visible control that moves focus to the ledger. */
 .exactDataButton {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   color: var(--ink-2);
   background: var(--chip-bg);
   border: 1px solid var(--line);
@@ -1111,7 +1111,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--t-mono-floor);
   color: var(--ink-2);
   cursor: pointer;
 }

@@ -16,6 +16,7 @@
     "pretypecheck": "node scripts/ensure-client.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "lint:css": "stylelint \"app/**/*.css\" \"components/**/*.css\"",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "@types/react-dom": "19.2.4",
     "eslint": "9.39.5",
     "eslint-config-next": "16.2.12",
+    "stylelint": "17.14.1",
     "typescript": "5.9.3"
   }
 }

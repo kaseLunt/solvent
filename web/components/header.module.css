@@ -25,7 +25,7 @@
 
 .wordmark {
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: var(--t-mono-lg);
   font-weight: 600;
   letter-spacing: var(--track-label);
   color: var(--ink);
@@ -58,7 +58,7 @@
   align-items: baseline;
   gap: 2px;
   padding: 4px 20px 0;
-  font-size: 13px;
+  font-size: var(--t-meta);
   overflow-x: auto;
 }
 

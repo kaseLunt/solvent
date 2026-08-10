@@ -1422,7 +1422,7 @@ spec): **1477 tests in 87 files**.
 Task list:
 - [x] Task 0 — wave config + ledger section (p1a-0)
 - [x] Task 1 — tokens.css migration + width contract (p1a-1)
-- [ ] Task 2 — stylelint: the structural floor (p1a-2)
+- [x] Task 2 — stylelint: the structural floor (p1a-2)
 - [ ] Task 3 — freshness tier machinery (pure) + meta constants provider
       (p1a-3)
 - [ ] Task 4 — THE MIGRATION WAVE: canon appbar + tiered chip (badge
@@ -1563,3 +1563,95 @@ untouched. Steps: base 1280 · 1440 → breakout-only 1340 · 1920 → both
   the value-only token changes, exactly the pin-map §3–4 prediction
   (`--shell-max` had zero pins; no test hard-codes a token value).
 - `npm run typecheck`: clean. `npx eslint` on both new specs: clean.
+
+### p1a-2 · stylelint — the structural floor (Task 2)
+
+The 12px floor stops being reviewable taste and becomes a build gate:
+stylelint 17.14.1 (exact devDep) with
+`declaration-property-value-allowed-list` — every `font-size` in
+`web/app/**/*.css` + `web/components/**/*.css` must match
+`/^var\(--(t|fs)-/`. Rule semantics verified against the current
+stylelint docs before writing the config: a `/regex/` value is matched
+against the ENTIRE declaration value, so the `^` anchor rejects
+literals, `calc()` wrappers, `inherit`, and token typos, while
+`var(--t-ui, 14px)` fallbacks stay legal. The `font` shorthand is held
+to `inherit` so a literal size cannot smuggle in through the shorthand
+(five lawful `font: inherit` uses today).
+
+**RELAXATION (recorded here + in the config comment):** the legacy
+`var(--fs-*)` aliases stay LAWFUL until Phase 3 retires them — every
+`--fs-*` already resolves onto a `--t-*` token (p1a-1), so the floor
+holds through the alias; Phase 3 tightens the pattern to `--t-*` only.
+
+**Deviations from the brief:** (1) config is `stylelint.config.mjs`,
+not `.stylelintrc.json` — the brief requires the relaxation recorded
+in a config COMMENT and JSON carries none; the ESM file matches the
+repo's `eslint.config.mjs` pattern and lets the allowed-list regex be
+a real RegExp. (2) The "no undefined token" typo guard is SKIPPED per
+the brief's own escape hatch ("if cheaply expressible; otherwise
+skip"): core stylelint has no undefined-custom-property rule — it
+needs the csstools plugin + importFrom wiring, a new dependency, not
+cheap. The `^var(--(t|fs)-` anchor already catches prefix typos;
+value typos (`--t-flor`) remain for Phase 3.
+
+Wiring: `web/package.json` gains `"lint:css": "stylelint
+"app/**/*.css" "components/**/*.css""`; CI web job runs `npm run
+lint:css` directly after `npm run lint`.
+
+**The 44 literal font-size fixes** (repo-wide inventory; every fix
+value-preserving and register-matched except the one floor lift):
+
+| File | Lines | Was | Now |
+|---|---|---|---|
+| book.module.css | 225, 240, 265, 274, 285, 295, 390, 396, 403, 411, 646, 652, 663, 673 | mono 12px (warn disclosure, chart-template STATE/METHOD/forensics slots, hist/increments SVG labels, denominator + contradiction lines, curve table) | `var(--t-mono-floor)` |
+| book.module.css | 256 | mono 14px (.answerLine — ANSWER slot) | `var(--t-mono-lg)` |
+| inspector.module.css | 170 | sans 16px (.stateCard h2 — the §09 state-block lead sentence, body register) | `var(--t-body)` |
+| lab.module.css | 800, 806, 813, 821, 897, 991, 999, 1048, 1064, 1079, 1086, 1114 | mono 12px (hist labels, dumbbell boundary label, flow lane labels, STATE/METHOD slots, frontier separator, exact-data button, tornado pick) | `var(--t-mono-floor)` |
+| lab.module.css | 1055 | sans 14px (.answerLine) | `var(--t-ui)` |
+| charts.module.css | 35, 73, 218, 251, 309, 315, 321, 332, 388, 399, 441 | mono 12px (axis/ref/outlier/value/step labels, measuring probe, ledger grid + map ledger) | `var(--t-mono-floor)` |
+| header.module.css | 28 | mono 14px (.wordmark) | `var(--t-mono-lg)` |
+| header.module.css | 61 | sans 13px (.navRow) | `var(--t-meta)` |
+| table.module.css | 15 | sans 14px (.takeaway — ANSWER slot) | `var(--t-ui)` |
+| table.module.css | 123 | 9px (.sortGlyph ▲/▼) | `var(--t-floor)` — **FLOOR LIFT 9 → 12, the sole visual change**; a sub-floor ornament glyph had no lawful token because no sub-12px token exists |
+
+`.chProbe` (charts 251) moved WITH `.axisLabel` (charts 35) — the
+probe must measure what the label renders; both now say
+`var(--t-mono-floor)`.
+
+**Folded in from Task 1's review (controller-authorized):** two pins in
+`tokens-contract.spec.ts` — base `--breakout-max: 1280px` exactly once
+(the canon's "holds 1280 at 1366" guard; the stepped blocks are the
+only other declarations) and `--ink-3` closed accounting
+(`countOf("--ink-3:") === 4`, the *-text tokens' pin style). Both are
+REGRESSION GUARDS, not red-first features: written, confirmed green
+against current HEAD (12 → 14 specs in the file).
+
+### Proof of gate + mutation kills (p1a-2)
+
+- **Red-first, the existing debt:** the config against the untouched
+  tree: **44 errors, exit 2** — the exact literal inventory above,
+  file-by-file, nothing else. After the 44 fixes: exit 0.
+- **THE STRUCTURAL-FLOOR PROOF (the task's mutation kill):** scratch
+  rule `.p1a2MutationScratch { font-size: 11px; }` appended to
+  globals.css → stylelint FAILED (exit 2) at exactly
+  `globals.css:127 font-size: 11px`; removed → exit 0. A sub-12px
+  label is now a build error, not a review comment.
+- **Pin kill A:** base `--breakout-max` mutated 1280 → 1300: KILLED at
+  exactly the new pin (tokens-contract.spec.ts:177), 13 passed.
+  Reverted.
+- **Pin kill B:** fifth `--ink-3` declaration added to the data-theme
+  dark block: KILLED at the closed-accounting pin (:125; the p1a-1
+  value-count pin at :116 also fired on the duplicated hex), 12
+  passed. Reverted; final tree re-verified 14/14.
+
+### Closing counts (p1a-2)
+
+- Suite: 1521 → **1523 tests** (+2 unit pins; base = p1b-5's 1521).
+- Full p1a run (final tree, fresh `npm run build`, port 3820):
+  **1522 passed, 1 skipped, 0 failed (35.8s)** — zero pin movement
+  from the 44 value-preserving swaps and the 9→12 sortGlyph lift
+  (chart-spec-v4's AC-54 rendered-floor pins pass unchanged: chart
+  text still renders 12px).
+- `npm run lint:css`: clean. `npm run typecheck`: clean.
+- `npm run lint` (eslint .): 0 errors (one pre-existing LabBookPanel
+  warning, untouched); `npx eslint` on the touched spec + config: clean.

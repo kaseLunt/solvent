@@ -167,7 +167,7 @@
 
 .stateCard h2 {
   margin: 0 0 6px;
-  font-size: 16px;
+  font-size: var(--t-body);
   letter-spacing: var(--track-tight);
 }
 

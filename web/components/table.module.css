@@ -12,7 +12,7 @@
 .takeaway {
   margin: 0;
   padding: 12px 14px 0;
-  font-size: 14px;
+  font-size: var(--t-ui);
   color: var(--ink);
   max-width: 82ch;
 }
@@ -120,7 +120,7 @@
 /* The ▲/▼ indicator — accent-colored, ONLY on the active column. */
 .sortGlyph {
   color: var(--accent);
-  font-size: 9px;
+  font-size: var(--t-floor);
 }
 
 /* Windowing spacer rows: pure scroll geometry, no cell chrome. */
