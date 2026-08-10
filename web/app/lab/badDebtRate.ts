@@ -29,6 +29,7 @@
 // whose transpiler does not resolve the `@/` alias.
 
 import type { LabRunBookEngine } from "../../lib/runbook";
+import { isWireScale, malformedFields, wireBigInt } from "../../lib/wireGuard";
 import { labUsd } from "./frontierView";
 
 /** The view's dust floor, in WHOLE dollars — a named view policy, not wire. */
@@ -58,8 +59,29 @@ function sideOf(
   usdDecimals: number,
   side: "before" | "after",
 ): BadDebtRateSide {
-  const bad = BigInt(aggregate.bad_debt_usd);
-  const eligible = BigInt(aggregate.eligible_debt_usd);
+  // p1b-1: validation FIRST, in read order. `BigInt("")` is a silent 0n and
+  // `BigInt("0x10")` a silent 16n, so an unvalidated absolute used to launder
+  // into the UNDEFINED arm (an empty eligible read as "$0 of eligible debt")
+  // or into a rate computed from garbage — and a fractional usd_decimals
+  // threw at the dust boundary instead of refusing. A field outside its wire
+  // contract routes to this module's OWN contradiction arm, naming the
+  // field: an unreadable value is never divided and never zero.
+  const bad = wireBigInt(aggregate.bad_debt_usd);
+  const eligible = wireBigInt(aggregate.eligible_debt_usd);
+  if (bad === null || eligible === null || !isWireScale(usdDecimals)) {
+    const fields = malformedFields([
+      ["bad_debt_usd", bad !== null],
+      ["eligible_debt_usd", eligible !== null],
+      ["usd_decimals", isWireScale(usdDecimals)],
+    ]);
+    return {
+      kind: "contradiction",
+      reason:
+        `RATE CONTRADICTION: ${fields.join(" and ")} ${fields.length === 1 ? "is" : "are"} ` +
+        `outside the wire contract ${side} the shock — an unreadable value is never divided ` +
+        `and never zero, so no rate is claimed.`,
+    };
+  }
   if (eligible === 0n) {
     if (bad > 0n) {
       return {
@@ -90,8 +112,16 @@ export function badDebtRate(engine: LabRunBookEngine): BadDebtRateView {
 
 /** "14.2%", "123.4%", or "<0.1%" for a real-but-sub-tenth rate. */
 export function ratePercentLabel(side: Extract<BadDebtRateSide, { kind: "rate" }>): string {
-  const tenths = BigInt(side.percentTenths);
-  if (tenths === 0n && BigInt(side.badUsd) > 0n) return "<0.1%";
+  // p1b-1: a rate side built by `sideOf` carries validated wire strings, so
+  // this arm exists for the hand-built side — and it still never coerces.
+  // `BigInt("")` printed an empty percentTenths as "0.0%" (a computed-zero
+  // costume) and `BigInt("0x10")` turned a malformed badUsd into "real"
+  // sub-tenth bad debt. An unreadable rate prints as unreadable, not as a
+  // number.
+  const tenths = wireBigInt(side.percentTenths);
+  const bad = wireBigInt(side.badUsd);
+  if (tenths === null || bad === null) return "unreadable";
+  if (tenths === 0n && bad > 0n) return "<0.1%";
   return `${(tenths / 10n).toString()}.${(tenths % 10n).toString()}%`;
 }
 

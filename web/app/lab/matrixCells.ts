@@ -30,6 +30,7 @@
 import type { EngineRefusal, ScenarioDefinition, Shock } from "@solvent/client";
 import { renderEngineAmount, renderSignedCount } from "../../lib/book-format";
 import type { LabRunBook, LabRunBookEngine, RunBookOutcome } from "../../lib/runbook";
+import { isWireDecimal, isZeroDecimal } from "../../lib/wireGuard";
 
 // ---------------------------------------------------------------------------
 // Axis families — the vocabulary a not-covered cell explains itself in.
@@ -2784,23 +2785,10 @@ export type CellOutcome =
   | { kind: "quiet" }
   | { kind: "malformed"; fields: string[] };
 
-/**
- * The wire Decimal contract, verbatim (api/openapi.yaml `Decimal` /
- * `NullableDecimal` pattern): an exact signed integer as a decimal string —
- * `^-?[0-9]+$`. NEVER a JSON number, never empty, never a fraction or
- * exponent, never whitespace.
- */
-const WIRE_DECIMAL = /^-?[0-9]+$/;
-
-/** Runtime check: the JSON-cast gives no guarantee this is even a string. */
-function isWireDecimal(value: unknown): value is string {
-  return typeof value === "string" && WIRE_DECIMAL.test(value);
-}
-
-/** Zero under the wire contract: every digit zero. Call ONLY on validated values. */
-function isZeroDecimal(value: string): boolean {
-  return /^-?0+$/.test(value);
-}
+// The wire-contract primitives (`WIRE_DECIMAL` / `isWireDecimal` /
+// `isZeroDecimal`) were p0-8's, module-private here; p1b-1 extracted them to
+// the SHARED `lib/wireGuard.ts` so every Track B classifier answers to one
+// law. Imported above — the checks below are byte-for-byte the same tests.
 
 export function cellPrimaryOutcome(engine: LabRunBookEngine): CellOutcome {
   // P0-8 finding 2 — validation FIRST, in read order. Every field this

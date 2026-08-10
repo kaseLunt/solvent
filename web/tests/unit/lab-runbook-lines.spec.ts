@@ -911,3 +911,100 @@ test("r89: the honest fixture side still reads exactly as before — the weld is
   expect(line).toContain("1 asset sums to $8,000");
   expect(line).not.toContain("CONTRADICTION");
 });
+
+// ---------------------------------------------------------------------------
+// p1b-1 — THE COERCION KILL. `BigInt("")` is a silent 0n and `BigInt("0x10")`
+// a silent 16n, so a malformed wire string used to launder into these
+// sentences as a measured number: an empty value_usd summed as $0 (and the
+// sum weld HELD, so the head claim printed), an empty wad_scale judged every
+// bucket against a scale of zero. Out-of-contract fields now route to each
+// composition's OWN refusal state — named, never coerced, never zero.
+// ---------------------------------------------------------------------------
+
+test("p1b-1: belowOneCount refuses an unreadable scale — null, never a count off a coerced zero", () => {
+  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const aggregate: RunBookAggregate = {
+    ...dm.before,
+    hf_histogram: { ...histogramWith(dm.before, "hf_wad", { "< 0.90": 3 }), wad_scale: "" },
+  };
+  // The OLD read: BigInt("") === 0n → every bucket judged against a ZERO
+  // scale → a real-looking 0 returned as the below-1.00 population. Null is
+  // the module's established cannot-compose state (the wire's own held_rows /
+  // lane_changed_rows carry it) — a count nobody could take is not 0.
+  expect(belowOneCount(aggregate)).toBe(null);
+});
+
+test("p1b-1: belowOneCount refuses an unreadable bucket bound — that bucket might sit below", () => {
+  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const histogram = histogramWith(dm.before, "hf_wad", { "< 0.90": 3, ">= 2.00": 5 });
+  const aggregate: RunBookAggregate = {
+    ...dm.before,
+    hf_histogram: {
+      ...histogram,
+      buckets: histogram.buckets.map((bucket, index) =>
+        index === 0 ? { ...bucket, upper_wad: "0x10" } : bucket,
+      ),
+    },
+  };
+  // BigInt("0x10") === 16n ≤ the WAD — the old read COUNTED a bucket whose
+  // bound nobody could read. An exact count over an unreadable bound is an
+  // under- or over-claim in a computed costume, so the whole count refuses.
+  expect(belowOneCount(aggregate)).toBe(null);
+  // The unbounded top bucket (upper_wad: null) is a STATEMENT, not a defect —
+  // the fixture's own histograms carry it and still count.
+  expect(belowOneCount(dm.before)).not.toBe(null);
+});
+
+test("p1b-1: the shift line makes NO below-1.00 claim over an unreadable histogram bound", () => {
+  const engine = engineWith("hf_wad", [
+    [0, 0, 1],
+    [4, 0, 3],
+  ]);
+  const broken = structuredClone(engine);
+  broken.before.hf_histogram.wad_scale = "";
+  const line = histogramShiftReadingLine(broken);
+  // The refusal is in the module's own voice: the missing fact is NAMED, and
+  // no movement arithmetic is composed over a bound nobody could read.
+  expect(line).toContain("NOT stated here");
+  expect(line).toContain("outside the wire decimal contract");
+  expect(line).not.toContain("sat below 1.00");
+  expect(line).not.toContain("grew by");
+  expect(line).not.toContain("did not change");
+  // The head still names the surface — the refusal replaces the CLAIM, not
+  // the section.
+  expect(line).toContain("What this shows:");
+  // And the honest body still composes: this is not a law that refuses
+  // everything.
+  expect(histogramShiftReadingLine(engine)).toContain("sat below 1.00");
+});
+
+test("p1b-1: a malformed value_usd is never summed as $0 — the sum claim refuses, naming the field", () => {
+  const malformed = {
+    ...COUNTED,
+    asset: "0x000000000000000000000000000000000000F00D",
+    value_usd: "",
+  };
+  // The OLD read summed BigInt("") as 0n, the weld HELD (800… + 0 = 800…),
+  // and the head printed "2 assets sum to $8,000" — a malformed row laundered
+  // into a verified-looking sum.
+  const line = collateralReadingLine(
+    collateralOf([COUNTED, malformed], "800000000000"),
+    8,
+    "before",
+  );
+  expect(line).toContain("COLLATERAL CONTRADICTION");
+  expect(line).toContain("collateral_by_asset[1].value_usd");
+  expect(line).toContain("outside the wire decimal contract");
+  expect(line).toContain("never summed and never zero");
+  expect(line).not.toContain("assets sum to");
+});
+
+test("p1b-1: a malformed total_collateral_usd refuses the sentence instead of throwing in labUsd", () => {
+  // The OLD read reached labUsd("0x10") → a DecimalFormatError killed the
+  // whole route (BigInt had already coerced the comparison to 16n).
+  const line = collateralReadingLine(collateralOf([COUNTED], "0x10"), 8, "after");
+  expect(line).toContain("COLLATERAL CONTRADICTION");
+  expect(line).toContain("total_collateral_usd");
+  expect(line).toContain("outside the wire decimal contract");
+  expect(line).not.toContain("$16");
+});

@@ -20,17 +20,34 @@
 // Playwright's transpiler as well as by Next.
 
 import type { LabRunBookEngine, RunBookAggregate } from "../../lib/runbook";
+import { malformedFields, wireBigInt, type FieldCheck } from "../../lib/wireGuard";
 import { belowOneLanes, crossingCounts, readTransitions } from "./labTransition";
 import { labUsd } from "./frontierView";
 
-/** Σ of bucket counts whose whole range sits at-or-below the wad scale. */
-export function belowOneCount(aggregate: RunBookAggregate): number {
-  const scale = BigInt(aggregate.hf_histogram.wad_scale);
-  return aggregate.hf_histogram.buckets.reduce(
-    (sum, bucket) =>
-      bucket.upper_wad !== null && BigInt(bucket.upper_wad) <= scale ? sum + bucket.count : sum,
-    0,
-  );
+/**
+ * Σ of bucket counts whose whole range sits at-or-below the wad scale — or
+ * NULL when the scale or any bucket bound is outside the wire decimal
+ * contract.
+ *
+ * p1b-1: `BigInt("")` is a silent 0n, so the old read judged every bucket
+ * against a ZERO scale and returned a real-looking count off a body nobody
+ * could read; a coerced bound could likewise pull a bucket below the line.
+ * Null is this module's established cannot-compose state (the wire's own
+ * `held_rows`/`lane_changed_rows` carry it): a count nobody could take is
+ * not 0. The unbounded top bucket (`upper_wad: null`) stays a STATEMENT,
+ * not a defect — it is outside every at-or-below claim by construction.
+ */
+export function belowOneCount(aggregate: RunBookAggregate): number | null {
+  const scale = wireBigInt(aggregate.hf_histogram.wad_scale);
+  if (scale === null) return null;
+  let sum = 0;
+  for (const bucket of aggregate.hf_histogram.buckets) {
+    if (bucket.upper_wad === null) continue;
+    const upper = wireBigInt(bucket.upper_wad);
+    if (upper === null) return null;
+    if (upper <= scale) sum += bucket.count;
+  }
+  return sum;
 }
 
 /** buckets + infinite — the accounts this side actually measured. */
@@ -100,6 +117,23 @@ export function histogramShiftReadingLine(engine: LabRunBookEngine): string {
   const reading = readTransitions(engine);
   const head = `${histogramShiftHead(engine.engine)} `;
 
+  // p1b-1: THE BELOW-1.00 COUNTS ARE LICENSED BY READABLE BOUNDS. `BigInt`
+  // used to coerce an empty wad_scale to 0n and judge every bucket against
+  // it, so a malformed body composed a real-looking movement sentence. When
+  // either side's count cannot be taken, the sentence names the missing fact
+  // in the register this function already refuses in — no movement
+  // arithmetic, no denominators, no zero costume.
+  const from = belowOneCount(before);
+  const to = belowOneCount(after);
+  if (from === null || to === null) {
+    return (
+      head +
+      "The below-1.00 populations are NOT stated here: this response declares a histogram scale " +
+      "or bucket bound outside the wire decimal contract, and no row can be placed against 1.00 " +
+      "by a bound that cannot be read."
+    );
+  }
+
   // A MATRIX THIS BODY CONTRADICTS IS NOT READ, and the thing lost with it is
   // the ONE census the two sides share. While the matrix reconciles,
   // `measured_rows` is a single total both distributions answer to. When it
@@ -113,12 +147,7 @@ export function histogramShiftReadingLine(engine: LabRunBookEngine): string {
   if (reading.kind === "contradictory") {
     return (
       head +
-      netOnlyMovement(
-        belowOneCount(before),
-        belowOneCount(after),
-        measuredCount(before),
-        measuredCount(after),
-      ) +
+      netOnlyMovement(from, to, measuredCount(before), measuredCount(after)) +
       " The gross crossings are NOT stated here: this response's transition matrix disagrees with " +
       "the two distributions beside it, and a crossing count derived from it would not answer to " +
       `them. ${regionClause(before)}${unmeasuredTail(after, false)}`
@@ -139,8 +168,6 @@ export function histogramShiftReadingLine(engine: LabRunBookEngine): string {
 
   const region = belowOneLanes(t);
   const { entries, exits, net } = crossingCounts(t, region);
-  const from = belowOneCount(before);
-  const to = belowOneCount(after);
 
   const movement =
     net === 0
@@ -396,18 +423,30 @@ export function collateralReadingLine(
   // total" — so the arithmetic is performed BEFORE the claim is made, in
   // bigint over the exact wire strings. A contradictory row (a value beside
   // the no-price-witness flag) is inside neither the count nor the sum.
+  //
+  // p1b-1: the weld reads its strings through `wireBigInt`, never bare
+  // `BigInt`. `BigInt("")` summed a malformed value_usd as 0n — and the weld
+  // HELD, so the head printed a verified-looking sum over a row nobody could
+  // read. An out-of-contract field is collected by name (in read order) and
+  // routes to the contradiction arm below instead of the arithmetic.
   let countedCount = 0;
   let countedSum = 0n;
   let contradictoryCount = 0;
-  for (const entry of entries) {
+  const checks: FieldCheck[] = [];
+  for (const [index, entry] of entries.entries()) {
     if (entry.value_usd === null) continue;
     if (entry.unpriced) {
       contradictoryCount++;
       continue;
     }
+    const value = wireBigInt(entry.value_usd);
+    checks.push([`collateral_by_asset[${String(index)}].value_usd`, value !== null]);
+    if (value === null) continue;
     countedCount++;
-    countedSum += BigInt(entry.value_usd);
+    countedSum += value;
   }
+  const totalWire = wireBigInt(aggregate.total_collateral_usd);
+  checks.push(["total_collateral_usd", totalWire !== null]);
 
   const contradictoryClause =
     contradictoryCount === 0
@@ -416,8 +455,21 @@ export function collateralReadingLine(
         `BOTH a dollar value and the no-price-witness flag — CONTRADICTORY, listed without a ` +
         `value, outside every sum here.`;
 
+  // p1b-1: the malformed arm fires BEFORE labUsd can throw on the total and
+  // before any sum comparison over coerced reads — in the r89 contradiction
+  // register, with the unreadable fields named.
+  const unreadable = malformedFields(checks);
+  if (unreadable.length > 0 || totalWire === null) {
+    return (
+      `COLLATERAL CONTRADICTION: ${unreadable.join(" and ")} ` +
+      `${unreadable.length === 1 ? "is" : "are"} outside the wire decimal contract ${side} the ` +
+      `shock — an unreadable value is never summed and never zero, so no sum claim is made.` +
+      contradictoryClause
+    );
+  }
+
   const total = labUsd(aggregate.total_collateral_usd, usdDecimals);
-  if (countedSum !== BigInt(aggregate.total_collateral_usd)) {
+  if (countedSum !== totalWire) {
     return (
       `COLLATERAL CONTRADICTION: the ${String(countedCount)} counted ` +
       `${countedCount === 1 ? "entry sums" : "entries sum"} to ` +

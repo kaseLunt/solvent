@@ -763,7 +763,7 @@ spec): **1416 tests in 83 files**.
 
 Task list:
 - [x] Task 0 — wave config + honest route error boundary (p1b-0)
-- [ ] Task 1 — wire-guard module + BigInt coercion kill
+- [x] Task 1 — wire-guard module + BigInt coercion kill (p1b-1)
 - [ ] Task 2 — full RunBookEngine classifier
 - [ ] Task 3 — SetRunEngineSummary classifier + tornado malformed arm
 - [ ] Task 4 — FactorPrice entry guard
@@ -825,3 +825,87 @@ visibility assertion (p1b-fixes.spec.ts:69). Reverted; final tree rebuilt.
   pre-existing styleguide skip, no other movement.
 - `npm run typecheck`: completely clean.
 - `npx eslint` on all four touched files: 0 errors, 0 warnings.
+
+### p1b-1 · shared wire guard + the BigInt coercion class (Task 1)
+
+`BigInt("")` and `BigInt(" ")` silently coerce to `0n`, and `BigInt("0x10")`
+to `16n` — all outside the wire Decimal contract (`^-?[0-9]+$`). Every bare
+`BigInt(wireString)` site could therefore launder a malformed field into a
+measured zero or a plausible wrong number (the p0-8 class, reachable again).
+And p0-8's own primitives were module-private to `matrixCells.ts`.
+
+Delivered:
+- `web/lib/wireGuard.ts` — the SHARED guard: `WIRE_DECIMAL`,
+  `isWireDecimal`, `isZeroDecimal` (extracted from `matrixCells.ts`
+  byte-for-byte), `isWireScale` (integer in [0,1000], mirroring
+  `assertScale`'s bounds in `@solvent/client`), `isWireCount`,
+  `wireBigInt` (null unless the contract matches — NEVER throws, NEVER
+  coerces; the only sanctioned string→bigint path), and
+  `malformedFields` (`FieldCheck[]` → failed names, in read order).
+- `web/app/lab/matrixCells.ts` — rebased on the shared module; exports and
+  behavior UNCHANGED (`matrix-outcome.spec.ts` green unmodified, 16/16).
+- `web/app/lab/badDebtRate.ts` — `sideOf` validates FIRST in read order
+  (`bad_debt_usd`, `eligible_debt_usd`, `usd_decimals`); a failing field
+  routes to the module's OWN contradiction arm naming the field ("an
+  unreadable value is never divided and never zero"). Before: an empty
+  eligible read as the "$0 of eligible debt" RATE CONTRADICTION (a claim off
+  a value nobody could read), `0x10` computed a rate from 16n, and a
+  fractional `usd_decimals` threw RangeError at the dust boundary.
+  `ratePercentLabel` refuses a hand-built malformed side as "unreadable"
+  instead of printing `BigInt("")` as "0.0%".
+- `web/app/lab/labRunBookLines.ts` — `belowOneCount` returns `number |
+  null`: null when the scale or any non-null bucket bound is outside the
+  contract (the wire's own `held_rows`/`lane_changed_rows` null being the
+  module's established cannot-compose state); the old read judged every
+  bucket against `BigInt("") === 0n`. `histogramShiftReadingLine` refuses
+  BEFORE composing (“The below-1.00 populations are NOT stated here…”, the
+  register it already refuses in). `collateralReadingLine`'s r89 sum weld
+  reads through `wireBigInt` with per-index field names
+  (`collateral_by_asset[i].value_usd`, `total_collateral_usd`) routed to the
+  COLLATERAL CONTRADICTION arm; the old read summed an empty value as $0
+  with the weld HOLDING (a verified-looking sum over an unreadable row), and
+  a malformed total threw in `labUsd` after the comparison had already
+  coerced.
+- `web/tests/unit/wire-guard.spec.ts` — the p0-2 bad-value loop, the
+  coercion kill (`wireBigInt("") === null`, `"0x10"` null, `"-15"` →
+  `-15n`), `-0`/`000` zero, scale bounds, count integrality, field naming.
+- Extended: `bad-debt-rate.spec.ts` (+4), `lab-runbook-lines.spec.ts` (+5).
+
+No new register anywhere: every malformed arm routes to a refusal
+composition its module already had (Task 2 owns the engine-level register).
+
+### Red-first evidence
+
+- `wire-guard.spec.ts` before the module existed: run dies at collection —
+  `Cannot find module '…/web/lib/wireGuard'`.
+- The 9 consumer pins against the UNFIXED modules: 9 failed / 38 passed in
+  the two extended files, each at its laundering — empty eligible produced
+  kind "rate"→the $0-of-eligible contradiction text (no field name), `0x10`
+  produced kind "rate", `usd_decimals: 2.5` produced `RangeError: The number
+  2.5 cannot be converted to a BigInt`, `ratePercentLabel` printed "0.0%",
+  `belowOneCount` returned coerced counts, the collateral weld printed
+  "2 assets sum to $8,000" over an empty value_usd, and the malformed total
+  threw `DecimalFormatError` in `labUsd`.
+
+### Mutation kills (p1b-1-M1, p1b-1-M2)
+
+- M1: `wireBigInt` reverts to bare `BigInt` (try/catch, coercion alive).
+  `wire-guard.spec.ts` “THE COERCION KILL” in isolation: KILLED at exactly
+  `expect(wireBigInt("")).toBe(null)` (wire-guard.spec.ts:68) — Expected
+  null, Received 0n. Reverted.
+- M2: `sideOf`'s null arm routed back to zero (`wireBigInt(…) ?? 0n`,
+  refusal branch reduced to the scale check). `bad-debt-rate.spec.ts`
+  “p1b-1: an EMPTY eligible” in isolation: KILLED at exactly the refusal
+  pin's field-naming assertion (bad-debt-rate.spec.ts:140) — the coerced
+  zero resurrected the "$0 of eligible debt" claim with no field named.
+  Reverted; final tree re-verified.
+
+### Closing counts (p1b-1)
+
+- Track B suite: 1417 → **1435** (+18: wire-guard 9, bad-debt-rate 4,
+  lab-runbook-lines 5).
+- Full run (final tree, `npm run build` + full p1b config, port 3819):
+  **1434 passed, 1 skipped, 0 failed (34.0s)** — the same single
+  pre-existing styleguide skip, no other movement.
+- `npm run typecheck`: completely clean.
+- `npx eslint` on all seven touched files: 0 errors, 0 warnings.
