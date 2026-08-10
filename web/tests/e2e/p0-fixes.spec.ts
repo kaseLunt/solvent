@@ -174,8 +174,12 @@ test.describe("p0-2 · outcome-aware matrix cells", () => {
     // object set from api/openapi.yaml's own example values with
     // execution_shortfall_usd "3864". Everything else byte-identical.
     const body = structuredClone(RUN_BOOK_200);
-    body.engines[0].bad_debt_delta_usd = "15900";
-    body.engines[0].market_realization = {
+    // noUncheckedIndexedAccess: narrow with a THROWING guard — a missing first
+    // engine is a broken fixture, never a variant to skip silently.
+    const engine = body.engines[0];
+    if (!engine) throw new Error("fixture shape: engines[0] missing");
+    engine.bad_debt_delta_usd = "15900";
+    engine.market_realization = {
       hfs_unchanged: true,
       execution_shortfall_usd: "3864",
       bad_debt_at_liquidation_usd: "0",
@@ -203,9 +207,13 @@ test.describe("p0-2 · outcome-aware matrix cells", () => {
     // bad_debt_delta_usd "0" (market_realization is already null in the
     // committed body). Everything else byte-identical.
     const body = structuredClone(RUN_BOOK_200);
-    body.engines[0].newly_eligible_accounts = 0;
-    body.engines[0].eligible_debt_delta_usd = "0";
-    body.engines[0].bad_debt_delta_usd = "0";
+    // noUncheckedIndexedAccess: same THROWING guard as above — a missing first
+    // engine is a broken fixture, never a variant to skip silently.
+    const engine = body.engines[0];
+    if (!engine) throw new Error("fixture shape: engines[0] missing");
+    engine.newly_eligible_accounts = 0;
+    engine.eligible_debt_delta_usd = "0";
+    engine.bad_debt_delta_usd = "0";
     await mockRunBook(page, body);
     await page.goto("/lab");
     await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
