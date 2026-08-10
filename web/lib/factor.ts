@@ -31,8 +31,14 @@ const APPROX_DECIMALS = 4;
 function toBig(value: number | string | bigint, field: string): bigint {
   if (typeof value === "bigint") return value;
   if (typeof value === "number") {
-    if (!Number.isSafeInteger(value)) {
-      throw new Error(`${field} must be an exact integer, got ${String(value)}`);
+    // -0 is refused too (p1b-12, Codex round 4): `Number.isSafeInteger(-0)`
+    // is true and `BigInt(-0)` is `0n`, so a fractional wire token
+    // (`JSON.parse("-1e-324")` rounds to NEGATIVE ZERO) would be laundered
+    // into an exact 0/den ratio and rendered as a computed-looking shock.
+    if (!Number.isSafeInteger(value) || Object.is(value, -0)) {
+      // String(-0) is "0" — name the sign bit explicitly in the refusal.
+      const shown = Object.is(value, -0) ? "-0" : String(value);
+      throw new Error(`${field} must be an exact integer, got ${shown}`);
     }
     return BigInt(value);
   }

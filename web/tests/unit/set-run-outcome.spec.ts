@@ -83,6 +83,33 @@ test.describe("the set-run's refusal register dispatches on the CODE", () => {
     expect(busy.kind).not.toBe(noBatch.kind);
   });
 
+  test("p1b-12: busy gauges that parse to -0 are refused into the 0 fallback, never carried", () => {
+    // The p1b-12 negative-zero class at THIS gate: `positiveInt` judged
+    // `Number.isInteger(value) && value >= 0` — both true of -0 — so a
+    // fractional token (`-1e-324` rounds to NEGATIVE ZERO during JSON.parse)
+    // rode into the busy arm as a capacity gauge. `.toBe` is Object.is, so
+    // these pins see the sign bit that String() would hide.
+    const outcome = classifySetRunRefusal(
+      503,
+      headers(),
+      '{"error":{"code":"set_run_busy","max_in_flight":-1e-324,"in_flight":-1e-324}}',
+    );
+    expect(outcome.kind).toBe("busy");
+    if (outcome.kind !== "busy") return;
+    expect(outcome.maxInFlight).toBe(0);
+    expect(outcome.inFlight).toBe(0);
+    // Ordinary zero gauges stay legal — the refusal is the sign bit.
+    const zeroes = classifySetRunRefusal(
+      503,
+      headers(),
+      '{"error":{"code":"set_run_busy","max_in_flight":0,"in_flight":0}}',
+    );
+    expect(zeroes.kind).toBe("busy");
+    if (zeroes.kind !== "busy") return;
+    expect(zeroes.maxInFlight).toBe(0);
+    expect(zeroes.inFlight).toBe(0);
+  });
+
   test("the BUSY arm reads no Retry-After, even if a proxy invents one", () => {
     const outcome = classifySetRunRefusal(503, headers({ "retry-after": "30" }), BUSY_BODY);
     expect(outcome.kind).toBe("busy");

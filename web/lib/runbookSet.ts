@@ -105,8 +105,20 @@ function retryAfter(header: string | null, envelope: Envelope | null): number | 
   return typeof fromBody === "number" ? fromBody : null;
 }
 
+/**
+ * A nonnegative integer, or null. NEVER -0 (p1b-12, Codex round 4):
+ * `JSON.parse("-1e-324")` rounds to NEGATIVE ZERO, which passes
+ * `Number.isInteger` and `>= 0`, so a fractional token would ride into the
+ * busy arm as a capacity gauge (`maxInFlight`/`inFlight` render in the busy
+ * sentence). A conforming integer marshal never emits a token that parses to
+ * -0, so the sign bit is the fingerprint of an out-of-contract token —
+ * refused into the same 0 fallback as every other unreadable gauge (the wire
+ * guard's law, applied at this local gate; see wireGuard.ts).
+ */
 function positiveInt(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && !Object.is(value, -0)
+    ? value
+    : null;
 }
 
 /**

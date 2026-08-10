@@ -188,6 +188,26 @@ test("p1b-11: isWireOccupancy is a population FLOORED AT 1 — an occupied cell 
   expect(isWireOccupancy(null)).toBe(false);
 });
 
+// p1b-12 (Codex round 4): the SAME negative-zero class, one guard over.
+// `isWireScale` judged `Number.isInteger(value) && value >= 0 && value <=
+// 1000` — all three are true of -0 — so `JSON.parse("-1e-324")` on
+// `usd_decimals` / `price_decimals` / market-realization scales / collateral
+// decimals wore a legal scale, and downstream `assertScale`
+// (packages/client-ts decimal.ts) accepts -0 too: base-unit strings would
+// render at ZERO decimal places — plausible, severely mis-scaled prices.
+// Same Object.is refusal, same marshal-fingerprint argument as the count
+// guards.
+
+test("p1b-12: -0 is refused by isWireScale — a wire scale's zero parses to +0", () => {
+  // The defect input: a fractional token that rounds to -0 DURING JSON.parse.
+  // Post-parse, the sign bit is all that remains of it.
+  expect(Object.is(JSON.parse("-1e-324"), -0)).toBe(true);
+  expect(isWireScale(JSON.parse("-1e-324"))).toBe(false);
+  expect(isWireScale(-0)).toBe(false);
+  // Ordinary 0 stays legal — the refusal is the SIGN BIT, not the magnitude.
+  expect(isWireScale(0)).toBe(true);
+});
+
 test("malformedFields names exactly the failed checks, in check order", () => {
   const checks: readonly FieldCheck[] = [
     ["bad_debt_usd", true],

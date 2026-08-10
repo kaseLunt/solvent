@@ -2872,6 +2872,91 @@ byte-identical.
   occupancy pins), every restoration diff-verified against the
   pre-mutation bytes.
 
+## Phase 1 Track B Codex fix wave 4 (p1b-12)
+
+Codex round 4 held the p1b-11 fixes and returned ONE finding — the same
+negative-zero class, one guard over — fixed here test-first with a
+full audit of every local integer gate outside wireGuard, in one commit
+(`fix(web): p1b-12 codex round 4 - negative zero is refused at every wire
+integer gate`).
+
+### Finding (HIGH) — isWireScale admits -0
+
+`web/lib/wireGuard.ts:39` (pre-fix): `isWireScale` judged
+`Number.isInteger(value) && value >= 0 && value <= 1000` — all three true
+of -0 — so `JSON.parse("-1e-324")` on `usd_decimals` / `price_decimals` /
+market-realization scales / collateral decimals passed the guard, and
+downstream `assertScale` (packages/client-ts decimal.ts:311) accepts -0
+too (`Number.isInteger(-0)` true, `-0 < 0` false): base-unit strings
+rendered at ZERO decimal places — plausible, severely mis-scaled prices.
+Post-parse distinguishable (the sign bit is the fingerprint), same
+`Object.is` refusal as the p1b-11 count guards.
+
+**Fix**: `isWireScale` refuses `Object.is(value, -0)`; ordinary `0` stays
+legal. The guard's doc comment records the deliberate asymmetry against
+`assertScale` (which admits -0), and the NEGATIVE ZERO block now records
+that -0 coverage spans ALL wire integer guards in the module — scale,
+population, occupancy (through population), signed count — plus the
+audited local gates outside it.
+
+### THE -0 AUDIT (per brief, recorded even where no change is owed)
+
+Universe: every `Number.isInteger` / `Number.isSafeInteger` use in web/
+outside wireGuard.ts and outside specs/fixtures (grep swept all of web/;
+hits landed only in lib/, app/, and test-side files).
+
+| Site | Gate (pre-fix) | Verdict | Action |
+|------|----------------|---------|--------|
+| `web/lib/wireGuard.ts:39` `isWireScale` | `isInteger && >= 0 && <= 1000` | -0 ADMITTED; wire scales feed the money renderers and `assertScale` admits -0 → zero-decimal base-unit prices | **FIXED** (the finding) |
+| `web/lib/runbookSet.ts:108` `positiveInt` | `isInteger && >= 0` | -0 ADMITTED into the busy refusal-envelope gauges — `maxInFlight`/`inFlight` render in the busy sentence (LabTornado.tsx:1072, tornadoLines.ts:368) | **FIXED**: `Object.is` refusal → null → the same 0 fallback as every unreadable gauge |
+| `web/lib/factor.ts:34` `toBig` | `isSafeInteger` | -0 ADMITTED **and LAUNDERED**: `BigInt(-0)` is `0n` — a fractional shock token would render as the exact ratio `0/den`, a computed-looking −100% | **FIXED**: throwing refusal (the module's own register), message names `-0` explicitly since `String(-0)` is `"0"` |
+| `web/app/book/riskBins.ts:142` `usdExponentLabel` | `isInteger(exponent)` | NOT a wire gate: exponent is locally computed bin geometry (`xIndex / 2`; xIndex is `2*decade+half` integer arithmetic, which cannot produce -0), and even a smuggled -0 renders the identical `$1` label (`10 ** -0 === 1`, `arr[-0]` ≡ `arr[0]`) | NO CHANGE (recorded) |
+| `web/lib/runbookSet.ts:102` + `web/lib/runbook.ts:92` `retryAfter` (adjacent, OUTSIDE the audited class) | `typeof === "number"` — no integer gate at all | the body-arm `retry_after_seconds` admits ANY number (2.5, -5, -0) — a pre-existing, WIDER posture than the -0 bypass class; a -0 renders "0" via `String()`, identical glyphs to a legal 0 | RECORDED, no change owed under this finding class (future-round candidate) |
+| `tests/fixtures/clock-law.mjs:204`, `tests/fixtures/generate-lab-book.mjs:3246`, `tests/unit/frontier-scale.spec.ts:72` | test-side | excluded by the brief's own scope (specs/fixtures; nothing rendered) | NO CHANGE |
+
+**Pins (4, all red-first witnessed)**: unit — wire-guard.spec.ts ×1
+(`JSON.parse("-1e-324")` IS -0 and is refused by isWireScale; 0 stays
+legal; RED: the guard admitted it) + set-run-outcome.spec.ts ×1 (busy
+gauges parsing to -0 refuse into the 0 fallback, `.toBe` is Object.is so
+the pin sees the sign bit; RED: `Received: -0`; ordinary-0 gauges stay
+legal) + factor.spec.ts ×1 (`formatFactor(-0, 100)` and
+`formatFactor(100, -0)` throw the exact-integer refusal; a zero NUMERATOR
+0/100 → −100% stays legal; RED: no throw / the wrong `positive` message).
+e2e — p1b-fixes.spec.ts "p1b-12" ×1 red-first: the committed run-book 200
+body with engines[0] `"usd_decimals":-1e-324` SPLICED AS RAW TEXT — the
+JS literal `-1e-324` already evaluates to -0 and `JSON.stringify(-0)`
+normalizes to `0`, so the fixture is cloned with a unique sentinel scale,
+serialized, and the sentinel replaced in the raw body string (uniqueness
+asserted in the pin); the mock fulfills with the raw body. RED witnessed
+the exact defect (the aave cell settled `data-cell-state="result"` with NO
+malformed outcome — the -0 scale admitted); GREEN: the cell settles
+malformed, the engine panel's malformed register names `usd_decimals`,
+the route stays live, the healthy dm engine renders untouched.
+
+**Kill (p1b-12-M1)**: the `Object.is` check removed from `isWireScale`
+alone → wire-guard.spec.ts in isolation dies at exactly the p1b-12 -0
+pin (1 failed / 12 passed; the p1b-11 -0 count pins and occupancy pins
+survive, discriminating M1 from p1b-11's mutants); restored,
+`fc /b`-verified byte-identical against the pre-mutation copy.
+
+### Closing counts (p1b-12)
+
+- `npm run typecheck` — clean (exit 0)
+- `npm run lint` — clean, zero warnings (exit 0)
+- `npm run lint:css` — clean (exit 0)
+- touched unit specs (wire-guard, set-run-outcome, factor) —
+  **64 passed** (61 pre-existing + the 3 new pins)
+- `npm run build` — clean (fresh, post-restore)
+- e2e lab + p1b-fixes — **49 passed** (p1b-11's 48 + the 1 new pin)
+- FULL Track B suite (`npx playwright test -c
+  tests/playwright.p1b.config.ts`, port 3819, fresh build):
+  **1608 passed, 9 skipped, 0 failed (38.9s)**
+  (`web-3819-p1b12-full.log`) — the p1b-11 count (1604 + 9 skipped: the
+  p1a-6 styleguide no-var shape) plus exactly the 4 new p1b-12 pins
+  (1 wire-guard + 1 set-run-outcome + 1 factor + 1 e2e).
+- Mutations: **1 mutant, 1 KILLED, 0 survived**, unit-in-isolation,
+  discriminated from the p1b-11 mutants, restoration byte-verified.
+
 ## p1a-7 — Track C convergence pass: the four un-audited surfaces hold under the new foundation
 
 **Scope**: verify History (/observatory), Activity (/feed), Proof (/proof),

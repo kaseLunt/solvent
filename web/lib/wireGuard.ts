@@ -34,10 +34,21 @@ export function isZeroDecimal(value: string): boolean {
 /**
  * A decimals scale the renderer may exponentiate: an integer in [0, 1000] —
  * mirrors `assertScale`'s bounds in `@solvent/client`'s decimal.ts, so what
- * this guard admits is exactly what the renderer will not throw on.
+ * this guard admits the renderer will not throw on. One deliberate asymmetry
+ * (p1b-12, Codex round 4): `assertScale` ADMITS -0 (`Number.isInteger(-0)`
+ * is true and `-0 < 0` is false) and would render base-unit strings at ZERO
+ * decimal places — a plausible, severely mis-scaled price — so this guard
+ * refuses the -0 fingerprint before the renderer ever sees it (the NEGATIVE
+ * ZERO block below).
  */
 export function isWireScale(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 1000;
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 1000 &&
+    !Object.is(value, -0)
+  );
 }
 
 /**
@@ -109,6 +120,17 @@ export function isWireScale(value: unknown): value is number {
  * as `0`), so a post-parse -0 is the surviving fingerprint of an
  * out-of-contract token, and BOTH count guards refuse it through
  * `Object.is` — the only equality that sees the sign bit. `0` stays legal.
+ *
+ * p1b-12 (Codex round 4): the SAME class, one guard over — `isWireScale`
+ * judged `Number.isInteger && >= 0 && <= 1000`, all true of -0, so
+ * `JSON.parse("-1e-324")` on `usd_decimals` / `price_decimals` /
+ * market-realization scales / collateral decimals wore a legal scale (and
+ * downstream `assertScale` accepts -0 too: base-unit strings would render at
+ * zero decimal places — plausible, severely mis-scaled prices). -0 coverage
+ * now spans ALL wire integer guards in this module — scale, population,
+ * occupancy (through population), signed count — and the p1b-12 audit
+ * carried the same refusal to the local integer gates outside it
+ * (`runbookSet.ts` `positiveInt`, `factor.ts` `toBig`).
  *
  * DOCUMENTED LIMITATION — THE POST-PARSE INFORMATION BOUNDARY (finding A2,
  * recorded, NOT closed, and not closable at this layer): fractional JSON

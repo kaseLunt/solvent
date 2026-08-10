@@ -83,6 +83,20 @@ test.describe("refusals", () => {
   test("a non-decimal string is refused", () => {
     expect(() => formatFactor("0.8", "1")).toThrow(/not a contract decimal/);
   });
+
+  test("p1b-12: negative zero is refused as a factor term — ordinary 0 stays a legal numerator", () => {
+    // The p1b-12 negative-zero class at THIS gate: `Number.isSafeInteger(-0)`
+    // is true, and `BigInt(-0)` is `0n` — a fractional wire token (`-1e-324`
+    // rounds to NEGATIVE ZERO during JSON.parse) would be LAUNDERED into the
+    // exact ratio `0/den` and rendered as a computed-looking −100% shock.
+    expect(Object.is(JSON.parse("-1e-324"), -0)).toBe(true);
+    expect(() => formatFactor(-0, 100)).toThrow(/exact integer/);
+    expect(() => formatFactor(100, -0)).toThrow(/exact integer/);
+    // A zero NUMERATOR is a legal factor (a full wipe): 0/100 → −100%.
+    const f = formatFactor(0, 100);
+    expect(f.ratio).toBe("0/100");
+    expect(f.percent).toBe(`${MINUS_SIGN}100%`);
+  });
 });
 
 test("renderFactor puts the ratio first — the ratio IS the number", () => {

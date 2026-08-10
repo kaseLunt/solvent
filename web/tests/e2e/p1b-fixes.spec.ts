@@ -942,3 +942,70 @@ test.describe("p1b-11 · Codex round-3 fixes", () => {
     await expect(dmPanel.getByTestId("book-engine-answer")).toBeVisible();
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-12 · the Codex round-4 fix wave: the SAME negative-zero class, one
+// guard over. `isWireScale` judged `Number.isInteger && >= 0 && <= 1000` —
+// all true of -0 — so `"usd_decimals": -1e-324` (a fractional token that
+// rounds to NEGATIVE ZERO during JSON.parse) wore a legal scale, and the
+// downstream renderer accepted it too (`assertScale` admits -0): base-unit
+// strings rendered at ZERO decimal places — plausible, severely mis-scaled
+// prices.
+//
+// HOW THE -0 PAYLOAD IS PRODUCED, honestly: the JS literal `-1e-324` already
+// EVALUATES to -0 (it is below half of Number.MIN_VALUE), and
+// `JSON.stringify(-0)` NORMALIZES to the token `0` — so a structuredClone +
+// stringify mock would deliver `"usd_decimals":0`, which parses to +0 and
+// never exercises the defect. The fixture is therefore cloned with a UNIQUE
+// SENTINEL scale, serialized, and the sentinel is spliced in the RAW BODY
+// STRING with the literal token `-1e-324`; the browser's JSON.parse turns
+// that token back into -0 at the boundary under test.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-12 · Codex round-4 fix", () => {
+  test("a usd_decimals token that parses to -0 refuses the engine by name — never a mis-scaled price", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    // Single documented change to the committed run-book fixture, serving ONE
+    // purpose (the scale-guard arm): engines[0]'s usd_decimals carries the
+    // raw JSON token -1e-324. Everything else byte-identical.
+    const SENTINEL = 987654321; // no legal scale (>1000): unmistakable in the body text
+    const body = corruptedRunBook((engine) => {
+      engine.usd_decimals = SENTINEL;
+    });
+    const serialized = JSON.stringify(body);
+    const needle = `"usd_decimals":${String(SENTINEL)}`;
+    // The sentinel must appear EXACTLY once (engines[0] only) or the splice
+    // would corrupt more than the documented field.
+    expect(serialized.split(needle).length).toBe(2);
+    const raw = serialized.replace(needle, '"usd_decimals":-1e-324');
+    await page.route(`${API}/v1/scenarios/*/run-book`, (route) => {
+      if (route.request().method() === "OPTIONS") {
+        return route.fulfill({ status: 204, headers: RUN_CORS, body: "" });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: RUN_CORS,
+        body: raw,
+      });
+    });
+    await page.goto("/lab");
+    await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
+    // ROUTE STAYS LIVE, the cell settles malformed — same law, same register
+    // as the p1b-2/p1b-9/p1b-11 pins above.
+    const cell = aaveCell(page);
+    await expect(cell).toHaveAttribute("data-cell-state", "result");
+    await expect(cell).toHaveAttribute("data-cell-outcome", "malformed");
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+    // The ENGINE PANEL names the unreadable scale.
+    const aavePanel = page.locator('[data-testid="book-engine"][data-engine="aave_v3_etherfi"]');
+    await expect(aavePanel).toHaveAttribute("data-engine-outcome", "malformed");
+    await expect(aavePanel).toContainText("usd_decimals");
+    // The healthy second engine renders normally — the refusal is scoped.
+    const dmPanel = page.locator('[data-testid="book-engine"][data-engine="debt_manager"]');
+    await expect(dmPanel).not.toHaveAttribute("data-engine-outcome", "malformed");
+    await expect(dmPanel.getByTestId("book-engine-answer")).toBeVisible();
+  });
+});
