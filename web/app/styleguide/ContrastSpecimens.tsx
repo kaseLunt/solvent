@@ -22,6 +22,7 @@ import {
   parseCssColor,
 } from "@/lib/contrast";
 import styles from "./styleguide.module.css";
+import inspectorStyles from "../inspector/inspector.module.css";
 
 interface ContrastPair {
   /** Stable id — doubles as the swatch's data-pair attribute. */
@@ -67,6 +68,15 @@ const PROBE: ContrastPair = {
 
 const ALL_PAIRS: readonly ContrastPair[] = [...AUDITED, PROBE];
 
+// p1a-9 (F5): ONE representative REAL-CONSUMER specimen rides the gate. The
+// token pairs above prove the PALETTE; this proves a consumer CLASS — the
+// inspector's verdict chip (inspector.module.css .verdict/.verdictWarn, the
+// price-freshness state chip), mounted with its real stylesheet on its real
+// --panel ground and measured live. A consumer that keeps (or regresses to)
+// the fill-grade token for its TEXT dies here: light --warn on --panel is
+// ~3.2, under the 4.5 gate this ratio is asserted against.
+const CONSUMER_SPECIMEN_ID = "consumer-inspector-verdict-warn";
+
 export function ContrastSpecimens() {
   const samples = useRef(new Map<string, HTMLSpanElement>());
   const [ratios, setRatios] = useState<Record<string, string>>({});
@@ -90,6 +100,21 @@ export function ContrastSpecimens() {
       if (fg === null || bg === null) continue;
       const ground = compositeOver(bg, base);
       next[pair.id] = formatRatio(contrastRatio(compositeOver(fg, ground), ground));
+    }
+
+    // The consumer specimen: its ink comes from the REAL class; its ground is
+    // its parent's (the chip itself is transparent — outline-first).
+    const consumer = samples.current.get(CONSUMER_SPECIMEN_ID);
+    if (consumer !== null && consumer !== undefined && consumer.parentElement !== null) {
+      const fg = parseCssColor(getComputedStyle(consumer).color);
+      const ownBg = parseCssColor(getComputedStyle(consumer).backgroundColor);
+      const parentBg = parseCssColor(getComputedStyle(consumer.parentElement).backgroundColor);
+      if (fg !== null && ownBg !== null && parentBg !== null) {
+        const ground = compositeOver(ownBg, compositeOver(parentBg, base));
+        next[CONSUMER_SPECIMEN_ID] = formatRatio(
+          contrastRatio(compositeOver(fg, ground), ground),
+        );
+      }
     }
     setRatios(next);
   }, []);
@@ -150,10 +175,50 @@ export function ContrastSpecimens() {
     );
   };
 
+  const consumerRatio = ratios[CONSUMER_SPECIMEN_ID];
+  const consumerFailing =
+    consumerRatio !== undefined && Number.parseFloat(consumerRatio) < AA_NORMAL_TEXT;
+
   return (
     <div className={styles.contrastGrid}>
       {AUDITED.map((pair) => renderPair(pair, false))}
       {renderPair(PROBE, true)}
+      <div
+        className={styles.contrastCard}
+        data-testid="contrast-consumer"
+        data-pair={CONSUMER_SPECIMEN_ID}
+        data-ratio={consumerRatio}
+        style={{ background: "var(--panel)" }}
+      >
+        <span
+          ref={(node) => {
+            if (node === null) samples.current.delete(CONSUMER_SPECIMEN_ID);
+            else samples.current.set(CONSUMER_SPECIMEN_ID, node);
+          }}
+          className={`${inspectorStyles.verdict} ${inspectorStyles.verdictWarn}`}
+        >
+          diagnostic
+        </span>
+        <span className={styles.contrastName}>
+          REAL CONSUMER — inspector .verdict.verdictWarn on --panel
+        </span>
+        <span
+          className={
+            consumerFailing
+              ? `${styles.contrastRatio} ${styles.contrastFail}`
+              : styles.contrastRatio
+          }
+        >
+          {consumerRatio === undefined
+            ? "measuring…"
+            : `${consumerRatio} ${consumerFailing ? "✗ < 4.5" : "✓ ≥ 4.5"}`}
+        </span>
+        <span className={styles.contrastNote}>
+          the p1a-9 F5 specimen: a live consumer CLASS, not a token pair — text on this chip must
+          reference the -text grade, and a regression to the fill token dies at this measured
+          ratio.
+        </span>
+      </div>
     </div>
   );
 }

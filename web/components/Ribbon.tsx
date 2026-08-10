@@ -36,15 +36,19 @@ export interface RibbonAsOf {
 
 /** The snapshot chip: its composed parts, its tier, and its full title. */
 export interface RibbonSnapshotChip {
-  /** From `snapshotChipParts` / `snapshotChipUnknown` (lib/freshness.ts). */
+  /** From `snapshotChipParts` / `snapshotChipUnknown` / `snapshotChipPending`
+   * (lib/freshness.ts). */
   readonly parts: SnapshotChipParts;
   /**
    * The SLA tier of the stated age — styles the chip per canon §06 (fresh →
    * quiet, aging → warn, stale → crit outline, critical → crit fill). `null`
    * is the UNKNOWN register: dashed, never any tier's color, because an
-   * unknown age has no tier, not a small one.
+   * unknown age has no tier, not a small one. `"pending"` (p1a-9) is a KNOWN
+   * age whose tier constants have not resolved: the quiet register — the age
+   * renders unstained, no tier word, no tier color, never the dashed unknown
+   * (the number is true; only the judgment over it is withheld).
    */
-  readonly tier: FreshnessTier | null;
+  readonly tier: FreshnessTier | "pending" | null;
   /** The chip's explanatory title (includes the fallback-thresholds disclosure). */
   readonly title: string;
 }
@@ -106,6 +110,27 @@ const TIER_CLASS: Record<FreshnessTier, string | undefined> = {
   critical: styles.cCritFill,
 };
 
+/**
+ * THE STREAM CHIP, on its own (p1a-9). The appbar's stream-posture chip was
+ * inlined in `Ribbon`, so the NO SERVABLE BATCH branch — which renders its own
+ * bar — silently dropped it: an unavailable statement erased the connection's
+ * truth. Both truths are independent facts and both always show (canon §05),
+ * so the chip is one component both bars mount. Same testid, same tone map,
+ * same accent-only pulse — the pins that watch `ribbon-stream` watch both.
+ */
+export function RibbonStreamChip({ posture }: { posture: RibbonStreamPosture }) {
+  return (
+    <span
+      className={`${styles.chip} ${TONE_CLASS[posture.tone]}`}
+      data-testid="ribbon-stream"
+      title="the stream connection's own posture — a separate statement from the snapshot's age beside it"
+    >
+      {posture.tone === "accent" && <i className={`${styles.dot} ${styles.pulse}`} aria-hidden />}
+      {posture.label}
+    </span>
+  );
+}
+
 export function Ribbon(props: RibbonProps) {
   if (props.mode === "proof") {
     return (
@@ -121,21 +146,18 @@ export function Ribbon(props: RibbonProps) {
   const coverage = props.coverage ?? null;
   return (
     <div className={styles.appbar}>
-      <span
-        className={`${styles.chip} ${TONE_CLASS[posture.tone]}`}
-        data-testid="ribbon-stream"
-        title="the stream connection's own posture — a separate statement from the snapshot's age beside it"
-      >
-        {posture.tone === "accent" && <i className={`${styles.dot} ${styles.pulse}`} aria-hidden />}
-        {posture.label}
-      </span>
+      <RibbonStreamChip posture={posture} />
       {snapshot !== undefined && (
         <>
           <i className={styles.sep} aria-hidden />
           <span
             data-testid="ribbon-snapshot"
             className={`${styles.chip} ${
-              snapshot.tier === null ? styles.cUnknown : TIER_CLASS[snapshot.tier]
+              snapshot.tier === null
+                ? styles.cUnknown
+                : snapshot.tier === "pending"
+                  ? styles.cQuiet
+                  : TIER_CLASS[snapshot.tier]
             }`}
             title={snapshot.title}
           >

@@ -92,12 +92,15 @@
   display: block;
 }
 
-.liveOk {
-  color: var(--ok);
+/* p1a-9 (F3): the proven-connection chip is ACCENT — connection is posture,
+ * not health, and no socket is green (the appbar's own law, canon §05).
+ * `.liveOk` is retired with the green it painted. */
+.liveAccent {
+  color: var(--accent-text);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .liveOk i {
+  .liveAccent i {
     animation: feedPulse 2.4s ease-in-out infinite;
   }
 
@@ -113,12 +116,23 @@
   }
 }
 
+/* p1a-9 (F3): open with NO base frame — the unknown register: measured ink,
+ * hollow dot, no posture color. This connection has proven nothing yet. */
+.liveUnknown {
+  color: var(--ink-2);
+}
+
+.liveUnknown i {
+  background: transparent;
+  border: 1px dashed currentColor;
+}
+
 .liveWarn {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .liveDown {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 .liveStrip b {
@@ -170,12 +184,12 @@
 
 .chipButton:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .chipButton.on {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
@@ -311,7 +325,7 @@
 }
 
 .txLink:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -347,7 +361,7 @@
 }
 
 .dividerFold summary:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .dividerFold p {
@@ -372,7 +386,7 @@
 
 .detailToggle:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .detail {
@@ -424,7 +438,7 @@
 }
 
 .warnStrip b {
-  color: var(--warn);
+  color: var(--warn-text);
   font-weight: 600;
   letter-spacing: var(--track-label);
 }
@@ -445,7 +459,7 @@
 }
 
 .refusalStrip b {
-  color: var(--crit);
+  color: var(--crit-text);
   font-weight: 600;
   letter-spacing: var(--track-refused);
 }
@@ -472,7 +486,7 @@
 }
 
 .noteFold summary:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .noteFold p {
@@ -508,7 +522,7 @@
 
 .loadMore:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .loadMore:disabled {

@@ -200,80 +200,62 @@ export default function StyleguidePage() {
               </>
             }
             qualification="One account carries $8.5K of the total; the other two are dust (<$0.01 and $0.33). 6 accounts refused per engine — counted below, never folded in."
-            identity={
-              <>
-                <StatusChip tone="quiet">
-                  CURRENT · <ChipVal>batch #18251</ChipVal>
-                </StatusChip>
-                <StatusChip tone="quiet">
-                  SNAPSHOT <ChipVal>48s</ChipVal>
-                </StatusChip>
-                <StatusChip tone="quiet">
-                  COVERAGE <ChipVal>2/2</ChipVal> ENGINES
-                </StatusChip>
-                <StatusChip tone="accent">
-                  EVIDENCE · <ChipVal>3 pins</ChipVal>
-                </StatusChip>
-              </>
-            }
+            identity={{
+              batch: { text: "CURRENT ·", value: "batch #18251" },
+              age: { text: "SNAPSHOT", value: "48s" },
+              coverage: { text: "COVERAGE", value: "2/2", suffix: "ENGINES" },
+              evidence: { text: "EVIDENCE ·", value: "3 pins", tone: "accent" },
+            }}
           />
           <VerdictBanner
             variant="refused"
             testId="sg-verdict-refused"
             answer="Verdict unavailable — the engine won't guess."
             qualification="The Debt Manager sweep failed twice at this batch, so it refuses to value this account rather than serve an unproven number. Chain activity is retained below."
-            identity={
-              <>
-                <RefusedChip cause="sweep failed twice" code="sweep_failed_no_success" />
-                <StatusChip tone="quiet">
-                  SNAPSHOT <ChipVal>48s</ChipVal>
-                </StatusChip>
-              </>
-            }
+            identity={{
+              // §5 D5 order holds inside the clause: the plain cause leads,
+              // the wire code rides last in the mono register.
+              currentOrProjected: {
+                text: "REFUSED · sweep failed twice ·",
+                value: "sweep_failed_no_success",
+                tone: "warn",
+              },
+              age: { text: "SNAPSHOT", value: "48s" },
+            }}
           />
           <VerdictBanner
             variant="superseded"
             testId="sg-verdict-superseded"
             answer="Results for previous input."
             qualification="Bound to 0x80b3…6e1d · batch #18251 · eth_-20 v3 · computed 04:11:07Z. The address field has changed; run again for the new address. A late response never overwrites a newer request context."
-            identity={
-              <>
-                <StatusChip tone="warn">SUPERSEDED</StatusChip>
-                <ProjectionBadge label="PROJECTION · ETH −20% v3" />
-              </>
-            }
+            identity={{
+              currentOrProjected: {
+                text: "SUPERSEDED · PROJECTION ·",
+                value: "ETH −20% v3",
+                tone: "warn",
+              },
+              batch: { text: "", value: "batch #18251" },
+            }}
           />
           <VerdictBanner
             variant="empty"
             testId="sg-verdict-empty"
             answer="No position — definitively."
             qualification="Both engines cover this address and both report no balances at batch #18251. Absence is a computed answer, not a failed lookup."
-            identity={
-              <>
-                <StatusChip tone="quiet">
-                  COVERAGE <ChipVal>2/2</ChipVal>
-                </StatusChip>
-                <StatusChip tone="quiet">
-                  SNAPSHOT <ChipVal>48s</ChipVal>
-                </StatusChip>
-              </>
-            }
+            identity={{
+              age: { text: "SNAPSHOT", value: "48s" },
+              coverage: { text: "COVERAGE", value: "2/2" },
+            }}
           />
           <VerdictBanner
             variant="partial"
             testId="sg-verdict-partial"
             answer="Partial answer: 1 of 2 engines."
             qualification="Aave answered; the Debt Manager withheld (missing observation). Findings below cover the Aave book only — no figure on this page includes Debt Manager values."
-            identity={
-              <>
-                <StatusChip tone="warn">
-                  COVERAGE <ChipVal>1/2</ChipVal> · DM WITHHELD
-                </StatusChip>
-                <StatusChip tone="quiet">
-                  CURRENT · <ChipVal>batch #18251</ChipVal>
-                </StatusChip>
-              </>
-            }
+            identity={{
+              batch: { text: "CURRENT ·", value: "batch #18251" },
+              coverage: { text: "COVERAGE", value: "1/2", suffix: "· DM WITHHELD", tone: "warn" },
+            }}
           />
           {/* THE RATIFIED LAW, demonstrated: a banner composed WITHOUT its
               identity strip renders a warn-register structural refusal that

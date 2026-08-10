@@ -18,12 +18,14 @@
 
 import { expect, test } from "@playwright/test";
 import { SchemaVersionMismatchError, type MetaResponse } from "@solvent/client";
-import { anchoredAgeSeconds, type AgeAnchor } from "../../lib/freshness";
+import { anchoredAgeSeconds, snapshotChipPending, type AgeAnchor } from "../../lib/freshness";
 import { freshnessTier, TIER_FALLBACK, type TierConstants } from "../../lib/freshnessTiers";
 import {
   loadMetaConstants,
   META_CONSTANTS_FALLBACK,
+  META_CONSTANTS_PENDING,
   tierConstantsOf,
+  tierConstantsViolation,
   type MetaSource,
 } from "../../lib/meta";
 
@@ -194,4 +196,90 @@ test("a SchemaVersionMismatchError from meta()'s own compatibility check lands t
 
 test("META_CONSTANTS_FALLBACK is the disclosed pair: the fallback trio, named as such", () => {
   expect(META_CONSTANTS_FALLBACK).toEqual({ constants: TIER_FALLBACK, source: "fallback" });
+});
+
+// ---------------------------------------------------------------------------
+// p1a-9 — the four-state reading. "pending" before the ask resolves,
+// "invalid" (fallback constants + a NAMED cause) for a wire trio the tier
+// theorems cannot stand on, "fallback" ONLY after an actual failure.
+// ---------------------------------------------------------------------------
+
+test("META_CONSTANTS_PENDING is the pre-resolution reading — the floor trio, named pending, never 'fallback'", () => {
+  expect(META_CONSTANTS_PENDING).toEqual({ constants: TIER_FALLBACK, source: "pending" });
+});
+
+test("tierConstantsViolation accepts the ratified trio and every properly nested one", () => {
+  expect(tierConstantsViolation(TIER_FALLBACK)).toBeNull();
+  // The nesting bounds are inclusive: 2×poll === ceiling === sweep is lawful.
+  expect(
+    tierConstantsViolation({
+      pricePollSeconds: 30,
+      priceCeilingSeconds: 60,
+      dmSweepWorstCaseSeconds: 60,
+    }),
+  ).toBeNull();
+});
+
+test("non-finite, non-positive and non-safe-integer constants are named INVALID, field by field", () => {
+  const invalid = (over: Partial<TierConstants>) =>
+    tierConstantsViolation({ ...TIER_FALLBACK, ...over });
+  expect(invalid({ pricePollSeconds: 0 })).toContain("price_poll_seconds");
+  expect(invalid({ pricePollSeconds: -60 })).toContain("price_poll_seconds");
+  expect(invalid({ pricePollSeconds: 1.5 })).toContain("price_poll_seconds");
+  expect(invalid({ priceCeilingSeconds: Number.NaN })).toContain("price_ceiling_seconds");
+  expect(invalid({ priceCeilingSeconds: Number.POSITIVE_INFINITY })).toContain(
+    "price_ceiling_seconds",
+  );
+  expect(invalid({ dmSweepWorstCaseSeconds: 2 ** 53 })).toContain("dm_sweep_worst_case_seconds");
+});
+
+test("THE MISORDERED PIN: poll 300 / ceiling 360 is INVALID — and 500s never renders FRESH", async () => {
+  // 2×300 = 600 > 360: the FRESH interval would spill past the API's own
+  // price-refusal boundary. A page trusting that trio would render FRESH at
+  // 500s over prices the API refuses to serve.
+  const source = metaAnswering({
+    ...WIRE_CONSTANTS,
+    price_poll_seconds: 300,
+    price_ceiling_seconds: 360,
+  });
+  const reading = await loadMetaConstants(source);
+  expect(reading.source).toBe("invalid");
+  expect(reading.constants).toEqual(TIER_FALLBACK);
+  expect(reading.invalidReason).toContain("out of order");
+  expect(reading.invalidReason).toContain("600");
+  // The whole point, stated as the tier it produces: under the served
+  // constants 500s is STALE (past the 360 ceiling) — never the FRESH the
+  // broken trio would have claimed.
+  expect(freshnessTier(500, reading.constants)).toBe("stale");
+});
+
+test("ceiling past the sweep worst case is the SECOND ordering violation, named as such", async () => {
+  const source = metaAnswering({
+    ...WIRE_CONSTANTS,
+    price_poll_seconds: 60,
+    price_ceiling_seconds: 6000,
+    dm_sweep_worst_case_seconds: 5580,
+  });
+  const reading = await loadMetaConstants(source);
+  expect(reading.source).toBe("invalid");
+  expect(reading.constants).toEqual(TIER_FALLBACK);
+  expect(reading.invalidReason).toContain("dm_sweep_worst_case_seconds");
+});
+
+test("an INVALID wire answer is not a FAILURE: source 'invalid', reason present — never 'fallback', never 'meta'", async () => {
+  const source = metaAnswering({ ...WIRE_CONSTANTS, price_poll_seconds: 0 });
+  const reading = await loadMetaConstants(source);
+  expect(reading.source).toBe("invalid");
+  expect(reading.invalidReason).toContain("price_poll_seconds");
+  // Still exactly one ask — invalidity is an answer, not a reason to poll.
+  expect(source.calls).toBe(1);
+});
+
+test("the PENDING snapshot chip states the age with NO tier word — the judgment is withheld, not the number", () => {
+  expect(snapshotChipPending(18251, 300)).toEqual({
+    label: "SNAPSHOT",
+    batchId: 18251,
+    age: "5m",
+    tierWord: null,
+  });
 });

@@ -27,7 +27,7 @@
 }
 
 .crossLink a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
@@ -88,7 +88,7 @@
 
 .tocChip:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* ---- section headings ---- */
@@ -130,13 +130,13 @@
   padding: 2px 7px;
   border-radius: var(--r-xs);
   border: 1px solid var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   white-space: nowrap;
 }
 
 .methodPost {
   border-color: var(--warn);
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .path {
@@ -196,7 +196,7 @@
 }
 
 .paramRequired {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .paramDescription {
@@ -296,7 +296,7 @@ details[open] > .sampleSummary::before {
 }
 
 .responseChipErr {
-  color: var(--warn);
+  color: var(--warn-text);
   border-color: var(--warn);
 }
 
@@ -324,7 +324,7 @@ details[open] > .sampleSummary::before {
 
 .errorStatus {
   font-weight: 600;
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .errorName {

@@ -53,12 +53,12 @@
 
 .chipButton:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .chipButton.on {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--chip-bg);
 }
 
@@ -304,7 +304,7 @@
 }
 
 .warnStrip b {
-  color: var(--warn);
+  color: var(--warn-text);
   font-weight: 600;
   letter-spacing: var(--track-label);
 }

@@ -53,7 +53,7 @@
   border: 1px dashed var(--crit);
   border-radius: var(--r-xs);
   padding: 4px 9px;
-  color: var(--crit);
+  color: var(--crit-text);
   background: var(--refused-bg);
 }
 
@@ -98,7 +98,7 @@
 
 .recentItem a:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* ---- [addr]: page chrome ---- */
@@ -278,15 +278,15 @@
 }
 
 .vOk {
-  color: var(--ok);
+  color: var(--ok-text);
 }
 
 .vWarn {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .vCrit {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 .vDim {
@@ -308,17 +308,17 @@
 }
 
 .verdictOk {
-  color: var(--ok);
+  color: var(--ok-text);
   border-color: var(--ok);
 }
 
 .verdictWarn {
-  color: var(--warn);
+  color: var(--warn-text);
   border-color: var(--warn);
 }
 
 .verdictCrit {
-  color: var(--crit);
+  color: var(--crit-text);
   border-color: var(--crit);
 }
 
@@ -364,7 +364,7 @@
 }
 
 .explain:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration-color: var(--accent);
 }
 
@@ -427,7 +427,7 @@
 /* The DM's disclosure-ratio warning stays VISIBLE, in the warn register —
    never folded into the collapsed doctrine. */
 .historyDmDisclosure {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .historyDoctrine summary {
@@ -514,7 +514,7 @@
 }
 
 .txLink:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -535,7 +535,7 @@
 
 .loadMore:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .sectionNote {

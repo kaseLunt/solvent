@@ -39,15 +39,15 @@
 }
 
 .vOk {
-  color: var(--ok);
+  color: var(--ok-text);
 }
 
 .vWarn {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .vCrit {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 .vDim {
@@ -108,7 +108,7 @@
 }
 
 .explain:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration-color: var(--accent);
 }
 

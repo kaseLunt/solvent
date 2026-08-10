@@ -15,7 +15,7 @@ import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 import { BOOK, POSITIONS_AAVE_PAGE_1 } from "../fixtures/book";
-import { FEED_POSTURE_SNAPSHOT } from "../fixtures/feed";
+import { FEED_CROSS_PAGE_1, FEED_POSTURE_SNAPSHOT } from "../fixtures/feed";
 
 async function openShell(page: Page, viewport: { width: number; height: number }): Promise<void> {
   await page.setViewportSize(viewport);
@@ -730,5 +730,327 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     await page.keyboard.press("Escape");
     await expect(chart).not.toBeFocused();
     await expect(page.getByTestId("sg-ir-readout")).toContainText("batch #18251");
+  });
+
+  test("p1a-9 F5: the contrast gate carries a REAL consumer specimen — the inspector verdict chip clears 4.5 live in both themes", async ({
+    page,
+  }) => {
+    // The token pairs prove the PALETTE; this proves a consumer CLASS: the
+    // inspector's .verdict.verdictWarn chip mounted with its real stylesheet
+    // on its real --panel ground, measured live. A consumer whose TEXT keeps
+    // (or regresses to) the fill-grade token dies here — light --warn on
+    // --panel is ~3.2.
+    const specimen = page.getByTestId("contrast-consumer");
+    await expect(specimen).toBeVisible();
+    for (const theme of ["light", "dark"] as const) {
+      await page.evaluate((value) => {
+        document.documentElement.setAttribute("data-theme", value);
+      }, theme);
+      await expect
+        .poll(async () => Number.parseFloat((await specimen.getAttribute("data-ratio")) ?? "0"), {
+          message: `consumer specimen ratio in ${theme}`,
+        })
+        .toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+// ===========================================================================
+// p1a-9 — THE CODEX ROUND. Seven findings, fixed test-first; the rendered
+// pins live here (the pure cores are pinned in tests/unit/*).
+//
+//   F1  coverage counts RISK BOOKS (the aggregate roster), never the
+//       watermark stamp vector — the five-stamp production shape is the pin.
+//   F2  /v1/meta pending → the snapshot chip does NOT tier-style; the age
+//       renders unstained (quiet register, no tier word).
+//   F3  the feed live strip threads hasBase and no socket is ever green:
+//       open+base → ACCENT "streaming", open+no-base → "awaiting base".
+//   F4  the NO SERVABLE BATCH branch renders the stream chip beside it —
+//       unavailable × {waiting, open} pinned here; the closed arm's label is
+//       the same `ribbonStreamPosture` total mapping the unit suite pins
+//       (production never reaches `closed` without an unmount: the client's
+//       reconnect policy defaults to unbounded).
+// ===========================================================================
+
+type SnapshotPayload = ReturnType<typeof structuredClone<typeof FEED_POSTURE_SNAPSHOT>>;
+
+/** The committed snapshot with a PAYLOAD-level mutation (p1a-9 needs to edit
+ * `engines`, not just the batch — the p1a-4 helper touches batch only). */
+function appbarPayloadFrame(mutate: (payload: SnapshotPayload) => void): string {
+  const payload = structuredClone(FEED_POSTURE_SNAPSHOT);
+  mutate(payload);
+  return `event: snapshot\ndata: ${JSON.stringify(payload)}\n\n`;
+}
+
+/**
+ * PRODUCTION'S OWN STAMP SHAPE: the watermark vector grows the param and
+ * price stamps the live pipeline binds (aave_param · prices:poll:1 ·
+ * prices:poll:10) beside the two risk books. The aggregates roster stays the
+ * TWO books — which is exactly the point: a coverage derivation reverted to
+ * the stamp vector reads 5/5 here and dies at the 2/2 pin.
+ */
+function withFiveStamps(payload: SnapshotPayload): void {
+  const batch = payload.batch;
+  if (batch === null || batch === undefined) throw new Error("fixture shape drifted");
+  const aave = batch.watermarks.find((stamp) => stamp.engine === "aave_v3_etherfi");
+  if (aave === undefined) throw new Error("fixture shape drifted");
+  for (const [engine, chainId] of [
+    ["aave_param", 1],
+    ["prices:poll:1", 1],
+    ["prices:poll:10", 10],
+  ] as const) {
+    batch.watermarks.push({ ...structuredClone(aave), engine, chain_id: chainId, sweep: null });
+  }
+}
+
+/** The server's own unavailability statement, as one SSE frame (r7's shape). */
+const UNAVAILABLE_FRAME = `event: unavailable\ndata: ${JSON.stringify({
+  served_at: "2026-07-29T10:00:05Z",
+  batch: null,
+  reason: "no complete risk batch is available",
+  stale_since_seconds: 42,
+  last_good_batch_id: 1,
+})}\n\n`;
+
+/** A held-open SSE server: writes `body` and keeps the connection alive, so
+ * `streamState` is genuinely "open" (route.fulfill would end the body — a
+ * hang-up — and spend the test on the reconnect backoff). */
+async function withHeldOpenStream(
+  page: Page,
+  body: string,
+  run: () => Promise<void>,
+): Promise<void> {
+  const live = new Set<ServerResponse>();
+  const server: Server = createServer((_request, response) => {
+    live.add(response);
+    response.on("close", () => live.delete(response));
+    response.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-store",
+      ...APPBAR_CORS,
+    });
+    response.write(body);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as AddressInfo).port;
+  try {
+    await page.route("**/v1/stream**", (route) =>
+      route.continue({ url: `http://127.0.0.1:${String(port)}/v1/stream` }),
+    );
+    await run();
+  } finally {
+    for (const response of live) response.destroy();
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
+  }
+}
+
+test.describe("p1a-9 · the codex round", () => {
+  // ---- F1: coverage divides compatible sets --------------------------------
+
+  test("F1: COVERAGE counts risk books — 2/2 on a five-stamp production-shaped batch, never 5/5", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await muteAppbarMeta(page);
+    await mockAppbarBook(page);
+    await page.route("**/v1/stream**", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { ...APPBAR_CORS, "content-type": "text/event-stream" },
+        body: appbarPayloadFrame(withFiveStamps),
+      }),
+    );
+    await page.goto("/book?engine=aave_v3_etherfi");
+
+    const header = page.getByRole("banner");
+    // THE PIN THE REVERT DIES AT: five stamps on the envelope, two books in
+    // the roster — the chip divides the roster.
+    await expect(header.getByTestId("ribbon-coverage")).toHaveText("COVERAGE 2/2 ENGINES");
+    // The five stamps are real and rendered — in the popover, where the
+    // pipeline input vector belongs.
+    await header.getByTestId("ribbon-data-status").click();
+    const panel = header.getByTestId("ribbon-data-status-panel");
+    await expect(panel).toContainText("aave_param");
+    await expect(panel).toContainText("prices:poll:1");
+    await expect(panel).toContainText("prices:poll:10");
+  });
+
+  test("F1: a withheld book on the five-stamp batch is 1/2 — warn register, named", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await muteAppbarMeta(page);
+    await mockAppbarBook(page);
+    await page.route("**/v1/stream**", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { ...APPBAR_CORS, "content-type": "text/event-stream" },
+        body: appbarPayloadFrame((payload) => {
+          withFiveStamps(payload);
+          if (payload.batch === null || payload.batch === undefined) {
+            throw new Error("fixture shape drifted");
+          }
+          payload.batch.refused_engines = ["debt_manager"];
+        }),
+      }),
+    );
+    await page.goto("/book?engine=aave_v3_etherfi");
+
+    const chip = page.getByRole("banner").getByTestId("ribbon-coverage");
+    await expect(chip).toHaveText("COVERAGE 1/2 ENGINES · debt_manager WITHHELD");
+    const register = await chip.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { color: cs.color, border: cs.borderTopColor };
+    });
+    expect(register.color).toBe(await resolveAppbarToken(page, "--warn-text"));
+    expect(register.border).toBe(await resolveAppbarToken(page, "--warn"));
+  });
+
+  test("F1: a frame WITHOUT the aggregates roster withholds the coverage chip entirely", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await muteAppbarMeta(page);
+    await mockAppbarBook(page);
+    await page.route("**/v1/stream**", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { ...APPBAR_CORS, "content-type": "text/event-stream" },
+        body: appbarPayloadFrame((payload) => {
+          delete payload.engines;
+        }),
+      }),
+    );
+    await page.goto("/book?engine=aave_v3_etherfi");
+
+    const header = page.getByRole("banner");
+    // The rest of the appbar renders; only the underivable chip is withheld —
+    // never approximated from the stamp vector sitting right there.
+    await expect(header.getByTestId("ribbon-batch")).toHaveText("BATCH #1");
+    await expect(header.getByTestId("ribbon-snapshot")).toBeVisible();
+    await expect(header.getByTestId("ribbon-coverage")).toHaveCount(0);
+  });
+
+  // ---- F2: pending meta never tier-styles ----------------------------------
+
+  test("F2: while /v1/meta is PENDING the snapshot chip renders the age UNSTAINED — no tier word, no tier color", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    // The one meta ask HANGS: never fulfilled, never failed. The reading must
+    // stay "pending" — not the fallback, which would tier-style at 300s.
+    await page.route("**/v1/meta*", () => {
+      /* held forever — resolution never arrives */
+    });
+    await mockAppbarStream(page, 300);
+    await mockAppbarBook(page);
+    await page.goto("/book?engine=aave_v3_etherfi");
+
+    const chip = page.getByTestId("ribbon-snapshot");
+    // 300s would be AGING under ANY constants this deployment could serve.
+    // THE MUTATION KILL: a ribbon that tier-styles during pending renders
+    // "SNAPSHOT 5m · AGING" and dies on the exact-text pin.
+    await expect(chip).toHaveText("SNAPSHOT 5m");
+    await expect(chip).not.toContainText("AGING");
+    const register = await readChipRegister(chip);
+    // The quiet register — measured ink, structural border, SOLID (the dashed
+    // unknown register is for an unknown AGE; this age is known).
+    expect(register.color).toBe(await resolveAppbarToken(page, "--ink-2"));
+    expect(register.border).toBe(await resolveAppbarToken(page, "--line"));
+    expect(register.borderStyle).toBe("solid");
+    // And the withholding is DISCLOSED, naming the pending ask — not the
+    // fallback sentence, because no failure has occurred.
+    await expect(chip).toHaveAttribute("title", /tier withheld — \/v1\/meta has not answered yet/);
+    await expect(chip).not.toHaveAttribute("title", /built-in fallback/);
+  });
+
+  // ---- F4: the unavailable branch keeps the stream chip --------------------
+
+  test("F4: NO SERVABLE BATCH renders BESIDE the stream chip — a hang-up reads STREAM RECONNECTING", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await muteAppbarMeta(page);
+    await mockAppbarBook(page);
+    // route.fulfill ends the body after the frame: the connection is a
+    // hang-up, so the CURRENT connection's truth is the reconnect backoff.
+    await page.route("**/v1/stream**", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { ...APPBAR_CORS, "content-type": "text/event-stream" },
+        body: UNAVAILABLE_FRAME,
+      }),
+    );
+    await page.goto("/book?engine=aave_v3_etherfi");
+
+    const header = page.getByRole("banner");
+    // BOTH truths, one bar: the service's own statement AND the transport's.
+    await expect(header.getByText("NO SERVABLE BATCH")).toBeVisible();
+    await expect(header.getByTestId("ribbon-stream")).toHaveText("STREAM RECONNECTING");
+    // The staleness statement is untouched by the chip's arrival.
+    await expect(page.getByTestId("ribbon-stale-since")).toHaveText("stale for 42s");
+  });
+
+  test("F4: NO SERVABLE BATCH over a genuinely OPEN stream reads STREAM CONNECTED — accent, never green", async ({
+    page,
+  }) => {
+    await muteAppbarMeta(page);
+    await mockAppbarBook(page);
+    await withHeldOpenStream(page, UNAVAILABLE_FRAME, async () => {
+      await page.goto("/book?engine=aave_v3_etherfi");
+      const header = page.getByRole("banner");
+      await expect(header.getByText("NO SERVABLE BATCH")).toBeVisible();
+      const chip = header.getByTestId("ribbon-stream");
+      await expect(chip).toHaveText("STREAM CONNECTED");
+      const color = await chip.evaluate((el) => getComputedStyle(el).color);
+      expect(color).toBe(await resolveAppbarToken(page, "--accent-text"));
+      expect(color).not.toBe(await resolveAppbarToken(page, "--ok"));
+    });
+  });
+
+  // ---- F3: the feed live strip — hasBase threaded, no green ----------------
+
+  test("F3: a proven feed connection is ACCENT 'streaming' — the ok token is not on this strip", async ({
+    page,
+  }) => {
+    await page.route("**/v1/events*", (route) => appbarJson(route, FEED_CROSS_PAGE_1));
+    await withHeldOpenStream(
+      page,
+      `event: snapshot\ndata: ${JSON.stringify(FEED_POSTURE_SNAPSHOT)}\n\n`,
+      async () => {
+        await page.goto("/feed");
+        const chip = page.getByTestId("feed-live-state");
+        await expect(chip).toHaveText("streaming");
+        const color = await chip.evaluate((el) => getComputedStyle(el).color);
+        // ACCENT — connection is posture, not health (the appbar's own law,
+        // now held by the strip that used to contradict it one viewport down).
+        expect(color).toBe(await resolveAppbarToken(page, "--accent-text"));
+        expect(color).not.toBe(await resolveAppbarToken(page, "--ok"));
+        expect(color).not.toBe(await resolveAppbarToken(page, "--ok-text"));
+      },
+    );
+  });
+
+  test("F3: open WITHOUT a base frame is 'awaiting base' — unknown register, nothing pretended", async ({
+    page,
+  }) => {
+    await page.route("**/v1/events*", (route) => appbarJson(route, FEED_CROSS_PAGE_1));
+    // The server accepts the connection and says NOTHING but a heartbeat
+    // comment: streamState is "open", hasBase is false.
+    await withHeldOpenStream(page, ": heartbeat 1753783205\n\n", async () => {
+      await page.goto("/feed");
+      const chip = page.getByTestId("feed-live-state");
+      // THE MUTATION KILL: a strip that ignores hasBase renders "streaming"
+      // over this connection and dies here.
+      await expect(chip).toHaveText("awaiting base");
+      const color = await chip.evaluate((el) => getComputedStyle(el).color);
+      expect(color).toBe(await resolveAppbarToken(page, "--ink-2"));
+      // And the batch line pretends nothing: no base means no batch strip.
+      await expect(page.getByTestId("feed-live-none")).toContainText("nothing is pretended");
+    });
   });
 });

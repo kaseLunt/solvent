@@ -42,6 +42,65 @@
       "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass."
     }
   },
+  "engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "value_decimals": 8,
+      "positions": 2,
+      "computed_positions": 1,
+      "refused_positions": 1,
+      "flagged_positions": 1,
+      "liquidatable_positions": 0,
+      "sweep": null,
+      "refused": false,
+      "refusal": null,
+      "total_collateral": "800000000000",
+      "total_debt": "600000000000",
+      "refusals": [
+        {
+          "key": "G1",
+          "count": 1
+        }
+      ],
+      "flags": [
+        {
+          "key": "stale_price",
+          "count": 1
+        }
+      ],
+      "unit_note": "values are integers at 8 decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)"
+    },
+    {
+      "engine": "debt_manager",
+      "value_decimals": 6,
+      "positions": 2,
+      "computed_positions": 1,
+      "refused_positions": 1,
+      "flagged_positions": 0,
+      "liquidatable_positions": 1,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-07-29T09:40:00Z",
+        "age_seconds": 1205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal": null,
+      "total_collateral": "4000000000",
+      "total_debt": "4200000000",
+      "refusals": [
+        {
+          "key": "SWEEP_NEVER",
+          "count": 1
+        }
+      ],
+      "flags": [],
+      "unit_note": "values are integers at 6 decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)"
+    }
+  ],
   "listener_connected": true,
   "poll_interval_seconds": 15,
   "note": "snapshot-on-connect: the base frame every connection receives before any tick."

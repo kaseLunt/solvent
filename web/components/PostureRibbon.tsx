@@ -4,12 +4,17 @@ import { usePosture, usePostureRefresh } from "@/lib/posture";
 import { ribbonCoverage } from "@/lib/coverage";
 import { formatBlock } from "@/lib/format";
 import { isWirePopulation } from "@/lib/wireGuard";
-import { snapshotChipParts, snapshotChipUnknown, staleSinceReading } from "@/lib/freshness";
+import {
+  snapshotChipParts,
+  snapshotChipPending,
+  snapshotChipUnknown,
+  staleSinceReading,
+} from "@/lib/freshness";
 import { freshnessTier } from "@/lib/freshnessTiers";
-import { useMetaConstants, type MetaConstantsSource } from "@/lib/meta";
+import { useMetaConstants, type MetaConstantsReading } from "@/lib/meta";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { ribbonEmptyPosture, ribbonStreamPosture } from "@/lib/stream-posture";
-import { Ribbon, type RibbonAsOf, type RibbonSnapshotChip } from "./Ribbon";
+import { Ribbon, RibbonStreamChip, type RibbonAsOf, type RibbonSnapshotChip } from "./Ribbon";
 import styles from "./ribbon.module.css";
 
 /**
@@ -28,18 +33,50 @@ import styles from "./ribbon.module.css";
  * The disclosure the snapshot chip carries when the tier thresholds are the
  * BUILT-IN fallback rather than `/v1/meta`'s constants (p1a-3's provider,
  * source `"fallback"`) — a threshold the page invented must never impersonate
- * one the pipeline stated. The arm is reachable on any unreachable or
- * refused meta read, including before the one meta round-trip resolves.
+ * one the pipeline stated. The arm is reachable on any FAILED meta read
+ * (transport, HTTP error, schema mismatch) — and, since p1a-9, ONLY on a
+ * failed one: before the ask resolves the reading is "pending" and no tier
+ * is styled at all.
  */
 export const TIER_FALLBACK_DISCLOSURE =
   "thresholds from built-in fallback — /v1/meta unavailable";
 
-/** The chip's base title — the age's subject, and the two-subjects law. */
-function snapshotTitle(batchId: number, source: MetaConstantsSource | null): string {
+/**
+ * The disclosure while the one meta ask is still in flight (p1a-9): the age
+ * renders unstained — no tier word, no tier color — because a tier styled
+ * from constants nothing has yet confirmed would be a severity the page
+ * invented. Not the fallback disclosure: no failure has occurred.
+ */
+export const TIER_PENDING_DISCLOSURE =
+  "tier withheld — /v1/meta has not answered yet";
+
+/**
+ * The disclosure prefix when meta ANSWERED but its constants failed
+ * validation (p1a-9): the tier is styled from the built-in fallback and the
+ * title names the exact cause (`invalidReason`, e.g. the misordered-boundary
+ * sentence), because "your server said something unusable" is a different
+ * fact from "your server was unreachable".
+ */
+export const TIER_INVALID_DISCLOSURE_PREFIX =
+  "thresholds from built-in fallback — /v1/meta constants invalid: ";
+
+/** The chip's base title — the age's subject, and the two-subjects law.
+ * `meta` null = no tier was computed, so no threshold source is disclosed. */
+function snapshotTitle(batchId: number, meta: MetaConstantsReading | null): string {
   const base =
     `snapshot freshness — how old served batch #${String(batchId)} is; ` +
     "the chip beside this is the stream connection, a separate statement";
-  return source === "fallback" ? `${base} · ${TIER_FALLBACK_DISCLOSURE}` : base;
+  if (meta === null) return base;
+  switch (meta.source) {
+    case "fallback":
+      return `${base} · ${TIER_FALLBACK_DISCLOSURE}`;
+    case "invalid":
+      return `${base} · ${TIER_INVALID_DISCLOSURE_PREFIX}${meta.invalidReason ?? "unstated"}`;
+    case "pending":
+      return `${base} · ${TIER_PENDING_DISCLOSURE}`;
+    case "meta":
+      return base;
+  }
 }
 
 // The coverage chip's HONEST derivation is `ribbonCoverage` (lib/coverage.ts,
@@ -174,13 +211,23 @@ export function PostureRibbon() {
         // disclosed either — the refusal is the whole statement.
         title: snapshotTitle(batchId, null),
       };
+    } else if (meta.source === "pending") {
+      // p1a-9: the age is KNOWN and renders as its number, but the tier
+      // constants have not resolved — the chip does NOT tier-style. Quiet
+      // register, no tier word: the pre-ratification interim, disclosed.
+      const seconds = age.seconds ?? posture.batch.age_seconds;
+      snapshot = {
+        parts: snapshotChipPending(batchId, seconds),
+        tier: "pending",
+        title: snapshotTitle(batchId, meta),
+      };
     } else {
       const seconds = age.seconds ?? posture.batch.age_seconds;
       const tier = freshnessTier(seconds, meta.constants);
       snapshot = {
         parts: snapshotChipParts(batchId, seconds, tier),
         tier,
-        title: snapshotTitle(batchId, meta.source),
+        title: snapshotTitle(batchId, meta),
       };
     }
     // WAVE R7 (round-15 finding 4), UNCHANGED IN LAW: the stream chip is
@@ -198,7 +245,11 @@ export function PostureRibbon() {
         superseded={posture.batch.supersession.superseded}
         snapshot={snapshot}
         batchId={batchId}
-        coverage={ribbonCoverage(posture.batch)}
+        // p1a-9: the roster is the batch's RISK-ENGINE AGGREGATES (the risk
+        // books), never the watermark stamp vector (the full pipeline input
+        // set — five stamps over a two-book deployment). A frame that did not
+        // carry the aggregates yields null and the chip is withheld.
+        coverage={ribbonCoverage(posture.batch, posture.engines)}
       />
     );
   }
@@ -215,8 +266,16 @@ export function PostureRibbon() {
       staleAge.unresolved,
       staleAge.refreshFailed,
     );
+    // p1a-9 (F4): the stream chip renders HERE TOO. The service's "no
+    // servable batch" and the connection's own posture are two independent
+    // truths — an unavailable statement received on a live socket must not
+    // erase the fact that the socket is live (or dead: RECONNECTING over an
+    // unavailable frame is exactly the double impairment a reader needs to
+    // see). Same chip, same testid, same registers as the stream branch.
     return (
       <div className={styles.appbar}>
+        <RibbonStreamChip posture={ribbonStreamPosture(streamState, hasBase)} />
+        <i className={styles.sep} aria-hidden />
         <span className={`${styles.chip} ${styles.cCrit}`}>NO SERVABLE BATCH</span>
         {stale !== null && (
           <span

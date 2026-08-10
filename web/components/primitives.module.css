@@ -26,15 +26,15 @@
 }
 
 .statValue.ok {
-  color: var(--ok);
+  color: var(--ok-text);
 }
 
 .statValue.warn {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .statValue.crit {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 .statSub {
@@ -101,15 +101,15 @@
 }
 
 .hf.ok {
-  color: var(--ok);
+  color: var(--ok-text);
 }
 
 .hf.warn {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .hf.crit {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 .hf.none {
@@ -189,7 +189,7 @@
 }
 
 .routeRefusalReset:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   border-color: var(--accent);
 }
 
@@ -255,15 +255,15 @@
 }
 
 .stampItem b.ok {
-  color: var(--ok);
+  color: var(--ok-text);
 }
 
 .stampItem b.warn {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .stampItem b.crit {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 .stampItem b.dim {
@@ -301,7 +301,7 @@
 }
 
 .addressLink:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -319,11 +319,11 @@
 }
 
 .copyButton:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   border-color: var(--accent);
 }
 
 .copyButton.copied {
-  color: var(--ok);
+  color: var(--ok-text);
   border-color: var(--ok);
 }

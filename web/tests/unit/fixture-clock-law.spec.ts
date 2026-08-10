@@ -247,7 +247,11 @@ const CENSUS: Record<string, number> = {
   "book-engine-refused.json": 3,
   "book-monotonicity-violation.json": 3,
   "book.json": 3,
-  "feed-posture-snapshot.json": 2,
+  // THREE since p1a-9: batch age over computed_at, the debt_manager
+  // watermark's sweep over max_updated_at, AND the same sweep stamp on the
+  // debt_manager row of the new `engines` aggregate roster (the schema's
+  // stamp-travels-on-the-row law; generate-feed.mjs pins the same 3).
+  "feed-posture-snapshot.json": 3,
   "observatory-series-dm.json": 2,
   "positions-aave-page-1.json": 2,
   "positions-aave-page-2.json": 2,
@@ -279,8 +283,9 @@ const CENSUS: Record<string, number> = {
   "stress-unknowable.json": 2,
 };
 
-/** 25 files × 2 trios + the three book bodies × 3. Stated separately so a census edit cannot move it silently. */
-const CENSUS_TOTAL = 59;
+/** 24 files × 2 trios + the three book bodies × 3 + the posture snapshot's 3
+ * (p1a-9). Stated separately so a census edit cannot move it silently. */
+const CENSUS_TOTAL = 60;
 
 // --- the generators' own pins, read out of their source ---------------------
 //
@@ -430,9 +435,11 @@ test.describe("the round-36 defect, replayed", () => {
       batch: { watermarks: { sweep: { age_seconds: number } | null }[] };
     };
 
-    // Committed, this body is clean and states two ages.
+    // Committed, this body is clean and states three ages (p1a-9: the batch
+    // age, the debt_manager watermark's sweep, and the same stamp on the
+    // aggregate roster's debt_manager row).
     expect(law.checkClocks(body).failures).toEqual([]);
-    expect(law.checkClocks(body).checked).toBe(2);
+    expect(law.checkClocks(body).checked).toBe(3);
 
     const sweeps = body.batch.watermarks.filter((w) => w.sweep !== null);
     expect(sweeps).toHaveLength(1);
@@ -448,7 +455,9 @@ test.describe("the round-36 defect, replayed", () => {
     sweep.age_seconds = 1200;
 
     const report = law.checkClocks(body);
-    expect(report.checked).toBe(2);
+    expect(report.checked).toBe(3);
+    // ONE failure: the watermark's sweep. The aggregate row's copy of the
+    // stamp is untouched by this replay and stays lawful.
     expect(report.failures).toHaveLength(1);
     const failure = report.failures.join("\n");
     expect(failure).toContain("$.batch.watermarks[1].sweep");
@@ -631,7 +640,7 @@ test.describe("this census and the generators' own pins cannot disagree", () => 
       .filter(([name, want]) => (CENSUS[name] ?? 0) !== want)
       .map(([name, want]) => `${name}: generator pins ${String(want)}, census has ${String(CENSUS[name] ?? 0)}`);
     expect(disagreements).toEqual([]);
-    // The one feed body with a clock, and both of its trios.
-    expect(feedPins.get("feed-posture-snapshot.json")).toBe(2);
+    // The one feed body with a clock, and all three of its trios (p1a-9).
+    expect(feedPins.get("feed-posture-snapshot.json")).toBe(3);
   });
 });

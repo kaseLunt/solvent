@@ -52,7 +52,7 @@
 }
 
 .warnStrip b {
-  color: var(--crit);
+  color: var(--crit-text);
   letter-spacing: var(--track-label);
 }
 
@@ -146,12 +146,12 @@
 }
 
 .statusOk {
-  color: var(--ok);
+  color: var(--ok-text);
   border-color: var(--ok);
 }
 
 .statusCrit {
-  color: var(--crit);
+  color: var(--crit-text);
   border-color: var(--crit);
   background: var(--crit-bg);
 }
@@ -271,7 +271,7 @@
 
 .rawToggle:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .rawJson {
@@ -306,7 +306,7 @@
 }
 
 .crossLink a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
@@ -345,5 +345,5 @@
 }
 
 .cardForensics summary:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }

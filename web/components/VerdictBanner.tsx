@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { verdictBannerModel, type VerdictVariant } from "@/lib/kit";
+import { verdictBannerModel, type VerdictIdentityModel, type VerdictVariant } from "@/lib/kit";
+import { ChipVal, StatusChip } from "./StatusChip";
 import styles from "./verdict.module.css";
 
 export interface VerdictBannerProps {
@@ -18,13 +19,17 @@ export interface VerdictBannerProps {
   /** What would change the reading: dust split, refusals, coverage. */
   qualification?: ReactNode;
   /**
-   * The IDENTITY STRIP — batch · age · coverage · current/projected ·
-   * evidence, composed from the chip family. REQUIRED BY LAW: "The banner
-   * never renders without its identity strip." A missing or render-empty
-   * strip does not throw — the banner renders a structural refusal naming
-   * the omission (web/lib/kit.ts `verdictBannerModel`).
+   * The IDENTITY STRIP as a TYPED MODEL (p1a-9): the §4 fields — batch ·
+   * age · coverage · current/projected · evidence — each an optional clause;
+   * the banner renders the strip ITSELF from the chip family. REQUIRED BY
+   * LAW: "The banner never renders without its identity strip." A missing
+   * or all-blank model does not throw — the banner renders a structural
+   * refusal naming the omission (web/lib/kit.ts `verdictBannerModel`). The
+   * old ReactNode identity is RETIRED: an unrendered node tree could smuggle
+   * a render-empty strip (an empty fragment) past the law; a typed model
+   * cannot.
    */
-  identity: ReactNode;
+  identity: VerdictIdentityModel | null;
   testId?: string;
 }
 
@@ -60,9 +65,21 @@ export function VerdictBanner({ variant, answer, qualification, identity, testId
       {qualification !== undefined && <p className={styles.qual}>{qualification}</p>}
       {/* data-slot: the strip's stable DOM hook — e2e pins assert it renders
           non-empty on every lawful banner (p1a-6; CSS-module class names are
-          not a contract). */}
+          not a contract). The chips come verbatim from the pure model, in the
+          canon's §4 order. */}
       <div className={styles.idStrip} data-slot="identity">
-        {identity}
+        {model.identity.map((chip) => (
+          <StatusChip key={chip.slot} tone={chip.tone}>
+            {chip.text}
+            {chip.value !== null && (
+              <>
+                {chip.text !== null && " "}
+                <ChipVal>{chip.value}</ChipVal>
+              </>
+            )}
+            {chip.suffix !== null && <> {chip.suffix}</>}
+          </StatusChip>
+        ))}
       </div>
     </section>
   );

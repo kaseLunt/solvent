@@ -135,12 +135,15 @@ const CLOCK_TRIOS = {
   "feed-units.json": 0,
   "feed-error-bad-cursor.json": 0,
   "feed-error-internal.json": 0,
-  // TWO trios, not one: the copied batch envelope states `batch.age_seconds`
-  // over its own `computed_at` AND the debt_manager sweep states one over its
-  // own `max_updated_at`. The sweep's was the stale byte; the batch's was
-  // already right, and pinning both is what makes "the law visited this file"
-  // a countable claim rather than an impression.
-  "feed-posture-snapshot.json": 2,
+  // THREE trios since p1a-9 (was two): the copied batch envelope states
+  // `batch.age_seconds` over its own `computed_at`, the debt_manager
+  // watermark's sweep states one over its own `max_updated_at` — and the
+  // p1a-9 `engines` roster carries the SAME debt_manager sweep stamp on its
+  // aggregate row (the schema's stamp-travels-on-the-row law), which the
+  // clock law now counts and verifies too. The sweep's was the stale byte
+  // once; pinning all three is what makes "the law visited this file" a
+  // countable claim rather than an impression.
+  "feed-posture-snapshot.json": 3,
 };
 
 const checkClockCensus = () => {
@@ -485,9 +488,48 @@ if (positionsExample?.batch === undefined) {
   console.error("generate-feed.mjs: api/openapi.yaml carries no batch in the /v1/positions example");
   process.exit(1);
 }
+
+// p1a-9: the snapshot carries the batch's RISK-ENGINE AGGREGATES too
+// (`StreamPayload.engines` — the risk books), because the coverage chip's
+// denominator is the aggregate roster, never the watermark stamp vector
+// (lib/coverage.ts; the p1a-9 Codex finding). The roster comes from the
+// client package's committed `book.json` fixture — the SAME batch (#1), the
+// same source generate-book.mjs copies byte-identically — with ONE documented
+// mechanical delta: an aggregate's sweep stamp is REPLACED by the batch
+// watermark's own sweep stamp for that engine, verbatim. The schema itself
+// says the aggregate's `sweep` is "the same `SweepStamp` the batch
+// envelope's `Stamp.sweep` serves", and the book fixture's copy states its
+// age against the book response's OWN served_at (10:00:00Z → 1200) while
+// this payload serves at 10:00:05Z (→ 1205) — the clock law below verifies
+// exactly that.
+const clientBook = JSON.parse(
+  readFileSync(
+    path.join(repoRoot, "packages", "client-ts", "test", "fixtures", "book.json"),
+    "utf8",
+  ),
+);
+if (!Array.isArray(clientBook?.engines) || clientBook.engines.length === 0) {
+  console.error(
+    "generate-feed.mjs: packages/client-ts/test/fixtures/book.json carries no engines roster",
+  );
+  process.exit(1);
+}
+if (clientBook.batch?.id !== positionsExample.batch.id) {
+  console.error(
+    "generate-feed.mjs: the client book fixture and the /v1/positions example no longer " +
+      "describe the same batch — the composed snapshot would weld two batches' truths",
+  );
+  process.exit(1);
+}
+const snapshotEngines = clientBook.engines.map((aggregate) => {
+  const stamp = positionsExample.batch.watermarks.find((w) => w.engine === aggregate.engine);
+  return { ...clone(aggregate), sweep: stamp === undefined ? null : clone(stamp.sweep) };
+});
+
 emit("feed-posture-snapshot.json", {
   served_at: positionsExample.served_at,
   batch: positionsExample.batch, // verbatim
+  engines: snapshotEngines,
   listener_connected: true,
   poll_interval_seconds: 15,
   note: "snapshot-on-connect: the base frame every connection receives before any tick.",

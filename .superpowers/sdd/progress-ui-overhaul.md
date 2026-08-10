@@ -3542,3 +3542,204 @@ individual read sites across 27 files), **5 rows already guarded**
 (assertScale / factor / factorPrice / lab classifiers), **8 rows
 recorded** (unconsumed, locally derived, identity-only, or the named
 residues above).
+
+
+## Phase 1 Track A Codex fix wave (p1a-9)
+
+One commit (`fix(web): p1a-9 codex round - coverage counts risk books, meta
+validates its constants, no socket is green, the floor has no fallback`).
+
+The Track A Codex round returned 7 findings; all 7 fixed test-first, mutation
+kills run in isolation, gates untouched (no bypasses).
+
+### F1 (high) — coverage divided incompatible sets
+
+`web/lib/coverage.ts` divided the WATERMARK vector (the full pipeline input
+set — five stamps on production: aave_v3_etherfi, aave_param, debt_manager,
+prices:poll:1, prices:poll:10) by `refused_engines` (risk BOOKS only) —
+"COVERAGE 5/5 ENGINES" over a two-engine book. The denominator is now the
+batch's RISK-ENGINE AGGREGATE roster (`StreamPayload.engines` — one
+`Aggregate` row per book, withheld books included: the store derives
+`refused_engines` from those very rows), deduped; roster ABSENT (the field is
+optional on the stream envelope) → the chip is WITHHELD entirely, never
+approximated from the stamps; an unbindable refused name (including a
+stamp-that-is-not-a-book, e.g. `prices:poll:1`) → withheld (the p1a-4 law,
+kept). `PostureRibbon` passes `posture.engines`.
+
+- Fixture: `generate-feed.mjs` now composes `engines` into
+  `feed-posture-snapshot.json` from the client package's committed
+  `book.json` (same batch #1; a batch-id weld refuses a drifted pair), with
+  ONE documented mechanical delta — each aggregate's sweep stamp is replaced
+  by the batch watermark's own stamp verbatim (the schema's
+  stamp-travels-on-the-row law), so the copy states 1205 against this
+  payload's `served_at` and the clock law verifies it. Census: the file now
+  pins **3** trios (was 2); `CLOCK_TRIOS` (generator), `CENSUS` +
+  `CENSUS_TOTAL` 59→60 + the round-36 replay's `checked` 2→3
+  (fixture-clock-law.spec.ts) moved in the same diff, as the pins demand.
+- Unit pins (coverage.spec.ts, rewritten): THE FIVE-STAMP PIN (envelope
+  keeps its 5-stamp `watermarks` on purpose — a derivation reverted to the
+  stamp vector type-checks and dies at 2/2), healthy 2/2, DM-withheld 1/2
+  named, roster-absent → null, roster-empty → null, unbindable (ghost +
+  price-stamp) → null, refused dedupe, roster dedupe.
+- e2e pins (p1a-fixes `p1a-9 · the codex round`): five-stamp 2/2 (stamps
+  visible in the Data-status popover), five-stamp DM-withheld 1/2 warn
+  register resolved, roster-absent → chip count 0 while BATCH/SNAPSHOT
+  render.
+- MUTATION KILL (isolation): roster reverted to `batch.watermarks` →
+  coverage.spec dies at THE FIVE-STAMP PIN (4 failed / 3 passed); restored →
+  green.
+
+### F2 (high) — meta had no pending/invalid states and validated nothing
+
+`web/lib/meta.tsx`: the reading is now
+`{ source: "pending" | "meta" | "invalid" | "fallback", constants,
+invalidReason? }`. "pending" is the provider's initial state (was: an
+instant "fallback" claimed BEFORE any failure); "meta" only for a VALIDATED
+trio; "invalid" (fallback constants + the cause named in `invalidReason`)
+when the wire answers with constants the tier theorems cannot stand on —
+each must be a finite positive safe integer (`Number.isSafeInteger` + `> 0`)
+AND the boundaries must nest: `2·poll ≤ ceiling ≤ sweepWorstCase`
+(`tierConstantsViolation`); "fallback" ONLY after an actual failed ask.
+Outside a provider the context default stays the disclosed fallback (no ask
+will ever run there — that is meta unavailable by construction, not a
+pending ask).
+
+- `PostureRibbon` does NOT tier-style during "pending": new
+  `snapshotChipPending` (lib/freshness.ts) renders the KNOWN age with no
+  tier word; `RibbonSnapshotChip.tier` gains the `"pending"` arm →
+  QUIET register (measured ink, solid border — deliberately not the dashed
+  unknown register: the age is known, only the judgment is withheld), with
+  `TIER_PENDING_DISCLOSURE` in the title. "invalid" tier-styles from the
+  fallback trio and discloses `TIER_INVALID_DISCLOSURE_PREFIX` + the cause.
+- Unit pins (freshness-tiers.spec.ts, +7): META_CONSTANTS_PENDING shape;
+  violation-accepts (ratified trio + inclusive nesting bounds); per-field
+  invalid arms (0, negative, fraction, NaN, Infinity, 2^53); THE MISORDERED
+  PIN (poll 300 / ceiling 360 → source "invalid", constants = fallback,
+  reason names "out of order"/600, and `freshnessTier(500, …)` is "stale" —
+  never the FRESH the broken trio implied); ceiling>sweep arm; invalid ≠
+  failure (one ask, source "invalid" not "fallback"); pending-chip parts.
+- e2e pin: /v1/meta HELD (never resolves) at age 300 → chip is exactly
+  `SNAPSHOT 5m` (no AGING), quiet register resolved, pending title, no
+  fallback sentence.
+- MUTATION KILL (isolation): ordering validation dropped (`if (false && …)`)
+  → dies at exactly THE MISORDERED PIN (1 failed / 17 passed); restored →
+  green.
+- PIN MIGRATION (ledgered): r6-fixes (1) "ROUND-13 RIBBON DEFECT" now mutes
+  /v1/meta (`route.abort()`), the p1a-4 determinism discipline — the chip's
+  `· AGING` now lands only when meta settles, and an unmuted meta (live API
+  or transport retries against a dead one) raced the test's reconnect
+  backoff and broke its `connections === 1` idle premise (observed 3/3
+  deterministic before the mute; 3/3 green after). The test's subject (the
+  anchored age) is untouched.
+
+### F3 (high) — the feed strip's green socket
+
+`web/app/feed/FeedLiveStrip.tsx` `streamChip` threads `hasBase`:
+open+base → `streaming` in ACCENT (`.liveAccent`, `--accent-text` — the
+appbar's own law: connection is posture, not health); open+no-base →
+`awaiting base` in the unknown register (`.liveUnknown`, `--ink-2`, hollow
+dashed dot). `.liveOk` (the green) is RETIRED; `.liveWarn`/`.liveDown`
+migrated to the text grade with the F5 sweep. Pin migration audit: NO
+existing pin referenced `liveOk`/`streaming` (grep of feed.spec +
+state-matrix recorded empty), so nothing migrated — the two new e2e pins are
+net-new. MUTATION KILL (isolation, built): `hasBase` ignored (open always
+"streaming") → dies at the awaiting-base pin; restored → green.
+
+### F4 (medium) — the unavailable branch dropped the stream chip
+
+The stream chip is lifted into `RibbonStreamChip` (components/Ribbon.tsx —
+same testid, tone map, accent-only pulse) and the NO SERVABLE BATCH branch
+(`PostureRibbon`) now mounts it beside the crit chip + stale-for reading,
+after a `.sep`. e2e pins: unavailable×waiting (hang-up → STREAM RECONNECTING
+beside NO SERVABLE BATCH + `stale for 42s` untouched) and unavailable×open
+(held-open SSE server → STREAM CONNECTED, accent resolved, never `--ok`).
+unavailable×closed: NOT honestly reachable in e2e (the client's reconnect
+policy defaults to `maxAttempts: Infinity`; `closed` occurs only on
+deliberate close/unmount) — the branch renders `ribbonStreamPosture`
+verbatim, whose closed arm (`STREAM CLOSED`, down register) is pinned by the
+total-mapping unit suite (stream-posture.spec.ts), the same code path both
+bars mount.
+
+### F5 (medium) — status TEXT still wore fill-grade tokens
+
+Sweep: every `color:` declaration referencing `--ok/--warn/--crit/--accent`
+in web CSS migrated to the `--*-text` grade — **93 declarations across 15
+stylesheets**; borders, chip spines, dots, underline marks
+(`text-decoration-color`), fills and SVG strokes keep the fill grade
+(≈88 declarations, untouched by design). Audit table (site → text-or-mark →
+action; class granularity):
+
+| stylesheet | migrated TEXT sites (→ `--*-text`) | kept FILL sites (marks) |
+|---|---|---|
+| app/lab/lab.module.css (18) | .modeButton[pressed], .hintBad, .chipOn, .proofChip, .bitIdentical, .tone-ok/-warn/-crit, .flagOn, .cardForensics summary:hover, .cellResult/.cellSuperseded/.cellUnanswered/.cellContradicted/.cellDefinitionChanged .cellTag, .rowLabelButton:hover, .dumbbellContradiction, .dumbbellUnmeasuredTag | borders (.modeButton, .chipOn, .proofChip, cell spines, .runButtonSmall:hover, dashed warn tag), fill .dumbbellContradictionBand (`--crit-bg`), outline `--accent` |
+| components/primitives.module.css (13) | .statValue.ok/.warn/.crit, .hf.ok/.warn/.crit, .routeRefusalReset:hover, .stampItem b.ok/.warn/.crit, .addressLink:hover, .copyButton:hover, .copyButton.copied | border-colors beside each hover/copied state |
+| app/inspector/inspector.module.css (12) | .refusal, .recentItem a:hover, .vOk/.vWarn/.vCrit, .verdictOk/.verdictWarn/.verdictCrit, .explain:hover, .historyDmDisclosure, .txLink:hover, .loadMore:hover | verdict/refusal border-colors, .explain underline `text-decoration-color`, .tagCrit `background: var(--crit)` |
+| app/feed/feed.module.css (12) | .liveAccent (new), .liveWarn, .liveDown, .chipButton:hover/.on, .txLink:hover, .dividerFold/.noteFold summary:hover, .detailToggle:hover, .warnStrip b, .refusalStrip b, .loadMore:hover | border-colors on chipButton/detailToggle/loadMore |
+| app/developers/developers.module.css (7) | .crossLink a, .tocChip:hover, .methodGet, .methodPost, .paramRequired, .responseChipErr, .errorStatus | method/response chip border-colors |
+| app/proof/proof.module.css (6) | .warnStrip b, .statusOk, .statusCrit, .rawToggle:hover, .crossLink a, .cardForensics summary:hover | status/rawToggle border-colors |
+| app/book/book.module.css (6) | .panelHead .comparator, .warnStrip b, .notice b, .chipButton:hover/.on, .incrementsContradiction | chipButton border-colors |
+| components/evidence.module.css (4) | .vOk/.vWarn/.vCrit, .explain:hover | .explain `text-decoration-color` |
+| app/globals.css (4) | .okt, .warnt, .crit-t, .eyebrow | — |
+| components/table.module.css (3) | .sortButton:hover, .sortGlyph, .loadMore:hover | .loadMore border-color |
+| app/observatory/observatory.module.css (3) | .chipButton:hover/.on, .warnStrip b | chipButton border-colors |
+| components/header.module.css (2) | .wordmark span, .themeToggle:hover | .tab.on / .themeToggle border-colors |
+| ribbon (1) .badge.proof · placeholder (1) .fedBy b · drawer (1) .close:hover | | proof-badge/close border-colors |
+
+The styleguide contrast gate gains ONE REAL-CONSUMER specimen
+(`ContrastSpecimens`): the inspector's `.verdict.verdictWarn` class mounted
+with its real stylesheet on its real `--panel` ground, measured live
+(`data-testid="contrast-consumer"`), pinned ≥ 4.5 in BOTH themes (e2e in the
+p1a-6 describe). KILL (isolation, built): `.verdictWarn` text regressed to
+`var(--warn)` → dies at the light-theme measured ratio (~3.2 < 4.5);
+restored → green. chart-spec-v4's AC contrast pins pass unchanged (the text
+grade only raises light-theme contrast; dark text grade = fill grade by
+token law).
+
+### F6 (medium) — the floor's regex accepted a fallback
+
+`web/stylelint.config.mjs`: `font-size` must now match the EXACT declared
+token vocabulary, both ends anchored, NO fallback argument —
+`^var\(--(t-(display|chapter|section|fighead|body|ui|meta|floor|mono-lg|mono-sm|mono-floor|mono|stat-lg|stat)|fs-(h1|h2|lede|body|note|table|mono-sm|mono|caption|label|badge|stat|hf))\)$`
+(names verified against tokens.css; longer alternatives precede their
+prefixes; `font` shorthand still held to `inherit`). All 339 existing
+declarations are bare token references — zero churn. SCRATCH PROOF (the
+p1a-2 form): `.p1a9MutationScratch { font-size: var(--t-typo, 1px) }` +
+`var(--t-ui, 14px)` + `var(--t-typo)` appended to globals.css → stylelint
+FAILED exit 2 at exactly globals.css:126/130/134 with the token-law message
+(all three: the old gate passed the first two); removed → exit 0.
+
+### F7 (medium) — identityMissing was bypassable by render-empty elements
+
+`web/lib/kit.ts`: the ReactNode identity RETIRES (an empty fragment was an
+"element", therefore content, and mounted a banner with a blank strip).
+`VerdictBanner` now takes a TYPED `VerdictIdentityModel` — the §4 strip
+fields verbatim (`batch · age · coverage · currentOrProjected · evidence`),
+each an optional clause `{ text?, value?, suffix?, tone? }` (value = the §5
+mono register) — and renders the strip ITSELF from the chip family
+(`StatusChip`/`ChipVal`), in `VERDICT_IDENTITY_ORDER`. Missing = no model or
+every clause blank (`verdictIdentityMissing`) → the unchanged structural
+refusal. `verdictBannerModel`'s banner arm now carries the resolved chips
+(`verdictIdentityChips`: §4 order, quiet default, blank members → null).
+Call sites migrated: the styleguide's five variant banners + the
+refusal-law specimen (`identity={null}`); no other consumer existed. Pins:
+kit.spec verdict describe rewritten — the EMPTY-FRAGMENT REGRESSION class
+({}, all-blank clauses, blank members) refuses; one-clause presence; §4
+order pin; tone map with chips carried. The p1a-6 DOM pin
+(`[data-slot="identity"]` non-empty per lawful banner) holds unchanged.
+
+### Closing counts (p1a-9)
+
+- `npm run typecheck` / `npm run lint` / `npm run lint:css` — clean (exit 0).
+- Touched unit specs (coverage 7 + freshness-tiers 18 + kit 9 +
+  stream-posture 10 + fixture-clock-law 73) — green in isolation.
+- CI-mirror shape (`NEXT_PUBLIC_SHOW_STYLEGUIDE=1 npm run build && npx
+  playwright test -c tests/playwright.p1a.config.ts`): **1645 passed,
+  0 skipped, 0 failed (36.5s)** — the p1a-8/p1b-14 line plus exactly the 17
+  new pins (2 coverage + 7 tiers + 8 e2e: 3 F1 + 1 F2 + 2 F4 + 2 F3 — the
+  F5 specimen rides the styleguide describe).
+- No-var shape (`npm run build`, same suite): **1635 passed, 10 skipped,
+  0 failed (37.5s)** — the 10 skips are exactly the styleguide describe
+  (9 + the new F5 consumer specimen).
+- 4 mutation kills, each in isolation, each dying at its named pin
+  (F1 roster / F2 ordering / F3 hasBase / F5 fill-grade), plus the F6
+  three-form scratch proof.

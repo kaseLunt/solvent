@@ -89,15 +89,15 @@ button {
 }
 
 .okt {
-  color: var(--ok);
+  color: var(--ok-text);
 }
 
 .warnt {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .crit-t {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 .eyebrow {
@@ -105,7 +105,7 @@ button {
   font-size: var(--fs-caption);
   letter-spacing: var(--track-eyebrow);
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-text);
   margin: 0 0 10px;
 }
 

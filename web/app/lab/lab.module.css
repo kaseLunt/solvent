@@ -58,7 +58,7 @@
 
 .modeButton[aria-pressed="true"] {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--chip-bg);
 }
 
@@ -115,7 +115,7 @@
 }
 
 .hintBad {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 /* ---- scenario chip bar (mockup .scenario-bar verbatim) ---- */
@@ -140,7 +140,7 @@
 
 .chipOn {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--chip-bg);
 }
 
@@ -230,7 +230,7 @@
   letter-spacing: var(--track-label);
   border: 1px solid var(--ok);
   border-radius: var(--r-sm);
-  color: var(--ok);
+  color: var(--ok-text);
   padding: 8px 12px;
   margin-bottom: var(--sp-3);
 }
@@ -238,7 +238,7 @@
 .bitIdentical {
   font-family: var(--mono);
   font-size: var(--fs-caption);
-  color: var(--ok);
+  color: var(--ok-text);
   margin-top: 8px;
 }
 
@@ -464,19 +464,19 @@
 }
 
 .tone-ok {
-  color: var(--ok);
+  color: var(--ok-text);
 }
 
 .tone-warn {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .tone-crit {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 .flagOn {
-  color: var(--warn);
+  color: var(--warn-text);
   font-weight: 600;
 }
 
@@ -543,7 +543,7 @@
 }
 
 .cardForensics summary:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .sectionTitle {
@@ -643,7 +643,7 @@
 }
 
 .cellResult .cellTag {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* WITHHELD: the refusal register's own tone — a censored cell reads as
@@ -659,7 +659,7 @@
 }
 
 .cellSuperseded .cellTag {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .cellSuperseded .cellValue {
@@ -673,7 +673,7 @@
 }
 
 .cellUnanswered .cellTag {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 /* WAVE R12 — CONTRADICTORY BOOK: the response answered this cell two ways, so
@@ -686,7 +686,7 @@
 }
 
 .cellContradicted .cellTag {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 /* WAVE R12 — DEFINITION CHANGED: nothing failed and nothing was withheld. The
@@ -698,7 +698,7 @@
 }
 
 .cellDefinitionChanged .cellTag {
-  color: var(--warn);
+  color: var(--warn-text);
 }
 
 .rowLabelButton {
@@ -715,7 +715,7 @@
 }
 
 .rowLabelButton:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .runButtonSmall {
@@ -905,7 +905,7 @@
 }
 
 .dumbbellContradiction {
-  color: var(--crit);
+  color: var(--crit-text);
 }
 
 /* VIEW 5 (flip ranking) — the strip's four cells and the flip bars. The two
@@ -965,7 +965,7 @@
   border: 1px dashed var(--warn);
   border-radius: var(--r-xs);
   padding: 1px 7px;
-  color: var(--warn);
+  color: var(--warn-text);
   white-space: nowrap;
 }
 

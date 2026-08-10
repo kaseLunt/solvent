@@ -31,10 +31,24 @@ function wireCount(value: number): string {
   return isWirePopulation(value) ? String(value) : "unreadable";
 }
 
-function streamChip(state: string): { label: string; tone: string } {
+/**
+ * p1a-9 (F3): the chip is a function of the CONNECTION'S WHOLE claim —
+ * `streamState` AND `hasBase` — the same law the appbar's stream chip has
+ * carried since Wave R7. An HTTP 200 the server has not spoken on is not
+ * "streaming": open without a base renders the unknown register ("awaiting
+ * base"), because this connection has proven nothing yet.
+ *
+ * AND NO SOCKET IS GREEN. The old `open → liveOk` arm painted the ok token
+ * over a transport fact, contradicting the appbar one viewport-height above
+ * (STREAM CONNECTED, accent — "connection is posture, not health"). A proven
+ * connection is ACCENT here too; green stays rationed to computed health.
+ */
+function streamChip(state: string, hasBase: boolean): { label: string; tone: string } {
   switch (state) {
     case "open":
-      return { label: "streaming", tone: styles.liveOk ?? "" };
+      return hasBase
+        ? { label: "streaming", tone: styles.liveAccent ?? "" }
+        : { label: "awaiting base", tone: styles.liveUnknown ?? "" };
     case "idle":
     case "connecting":
       return { label: "connecting", tone: styles.liveWarn ?? "" };
@@ -49,7 +63,7 @@ function streamChip(state: string): { label: string; tone: string } {
 
 export function FeedLiveStrip() {
   const posture = usePosture();
-  const chip = streamChip(posture.streamState);
+  const chip = streamChip(posture.streamState, posture.hasBase);
   const live = posture.streamState === "open" && posture.hasBase;
 
   return (

@@ -151,6 +151,16 @@ test("(1) THE ROUND-13 RIBBON DEFECT: an idle stream + two blind clocks no longe
 }) => {
   await page.clock.install({ time: T0 });
 
+  // p1a-9 PIN MIGRATION: the snapshot chip no longer tier-styles while the
+  // /v1/meta ask is PENDING, so the `SNAPSHOT 2m · AGING` pin below settles
+  // only after meta does — and an unmuted meta (a live API, or the client's
+  // own transport retries against a dead one) races this test's reconnect
+  // backoff and breaks the `connections === 1` idle premise. Mute it, the
+  // same determinism discipline p1a-4's appbar tests apply: the fallback
+  // trio lands immediately and the test's own subject (the anchored AGE) is
+  // untouched.
+  await page.route("**/v1/meta*", (route) => route.abort());
+
   // DERIVED stream snapshot #1: the posture batch is 130s old — WELL inside the
   // ribbon's 1h threshold, so the stale suffix is correctly silent at receipt.
   // No other byte changes.

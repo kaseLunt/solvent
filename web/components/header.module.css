@@ -32,7 +32,7 @@
 }
 
 .wordmark span {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .tagline {
@@ -115,5 +115,5 @@
 
 .themeToggle:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }

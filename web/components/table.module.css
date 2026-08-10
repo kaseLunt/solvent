@@ -114,12 +114,12 @@
 }
 
 .sortButton:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* The ▲/▼ indicator — accent-colored, ONLY on the active column. */
 .sortGlyph {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--t-floor);
 }
 
@@ -173,7 +173,7 @@
 
 .loadMore:hover:not(:disabled) {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .loadMore:disabled {

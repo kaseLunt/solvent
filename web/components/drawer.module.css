@@ -75,7 +75,7 @@
 
 .close:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .body {

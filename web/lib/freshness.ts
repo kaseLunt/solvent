@@ -800,6 +800,24 @@ export function snapshotChipUnknown(batchId: number, refreshFailed: boolean): Sn
   };
 }
 
+/**
+ * The chip while the tier constants are PENDING (p1a-9): the age is KNOWN and
+ * renders as its number, but no tier claim is licensed yet — `/v1/meta` has
+ * not answered, and a tier painted from constants nothing has confirmed would
+ * be a severity the page invented. No tier word; the caller renders the age
+ * UNSTAINED (quiet register — measured ink, no tier color), which is the
+ * pre-ratification interim register, not the unknown-age one: the number is
+ * true, only the judgment over it is withheld.
+ */
+export function snapshotChipPending(batchId: number, ageSeconds: number): SnapshotChipParts {
+  return {
+    label: "SNAPSHOT",
+    batchId,
+    age: humanAge(ageSeconds),
+    tierWord: null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // THE UNAVAILABLE FRAME'S OWN AGE (Wave R7, Codex round-15 finding 3).
 //

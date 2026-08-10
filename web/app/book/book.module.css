@@ -140,7 +140,7 @@
 .panelHead .comparator {
   text-transform: none;
   letter-spacing: 0;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .panelBody {
@@ -178,7 +178,7 @@
 }
 
 .warnStrip b {
-  color: var(--warn);
+  color: var(--warn-text);
   font-weight: 600;
   letter-spacing: var(--track-label);
 }
@@ -213,7 +213,7 @@
 }
 
 .notice b {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
   letter-spacing: var(--track-label);
 }
@@ -346,12 +346,12 @@
 
 .chipButton:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .chipButton.on {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--chip-bg);
 }
 
@@ -661,7 +661,7 @@
 .incrementsContradiction {
   font-family: var(--mono);
   font-size: var(--t-mono-floor);
-  color: var(--crit);
+  color: var(--crit-text);
   margin: 0 0 6px;
 }
 
