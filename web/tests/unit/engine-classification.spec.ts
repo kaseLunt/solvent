@@ -477,6 +477,48 @@ test("p1b-10: newly_eligible_accounts is the schema's SIGNED net — negative st
   ).toEqual(["newly_eligible_accounts"]);
 });
 
+// ---------------------------------------------------------------------------
+// p1b-11 (Codex round 3) — negative zero and the schema's occupancy floor.
+//
+// Finding A1: the guards judge the PARSED binary64, and JSON.parse("-1e-324")
+// rounds to -0 — which is === 0 and passed `>= 0`, so a fractional token wore
+// a legal population. Finding B: `RunBookTransitionCell.rows` is the schema's
+// `minimum: 1` ("A cell is emitted only when it holds at least one row"; an
+// empty cell is ABSENT, never a row of zeros), and a fake `{rows: 0}` cell
+// reconciles EVERY margin and census sum — 0 changes nothing — so the
+// classifier's occupancy floor is the only gate that can refuse it.
+// ---------------------------------------------------------------------------
+
+test("p1b-11: a NEGATIVE-ZERO population is named — -1e-324 parses to -0, and -0 passed >= 0", () => {
+  expect(corrupted((engine) => (engine.movers_total = -0))).toEqual(["movers_total"]);
+  expect(
+    corrupted((engine) => {
+      const bucket = engine.before.hf_histogram.buckets[0];
+      if (!bucket) throw new Error("fixture shape: bucket missing");
+      bucket.count = -0;
+    }),
+  ).toEqual(["before.hf_histogram.buckets[0].count"]);
+});
+
+test("p1b-11: a ZERO-ROW occupied cell is named per index — the schema floors rows at 1", () => {
+  expect(
+    corrupted((engine) => {
+      const cell = engine.hf_transitions.outflows[3]?.cells[0];
+      if (!cell) throw new Error("fixture shape: occupied cell missing");
+      cell.rows = 0;
+    }),
+  ).toEqual(["hf_transitions.outflows[3].cells[0].rows"]);
+  // rows: 1 — the fixture's own value, re-stated — stays legal: the floor is
+  // exactly the schema's, not a wider refusal.
+  expect(
+    corrupted((engine) => {
+      const cell = engine.hf_transitions.outflows[3]?.cells[0];
+      if (!cell) throw new Error("fixture shape: occupied cell missing");
+      cell.rows = 1;
+    }),
+  ).toEqual([]);
+});
+
 test("p1b-2: fields are named in wire read order across the whole subtree", () => {
   expect(
     corrupted((engine) => {

@@ -2260,6 +2260,18 @@ sourced from this ledger alone (no task-2 report exists, by record).
    matrix/tornado surfaces compose their own pre-existing identity
    statements; migrating them onto `identityLine`'s book/set arms remains
    available, unexercised.
+5. **Post-parse information boundary** (p1b-11, Codex round 3 finding A2 —
+   RECORDED as structural, not fixable at this layer): fractional JSON
+   tokens that round to safe integers during JSON.parse are
+   indistinguishable from integer tokens (`9007199254740991.1` parses to
+   exactly `9007199254740991`, and no predicate over the parsed number can
+   separate them); complete closure requires raw-text response validation
+   (a re-parse architecture — Phase-3+ architectural candidate, or
+   server-side contract testing). The one rounding that leaves a
+   fingerprint — a fractional token rounding to NEGATIVE ZERO
+   (`-1e-324` → `-0`) — is refused by the count guards (finding A1, fixed
+   in p1b-11); every other rounding leaves none. Documented-limitation
+   block on the two guards in `web/lib/wireGuard.ts`.
 
 ### Still-open server defect (outside web scope, held open since p0-9)
 
@@ -2743,3 +2755,119 @@ styleguide tests SKIP (never fail) on the 404
 (`web-3820-p1a6-novar.log`), so local runs without the var keep the
 p1a-5-era behavior (skips, with counts 1599+9-skipped shape) and CI's
 env-var expectation is unchanged.
+
+## Phase 1 Track B Codex fix wave 3 (p1b-11)
+
+Codex round 3 returned two findings; the detectable defects are fixed here,
+test-first, and finding A's undetectable half is RECORDED as a structural
+limitation, in one commit (`fix(web): p1b-11 codex round 3 - negative zero
+and zero-row cells are refused, the JSON-parse information boundary is
+recorded`).
+
+### Finding A (HIGH, PARTIAL by design) — the guards judge the parsed double
+
+`web/lib/wireGuard.ts:91` (pre-fix): `isWirePopulation`/`isWireSignedCount`
+examine the parsed binary64, never the JSON token. Two sub-cases, split by
+whether the parse leaves evidence.
+
+**A1 (detectable, FIXED)**: `"movers_total": -1e-324` parses to NEGATIVE
+ZERO — which is `=== 0` and passed `>= 0` — so a fractional token wore a
+legal population and moversDisclosure rendered "No account…" as a
+computed-looking claim. Both count guards now refuse
+`Object.is(value, -0)`: a conforming integer marshal never emits a token
+that parses to -0 (Go's encoding/json prints an int64 zero as `0`), so a
+post-parse -0 is the surviving fingerprint of an out-of-contract token.
+`0` stays legal on both guards — the refusal is the sign bit, not the
+magnitude.
+
+**A2 (undetectable, RECORDED not fixed)**: `9007199254740991.1` rounds to
+`9007199254740991` DURING JSON.parse — post-parse the double is
+indistinguishable from the integer token, and no client-side predicate can
+close this without raw-text response validation (a re-parse architecture).
+Recorded twice: the documented-limitation block on the two guards
+(wireGuard.ts) and item 5 of the p1b-7 seal's out-of-scope inventory
+(above) — Phase-3+ architectural candidate, or server-side contract
+testing.
+
+**Pins**: unit — wire-guard.spec.ts ×1 red-first (`JSON.parse("-1e-324")`
+IS -0 and is refused by both guards; 0 stays legal on both) +
+engine-classification.spec.ts ×1 red-first (`movers_total = -0` and a
+bucket `count = -0` named per path). RED witnessed: both pins failed by
+assertion pre-fix (the classifier returned `[]`; the guards admitted -0).
+
+**Kill (p1b-11-M1)**: the `Object.is` check removed from BOTH guards → the
+two -0 pins die in isolation (2 failed / 38 passed; the occupancy pins
+survive, so the mutant is discriminated from M2); restored, diff-verified
+byte-identical.
+
+### Finding B (MEDIUM) — a zero-row occupied cell is refused by name
+
+`web/app/lab/engineClassification.ts:192` (pre-fix): `cells[].rows` rode
+the zero-admitting population guard while `RunBookTransitionCell.rows` is
+the schema's `minimum: 1` (api/openapi.yaml:4546 — "A cell is emitted only
+when it holds at least one row"; "An empty cell is ABSENT, never a row of
+zeros"). A fake `{"to":1,"rows":0,...}` cell passed classification AND
+`readTransitions`' whole contradiction register — 0 changes no margin or
+census sum, so every reconciliation still balanced — and rendered as an
+occupied 0 cell in the transition table (LabRunBookTransition.tsx:330; the
+red run's page snapshot witnessed the healthy settle).
+
+**Fix**: `isWireOccupancy` joins wireGuard.ts (`isWirePopulation && >= 1`)
+— the population guard's floored sibling, with the assignment-table entry
+— and `cells[].rows` takes it, named per index
+(`hf_transitions.outflows[i].cells[j].rows`) like the rest.
+
+**setRunClassification.ts checked (per brief)**: `SetRunEngineSummary`
+carries NO transitions subtree (schema read: engine, usd_decimals, the
+counts, the Decimals, market_realization, projection, note — nothing
+cell-shaped), so `rows` is not consumed there and no change is owed.
+
+**THE MINIMUM SWEEP (recorded, yield = 1)**: api/openapi.yaml's
+`components:` section (line 2212 on) holds exactly ONE `minimum:` — line
+4546, `RunBookTransitionCell.rows`. Every other `minimum: 1` in the file
+is a request parameter (page sizes, path ids, strides), and no
+`exclusiveMinimum` exists anywhere in the contract. So no other
+schema-minimum response field is guarded as a population by any
+classifier; nothing else owed the floor treatment.
+
+**Pins**: unit — wire-guard.spec.ts ×1 (the occupancy law: floored at
+exactly 1; 0 and -0 refused; everything the population guard refuses stays
+refused; red witnessed as the missing-export load failure) +
+engine-classification.spec.ts ×1 red-first (rows: 0 named
+`hf_transitions.outflows[3].cells[0].rows` per index; rows: 1 stays
+legal — the floor is the schema's, not a wider refusal). e2e —
+p1b-fixes.spec.ts "p1b-11 fB" red-first: structuredClone of the committed
+run-book 200 body with a fabricated `{to: 1, rows: 0}` cell APPENDED to
+the measured outflow (margins reconcile by construction) → RED witnessed
+the exact defect (the aave cell settled HEALTHY, the fake cell admitted);
+GREEN: the engine panel's malformed register names
+`hf_transitions.outflows[3].cells[1].rows`, the fabricated cell never
+renders as a transition-table row, the route stays live, the healthy dm
+engine renders untouched.
+
+**Kill (p1b-11-M2)**: `isWireOccupancy` loses its `>= 1` floor (weakened
+to the bare population guard) → the two occupancy pins die in isolation
+(2 failed / 38 passed; the -0 pins survive); restored, diff-verified
+byte-identical.
+
+### Closing counts (p1b-11)
+
+- `npm run typecheck` — clean (exit 0)
+- `npm run lint` — clean, zero warnings (exit 0)
+- `npm run lint:css` — clean (exit 0)
+- touched unit specs (wire-guard, engine-classification,
+  set-run-classification) — **51 passed**
+- `npm run build` — clean (fresh, post-restore)
+- e2e lab + p1b-fixes — **48 passed**
+- FULL Track B suite (`npx playwright test -c
+  tests/playwright.p1b.config.ts`, port 3819, fresh build):
+  **1604 passed, 9 skipped, 0 failed (35.5s)**
+  (`web-3819-p1b11-full.log`) — the p1a-6 no-var baseline (1599 passed +
+  9 skipped: the 8 styleguide pins + the shell styleguide walk, which
+  skip without `NEXT_PUBLIC_SHOW_STYLEGUIDE` by p1a-6's recorded design)
+  plus exactly the 5 new p1b-11 pins (2 wire-guard +
+  2 engine-classification + 1 e2e).
+- Mutations: **2 mutants, 2 KILLED, 0 survived**, both unit-in-isolation
+  and mutually discriminating (M1 kills only the -0 pins, M2 only the
+  occupancy pins), every restoration diff-verified against the
+  pre-mutation bytes.

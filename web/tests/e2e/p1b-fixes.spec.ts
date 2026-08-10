@@ -889,3 +889,56 @@ test.describe("p1b-10 · Codex round-2 fixes", () => {
     await expect(page.getByTestId("route-refusal")).toHaveCount(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-11 · the Codex round-3 fix wave: a zero-row occupied cell is refused by
+// name (finding B — `RunBookTransitionCell.rows` is the schema's `minimum: 1`;
+// the zero-admitting population guard let a fake `{to, rows: 0}` cell through
+// classification AND the contradiction register, because 0 changes no margin
+// or census sum, and the transition table rendered it as an occupied cell of
+// 0 rows). Finding A1 (-0 refused by both count guards) is pinned at unit
+// level — the guard's own law in wire-guard.spec.ts and the per-field naming
+// in engine-classification.spec.ts; its render consequence is the SAME
+// malformed register the pin below and the p1b-9 f2 pin already hold.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-11 · Codex round-3 fixes", () => {
+  test("fB: a fake zero-row occupied cell refuses the engine by name — never an occupied 0 row in the transition table", async ({
+    page,
+  }) => {
+    await mockCold(page);
+    // Single documented change to the committed run-book fixture, serving ONE
+    // purpose (the occupancy-floor arm): a fabricated cell {to: 1, rows: 0}
+    // APPENDED to engines[0]'s measured outflow (lane 3, beside the fixture's
+    // own occupied 3→0 cell). rows: 0 adds nothing to any margin or census
+    // sum, so readTransitions' whole contradiction register still reconciles
+    // — classification is the only gate that can refuse it. Everything else
+    // byte-identical.
+    const body = corruptedRunBook((engine) => {
+      const outflow = engine.hf_transitions.outflows[3];
+      if (!outflow) throw new Error("fixture shape: outflow missing");
+      outflow.cells.push({ to: 1, rows: 0, debt_before_usd: "0", debt_after_usd: "0" });
+    });
+    await mockRunBook(page, body);
+    await page.goto("/lab");
+    await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
+    // ROUTE STAYS LIVE, the cell settles malformed — same law, same register
+    // as the p1b-2/p1b-9 pins above.
+    const cell = aaveCell(page);
+    await expect(cell).toHaveAttribute("data-cell-state", "result");
+    await expect(cell).toHaveAttribute("data-cell-outcome", "malformed");
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+    // The ENGINE PANEL names the zero-row cell by its full per-index path.
+    const aavePanel = page.locator('[data-testid="book-engine"][data-engine="aave_v3_etherfi"]');
+    await expect(aavePanel).toHaveAttribute("data-engine-outcome", "malformed");
+    await expect(aavePanel).toContainText("hf_transitions.outflows[3].cells[1].rows");
+    // The fabricated cell never renders as an occupied row of the table.
+    await expect(
+      page.locator('[data-testid="runbook-transition-cell"][data-from="3"][data-to="1"]'),
+    ).toHaveCount(0);
+    // The healthy second engine renders normally — the refusal is scoped.
+    const dmPanel = page.locator('[data-testid="book-engine"][data-engine="debt_manager"]');
+    await expect(dmPanel).not.toHaveAttribute("data-engine-outcome", "malformed");
+    await expect(dmPanel.getByTestId("book-engine-answer")).toBeVisible();
+  });
+});

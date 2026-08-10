@@ -36,6 +36,7 @@
 import type { LabRunBookEngine } from "../../lib/runbook";
 import {
   isWireDecimal,
+  isWireOccupancy,
   isWirePopulation,
   isWireScale,
   isWireSignedCount,
@@ -189,7 +190,12 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
           return;
         }
         checks.push([`${at}.to`, isWirePopulation(cell.to)]);
-        checks.push([`${at}.rows`, isWirePopulation(cell.rows)]);
+        // p1b-11 (finding B): `rows` is the schema's `minimum: 1` — "A cell
+        // is emitted only when it holds at least one row"; an empty cell is
+        // ABSENT, never a row of zeros. A fake zero-row cell reconciles
+        // EVERY margin and census sum (0 changes nothing), so this floor is
+        // the only gate that refuses it.
+        checks.push([`${at}.rows`, isWireOccupancy(cell.rows)]);
         checks.push([`${at}.debt_before_usd`, isNullableWireDecimal(cell.debt_before_usd)]);
         checks.push([`${at}.debt_after_usd`, isNullableWireDecimal(cell.debt_after_usd)]);
       });

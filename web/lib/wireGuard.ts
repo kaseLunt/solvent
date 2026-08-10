@@ -62,8 +62,8 @@ export function isWireScale(value: unknown): value is number {
  *     NO DEBT on this side"), `refused_count` ("positions ... COUNTED here");
  *   - RunBookTransitions `lanes[].index` / `outflows[].from` / `cells[].to`
  *     ("this lane's position" — an index into the dense margins),
- *     `cells[].rows` ("a COUNT of position rows"), `from_rows[]` /
- *     `to_rows[]` ("each lane's whole BEFORE/AFTER population"),
+ *     `from_rows[]` / `to_rows[]` ("each lane's whole BEFORE/AFTER
+ *     population"),
  *     `total_rows` / `measured_rows` / `unmeasured_rows` /
  *     `unmeasured_refused_in_batch_rows` /
  *     `unmeasured_excluded_by_this_layer_rows` (the census totals), and the
@@ -85,16 +85,69 @@ export function isWireScale(value: unknown): value is number {
  *     before, and it may be negative") WHEN a surface starts consuming it —
  *     today it is outside the consumed set by p1b-3's recorded scope
  *     decision.
+ *
+ * `isWireOccupancy` (p1b-11, Codex round 3 finding B) — populations the
+ * schema FLOORS AT 1 (`minimum: 1`):
+ *   - RunBookTransitions `cells[].rows` ("a COUNT of position rows" an
+ *     emitted cell holds AT LEAST ONE of — "An empty cell is ABSENT, never a
+ *     row of zeros"). THE MINIMUM SWEEP (p1b-11, recorded): `rows` is the
+ *     ONLY `minimum:`-carrying field in the contract's RESPONSE schemas
+ *     (api/openapi.yaml `components:` holds exactly one `minimum:`, on
+ *     RunBookTransitionCell.rows; every other `minimum: 1` in the file is a
+ *     request parameter), so no other population-guarded field carries a
+ *     floor a zero-admitting guard could miss.
  */
 
-/** A wire POPULATION: a tally of things that exist. Nonnegative SAFE integer. */
+/**
+ * NEGATIVE ZERO IS REFUSED (p1b-11, Codex round 3 finding A1). These guards
+ * judge the PARSED binary64, never the JSON token, and
+ * `JSON.parse("-1e-324")` rounds to NEGATIVE ZERO — which is `=== 0` and
+ * passed `>= 0`, so a fractional token wore a legal population
+ * (`movers_total: -1e-324` rendered moversDisclosure's "No account…"
+ * sentence as a computed-looking claim). A conforming integer marshal never
+ * emits a token that parses to -0 (Go's encoding/json prints an int64 zero
+ * as `0`), so a post-parse -0 is the surviving fingerprint of an
+ * out-of-contract token, and BOTH count guards refuse it through
+ * `Object.is` — the only equality that sees the sign bit. `0` stays legal.
+ *
+ * DOCUMENTED LIMITATION — THE POST-PARSE INFORMATION BOUNDARY (finding A2,
+ * recorded, NOT closed, and not closable at this layer): fractional JSON
+ * tokens that round to a SAFE integer during JSON.parse are
+ * indistinguishable from integer tokens afterwards — `9007199254740991.1`
+ * parses to exactly `9007199254740991`, and no predicate over the parsed
+ * number can separate them. -0 is refusable only because its rounding
+ * leaves a fingerprint (the sign bit); a token that rounds onto a plain
+ * safe integer leaves none. Complete closure requires RAW-TEXT response
+ * validation (a re-parse architecture) — a Phase-3+ architectural
+ * candidate, or server-side contract testing. Ledgered in the p1b seal's
+ * structural-limitations inventory
+ * (.superpowers/sdd/progress-ui-overhaul.md).
+ */
+
+/** A wire POPULATION: a tally of things that exist. Nonnegative SAFE integer, never -0. */
 export function isWirePopulation(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    !Object.is(value, -0)
+  );
 }
 
-/** A wire SIGNED count: a net/delta the schema declares may be negative. Still a SAFE integer. */
+/**
+ * A wire OCCUPANCY (p1b-11, finding B): a population the schema FLOORS AT 1.
+ * `RunBookTransitionCell.rows` is `minimum: 1` — "A cell is emitted only
+ * when it holds at least one row" — and a fake `{rows: 0}` cell passes every
+ * margin and census reconciliation precisely because 0 changes no sum, so
+ * this floor is the only gate that can refuse it.
+ */
+export function isWireOccupancy(value: unknown): value is number {
+  return isWirePopulation(value) && value >= 1;
+}
+
+/** A wire SIGNED count: a net/delta the schema declares may be negative. Still a SAFE integer, never -0. */
 export function isWireSignedCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value);
+  return typeof value === "number" && Number.isSafeInteger(value) && !Object.is(value, -0);
 }
 
 /**

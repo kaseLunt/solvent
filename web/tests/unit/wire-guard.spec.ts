@@ -25,6 +25,7 @@ import { expect, test } from "@playwright/test";
 import {
   WIRE_DECIMAL,
   isWireDecimal,
+  isWireOccupancy,
   isWirePopulation,
   isWireScale,
   isWireSignedCount,
@@ -139,6 +140,52 @@ test("p1b-10: isWireSignedCount keeps the sign but still demands exactness", () 
   expect(isWireSignedCount(Number.NaN)).toBe(false);
   expect(isWireSignedCount(Number.POSITIVE_INFINITY)).toBe(false);
   expect(isWireSignedCount(null)).toBe(false);
+});
+
+// p1b-11 (Codex round 3, finding A1): the guards judge the PARSED binary64,
+// never the JSON token — and `JSON.parse("-1e-324")` rounds to NEGATIVE ZERO,
+// which is `=== 0` and passed `>= 0`, so a fractional token wore a legal
+// population (`movers_total: -1e-324` rendered moversDisclosure's "No
+// account…" sentence as a computed-looking claim). A conforming integer
+// marshal never emits a token that parses to -0 (Go's encoding/json prints an
+// int64 zero as `0`), so a post-parse -0 is the surviving fingerprint of an
+// out-of-contract token, and BOTH guards refuse it. Only Object.is can see
+// the sign bit; `===` cannot.
+
+test("p1b-11: -0 is refused by BOTH count guards — a wire integer's zero parses to +0", () => {
+  // The observed defect input: a fractional token that rounds to -0 DURING
+  // JSON.parse. Post-parse, the sign bit is all that remains of it.
+  expect(Object.is(JSON.parse("-1e-324"), -0)).toBe(true);
+  expect(isWirePopulation(JSON.parse("-1e-324"))).toBe(false);
+  expect(isWirePopulation(-0)).toBe(false);
+  expect(isWireSignedCount(-0)).toBe(false);
+  // 0 stays legal on both — the refusal is the SIGN BIT, not the magnitude.
+  expect(isWirePopulation(0)).toBe(true);
+  expect(isWireSignedCount(0)).toBe(true);
+});
+
+// p1b-11 (finding B): the schema's own floor joins the vocabulary.
+// `RunBookTransitionCell.rows` is `minimum: 1` (api/openapi.yaml: "A cell is
+// emitted only when it holds at least one row" — an empty cell is ABSENT,
+// never a row of zeros), and the zero-admitting population guard let a fake
+// occupied cell `{rows: 0}` through classification AND the contradiction
+// register (0 changes no margin or census sum) into the transition table as
+// an occupied 0 row.
+
+test("p1b-11: isWireOccupancy is a population FLOORED AT 1 — an occupied cell holds at least one row", () => {
+  expect(isWireOccupancy(1)).toBe(true);
+  expect(isWireOccupancy(31)).toBe(true);
+  expect(isWireOccupancy(Number.MAX_SAFE_INTEGER)).toBe(true);
+  // The zero arm: a zero-row OCCUPIED cell is a contradiction in terms.
+  expect(isWireOccupancy(0)).toBe(false);
+  expect(isWireOccupancy(-0)).toBe(false);
+  // Everything the population guard refuses stays refused.
+  expect(isWireOccupancy(-1)).toBe(false);
+  expect(isWireOccupancy(9007199254740992)).toBe(false);
+  expect(isWireOccupancy(2.5)).toBe(false);
+  expect(isWireOccupancy("1")).toBe(false);
+  expect(isWireOccupancy(Number.NaN)).toBe(false);
+  expect(isWireOccupancy(null)).toBe(false);
 });
 
 test("malformedFields names exactly the failed checks, in check order", () => {
