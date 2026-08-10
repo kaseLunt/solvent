@@ -5,6 +5,12 @@
 //         address and hides the result body; retyping the exact address
 //         restores it (pure derivation, no data destruction).
 //
+//   p0-2 · outcome-aware matrix cells: a settled scenario×engine cell renders
+//         EVERY nonzero outcome dimension (newly eligible, Δ eligible debt,
+//         Δ bad debt, execution shortfall) in its sub-line, and an all-zero
+//         engine says "no effective movement" — bad debt and shortfall can no
+//         longer hide behind a $0 eligible-debt delta.
+//
 // Mock shapes, fixture files, and the hydration-race fill idiom are reused
 // from tests/e2e/lab.spec.ts — the fixtures are the committed, generated
 // bodies that spec documents (tests/fixtures/generate.mjs provenance).
@@ -104,5 +110,107 @@ test.describe("p0-1 · address-bound stress results", () => {
     await input.fill(ADDR.slice(0, -1) + "0");
     await expect(page.getByTestId("lab-stale-result")).toBeVisible();
     await expect(page.getByTestId("lab-error")).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p0-2 · outcome-aware matrix cells
+// ---------------------------------------------------------------------------
+
+/**
+ * The committed run-book 200 body — the SAME fixture lab.spec.ts's RESULT-cell
+ * pins run against (generated from api/openapi.yaml's run-book example by
+ * tests/fixtures/generate-lab-book.mjs). Parsed once; each test clones it and
+ * documents its single change.
+ */
+type RunBookBody = {
+  engines: {
+    engine: string;
+    newly_eligible_accounts: number;
+    eligible_debt_delta_usd: string;
+    bad_debt_delta_usd: string;
+    market_realization: Record<string, unknown> | null;
+  }[];
+};
+const RUN_BOOK_200 = JSON.parse(fixture("run-book.eth_minus_30.json")) as RunBookBody;
+
+/** POST-capable CORS: the run-book request is preflighted, so the OPTIONS leg needs methods+headers. */
+const RUN_CORS = {
+  ...CORS,
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "content-type, accept",
+};
+
+/** Mock the run-book POST, answering the OPTIONS leg too (tornado.spec.ts's mockSetRun pattern). */
+async function mockRunBook(page: Page, body: RunBookBody) {
+  await page.route(`${API}/v1/scenarios/*/run-book`, (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: RUN_CORS, body: "" });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: RUN_CORS,
+      body: JSON.stringify(body),
+    });
+  });
+}
+
+/**
+ * The eth_minus_30 row's FIRST engine column — aave_v3_etherfi, engines[0] of
+ * the fixture (lab.spec.ts's cell() geometry: td 1 = aave, td 2 = debt_manager).
+ */
+function aaveCell(page: Page) {
+  return page.locator('[data-testid="matrix-row"][data-scenario-id="eth_minus_30"] td').nth(1);
+}
+
+test.describe("p0-2 · outcome-aware matrix cells", () => {
+  test("a run with bad debt and shortfall surfaces both in the cell", async ({ page }) => {
+    await mockCold(page);
+    // Single documented change to the committed run-book fixture, serving ONE
+    // purpose (the exact fields fix p0-2 must surface): the first engine's
+    // (aave_v3_etherfi) bad_debt_delta_usd set to "15900", and — because the
+    // committed fixture carries market_realization: null — the whole Shortfall
+    // object set from api/openapi.yaml's own example values with
+    // execution_shortfall_usd "3864". Everything else byte-identical.
+    const body = structuredClone(RUN_BOOK_200);
+    body.engines[0].bad_debt_delta_usd = "15900";
+    body.engines[0].market_realization = {
+      hfs_unchanged: true,
+      execution_shortfall_usd: "3864",
+      bad_debt_at_liquidation_usd: "0",
+      usd_decimals: 8,
+      seizure_model: "pro-rata-over-counted-collateral",
+      note:
+        "market value is NOT an oracle mark: this scenario moves NO health factor " +
+        "(`hfs_unchanged` asserts it, computed not promised). The output is the gap the " +
+        "protocol is not seeing, under the disclosed seizure model.",
+    };
+    await mockRunBook(page, body);
+    await page.goto("/lab");
+    await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
+    const cell = aaveCell(page);
+    await expect(cell).toHaveAttribute("data-cell-state", "result");
+    await expect(cell).toContainText("Δ bad debt");
+    await expect(cell).toContainText("execution shortfall");
+  });
+
+  test("an all-zero engine says so instead of a bare $0", async ({ page }) => {
+    await mockCold(page);
+    // Single documented change to the committed run-book fixture, serving ONE
+    // purpose (the quiet arm): the first engine's three outcome dimensions all
+    // zeroed — newly_eligible_accounts 0, eligible_debt_delta_usd "0",
+    // bad_debt_delta_usd "0" (market_realization is already null in the
+    // committed body). Everything else byte-identical.
+    const body = structuredClone(RUN_BOOK_200);
+    body.engines[0].newly_eligible_accounts = 0;
+    body.engines[0].eligible_debt_delta_usd = "0";
+    body.engines[0].bad_debt_delta_usd = "0";
+    await mockRunBook(page, body);
+    await page.goto("/lab");
+    await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
+    const cell = aaveCell(page);
+    await expect(cell).toHaveAttribute("data-cell-state", "result");
+    await expect(cell).toContainText("no effective movement");
   });
 });

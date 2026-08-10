@@ -70,12 +70,14 @@ import { useState } from "react";
 import type { ScenarioDefinition } from "@solvent/client";
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
-import { renderEngineAmount, renderSignedCount } from "@/lib/book-format";
+import { renderSignedCount } from "@/lib/book-format";
 import {
   attemptChangedNote,
   attemptSkew,
   axisFamilyWords,
   batchHeaderLine,
+  CELL_QUIET_LINE,
+  cellPrimaryOutcome,
   cellState,
   listedPhases,
   observedAnchorBatch,
@@ -84,6 +86,7 @@ import {
   rowCoverage,
   rowIdentity,
   scenarioCoverage,
+  usd,
   type LabCellState,
   type MatrixPhase,
 } from "./matrixCells";
@@ -94,14 +97,9 @@ import {
 } from "./labPanelLines";
 import styles from "./lab.module.css";
 
-/**
- * The engine's own USD, grouped. `renderEngineAmount` is the shared, tested
- * helper (null stays an em dash; the digits are untouched string surgery), and
- * the "$" rides outside it because the wire's unit is disclosed per engine.
- */
-function usd(value: string, decimals: number): string {
-  return `$${renderEngineAmount(value, decimals)}`;
-}
+// The engine's-own-USD helper `usd` moved to matrixCells.ts (Phase 0 fix 2):
+// the decision layer's `cellPrimaryOutcome` composes the same dollars this
+// component renders, so one definition serves both.
 
 function Cell({ state }: { state: LabCellState }) {
   switch (state.state) {
@@ -139,7 +137,13 @@ function Cell({ state }: { state: LabCellState }) {
           <span className={styles.cellTag}>running…</span>
         </td>
       );
-    case "result":
+    case "result": {
+      // P0-2 (UI-overhaul trust fix): the sub-line renders EVERY nonzero
+      // outcome dimension of the engine result via `cellPrimaryOutcome` — the
+      // top value alone let bad debt and execution shortfall hide behind a
+      // "$0" eligible-debt delta, and an all-zero engine now says so in words
+      // rather than staying a bare zero.
+      const outcome = cellPrimaryOutcome(state.engine);
       return (
         <td
           className={styles.cellResult}
@@ -160,12 +164,21 @@ function Cell({ state }: { state: LabCellState }) {
                 METHOD line, where it is stated ONCE rather than once per cell.
                 The BATCH PIN moved the other way — out of the `title` and into
                 rendered text, because a batch id is a number and LAW-5 gives a
-                number no home that needs a mouse. */}
-            net eligible accounts {renderSignedCount(state.engine.newly_eligible_accounts)} ·
-            batch #{String(state.batchId)}
+                number no home that needs a mouse.
+
+                P0-2: the `net eligible accounts` fragment stays FIRST because
+                lab.spec.ts pins that phrasing; when the count is nonzero the
+                outcome composition restates it as "+N newly eligible" — a
+                duplication noted in the program ledger for Phase 3 cleanup. */}
+            {[
+              `net eligible accounts ${renderSignedCount(state.engine.newly_eligible_accounts)}`,
+              outcome.kind === "quiet" ? CELL_QUIET_LINE : outcome.parts.join(" · "),
+              `batch #${String(state.batchId)}`,
+            ].join(" · ")}
           </span>
         </td>
       );
+    }
     case "withheld":
       return (
         <td

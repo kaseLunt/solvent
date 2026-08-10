@@ -28,6 +28,7 @@
 // Playwright's transpiler as well as by Next.
 
 import type { EngineRefusal, ScenarioDefinition, Shock } from "@solvent/client";
+import { renderEngineAmount, renderSignedCount } from "../../lib/book-format";
 import type { LabRunBook, LabRunBookEngine, RunBookOutcome } from "../../lib/runbook";
 
 // ---------------------------------------------------------------------------
@@ -2750,4 +2751,50 @@ export function attemptChangedNote(skew: DefinitionSkew, surface: RerunSurface):
         "there is nothing to do here until the request settles."
     : "No book came back from it, so there is nothing here for a listing refresh to make " +
         "readable, so this panel shows no aggregate, no delta and no outcome register from it.";
+}
+
+/**
+ * The engine's own USD, grouped. `renderEngineAmount` is the shared, tested
+ * helper (null stays an em dash; the digits are untouched string surgery), and
+ * the "$" rides outside it because the wire's unit is disclosed per engine.
+ *
+ * Phase 0 fix 2 moved this here from LabMatrix.tsx, where it was
+ * module-private: `cellPrimaryOutcome` below must compose the SAME dollars the
+ * component renders, so the helper lives in the decision layer and LabMatrix
+ * imports it back.
+ */
+export function usd(value: string, decimals: number): string {
+  return `$${renderEngineAmount(value, decimals)}`;
+}
+
+// ————— Phase 0 fix 2: the cell's primary-outcome composition —————
+// A settled cell must not read "$0" while ANY outcome dimension moved.
+// Wire deltas are integer decimal strings scaled by usd_decimals; zero is
+// any string whose digits are all zero (sign irrelevant).
+export const CELL_QUIET_LINE = "no effective movement";
+
+export type CellOutcome =
+  | { kind: "movement"; parts: string[] }
+  | { kind: "quiet" };
+
+function isZeroDecimal(value: string): boolean {
+  return /^-?0*\.?0*$/.test(value);
+}
+
+export function cellPrimaryOutcome(engine: LabRunBookEngine): CellOutcome {
+  const parts: string[] = [];
+  if (engine.newly_eligible_accounts !== 0) {
+    parts.push(`${renderSignedCount(engine.newly_eligible_accounts)} newly eligible`);
+  }
+  if (!isZeroDecimal(engine.eligible_debt_delta_usd)) {
+    parts.push(`Δ eligible debt ${usd(engine.eligible_debt_delta_usd, engine.usd_decimals)}`);
+  }
+  if (!isZeroDecimal(engine.bad_debt_delta_usd)) {
+    parts.push(`Δ bad debt ${usd(engine.bad_debt_delta_usd, engine.usd_decimals)}`);
+  }
+  const mr = engine.market_realization;
+  if (mr && !isZeroDecimal(mr.execution_shortfall_usd)) {
+    parts.push(`execution shortfall ${usd(mr.execution_shortfall_usd, mr.usd_decimals)}`);
+  }
+  return parts.length === 0 ? { kind: "quiet" } : { kind: "movement", parts };
 }
