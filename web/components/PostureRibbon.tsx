@@ -13,7 +13,7 @@ import {
 import { freshnessTier } from "@/lib/freshnessTiers";
 import { useMetaConstants, type MetaConstantsReading } from "@/lib/meta";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
-import { ribbonEmptyPosture, ribbonStreamPosture } from "@/lib/stream-posture";
+import { ribbonEmptyPosture, ribbonStreamPosture, ribbonSweepReading } from "@/lib/stream-posture";
 import { Ribbon, RibbonStreamChip, type RibbonAsOf, type RibbonSnapshotChip } from "./Ribbon";
 import styles from "./ribbon.module.css";
 
@@ -169,17 +169,16 @@ export function PostureRibbon() {
     }));
     for (const stamp of posture.batch.watermarks) {
       if (stamp.sweep !== null) {
+        // p1b-15: value AND tone come from ONE pure derivation
+        // (ribbonSweepReading). The old inline tone read `failed > 0` raw —
+        // `-0 > 0` is false, so an out-of-contract failure tally wore the
+        // dim, non-degraded arm beside a readable age. The p1b-14 age guard
+        // rides inside the same derivation, unchanged.
+        const sweep = ribbonSweepReading(stamp.sweep);
         asOfs.push({
           label: `${stamp.engine} sweep`,
-          value:
-            stamp.sweep.age_seconds === null
-              ? "age —"
-              : // p1b-14: a non-null sweep age is a wire population; the word
-                // register refuses what the contract would not have produced.
-                isWirePopulation(stamp.sweep.age_seconds)
-                ? `age ${String(stamp.sweep.age_seconds)}s`
-                : "age unreadable",
-          tone: stamp.sweep.failed > 0 ? "warn" : "dim",
+          value: sweep.value,
+          tone: sweep.tone,
         });
       }
     }

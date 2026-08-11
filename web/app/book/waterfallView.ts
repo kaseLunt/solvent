@@ -73,8 +73,14 @@ export function waterfallEngineAnswer(waterfall: Waterfall, engine: string): str
   for (const point of waterfall.points) {
     const at = point.engines.find((candidate) => candidate.engine === engine);
     if (at === undefined) continue;
-    if (deepest === null || point.index > deepest.index) {
-      deepest = { index: point.index, factor: point.factor, at };
+    // p1b-15: the grid index passes the population contract BEFORE it is
+    // used for selection — `-0 === 0` is true and `-0 > n` behaves like 0,
+    // so an out-of-contract token could steer the deepest-point choice and
+    // the "At the unshocked point" claim. Out of contract THROWS into the
+    // p1b-0 route boundary (the p1b-14 accountCount law, same module).
+    const index = readWirePopulation(point.index, "points[].index");
+    if (deepest === null || index > deepest.index) {
+      deepest = { index, factor: point.factor, at };
     }
   }
   if (deepest === null) {
@@ -104,8 +110,14 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
     if (at === undefined) continue;
     // Grid point 0 is the UNSHOCKED standing census; every later point is a
     // projection and labels itself by its percent distance from ×1.00.
+    // p1b-15: the index is validated BEFORE that branch — `-0 === 0` is
+    // true, so an out-of-contract token (`-1e-324` parses to -0) wore the
+    // legitimate unshocked rung. Out of contract THROWS into the p1b-0
+    // route boundary, like every other wire integer read in this module.
     const percent =
-      point.index === 0 ? "unshocked" : gridPercentLabel(point.factor, waterfall.grid_scale);
+      readWirePopulation(point.index, "points[].index") === 0
+        ? "unshocked"
+        : gridPercentLabel(point.factor, waterfall.grid_scale);
     const times = factorTimesLabel(point.factor, waterfall.grid_scale);
     steps.push({
       label:
@@ -169,8 +181,10 @@ export function waterfallAllDustRungs(waterfall: Waterfall, engine: string): Wat
   for (const point of waterfall.points) {
     const at = point.engines.find((candidate) => candidate.engine === engine);
     if (at === undefined) continue;
+    // p1b-15: same index law as the step builder — a -0 token must never
+    // name its rung "unshocked" in the dust disclosure either.
     const name =
-      point.index === 0
+      readWirePopulation(point.index, "points[].index") === 0
         ? "unshocked"
         : `${factorTimesLabel(point.factor, waterfall.grid_scale)} ` +
           `(${gridPercentLabel(point.factor, waterfall.grid_scale)})`;

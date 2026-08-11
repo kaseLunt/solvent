@@ -32,6 +32,7 @@ import {
   POSITIONS_AAVE_PAGE_2,
   POSITIONS_DM_PAGE_1,
 } from "../fixtures/book";
+import { FEED_POSTURE_SNAPSHOT } from "../fixtures/feed";
 import { ADDRESS_FOUND, EVENTS, FOUND_ADDR, HISTORY, PARAMS } from "../fixtures/inspector";
 import { OBSERVATORY_SERIES_AAVE } from "../fixtures/observatory";
 
@@ -1151,5 +1152,130 @@ test.describe("p1b-14 · Codex round-6 fix", () => {
     await expect(refusal).toContainText("refused to render");
     await expect(page.getByRole("banner")).toBeVisible();
     await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p1b-15 · the Codex round-7 fix wave: the LAST TWO -0 reads the p1b-14
+// audit marked guarded but were not (both rows struck-and-corrected in the
+// ledger).
+//
+// Site 1 — the appbar sweep chip's TONE read `stamp.sweep.failed > 0` raw:
+// `-0 > 0` is false, so a malformed failure tally selected the DIM
+// (non-degraded) arm while the sweep age beside it stayed readable — a tally
+// nobody could read looked like a healthy sweep. The derivation is now the
+// pure `ribbonSweepReading` (lib/stream-posture.ts): an out-of-contract
+// tally renders the word register (`failed unreadable`) in the warn tone —
+// the dim arm is unreachable over an unreadable tally.
+//
+// Site 2 — the waterfall builders branched on `point.index === 0` (true of
+// -0) so a raw first-index token `-1e-324` wore the legitimate unshocked
+// rung, and the increments grid weld ordered indexes it never validated
+// (`1 <= -0` is false — the sequence read as strictly rising). Every
+// consumed point index now passes the population contract first: the
+// waterfallView reads throw into the p1b-0 route boundary (the p1b-14
+// accountCount law, same module), and the increments model refuses in its
+// own GRID CONTRADICTION register (unit-pinned — behind the route arm here).
+//
+// The -0 payloads are produced exactly as p1b-12/13/14's raw-splice:
+// sentinel value, uniqueness asserted, raw-string replacement (JSON.stringify
+// normalizes -0 to the token 0).
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-15 · Codex round-7 fixes", () => {
+  test("a sweep failed-tally token that parses to -0 renders the unreadable register — never the dim arm", async ({
+    page,
+  }) => {
+    // Single documented change to the committed stream snapshot fixture: the
+    // debt_manager watermark sweep's `failed` carries the raw token -1e-324.
+    // Everything else byte-identical.
+    const SENTINEL = 987654321; // no failure tally of this book: unmistakable
+    const payload = structuredClone(FEED_POSTURE_SNAPSHOT);
+    const stamp = payload.batch?.watermarks.find((w) => w.engine === "debt_manager");
+    if (!stamp?.sweep) throw new Error("fixture shape: debt_manager watermark sweep missing");
+    stamp.sweep.failed = SENTINEL;
+    const frame = `event: snapshot\ndata: ${JSON.stringify(payload)}\n\n`;
+    const needle = `"failed":${String(SENTINEL)}`;
+    // The sentinel must appear EXACTLY once (the watermark sweep only — the
+    // engine-aggregate sweep is a different object) or the splice would
+    // corrupt more than the documented field.
+    expect(frame.split(needle).length).toBe(2);
+    const raw = frame.replace(needle, '"failed":-1e-324');
+    await mockBookWith(page, BOOK);
+    // /v1/meta muted for hermeticity (the snapshot chip's tier is not under
+    // test, and a live API must not feed this test different constants).
+    await page.route("**/v1/meta*", (route) => route.abort());
+    // Registered AFTER mockBookWith so this stream fulfillment wins over its
+    // abort (Playwright matches routes newest-first).
+    await page.route("**/v1/stream**", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { ...CORS, "content-type": "text/event-stream" },
+        body: raw,
+      }),
+    );
+    await page.goto("/book");
+    const header = page.getByRole("banner");
+    // The appbar renders from the retained snapshot; open the popover.
+    await header.getByTestId("ribbon-data-status").click();
+    const panel = header.getByTestId("ribbon-data-status-panel");
+    const reading = panel.locator("span", { hasText: "debt_manager sweep" }).locator("b");
+    // THE WORD REGISTER: the readable age stays stated, the unreadable tally
+    // is named — never silently absorbed into a tone.
+    await expect(reading).toHaveText("age 1205s · failed unreadable");
+    // THE TONE, resolved against the live tokens (class names are hashed in
+    // a production build): warn ink, and NEVER the dim (--ink-3) arm — an
+    // unreadable failure tally must not wear the non-degraded register.
+    const resolveInk = (token: string) =>
+      page.evaluate((name) => {
+        const probe = document.createElement("span");
+        document.body.appendChild(probe);
+        probe.style.color = `var(${name})`;
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      }, token);
+    const color = await reading.evaluate((el) => getComputedStyle(el).color);
+    expect(color).toBe(await resolveInk("--warn-text"));
+    expect(color).not.toBe(await resolveInk("--ink-3"));
+    // Scoped: the refusal is the sweep entry's own — the batch chip beside it
+    // still states its identity, and the shell holds.
+    await expect(header.getByTestId("ribbon-batch")).toHaveText("BATCH #1");
+  });
+
+  test("a waterfall first-index token that parses to -0 refuses the ROUTE — never the unshocked rung", async ({
+    page,
+  }) => {
+    // Single documented change to the committed /v1/book fixture: the
+    // waterfall's FIRST grid point index carries the raw token -1e-324.
+    // Everything else byte-identical. Pre-fix, `-0 === 0` dressed the point
+    // as the standing census (the unshocked rung, chart ticks and dust-rung
+    // names) and `1 <= -0` being false let the increments weld read the grid
+    // as lawfully ordered.
+    const SENTINEL = 987654321; // no grid index of this book: unmistakable
+    const body = structuredClone(BOOK);
+    if (body.waterfall === null) throw new Error("fixture shape: waterfall missing");
+    const first = body.waterfall.points[0];
+    if (!first) throw new Error("fixture shape: waterfall points[0] missing");
+    first.index = SENTINEL;
+    const serialized = JSON.stringify(body);
+    const needle = `"index":${String(SENTINEL)}`;
+    expect(serialized.split(needle).length).toBe(2);
+    const raw = serialized.replace(needle, '"index":-1e-324');
+    await mockBookWith(page, body);
+    await page.route("**/v1/book", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", headers: CORS, body: raw }),
+    );
+    await page.goto("/book");
+    // THE HONEST ARM: the p1b-0 route boundary catches the WireIntegerError
+    // the guarded index read throws — the route refuses by name…
+    const refusal = page.getByTestId("route-refusal");
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toContainText("refused to render");
+    await expect(page.getByRole("banner")).toBeVisible();
+    // …and the fabricated census exists NOWHERE: no chart tick, no answer
+    // sentence, no dust-rung name and no increments row wears "unshocked"
+    // over a point whose index nobody may read.
+    await expect(page.getByText(/unshocked/)).toHaveCount(0);
   });
 });

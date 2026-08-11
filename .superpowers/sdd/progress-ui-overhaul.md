@@ -3445,7 +3445,7 @@ derived-locally / out of scope, recorded.
 | WaterfallEngine `newly_eligible_accounts`, `cumulative_eligible_accounts` | stressIncrements latch weld (arithmetic BEFORE any guard; malformed counts either fed a rendered step or tripped the LATCH CONTRADICTION register — the wrong claim) | (b) | **FIXED** — count-contract check before the weld, refusing into the module's own `refused` arm (COUNT CONTRADICTION voice) |
 | WaterfallEngine `cumulative_eligible_accounts`, `insolvent_if_liquidated_accounts` | waterfallView (answer sentence, step labels, all-dust `> 0` gates) | (b) | **FIXED** — `accountCount` helper + guarded gates |
 | Monotonicity `index` | BookWaterfall violation strip | (b) | **FIXED** — `readWirePopulation` |
-| WaterfallPoint `index` | waterfallView/stressIncrements ordering arithmetic | (c) | ordering violations already refuse via the GRID CONTRADICTION arm; the index never renders outside that refusal's own text — recorded |
+| WaterfallPoint `index` | waterfallView/stressIncrements ordering arithmetic | ~~(c)~~ (b) | ~~ordering violations already refuse via the GRID CONTRADICTION arm; the index never renders outside that refusal's own text — recorded~~ **was recorded needing no guard — INCORRECT; fixed p1b-15** (Codex round 7): `point.index === 0` is true of -0, so a `-1e-324` token wore the legitimate UNSHOCKED rung in every builder, and the weld's ordering (`1 <= -0` is false) read a -0,1 sequence as strictly rising — guarded reads in waterfallView (route arm) + index contract in the grid weld (the module's own refused arm, GRID CONTRADICTION voice) |
 | HeldFlat `chain_id`, ChainEvent `chain_id` | BookWaterfall held-flat table; FeedList/InspectorActivity TxLink title | (b) | **FIXED** — `readWirePopulation` |
 | BookCoverage `excluded_by_this_layer` | BookSurface coverage stamp | (b) | **FIXED** — `readWirePopulation` |
 | BookCoverage `batch_positions`, `in_book`, `refused_in_batch` | no web consumer (grep: none) | (c) | recorded — unconsumed |
@@ -3458,7 +3458,7 @@ derived-locally / out of scope, recorded.
 | Stamp `last_block` | BookSurface marks, PostureRibbon/FeedLiveStrip watermarks, InspectorSurface, evidence | (b) | **FIXED** — `formatBlock` word register (one chokepoint) |
 | Stamp `chain_id` | evidence watermark row | (b) | **FIXED** — `readWirePopulation` |
 | Stamp / ObservatorySeriesPoint `acked_epoch`, `max_epoch_at_compute` | InspectorPositionCard `unackedEpochs` subtraction; ObservatoryPointDetail reorg row; evidence `reorgPostureRow` | (b) | **FIXED** — both legs guarded before the subtraction at all three sites |
-| SweepStamp `rows`, `failed`, `generation` | ObservatoryPointDetail sweep row; PostureRibbon sweep chip; BookSurface `marksSummary` glyph branch | (b) | **FIXED** — guarded reads (word register on the ribbon age); BookSurface line 331's tone branch is transitively covered (same render as marksSummary) |
+| SweepStamp `rows`, `failed`, `generation` | ObservatoryPointDetail sweep row; PostureRibbon sweep chip; BookSurface `marksSummary` glyph branch | (b) | ~~**FIXED** — guarded reads (word register on the ribbon age); BookSurface line 331's tone branch is transitively covered (same render as marksSummary)~~ **was recorded guarded — INCORRECT for the ribbon sweep chip's TONE; fixed p1b-15** (Codex round 7): only the AGE was guarded — the tone read `stamp.sweep.failed > 0` raw, and `-0 > 0` is false, so a malformed tally wore the dim non-degraded arm — `ribbonSweepReading` (lib/stream-posture.ts) now derives value+tone in one guarded read (word register `failed unreadable`, warn tone). The ObservatoryPointDetail and BookSurface reads were and remain guarded (readWirePopulation) |
 | SweepStamp `age_seconds` (nullable) | PostureRibbon sweep chip | (b) | **FIXED** — word register |
 | AsOf/PositionSummary `balances_block`, `params_block`, `sweep_block`; Leg `debt_index_block`, `collateral_index_block`; PriceInput `block_number`; ParamChange `effective_block`; ChainEvent `block_number`; RateIndex `as_of_block`; ObservatorySeriesPoint `last_block` | formatBlock render sites across all five surfaces + evidence + history-series | (b) | **FIXED** — `formatBlock` word register; the `sweep_block > 0` CLAIM branches (InspectorPositionCard, positionRow, history-series `sweepMark`) additionally guarded with `readWirePopulation` so -0 can never read as "no sweep recorded" |
 | ParamChange `effective_log_index`; ChainEvent `log_index`, `seq` | InspectorPositionCard provenance; FeedList/InspectorActivity provenance lines (incl. the `seq !== 0` branch, where `-0 !== 0` is false) | (b) | **FIXED** — `readWirePopulation` |
@@ -3743,3 +3743,118 @@ order pin; tone map with chips carried. The p1a-6 DOM pin
 - 4 mutation kills, each in isolation, each dying at its named pin
   (F1 roster / F2 ordering / F3 hasBase / F5 fill-grade), plus the F6
   three-form scratch proof.
+
+
+## Phase 1 Track B Codex fix wave 7 (p1b-15)
+
+One commit (`fix(web): p1b-15 codex round 7 - the last two negative-zero
+reads are guarded, the audit corrects itself`).
+
+Codex round 7 read the p1b-14 audit table against the code and found TWO
+rows that claimed guards which did not exist. Both fixed test-first, and
+both rows STRUCK-AND-CORRECTED in §p1b-14 above (never silently
+rewritten): the incorrect verdicts remain visible under strikethrough
+with the correction beside them.
+
+### Site 1 (medium) — the appbar sweep chip's TONE read `failed` raw
+
+`web/components/PostureRibbon.tsx:182` (pre-fix):
+`tone: stamp.sweep.failed > 0 ? "warn" : "dim"` — no wire guard. A
+failure-tally token `-1e-324` parses to NEGATIVE ZERO, `-0 > 0` is
+false, so the malformed tally selected the DIM (non-degraded) arm while
+the sweep age beside it stayed readable: a tally nobody could read
+looked like a healthy sweep. The p1b-14 row recorded this consumer as
+guarded — it guarded only the AGE.
+
+Fix: `ribbonSweepReading` (lib/stream-posture.ts, the ribbon family's
+pure module) derives value AND tone in ONE guarded read. An
+out-of-contract tally renders the word register (`failed unreadable`,
+the p1b-13/14 vocabulary) in the WARN tone — the dim arm is unreachable
+over an unreadable tally, and never a throw (layout chrome, above the
+p1b-0 boundary). Legal tallies keep the exact prior law (0 → dim,
+>0 → warn); the p1b-14 age arms ride inside unchanged. PostureRibbon
+consumes the derivation; no other sweep-chip consumer exists.
+
+### Site 2 (medium) — WaterfallPoint `index` was never validated
+
+`web/app/book/waterfallView.ts:107-108` (pre-fix): `buildWaterfallSteps`
+branched on `point.index === 0` — true of -0 — so a raw first-index
+token `-1e-324` wore the legitimate UNSHOCKED rung (chart tick, answer
+sentence selection, dust-rung names). And `stressIncrements`' grid weld
+ORDERED indexes it never validated: `1 <= -0` is false, so a -0,1
+sequence read as strictly rising and the increments view rendered as if
+the grid were lawful. The p1b-14 row recorded the field as (c) needing
+no guard ("the index never renders outside that refusal's own text") —
+INCORRECT: the index steers rendering through the `=== 0` branch and the
+ordering weld even where it never prints.
+
+Fix, split by the p1b-14 register doctrine:
+- waterfallView (`waterfallEngineAnswer` selection,
+  `buildWaterfallSteps` census branch, `waterfallAllDustRungs` rung
+  names): every consumed `point.index` passes
+  `readWirePopulation(point.index, "points[].index")` BEFORE
+  ordering/selection/label derivation — out of contract THROWS into the
+  p1b-0 route boundary, the module's established posture (the p1b-14
+  accountCount law).
+- stressIncrements: the indexes pass `isWirePopulation` at the TOP of
+  the grid weld — failure refuses into the module's own `refused` arm
+  (GRID CONTRADICTION voice, naming the factor pair, never printing a
+  value `String(-0)` would launder to "0"). On the live page the route
+  arm fires first (both read the same points); the model's register is
+  unit-pinned.
+
+### Red-first, executed and witnessed (`web-3819-p1b15-red.log`)
+
+All 5 pins written first and failed at the defect:
+- unit: `buildWaterfallSteps` did NOT throw on a -0 first index (the
+  unshocked rung rendered); `waterfallEngineAnswer`/`waterfallAllDustRungs`
+  did not throw; `stressIncrements` returned "view" over the -0,1 grid
+  ("expected refused, got view").
+- e2e (raw-splice per p1b-12/13/14: sentinel, uniqueness asserted,
+  raw-string replacement): the sweep splice resolved to
+  `<b class="…__dim">age 1205s</b>` — the -0 tally WEARING the dim arm,
+  captured in the log; the waterfall splice rendered /book with NO route
+  refusal.
+- The `ribbonSweepReading` pins are born with the function (its RED is
+  the e2e above); bite proven by mutation M1.
+
+### Mutation kills (3/3, unit-in-isolation, restoration `cmp`-verified)
+
+- **p1b-15-M1**: the tally guard removed from `ribbonSweepReading`
+  (`if (!isWirePopulation(sweep.failed))` → `if (false)`) →
+  stream-posture.spec.ts dies at exactly the -0 tally pin
+  (**1 failed / 9 passed**, `web-3819-p1b15-mutM1.log`).
+- **p1b-15-M2**: the weld index check removed (`→ if (false)`) →
+  stress-increments.spec.ts dies at exactly the p1b-15 grid pin
+  (**1 failed / 12 passed**, `web-3819-p1b15-mutM2.log`).
+- **p1b-15-M3**: `buildWaterfallSteps`' guarded read reverted to
+  `point.index === 0` → book-charts-copy.spec.ts dies at exactly the
+  unshocked-rung pin (**1 failed / 55 passed**,
+  `web-3819-p1b15-mutM3.log`; the surviving answer/dust pin
+  discriminates the mutant).
+- Each restored and `cmp`-verified byte-identical before the next.
+
+### Closing counts (p1b-15)
+
+- `npm run typecheck` / `npm run lint` / `npm run lint:css` — clean
+  (exit 0)
+- touched unit specs (book-charts-copy + stress-increments +
+  stream-posture) — **79 passed** (72 pre-existing + 5 new + 2 born
+  with `ribbonSweepReading`)
+- `npm run build` — clean (fresh, post-restore)
+- e2e book + p1b-fixes + shell (appbar) — **57 passed, 1 skipped**
+  (the styleguide smoke skip)
+- FULL Track B suite (`npx playwright test -c
+  tests/playwright.p1b.config.ts`, port 3819, fresh build):
+  **1642 passed, 10 skipped, 0 failed (36.9s)**
+  (`web-3819-p1b15-full.log`) — the pre-wave baseline measured this
+  session (1635 + 10 skipped, `web-3819-p1b15-baseline-full.log`) plus
+  exactly the 7 new pins (2 stream-posture + 1 stress-increments +
+  2 book-charts-copy + 2 e2e).
+
+### Audit posture after this wave
+
+The two corrected rows close round 7's findings; no OTHER row was
+re-verified this wave — the correction is scoped to what Codex proved
+wrong. The named residues of §p1b-14 (meta constants, retryAfter twins,
+provider raw carry, the A2 information boundary) stand unchanged.

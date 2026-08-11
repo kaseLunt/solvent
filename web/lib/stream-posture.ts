@@ -34,6 +34,7 @@
 // labels contains the substring "LIVE" (the three retirement guards).
 
 import type { StreamState } from "@solvent/client";
+import { isWirePopulation } from "./wireGuard";
 
 /**
  * How the stream chip is toned. Maps onto the canon chip registers in
@@ -113,4 +114,51 @@ export function ribbonEmptyPosture(
   const posture = ribbonStreamPosture(streamState, hasBase);
   if (posture.label !== STREAM_CONNECTED) return posture;
   return { label: STREAM_NO_BATCH, tone: "waiting" };
+}
+
+/**
+ * The Data-status popover's SWEEP entry (p1b-15, Codex round 7): one reading
+ * — value and tone — derived together, pure, so the appbar cannot compose a
+ * readable-looking line over fields it never validated.
+ *
+ * THE DEFECT THIS KILLS: PostureRibbon derived the tone as
+ * `stamp.sweep.failed > 0` with no wire guard in front. `-0 > 0` is false,
+ * so a failure-tally token `-1e-324` (which parses to NEGATIVE ZERO — the
+ * p1b-11 class) selected the DIM, non-degraded arm while the sweep age
+ * beside it stayed readable: a tally nobody could read looked like a
+ * healthy sweep. The p1b-14 audit recorded this read as guarded — it
+ * guarded only the AGE — and the row is struck-and-corrected this wave.
+ *
+ * The arms:
+ *   - `failed` outside the wire population contract → the word register
+ *     (`failed unreadable`, the p1b-13/14 vocabulary) in the WARN tone: an
+ *     unreadable degradation tally is itself a degraded statement, and the
+ *     dim arm is unreachable over it. Never a throw — this renders in the
+ *     layout-level appbar, ABOVE the p1b-0 route boundary.
+ *   - `failed` legal → the age reading alone, warn when failures > 0, dim
+ *     otherwise (unchanged law).
+ *   - the AGE keeps its p1b-14 guard: null → "age —", out-of-contract →
+ *     "age unreadable", legal → "age Ns".
+ */
+export interface RibbonSweepReading {
+  /** The entry's text, e.g. "age 41s" or "age 41s · failed unreadable". */
+  readonly value: string;
+  /** Maps onto the popover's as-of tones (components/Ribbon.tsx). */
+  readonly tone: "warn" | "dim";
+}
+
+export function ribbonSweepReading(sweep: {
+  readonly age_seconds: number | null;
+  readonly failed: number;
+}): RibbonSweepReading {
+  const age =
+    sweep.age_seconds === null
+      ? "age —"
+      : isWirePopulation(sweep.age_seconds)
+        ? `age ${String(sweep.age_seconds)}s`
+        : "age unreadable";
+  if (!isWirePopulation(sweep.failed)) {
+    return { value: `${age} · failed unreadable`, tone: "warn" };
+  }
+  return { value: age, tone: sweep.failed > 0 ? "warn" : "dim" };
 }

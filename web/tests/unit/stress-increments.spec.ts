@@ -213,3 +213,24 @@ test("p1b-6: a malformed scale anchor yields NO clause — never the \"$0, no ba
     "Every increase in this window is $0, so no bar is drawn.",
   );
 });
+
+// ---------------------------------------------------------------------------
+// p1b-15 (Codex round 7) — THE INDEX CONTRACT JOINS THE GRID WELD. The weld
+// ORDERED indexes it never validated: `1 <= -0` is false, so a first-point
+// index token `-1e-324` (which parses to NEGATIVE ZERO) read as a strictly
+// rising sequence and the view rendered as if the grid were lawful. The
+// p1b-14 audit recorded WaterfallPoint `index` as needing no guard — that
+// row was INCORRECT and is struck-and-corrected this wave.
+// ---------------------------------------------------------------------------
+
+test("p1b-15: a first-point index of -0 REFUSES the grid — never a lawful-looking view", () => {
+  const waterfall = waterfallClone();
+  const first = waterfall.points[0];
+  if (first === undefined) throw new Error("fixture invariant");
+  // The defect input: the raw token -1e-324 parses to NEGATIVE ZERO.
+  first.index = JSON.parse("-1e-324") as number;
+  expect(Object.is(first.index, -0)).toBe(true);
+  const reason = refusedOf(waterfall, "debt_manager");
+  expect(reason).toContain("GRID CONTRADICTION");
+  expect(reason).toContain("wire population contract");
+});

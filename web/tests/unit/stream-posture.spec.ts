@@ -26,6 +26,7 @@ import type { StreamState } from "@solvent/client";
 import {
   ribbonEmptyPosture,
   ribbonStreamPosture,
+  ribbonSweepReading,
   STREAM_AWAITING_BASE,
   STREAM_CLOSED,
   STREAM_CONNECTED,
@@ -136,5 +137,57 @@ test.describe("ribbonEmptyPosture — an appbar with nothing beside it", () => {
         );
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p1b-15 (Codex round 7) — ribbonSweepReading: the sweep entry's value AND
+// tone from one guarded derivation. The old inline tone read
+// `stamp.sweep.failed > 0` raw: `-0 > 0` is false, so a failure-tally token
+// `-1e-324` (which parses to NEGATIVE ZERO) selected the DIM, non-degraded
+// arm while the sweep age beside it stayed readable. The p1b-14 audit
+// recorded this read as guarded — it guarded only the age; the row is
+// struck-and-corrected this wave.
+// ---------------------------------------------------------------------------
+
+test.describe("ribbonSweepReading — no tone is derived from a tally nobody validated", () => {
+  test("a -0 failure tally renders the word register in WARN — the dim arm is unreachable", () => {
+    // The defect input: the raw token -1e-324 parses to NEGATIVE ZERO.
+    const minusZero = JSON.parse("-1e-324") as number;
+    expect(Object.is(minusZero, -0)).toBe(true);
+    expect(ribbonSweepReading({ age_seconds: 1205, failed: minusZero })).toEqual({
+      value: "age 1205s · failed unreadable",
+      tone: "warn",
+    });
+    // The whole out-of-contract family refuses the same way — a negative,
+    // fractional or unsafe tally must never read as "no failures".
+    for (const failed of [-1, 1.5, 2 ** 53]) {
+      expect(ribbonSweepReading({ age_seconds: 1205, failed }).tone, String(failed)).toBe("warn");
+      expect(ribbonSweepReading({ age_seconds: 1205, failed }).value, String(failed)).toContain(
+        "failed unreadable",
+      );
+    }
+  });
+
+  test("legal tallies keep the p1b-14 law: 0 is dim, failures warn, and the age arms hold", () => {
+    expect(ribbonSweepReading({ age_seconds: 41, failed: 0 })).toEqual({
+      value: "age 41s",
+      tone: "dim",
+    });
+    expect(ribbonSweepReading({ age_seconds: 41, failed: 1 })).toEqual({
+      value: "age 41s",
+      tone: "warn",
+    });
+    // The age's own arms ride along unchanged: null is stated, an
+    // out-of-contract age is the word register — and both still tone from
+    // the (validated) tally.
+    expect(ribbonSweepReading({ age_seconds: null, failed: 0 })).toEqual({
+      value: "age —",
+      tone: "dim",
+    });
+    expect(ribbonSweepReading({ age_seconds: JSON.parse("-1e-324") as number, failed: 2 })).toEqual({
+      value: "age unreadable",
+      tone: "warn",
+    });
   });
 });

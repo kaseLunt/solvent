@@ -23,7 +23,9 @@ import {
   gridPercentLabel,
   waterfallAllDustLine,
   waterfallAllDustRungs,
+  waterfallEngineAnswer,
 } from "../../app/book/waterfallView";
+import { WireIntegerError } from "../../lib/wireGuard";
 import {
   BAD_DEBT_METHOD,
   LIQUIDATABLE_CARD_METHOD,
@@ -857,5 +859,44 @@ test.describe("p1b-14: malformedHistogramCounts — the panel's count classifier
       "infinite_count",
       "refused_count",
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// p1b-15 (Codex round 7) — THE UNSHOCKED BRANCH VALIDATES ITS INDEX. Grid
+// point 0 is the standing census, and the builders picked that branch with
+// `point.index === 0` — true of NEGATIVE ZERO too (`-0 === 0` is true), so a
+// raw index token `-1e-324` wore the legitimate unshocked rung. Every point
+// index now passes `readWirePopulation` BEFORE ordering/selection/label
+// derivation; out of contract THROWS into the p1b-0 route boundary — the
+// established posture of every other wire integer in this module (the p1b-14
+// accountCount law). The p1b-14 audit recorded this field as (c) needing no
+// guard — INCORRECT, struck-and-corrected this wave.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-15: every consumed point index is validated before the unshocked branch", () => {
+  function minusZeroFirstIndex(): Waterfall {
+    const waterfall = structuredClone(fixtureWaterfall());
+    const first = waterfall.points[0];
+    if (first === undefined) throw new Error("fixture shape drifted");
+    // The defect input: the raw token -1e-324 parses to NEGATIVE ZERO.
+    first.index = JSON.parse("-1e-324") as number;
+    expect(Object.is(first.index, -0)).toBe(true);
+    return waterfall;
+  }
+
+  test("a -0 first index THROWS out of buildWaterfallSteps — never the unshocked rung", () => {
+    expect(() => buildWaterfallSteps(minusZeroFirstIndex(), "debt_manager")).toThrow(
+      WireIntegerError,
+    );
+  });
+
+  test("the answer sentence and the dust rungs refuse the same index", () => {
+    expect(() => waterfallEngineAnswer(minusZeroFirstIndex(), "debt_manager")).toThrow(
+      WireIntegerError,
+    );
+    expect(() => waterfallAllDustRungs(minusZeroFirstIndex(), "debt_manager")).toThrow(
+      WireIntegerError,
+    );
   });
 });

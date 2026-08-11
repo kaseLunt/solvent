@@ -65,6 +65,22 @@ export function stressIncrements(waterfall: Waterfall, engine: string): StressIn
     const prev = points[i - 1];
     const next = points[i];
     if (prev === undefined || next === undefined) continue;
+    // p1b-15: the indexes pass the wire POPULATION contract BEFORE they are
+    // ordered — `1 <= -0` is false, so a first-point index token that parses
+    // to NEGATIVE ZERO (`-1e-324`, the p1b-11 class) read as a strictly
+    // rising sequence and the view rendered as if the grid were lawful. An
+    // unreadable index is the grid refusal, never a coerced comparison. (The
+    // p1b-14 audit recorded this field as needing no guard — INCORRECT,
+    // corrected this wave.)
+    if (!isWirePopulation(prev.index) || !isWirePopulation(next.index)) {
+      return {
+        kind: "refused",
+        reason:
+          `GRID CONTRADICTION: a served point index is outside the wire population contract ` +
+          `(a nonnegative safe integer) between factors ${prev.factor} and ${next.factor} — ` +
+          `no between-step reading exists on a grid whose order cannot be read.`,
+      };
+    }
     // p1b-6 item 6: the factors pass the wire Decimal contract BEFORE they
     // are compared — `BigInt("")` is a silent 0n, which SLIPPED THROUGH this
     // weld (0n descends below any positive factor) and then rendered a
