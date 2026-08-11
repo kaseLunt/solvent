@@ -3858,3 +3858,102 @@ The two corrected rows close round 7's findings; no OTHER row was
 re-verified this wave — the correction is scoped to what Codex proved
 wrong. The named residues of §p1b-14 (meta constants, retryAfter twins,
 provider raw carry, the A2 information boundary) stand unchanged.
+
+
+## Phase 1 Track B micro fix wave (p1b-16)
+
+One commit (`fix(web): p1b-16 the stop index joins the grid weld`).
+
+One item, named by p1b-15's own concerns list: `stressIncrements`'
+truncation compare (`b.index >= stopIndex`) consumed the server-named
+`monotonicity.index` RAW.
+
+### The site (medium) — a -0 stop index silently truncated the series
+
+`web/app/book/stressIncrements.ts` (pre-fix): p1b-15 welded the POINT
+indexes but not the stop index they are ordered against. A stop-index
+token `-1e-324` parses to NEGATIVE ZERO (the p1b-11 class); every
+lawful point index satisfies `>= -0`, so the loop broke at the FIRST
+step and the model returned kind "view" with an EMPTY step list wearing
+the legitimate stop sentence — a silent truncation, never a refusal.
+
+Fix: the named index passes `isWirePopulation` at the stop-index
+classification point (immediately after the p1b-15 grid weld, before
+the truncation loop) — the same wire population contract as the point
+indexes it is ordered against. Failure refuses into the module's own
+`refused` arm (GRID CONTRADICTION voice; no value printed, since
+`String(-0)` would launder to "0"). A null/undefined index keeps the
+exact prior law (no stop; the schema serves `index?`), and the stop
+stays ENGINE-SCOPED: the unnamed engine still runs the full grid.
+
+### Red-first, executed and witnessed (`web-3819-p1b16-red.log`)
+
+The pin written first and failed at the defect: `stressIncrements` over
+`BOOK_MONOTONICITY_VIOLATION` with `monotonicity.index` spliced to -0
+returned "view" ("expected refused, got view") — 1 failed / 13 passed.
+
+### Mutation kill (1/1, unit-in-isolation, restoration `cmp`-verified)
+
+- **p1b-16-M1**: the stop-index guard removed
+  (`if (stopIndex !== null && !isWirePopulation(stopIndex))` →
+  `if (false)`) → stress-increments.spec.ts dies at exactly the p1b-16
+  pin (**1 failed / 13 passed**, `web-3819-p1b16-mutM1.log`; every
+  p1b-15/-6 pin survives, so the mutant is discriminated). Restored and
+  `cmp`-verified byte-identical.
+
+### Final self-audit — every wire-integer read in stressIncrements.ts + waterfallView.ts
+
+Sweep of both modules for ANY remaining unguarded wire-integer read
+(recorded even where empty of defects):
+
+- `points[].index` — stressIncrements: welded via `isWirePopulation`
+  (p1b-15); the `String(...)` prints in the factor/descend refusal
+  reasons fire only AFTER the weld admitted the pair. waterfallView:
+  `readWirePopulation("points[].index")` at all three sites (p1b-15);
+  the `deepest.index === 0` branch reads the validated copy. GUARDED.
+- `monotonicity.index` — guarded THIS WAVE; consumed by the truncation
+  compare only after classification. GUARDED.
+- `cumulative_eligible_accounts` / `newly_eligible_accounts` /
+  `insolvent_if_liquidated_accounts` — stressIncrements: the p1b-14
+  count contract precedes the latch weld and every `String(...)` in the
+  LATCH reason. waterfallView: `accountCount` → `readWirePopulation`,
+  and the dust-rung zero-member gates read through the guard. GUARDED.
+- `usd_decimals` (stressIncrements) — RESIDUE, recorded: the SCALE weld
+  compares `b.at.usd_decimals !== a.at.usd_decimals` RAW and classifies
+  after, not before. A matched -0 PAIR slips the arm and refuses only
+  downstream (every consumption of `step.usdDecimals` —
+  `incrementScaleClause`, BookWaterfall's step money — lands in
+  `formatUnits` → `assertScale`, which refuses -0 since p1b-13 into the
+  route register instead of the module's own); a MISMATCHED pair fires
+  SCALE CONTRADICTION whose prose prints `String(-0)` as "0" and says
+  "changed" where the truth is "cannot be read" (the p1b-14
+  count-contract register lesson, one field over). No lawful-looking
+  number renders on any path. Candidate for the next round.
+- `usd_decimals` (waterfallView) — RESIDUE, recorded:
+  `waterfallAllDustRungs` feeds it to `sumProvablyDust` →
+  `BigInt(decimals)` RAW (dust.ts:271): `BigInt(-0)` is a silent `0n`,
+  so within that function a -0 scale coerces the dust threshold to 10
+  base units instead of refusing. Direction proven omission-only (a
+  true scale is >= 0, so the coerced threshold is never LARGER than the
+  true one — no false "all dust" claim is possible, only a missed
+  disclosure), and on the live page the same render throws first
+  (BookWaterfall computes the dust line and then `waterfallEngineAnswer`
+  / `buildWaterfallSteps` hit the same field via `usd`/`geometry` →
+  `assertScale`; React discards the whole render into the p1b-0 route
+  arm, so no coerced result paints). Still an unguarded wire-integer
+  read at module level. Candidate for the next round.
+- No other number-typed wire field is consumed by either module
+  (factors / cumulatives / grid_scale are Decimal STRINGS, read through
+  `wireBigInt` / `formatUnits`).
+
+### Closing counts (p1b-16)
+
+- `npm run typecheck` / `npm run lint` / `npm run lint:css` — clean
+  (exit 0)
+- touched unit spec (stress-increments) — **14 passed** (13 + 1 new)
+- `npm run build` — clean (fresh, post-restore)
+- FULL Track B suite (`npx playwright test -c
+  tests/playwright.p1b.config.ts`, port 3819, fresh build):
+  **1643 passed, 10 skipped, 0 failed (36.8s)**
+  (`web-3819-p1b16-full.log`) — the p1b-15 count (1642) plus exactly
+  the 1 new pin.

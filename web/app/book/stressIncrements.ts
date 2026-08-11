@@ -114,6 +114,24 @@ export function stressIncrements(waterfall: Waterfall, engine: string): StressIn
     monotonicity.ok === false && monotonicity.engine === engine
       ? (monotonicity.index ?? null)
       : null;
+  // p1b-16: THE STOP INDEX JOINS THE GRID WELD. The truncation compare below
+  // (`b.index >= stopIndex`) consumed the server-named monotonicity index
+  // raw — a stop-index token `-1e-324` parses to NEGATIVE ZERO (the p1b-11
+  // class), every lawful point index satisfies `>= -0`, and the series
+  // SILENTLY stopped at the first step: an empty step list wearing the
+  // legitimate stop sentence. The named index passes the same wire population
+  // contract as the point indexes it is ordered against; failure is the grid
+  // refusal (no value printed — `String(-0)` would launder to "0"), never a
+  // coerced truncation. (Named as a p1b-15 concern; closed this wave.)
+  if (stopIndex !== null && !isWirePopulation(stopIndex)) {
+    return {
+      kind: "refused",
+      reason:
+        `GRID CONTRADICTION: the server-named monotonicity stop index for this engine is ` +
+        `outside the wire population contract (a nonnegative safe integer) — no series can ` +
+        `stop before a point whose place on the grid cannot be read.`,
+    };
+  }
   const stopped =
     stopIndex === null
       ? null

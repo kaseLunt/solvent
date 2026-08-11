@@ -234,3 +234,26 @@ test("p1b-15: a first-point index of -0 REFUSES the grid — never a lawful-look
   expect(reason).toContain("GRID CONTRADICTION");
   expect(reason).toContain("wire population contract");
 });
+
+// ---------------------------------------------------------------------------
+// p1b-16 — THE STOP INDEX JOINS THE GRID WELD. p1b-15 welded the POINT
+// indexes but the truncation compare (`b.index >= stopIndex`) still consumed
+// the server-named monotonicity index raw: a stop-index token `-1e-324`
+// parses to NEGATIVE ZERO, every lawful point index satisfies `>= -0`, and
+// the series silently stopped at the first step — an empty step list wearing
+// the legitimate stop sentence. Named as a p1b-15 concern; closed here.
+// ---------------------------------------------------------------------------
+
+test("p1b-16: a -0 monotonicity stop index REFUSES the grid — the series is never silently truncated", () => {
+  const waterfall = waterfallOf(BOOK_MONOTONICITY_VIOLATION);
+  // The defect input: the raw token -1e-324 parses to NEGATIVE ZERO.
+  waterfall.monotonicity.index = JSON.parse("-1e-324") as number;
+  expect(Object.is(waterfall.monotonicity.index, -0)).toBe(true);
+  const reason = refusedOf(waterfall, "debt_manager");
+  expect(reason).toContain("GRID CONTRADICTION");
+  expect(reason).toContain("wire population contract");
+  // The stop is ENGINE-SCOPED: the unnamed engine still runs the full grid.
+  const aave = viewOf(waterfall, "aave_v3_etherfi");
+  expect(aave.stopped).toBeNull();
+  expect(aave.steps).toHaveLength(5);
+});
