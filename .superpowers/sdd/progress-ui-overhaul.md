@@ -4060,3 +4060,26 @@ ingestion can close them.
   the 4 new pins.
 
 Malformed-wire class: CLOSED at all known render-reachable sites per owner ruling 2026-08-10; complete closure = response-boundary validation at ingestion, commissioned as a Phase 2/3 work item.
+
+## Phase 1 CLOSE (2026-08-10, owner-ratified)
+
+Track A (foundation): 9 tasks + 1 Codex fix wave (p1a-0..9). Delivered: closed type set (12px floor,
+stylelint-structural), two-grade palette (4.5:1 both themes, real consumers migrated), width contract
+(1180 repealed), freshness tiers as validated theorems (pending/meta/fallback/invalid), the canon appbar
+(LIVE·WATERMARKED retired; stream/snapshot-tier/batch/coverage as separate truths; 61+ pins migrated),
+component kit (typed verdict-banner identity, exact-layer affordance, chip family, six states), the living
+styleguide (self-verifying contrast incl. a real consumer), convergence pass (four surfaces hold).
+Codex round: 7 findings, all fixed and verified held. Mutants: 15+4 killed.
+
+Track B (validation + identity): 17 waves (p1b-0..17) over seven Codex rounds. Delivered: honest route
+refusal boundary; wireGuard law (decimal/scale/population/signed/occupancy, -0 refused everywhere incl.
+the client-ts assertScale contract gate — the freeze's one authorized exception); three classifiers
+(RunBookEngine full subtree, SetRunEngineSummary, FactorPrice); result identity (§5) with response-address
++ nested-account welds; the nine-item gap audit; the -0 class closed at every known render-reachable site
+(owner ruling 2026-08-10). Mutants: 23+ killed across the train.
+
+Commissioned forward (owner-ratified): RESPONSE-BOUNDARY VALIDATION AT INGESTION as a Phase 2/3 work item
+- the only complete closure of the post-parse boundary (A2) and the guard-discipline erosion risk.
+Standing owner-adjudication items: A2 post-parse fractional rounding (recorded boundary); retryAfter
+typeof-number twins; server-side solver-error prices:null serialization (API defect, outside program scope).
+Suites at seal: p1b shape 1647/10/0; CI-mirror shape 1645+/0/0; client-ts 355/0. Typecheck/lint/stylelint clean.
