@@ -3957,3 +3957,106 @@ Sweep of both modules for ANY remaining unguarded wire-integer read
   **1643 passed, 10 skipped, 0 failed (36.8s)**
   (`web-3819-p1b16-full.log`) — the p1b-15 count (1642) plus exactly
   the 1 new pin.
+
+## Phase 1 Track B micro fix wave (p1b-17) — the class closes
+
+One commit (`fix(web): p1b-17 the last two scale reads join the guard -
+the class closes at every known site`).
+
+Two items, named by p1b-16's own final self-audit — the LAST site-fix
+wave of the malformed-wire class, per the owner ruling of 2026-08-10.
+
+### Residue 1 (medium) — the SCALE weld compared raw and classified after
+
+`web/app/book/stressIncrements.ts` (pre-fix): the weld read
+`b.at.usd_decimals !== a.at.usd_decimals` RAW. A MATCHED NEGATIVE-ZERO
+pair (`-0 !== -0` is false; the p1b-11 class) slipped PAST the weld —
+the -0 rode `step.usdDecimals` out of the module and refused only
+downstream (`formatUnits` → `assertScale`, the p1b-0 route register
+instead of the module's own arm). A MISMATCHED pair fired SCALE
+CONTRADICTION whose prose printed `String(-0)` as "0" and claimed the
+scale "changed" (6 to 0) where the truth is that it cannot be read.
+
+Fix: both scales pass `isWireScale` BEFORE the weld compares them —
+classify-then-compare, the same order the count contract (p1b-14) and
+the grid weld (p1b-15) already enforce in this module. Failure refuses
+into the module's own arm (SCALE CONTRADICTION voice, "outside the wire
+scale contract … a scale that cannot be read"; the factor pair names
+the site, no scale value prints). The changed-scale arm is unchanged
+and now unreachable by an unreadable value: its prose prints only
+scales the guard admitted.
+
+### Residue 2 (low, omission-only) — the dust threshold's scale read raw
+
+`web/app/book/waterfallView.ts` (pre-fix): `waterfallAllDustRungs` fed
+`at.usd_decimals` to `sumProvablyDust` → `BigInt(decimals)` RAW —
+`BigInt(-0)` is a silent `0n`, so a -0 scale coerced the Σ-dust
+threshold to 10 BASE UNITS. Direction proven omission-only (a true
+scale is >= 0, so the coerced threshold is never LARGER than a true
+one — no false "all dust" over a real-money rung), but a
+sub-10-base-unit Σ still CLAIMED dust under the coercion, and every
+larger Σ fell out of the disclosure by ACCIDENT.
+
+Fix: `isWireScale` guards the read — an out-of-contract scale makes NO
+dust claim on either class (`continue`, the function's own omission
+posture: the disclosure line only ever ADDS a fact, and a dust PROOF
+needs a readable scale). The omission is now deliberate, never a
+coerced threshold; `0` stays a legal scale (pinned). On the live page
+the same render still throws first via `usd`/`geometry` →
+`assertScale` into the p1b-0 route arm — the module-level guard closes
+the read for every future caller, not just today's page.
+
+### Red-first, executed and witnessed (`web-3819-p1b17-red.log`)
+
+Three defect pins written first, all failed at their defects
+(**3 failed / 71 passed**):
+
+- matched -0 pair → `stressIncrements` returned "view" ("expected
+  refused, got view");
+- mismatched pair → prose read "usd_decimals changed between grid
+  points (6 to 0)" (no "cannot be read");
+- dust rungs with -0 scale and Σ bad debt "5" → `badDebt:
+  ["unshocked"]` (a dust claim at an unreadable scale).
+
+The fourth new pin ("0 stays a LEGAL scale") passes on both sides by
+design — it guards the guard against over-refusing the value zero.
+
+### Mutation kills (2/2, unit-in-isolation, restorations `cmp`-verified)
+
+- **p1b-17-M1**: the stressIncrements classify guard removed
+  (`if (!isWireScale(a…) || !isWireScale(b…))` → `if (false)`) →
+  stress-increments.spec.ts dies at exactly the two p1b-17 pins
+  (**2 failed / 14 passed**, `web-3819-p1b17-mutM1.log`); every
+  p1b-6/-15/-16 pin survives. Restored, `cmp` byte-identical.
+- **p1b-17-M2**: the waterfallView scale guard removed
+  (`if (!isWireScale(at.usd_decimals)) continue` → `if (false)
+  continue`) → book-charts-copy.spec.ts dies at exactly the p1b-17
+  defect pin (**1 failed / 57 passed**, `web-3819-p1b17-mutM2.log`);
+  the "0 stays legal" companion and every p1b-14/-15 pin survive,
+  discriminating the mutant. Restored, `cmp` byte-identical.
+
+### Closing audit
+
+With these two reads guarded, the p1b-16 final self-audit's inventory
+is fully discharged: every wire-integer read in stressIncrements.ts and
+waterfallView.ts is classified before use, and no module on the audited
+surfaces consumes a number-typed wire field without a guard. The
+structural limitation stands as recorded (post-parse information
+boundary, finding A2): tokens that round onto plain safe integers are
+indistinguishable post-parse, and only raw-text response validation at
+ingestion can close them.
+
+### Closing counts (p1b-17)
+
+- `npm run typecheck` / `npm run lint` / `npm run lint:css` — clean
+  (exit 0)
+- touched unit specs — stress-increments **16 passed** (14 + 2 new),
+  book-charts-copy **58 passed** (56 + 2 new)
+- `npm run build` — clean (fresh, post-restore)
+- FULL Track B suite (`npx playwright test -c
+  tests/playwright.p1b.config.ts`, port 3819, fresh build):
+  **1647 passed, 10 skipped, 0 failed (35.7s)**
+  (`web-3819-p1b17-full.log`) — the p1b-16 count (1643) plus exactly
+  the 4 new pins.
+
+Malformed-wire class: CLOSED at all known render-reachable sites per owner ruling 2026-08-10; complete closure = response-boundary validation at ingestion, commissioned as a Phase 2/3 work item.

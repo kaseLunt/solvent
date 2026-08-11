@@ -25,7 +25,7 @@
 
 import { formatUnits, type Waterfall } from "@solvent/client";
 import { groupDecimalString } from "../../lib/book-format";
-import { isWirePopulation, wireBigInt } from "../../lib/wireGuard";
+import { isWirePopulation, isWireScale, wireBigInt } from "../../lib/wireGuard";
 import { factorTimesLabel } from "./waterfallView";
 
 interface EnginePoint {
@@ -183,6 +183,25 @@ export function stressIncrements(waterfall: Waterfall, engine: string): StressIn
           `${String(b.at.cumulative_eligible_accounts)}) disagrees with the served entry count ` +
           `(${String(b.at.newly_eligible_accounts)}) — the latch identity fails, so no step ` +
           `reading is drawn.`,
+      };
+    }
+    // p1b-17: the scales are CLASSIFIED before the weld compares them —
+    // `-0 !== -0` is false, so a MATCHED NEGATIVE-ZERO pair (the p1b-11
+    // class) slipped PAST this weld into the rendered step and refused only
+    // downstream (formatUnits → assertScale, the route register instead of
+    // this module's own arm), and a MISMATCHED pair's prose printed
+    // `String(-0)` as "0" — claiming the scale "changed" where the truth is
+    // that it cannot be read. An unreadable scale is this module's refusal,
+    // named as unreadable; no value prints. (p1b-16 residue 1, closed.)
+    if (!isWireScale(a.at.usd_decimals) || !isWireScale(b.at.usd_decimals)) {
+      return {
+        kind: "refused",
+        reason:
+          `SCALE CONTRADICTION: a served usd_decimals between ` +
+          `${factorTimesLabel(a.factor, waterfall.grid_scale)} and ` +
+          `${factorTimesLabel(b.factor, waterfall.grid_scale)} is outside the wire scale ` +
+          `contract (an integer in [0, 1000], never -0) — no difference is computable at a ` +
+          `scale that cannot be read.`,
       };
     }
     if (b.at.usd_decimals !== a.at.usd_decimals) {

@@ -257,3 +257,45 @@ test("p1b-16: a -0 monotonicity stop index REFUSES the grid — the series is ne
   expect(aave.stopped).toBeNull();
   expect(aave.steps).toHaveLength(5);
 });
+
+// ---------------------------------------------------------------------------
+// p1b-17 — THE SCALES ARE CLASSIFIED BEFORE THE WELD COMPARES THEM. The
+// SCALE weld read `b.at.usd_decimals !== a.at.usd_decimals` RAW: a MATCHED
+// NEGATIVE-ZERO pair (`-0 !== -0` is false) slipped PAST the weld into the
+// rendered step and refused only downstream (formatUnits → assertScale, the
+// route register instead of this module's own arm), and a MISMATCHED pair's
+// SCALE CONTRADICTION prose printed `String(-0)` as "0" — claiming the scale
+// "changed" where the truth is that it cannot be read. Named as p1b-16
+// residue 1; closed here — the last unclassified read in this module.
+// ---------------------------------------------------------------------------
+
+test("p1b-17: a MATCHED -0 scale pair refuses in THIS module — never a step handed to the route register", () => {
+  const waterfall = waterfallClone();
+  // The defect input: EVERY point's scale is the raw token -1e-324, which
+  // parses to NEGATIVE ZERO — the pair MATCHES, so the raw weld passed and
+  // the -0 rode `step.usdDecimals` out of the module.
+  for (const point of waterfall.points) {
+    const at = point.engines.find((e) => e.engine === "debt_manager");
+    if (at === undefined) throw new Error("fixture invariant");
+    at.usd_decimals = JSON.parse("-1e-324") as number;
+    expect(Object.is(at.usd_decimals, -0)).toBe(true);
+  }
+  const reason = refusedOf(waterfall, "debt_manager");
+  expect(reason).toContain("SCALE CONTRADICTION");
+  expect(reason).toContain("cannot be read");
+});
+
+test("p1b-17: a MISMATCHED pair with a -0 side says CANNOT BE READ — never \"changed\" printing -0 as 0", () => {
+  const waterfall = waterfallClone();
+  const at = waterfall.points[1]?.engines.find((e) => e.engine === "debt_manager");
+  if (at === undefined) throw new Error("fixture invariant");
+  // One side out of contract: the old arm fired, but its prose printed
+  // `String(-0)` as "0" and claimed the scale CHANGED (6 to 0) — a
+  // computed-looking claim about a value that cannot be read.
+  at.usd_decimals = JSON.parse("-1e-324") as number;
+  expect(Object.is(at.usd_decimals, -0)).toBe(true);
+  const reason = refusedOf(waterfall, "debt_manager");
+  expect(reason).toContain("SCALE CONTRADICTION");
+  expect(reason).toContain("cannot be read");
+  expect(reason).not.toContain("changed");
+});

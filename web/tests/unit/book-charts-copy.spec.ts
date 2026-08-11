@@ -900,3 +900,74 @@ test.describe("p1b-15: every consumed point index is validated before the unshoc
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// p1b-17 — THE DUST THRESHOLD'S SCALE IS CLASSIFIED AT THE READ. The Σ-dust
+// proof is `parsed sum < 10 × 10^usd_decimals`, and `waterfallAllDustRungs`
+// fed the scale to `sumProvablyDust` → `BigInt(decimals)` RAW: `BigInt(-0)`
+// is a SILENT 0n (the p1b-11 class), so a NEGATIVE-ZERO scale coerced the
+// threshold to 10 BASE UNITS — an accidental arithmetic at a scale nobody
+// can read. Direction proven omission-only (the coerced threshold is never
+// LARGER than a true one, so no false "all dust" claim was possible), but a
+// sub-10-base-unit Σ still CLAIMED dust under the coercion. Now an
+// out-of-contract scale makes no dust claim on either class — the omission
+// is the function's own deliberate posture, never a coerced threshold.
+// Named as p1b-16 residue 2; closed here.
+// ---------------------------------------------------------------------------
+
+test.describe("p1b-17: a -0 scale makes NO dust claim — deliberate omission, never a coerced threshold", () => {
+  function dustWaterfallAtScale(usdDecimals: number): Waterfall {
+    return {
+      scenario_id: "t",
+      scenario_version: "v1",
+      axis: "eth_usd",
+      grid_scale: "1000000000000000000",
+      points: [
+        {
+          index: 0,
+          factor: "1000000000000000000",
+          engines: [
+            {
+              engine: "debt_manager",
+              usd_decimals: usdDecimals,
+              newly_eligible_accounts: 0,
+              cumulative_eligible_accounts: 2,
+              cumulative_debt_eligible_usd: "9999999", // 10^7 base units
+              cumulative_collateral_at_risk_usd: "0",
+              insolvent_if_liquidated_accounts: 2,
+              cumulative_bad_debt_usd: "5", // BELOW the coerced 10-base-unit threshold
+            },
+          ],
+        },
+      ],
+      held_flat: [],
+      eligibility_note: "",
+      monotonicity: { ok: true },
+      at_risk_note: "",
+      excluded_engines: [],
+    };
+  }
+
+  test("the defect input: -0 yields EMPTY rungs — the sub-10-base-unit Σ never claims dust", () => {
+    // The raw token -1e-324 parses to NEGATIVE ZERO; the old raw read built
+    // threshold 10n (10 × 10^0) and pushed "unshocked" onto badDebt because
+    // 5n < 10n — a dust claim computed at a scale that cannot be read.
+    const waterfall = dustWaterfallAtScale(JSON.parse("-1e-324") as number);
+    const at = waterfall.points[0]?.engines[0];
+    if (at === undefined) throw new Error("fixture shape drifted");
+    expect(Object.is(at.usd_decimals, -0)).toBe(true);
+    expect(waterfallAllDustRungs(waterfall, "debt_manager")).toEqual({
+      eligible: [],
+      badDebt: [],
+    });
+  });
+
+  test("0 stays a LEGAL scale: the guard refuses the sign bit, not the value zero", () => {
+    // At a lawful scale of 0 the same sums read honestly: Σ eligible
+    // 9999999 >= 10 is NOT dust, Σ bad debt 5 < 10 IS — the claim renders.
+    expect(waterfallAllDustRungs(dustWaterfallAtScale(0), "debt_manager")).toEqual({
+      eligible: [],
+      badDebt: ["unshocked"],
+    });
+  });
+});

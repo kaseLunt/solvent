@@ -22,7 +22,7 @@ import { formatUnits, parseDecimal, type Waterfall } from "@solvent/client";
 // reaches the unit-spec transpiler).
 import type { WaterfallStep } from "../../components/charts/WaterfallSteps";
 import { factorDistancePercent, groupDecimalString } from "../../lib/book-format";
-import { readWirePopulation } from "../../lib/wireGuard";
+import { isWireScale, readWirePopulation } from "../../lib/wireGuard";
 import { sumProvablyDust } from "./dust";
 
 /** p1b-14: an account tally on a rung is a wire population, guarded at the read. */
@@ -188,6 +188,16 @@ export function waterfallAllDustRungs(waterfall: Waterfall, engine: string): Wat
         ? "unshocked"
         : `${factorTimesLabel(point.factor, waterfall.grid_scale)} ` +
           `(${gridPercentLabel(point.factor, waterfall.grid_scale)})`;
+    // p1b-17: the Σ-dust threshold is 10 × 10^usd_decimals and
+    // `sumProvablyDust` reads the scale raw — `BigInt(-0)` is a SILENT 0n
+    // (the p1b-11 class), so a NEGATIVE-ZERO scale coerced the threshold to
+    // 10 BASE UNITS: a sub-10-base-unit Σ claimed dust at a scale nobody
+    // can read, and every other rung fell out of the disclosure by ACCIDENT.
+    // Omission stays the honest posture — a dust PROOF needs a readable
+    // scale, and this line only ever ADDS a fact — but it is now DELIBERATE:
+    // an out-of-contract scale makes no dust claim on either class.
+    // (p1b-16 residue 2, closed.)
+    if (!isWireScale(at.usd_decimals)) continue;
     // p1b-14: the zero-member gates read their counts through the population
     // guard — a -0 member count is out of contract, never "no members".
     if (
