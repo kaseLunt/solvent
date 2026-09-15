@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Solvent UI mockup · pages-console</title>
+<style>
+body{margin:0;padding:32px 24px;background:#1d1d1f;color:#e6e6e8;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}
+h2{font-size:22px;margin:0 0 6px}.subtitle{color:#a0a0a6;margin:0 0 24px;max-width:1180px}
+.cards{display:grid;grid-template-columns:1fr;gap:2.5rem}.card{border:1px solid #3d3d3f;border-radius:12px;background:#2d2d2f;overflow:hidden;max-width:1230px;margin:0 auto}
+.card-image{padding:0}.card-body{padding:16px 20px}.card-body h3{margin:0 0 4px;font-size:16px}.card-body p{margin:0 0 6px;color:#c9c9cd;font-size:14px}
+.mockup-note{font-size:12px;color:#8a8a90;margin-bottom:20px}
+</style></head><body>
+<p class="mockup-note">Approved 2026-09-15 · companion screen exported verbatim (interactive selection removed). Authoritative visual reference for docs/specs/2026-09-15-ui-product-register-design.md.</p>
+<h2>The three pages in the Console register</h2>
+<p class="subtitle">Cash book leads; the Aave v3 market is a legacy section. Headlines are money-first with a $100 materiality line — dust is counted, never headlined. Each page: the first viewport at full fidelity, then a map of what sits below the fold. Same six parts everywhere: <b>verdict header · identity chips · KPI tiles · chart card · table · evidence drawer</b>.</p>
+
+<style>
+  .mk { width: 100%; max-width: 1180px; margin: 0 auto; overflow: hidden; border-radius: 8px; line-height: 1.45; text-align: left; background: #0c1215; color: #dbe5e8; font-family: Inter, "Segoe UI", system-ui, sans-serif; font-size: 14px; }
+  .mk * { box-sizing: border-box; margin: 0; padding: 0; }
+  .mk table { border-collapse: collapse; width: 100%; }
+  .tn { font-variant-numeric: tabular-nums; }
+  .mono { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; }
+  .page-block { max-width: 1180px; margin: 0 auto 3.5rem; }
+  .page-block h3 { margin: 0 0 0.5rem; }
+  .page-block .job { opacity: 0.75; margin-bottom: 0.9rem; }
+  .secmap { max-width: 1180px; margin: 0.9rem auto 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+  .secmap div { border: 1px dashed rgba(127,127,127,0.5); border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.4; }
+  .secmap div b { display: block; margin-bottom: 3px; }
+  .secmap div.dr { border-style: dotted; opacity: 0.8; }
+  .notes { max-width: 1180px; margin: 0.9rem auto 0; font-size: 13.5px; opacity: 0.85; }
+  .notes li { margin-left: 1.2em; margin-bottom: 0.25em; }
+
+  /* ---- shell ---- */
+  .k-hd { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 28px; border-bottom: 1px solid #223034; background: #0f171a; }
+  .k-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .k-brand i { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #5ab3c4, #2e7d8c); display: inline-block; }
+  .k-brand small { font-weight: 400; color: #93a5ab; font-size: 13px; margin-left: 6px; }
+  .k-nav { display: flex; gap: 4px; }
+  .k-nav span { padding: 6px 12px; border-radius: 6px; color: #93a5ab; font-size: 14px; }
+  .k-nav span.on { color: #dbe5e8; background: #1b262b; }
+  .k-status { display: flex; align-items: center; gap: 14px; color: #93a5ab; font-size: 13px; }
+  .k-status .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid #223034; border-radius: 999px; color: #dbe5e8; }
+  .k-status .dot { width: 7px; height: 7px; border-radius: 50%; background: #63b98a; box-shadow: 0 0 0 3px rgba(99,185,138,0.18); }
+  .k-body { padding: 28px 28px 24px; }
+
+  /* ---- verdict header ---- */
+  .k-kick { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #5ab3c4; font-weight: 600; margin-bottom: 8px; }
+  .k-h1 { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; max-width: 860px; }
+  .k-h1 b { font-weight: 600; } .k-h1 b.crit { color: #d96a5d; } .k-h1 b.warn { color: #d0a04a; } .k-h1 b.ok { color: #63b98a; }
+  .k-dek { color: #93a5ab; font-size: 16px; max-width: 800px; margin-top: 10px; }
+  .k-dek b { color: #dbe5e8; font-weight: 500; }
+  .k-meta { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
+  .k-meta span { font-size: 12.5px; padding: 4px 10px; border-radius: 6px; background: #131c20; border: 1px solid #223034; color: #93a5ab; }
+  .k-meta span b { color: #dbe5e8; font-weight: 500; }
+  .k-meta span.ok b { color: #63b98a; } .k-meta span.warn { border-color: rgba(208,160,74,0.45); } .k-meta span.warn b { color: #d0a04a; }
+  .k-meta .sp { flex: 1; background: none; border: 0; padding: 0; }
+  .k-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; font-size: 13.5px; font-weight: 500; border: 1px solid #223034; background: #131c20; color: #dbe5e8; }
+  .k-btn.primary { background: #5ab3c4; color: #0c1215; border-color: #5ab3c4; }
+  .k-btn.ghost { background: none; }
+
+  /* ---- section head ---- */
+  .k-sec { display: flex; align-items: baseline; justify-content: space-between; margin-top: 26px; }
+  .k-sec h3 { font-size: 17px; font-weight: 600; }
+  .k-sec h3 small { font-weight: 400; color: #93a5ab; font-size: 13.5px; margin-left: 10px; }
+  .k-sec a { font-size: 13px; color: #5ab3c4; }
+
+  /* ---- KPI tiles ---- */
+  .k-kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-top: 12px; }
+  .k-kpis.five { grid-template-columns: repeat(5, 1fr); }
+  .k-kpi { background: #131c20; border: 1px solid #223034; border-radius: 10px; padding: 14px 16px; }
+  .k-kpi .l { color: #93a5ab; font-size: 13px; }
+  .k-kpi .v { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-top: 6px; }
+  .k-kpi .s { color: #71868e; font-size: 12.5px; margin-top: 4px; }
+  .k-kpi .s u { text-decoration: underline dotted; text-underline-offset: 3px; }
+  .k-kpi.crit .v { color: #d96a5d; } .k-kpi.warn .v { color: #d0a04a; } .k-kpi.ok .v { color: #63b98a; }
+  .k-kpi.ref { border-style: dashed; } .k-kpi.ref .v { color: #93a5ab; }
+
+  /* ---- cards ---- */
+  .k-grid { display: grid; grid-template-columns: 7fr 5fr; gap: 16px; margin-top: 12px; }
+  .k-grid.rail { grid-template-columns: 8fr 4fr; }
+  .k-card { background: #131c20; border: 1px solid #223034; border-radius: 10px; padding: 18px 20px; }
+  .k-card .t { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .k-card .t h4 { font-size: 15px; font-weight: 600; }
+  .k-card .t a { font-size: 13px; color: #5ab3c4; white-space: nowrap; }
+  .k-card .f { color: #93a5ab; font-size: 13.5px; margin-top: 4px; }
+  .k-card .f b { color: #dbe5e8; font-weight: 500; }
+
+  /* bars */
+  .k-bars { display: grid; gap: 10px; align-items: end; height: 160px; margin-top: 22px; }
+  .k-bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .k-bar i { display: block; width: 100%; background: #2e7d8c; border-radius: 4px 4px 0 0; }
+  .k-bar.crit i { background: #d96a5d; } .k-bar.warn i { background: #d0a04a; } .k-bar.dim i { background: #223034; }
+  .k-bar .cnt { font-size: 12.5px; color: #dbe5e8; margin-bottom: 6px; white-space: nowrap; }
+  .k-bar .cnt small { color: #71868e; }
+  .k-bar .lab { font-size: 12px; color: #71868e; margin-top: 8px; text-align: center; }
+
+  /* table */
+  .k-tbl th { text-align: left; font-weight: 500; color: #93a5ab; font-size: 12.5px; padding: 10px 8px 8px; border-bottom: 1px solid #223034; }
+  .k-tbl td { padding: 9px 8px; border-bottom: 1px solid #1b262b; font-size: 13.5px; white-space: nowrap; }
+  .k-tbl td.r, .k-tbl th.r { text-align: right; }
+  .k-tbl .addr { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; font-size: 12.5px; color: #dbe5e8; }
+  .k-tbl .sub { color: #71868e; font-size: 12px; }
+  .k-tbl tr.dim td { color: #71868e; }
+  .k-pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .k-pill.crit { background: rgba(217,106,93,0.14); color: #d96a5d; }
+  .k-pill.warn { background: rgba(208,160,74,0.14); color: #d0a04a; }
+  .k-pill.ok { background: rgba(99,185,138,0.14); color: #63b98a; }
+  .k-pill.ref { background: rgba(95,113,120,0.18); color: #93a5ab; }
+  .k-pill.proj { background: none; border: 1px dashed #d0a04a; color: #d0a04a; }
+  .k-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: #93a5ab; margin-top: 10px; }
+  .k-toggle i { width: 28px; height: 16px; border-radius: 999px; background: #223034; position: relative; display: inline-block; }
+  .k-toggle i::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #93a5ab; }
+
+  /* kv rows */
+  .k-kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; font-size: 13.5px; margin-top: 12px; }
+  .k-kv .k { color: #93a5ab; } .k-kv .v { text-align: right; }
+  .k-kv .v small { color: #71868e; margin-left: 6px; }
+  .k-check { list-style: none; margin-top: 12px; font-size: 13.5px; }
+  .k-check li { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid #1b262b; align-items: baseline; }
+  .k-check li span.i { color: #63b98a; font-weight: 600; width: 14px; }
+  .k-check li span.i.warn { color: #d0a04a; }
+  .k-check li small { color: #71868e; margin-left: auto; white-space: nowrap; }
+
+  /* search */
+  .k-search { display: flex; gap: 10px; margin-top: 4px; }
+  .k-search .in { flex: 1; height: 40px; border: 1px solid #223034; border-radius: 8px; background: #0f171a; display: flex; align-items: center; padding: 0 14px; font-family: "Cascadia Code", Consolas, monospace; font-size: 13.5px; color: #dbe5e8; }
+  .k-search .in small { margin-left: auto; color: #71868e; font-family: Inter, system-ui, sans-serif; }
+
+  /* scenarios library */
+  .k-lib { background: #131c20; border: 1px solid #223034; border-radius: 10px; overflow: hidden; }
+  .k-lib .lh { padding: 12px 14px; border-bottom: 1px solid #223034; font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; }
+  .k-lib .lh small { color: #93a5ab; font-weight: 400; }
+  .k-lib .li { padding: 11px 14px; border-bottom: 1px solid #1b262b; display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; }
+  .k-lib .li.on { background: #1b262b; }
+  .k-lib .li .cb { width: 16px; height: 16px; border: 1px solid #3a4b52; border-radius: 4px; margin-top: 2px; }
+  .k-lib .li.on .cb, .k-lib .li.sel .cb { background: #5ab3c4; border-color: #5ab3c4; }
+  .k-lib .li .n { font-size: 13.5px; font-weight: 500; }
+  .k-lib .li .d { font-size: 12.5px; color: #93a5ab; margin-top: 2px; }
+  .k-lib .li .o { font-size: 12.5px; margin-top: 4px; }
+  .k-lib .li .o.crit { color: #d96a5d; } .k-lib .li .o.dim { color: #71868e; }
+  .k-lib .lf { padding: 12px 14px; display: flex; gap: 8px; align-items: center; }
+  .k-heat { display: grid; grid-template-columns: 90px repeat(5, 1fr); gap: 4px; margin-top: 16px; font-size: 12px; }
+  .k-heat .hl { color: #71868e; display: flex; align-items: center; }
+  .k-heat .hc { height: 34px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #dbe5e8; }
+  .k-heat .hh { color: #71868e; text-align: center; height: auto; }
+</style>
+
+<!-- ============================================================ BOOK ============================================================ -->
+<div class="page-block">
+  <h3>Book — <em>what is at risk now?</em></h3>
+  <p class="job">Cash first. Money before counts. The quiet-day variant of the headline reads: <i>"Nothing material is liquidatable on the Cash book right now"</i> with the same layout.</p>
+  <div class="mk">
+    <div class="k-hd">
+      <div class="k-brand"><i></i>Solvent <small>ether.fi Cash risk</small></div>
+      <div class="k-nav"><span class="on">Book</span><span>Inspector</span><span>Scenarios</span><span>History</span><span>Activity</span><span>Proof</span></div>
+      <div class="k-status"><span class="pill"><span class="dot"></span>Live · batch 18,251 · 42s ago</span><span>API</span><span>◐</span></div>
+    </div>
+    <div class="k-body">
+      <div class="k-kick">Cash book · right now</div>
+      <div class="k-h1"><b class="crit">$6,840 of Cash debt is liquidatable right now,</b> across 2 accounts.</div>
+      <div class="k-dek">47 more positions are technically liquidatable but total <b>$112</b> — below the $100 line and not headlined. <b>27 accounts</b> are within 10% of their borrow cap, carrying <b>$312K</b>. 6 positions could not be computed this batch and are counted, not hidden.</div>
+      <div class="k-meta"><span>Batch <b>18,251</b></span><span class="ok">Snapshot <b>42s · fresh</b></span><span>Coverage <b>1,406 / 1,412</b> computed</span><span>Prices <b>RedStone · 38s</b></span><span>Current, not projected</span><span class="sp"></span><span class="k-btn ghost">Methodology &amp; evidence</span></div>
+
+      <div class="k-sec"><h3>Cash <small>Debt Manager engine · OP Mainnet · 1,412 borrowing accounts</small></h3><a>Legacy Aave v3 market ↓</a></div>
+      <div class="k-kpis">
+        <div class="k-kpi"><div class="l">Debt outstanding</div><div class="v tn">$24.6M</div><div class="s">against <u>$61.3M</u> collateral</div></div>
+        <div class="k-kpi crit"><div class="l">Liquidatable · material</div><div class="v tn">$6,840</div><div class="s">2 accounts · 47 more under $100</div></div>
+        <div class="k-kpi warn"><div class="l">Near cap · &lt;10% room</div><div class="v tn">$312K</div><div class="s">27 accounts</div></div>
+        <div class="k-kpi"><div class="l">Median room</div><div class="v tn">38%</div><div class="s">of borrow cap · 10th pct 7.1%</div></div>
+        <div class="k-kpi warn"><div class="l">Standing bad debt</div><div class="v tn">$239.60</div><div class="s">1 account · unchanged 31 batches</div></div>
+        <div class="k-kpi ref"><div class="l">Not computed</div><div class="v tn">6</div><div class="s">sweep never ran · <u>why</u></div></div>
+      </div>
+
+      <div class="k-grid">
+        <div class="k-card">
+          <div class="t"><h4>Distance to liquidation, by debt</h4><a>Exact bins →</a></div>
+          <div class="f">Cash debt grouped by room under the borrow cap · bars are dollars, counts printed · <b>$319K</b> sits within 10% of the cap</div>
+          <div class="k-bars" style="grid-template-columns: repeat(6, 1fr)">
+            <div class="k-bar crit"><span class="cnt">$6,952 <small>· 49</small></span><i style="height:6px"></i><span class="lab">over cap<br>liquidatable</span></div>
+            <div class="k-bar warn"><span class="cnt">$118K <small>· 9</small></span><i style="height:12px"></i><span class="lab">&lt; 5% room</span></div>
+            <div class="k-bar warn"><span class="cnt">$194K <small>· 18</small></span><i style="height:19px"></i><span class="lab">5–10%</span></div>
+            <div class="k-bar"><span class="cnt">$2.1M <small>· 141</small></span><i style="height:40px"></i><span class="lab">10–25%</span></div>
+            <div class="k-bar"><span class="cnt">$8.9M <small>· 512</small></span><i style="height:88px"></i><span class="lab">25–50%</span></div>
+            <div class="k-bar"><span class="cnt">$13.3M <small>· 677</small></span><i style="height:124px"></i><span class="lab">&gt; 50% room</span></div>
+          </div>
+        </div>
+        <div class="k-card">
+          <div class="t"><h4>Needs attention</h4><a>All 1,412 accounts →</a></div>
+          <div class="f">Material first, then by room</div>
+          <table class="k-tbl" style="margin-top:10px">
+            <tr><th>Account</th><th class="r">Room</th><th class="r">Debt</th><th class="r">Status</th></tr>
+            <tr><td><span class="addr">0x7a3f…c21e</span></td><td class="r tn">−$184</td><td class="r tn">$4,620</td><td class="r"><span class="k-pill crit">Liquidatable</span></td></tr>
+            <tr><td><span class="addr">0x19b0…88d4</span></td><td class="r tn">−$41</td><td class="r tn">$2,220</td><td class="r"><span class="k-pill crit">Liquidatable</span></td></tr>
+            <tr><td><span class="addr">0xe4c2…0a17</span></td><td class="r tn">1.2%</td><td class="r tn">$61,300</td><td class="r"><span class="k-pill warn">Near cap</span></td></tr>
+            <tr><td><span class="addr">0x5d88…f3b9</span></td><td class="r tn">2.9%</td><td class="r tn">$18,410</td><td class="r"><span class="k-pill warn">Near cap</span></td></tr>
+            <tr><td><span class="addr">0xab91…6e02</span></td><td class="r tn">4.7%</td><td class="r tn">$9,050</td><td class="r"><span class="k-pill warn">Near cap</span></td></tr>
+            <tr class="dim"><td><span class="addr">0x02f4…9c7d</span></td><td class="r tn">—</td><td class="r tn">$1,500</td><td class="r"><span class="k-pill ref">Not computed</span></td></tr>
+          </table>
+          <div class="k-toggle"><i></i>Show 47 small &amp; dust positions ($112)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="secmap">
+    <div><b>Collateral mix</b>Cash collateral by asset (weETH, ETHFI, USDC…) with share of debt it backs; one bar per asset.</div>
+    <div><b>Stress preview</b>Three committed scenarios, one line each: "ETH −30% → +$1.28M liquidatable, 118 accounts". Links into Scenarios.</div>
+    <div><b>Bad debt census</b>The one account carrying $239.60, its age, and what it would take to clear.</div>
+    <div><b>Legacy · Aave v3 market</b>Collapsed by default. Own KPI row (8,552 mostly dormant positions · $1.9M debt · 46 liquidatable, all dust). Never summed with Cash.</div>
+    <div class="dr"><b>Methodology &amp; evidence (drawer)</b>The one place the doctrine lives: comparators per engine, materiality line, refusal codes, batch identity, links to Proof. Replaces every inline caveat.</div>
+  </div>
+</div>
+
+<!-- ============================================================ INSPECTOR ============================================================ -->
+<div class="page-block">
+  <h3>Inspector — <em>is this address at risk, how close, and why?</em></h3>
+  <p class="job">Same header, same chips, same tiles. The verdict is the sentence a cardholder would want to read. Seven states (healthy, near cap, liquidatable, cannot compute, no position, invalid address, loading) all render into this same frame — only the readings change.</p>
+  <div class="mk">
+    <div class="k-hd">
+      <div class="k-brand"><i></i>Solvent <small>ether.fi Cash risk</small></div>
+      <div class="k-nav"><span>Book</span><span class="on">Inspector</span><span>Scenarios</span><span>History</span><span>Activity</span><span>Proof</span></div>
+      <div class="k-status"><span class="pill"><span class="dot"></span>Live · batch 18,251 · 42s ago</span><span>API</span><span>◐</span></div>
+    </div>
+    <div class="k-body">
+      <div class="k-search"><div class="in">0x7a3f19e2c8b4d0a6f1e3b5c7d9a2f4e6b8c0d2c21e <small>⌘K · any 0x address</small></div><span class="k-btn primary">Inspect</span><span class="k-btn ghost">Stress this address →</span></div>
+
+      <div class="k-kick" style="margin-top:26px">Cash · account 0x7a3f…c21e</div>
+      <div class="k-h1"><b class="warn">Within $184 of its borrow cap.</b> Not liquidatable yet.</div>
+      <div class="k-dek">Borrowing <b>$4,620</b> against a <b>$4,804</b> cap — 96.2% used. A <b>3.8% fall</b> in collateral value, or <b>$184</b> more debt, makes this account liquidatable. It has been within 10% of its cap for the last <b>14 batches</b> (≈7 minutes).</div>
+      <div class="k-meta"><span>Batch <b>18,251</b></span><span class="ok">Snapshot <b>42s · fresh</b></span><span>Lookup <b>complete</b> · both engines</span><span>Prices <b>RedStone · 38s</b></span><span class="sp"></span><span class="k-btn ghost">Inputs · Calculation · Provenance</span></div>
+
+      <div class="k-kpis five" style="margin-top:22px">
+        <div class="k-kpi"><div class="l">Debt</div><div class="v tn">$4,620</div><div class="s">USDC · <u>4,620.000000</u></div></div>
+        <div class="k-kpi"><div class="l">Borrow cap</div><div class="v tn">$4,804</div><div class="s">Σ collateral × per-asset LTV</div></div>
+        <div class="k-kpi warn"><div class="l">Room</div><div class="v tn">$184</div><div class="s">3.8% of cap</div></div>
+        <div class="k-kpi"><div class="l">Collateral</div><div class="v tn">$12,050</div><div class="s">2 assets · <u>by asset</u></div></div>
+        <div class="k-kpi warn"><div class="l">Status</div><div class="v">Near cap</div><div class="s">strict rule: debt &gt; cap</div></div>
+      </div>
+
+      <div class="k-grid rail">
+        <div class="k-card">
+          <div class="t"><h4>What backs this debt</h4><a>Price inputs →</a></div>
+          <div class="f">Cap = Σ (collateral value × that asset's LTV) · prices as of 38s ago</div>
+          <table class="k-tbl" style="margin-top:10px">
+            <tr><th>Asset</th><th class="r">Amount</th><th class="r">Price</th><th class="r">Value</th><th class="r">LTV</th><th class="r">Counts toward cap</th></tr>
+            <tr><td>weETH</td><td class="r tn">2.100</td><td class="r tn">$3,802.40</td><td class="r tn">$7,985</td><td class="r tn">50%</td><td class="r tn">$3,992</td></tr>
+            <tr><td>ETHFI</td><td class="r tn">3,250</td><td class="r tn">$1.2508</td><td class="r tn">$4,065</td><td class="r tn">20%</td><td class="r tn">$813</td></tr>
+            <tr><td colspan="3" style="color:#93a5ab">Borrow cap</td><td class="r tn">$12,050</td><td></td><td class="r tn" style="font-weight:600">$4,804</td></tr>
+          </table>
+          <div class="f" style="margin-top:12px">Boundary: liquidatable if weETH falls to <b>$3,657</b> with ETHFI flat, or ETHFI to <b>$0.11</b> with weETH flat. <u>Exact</u></div>
+        </div>
+        <div class="k-card">
+          <div class="t"><h4>Trust</h4><a>Evidence →</a></div>
+          <ul class="k-check">
+            <li><span class="i">✓</span>Computed this batch<small>18,251</small></li>
+            <li><span class="i">✓</span>Prices fresh<small>38s · within 120s</small></li>
+            <li><span class="i">✓</span>Collateral sweep succeeded<small>gen 4</small></li>
+            <li><span class="i warn">!</span>weETH price is adapter output<small>not oracle-direct</small></li>
+            <li><span class="i">✓</span>Reconciles to chain<small>drift 0</small></li>
+          </ul>
+          <div class="f" style="margin-top:14px">History · room % over the last 100 batches</div>
+          <div style="height:54px;margin-top:8px;border-bottom:1px solid #223034;position:relative">
+            <svg width="100%" height="54" viewBox="0 0 300 54" preserveAspectRatio="none"><polyline fill="none" stroke="#5ab3c4" stroke-width="1.5" points="0,10 40,12 80,11 120,18 160,22 200,30 240,38 270,44 300,46"/><line x1="0" y1="48" x2="300" y2="48" stroke="#d0a04a" stroke-dasharray="3 3"/></svg>
+            <span style="position:absolute;right:0;top:-2px;font-size:11.5px;color:#71868e">10% line</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="secmap">
+    <div><b>History</b>Room % across batches for Cash (headroom view); health-factor chart for a legacy Aave position. Gaps drawn as gaps.</div>
+    <div><b>Activity</b>This account's chain actions as a real table: borrow, repay, supply, withdraw, liquidation, with tx links.</div>
+    <div><b>Legacy Aave v3 position</b>Only if the address has one. Own card, HF-based, clearly labeled legacy.</div>
+    <div><b>Stress this address</b>Inline result of the three committed scenarios for this account; deep link into Scenarios with the address preserved.</div>
+    <div class="dr"><b>Inputs · Calculation · Provenance (drawer)</b>The formula with this account's numbers substituted, every input's source and age, the exact wire values.</div>
+  </div>
+</div>
+
+<!-- ============================================================ SCENARIOS ============================================================ -->
+<div class="page-block">
+  <h3>Scenarios — <em>what changes under a named shock?</em></h3>
+  <p class="job">A library on the left, one result workspace on the right. Book-wide by default; "one address" is a toggle in the library header. Every shocked number wears the dashed PROJECTION badge. Multi-select → "Compare 2 scenarios".</p>
+  <div class="mk">
+    <div class="k-hd">
+      <div class="k-brand"><i></i>Solvent <small>ether.fi Cash risk</small></div>
+      <div class="k-nav"><span>Book</span><span>Inspector</span><span class="on">Scenarios</span><span>History</span><span>Activity</span><span>Proof</span></div>
+      <div class="k-status"><span class="pill"><span class="dot"></span>Live · batch 18,251 · 42s ago</span><span>API</span><span>◐</span></div>
+    </div>
+    <div class="k-body">
+      <div style="display:grid;grid-template-columns:300px 1fr;gap:20px">
+        <div>
+          <div class="k-lib">
+            <div class="lh">Scenarios <small>Whole book · <u>One address</u></small></div>
+            <div class="li on"><span class="cb"></span><div><div class="n">ETH −30%</div><div class="d">All ETH-linked collateral, instantaneous mark</div><div class="o crit">+$1.28M liquidatable · 118 accounts</div></div></div>
+            <div class="li"><span class="cb"></span><div><div class="n">weETH depeg to 0.95, oracles held</div><div class="d">Market price 5% under redemption; oracle unchanged</div><div class="o crit">$41K execution shortfall · not a health event</div></div></div>
+            <div class="li"><span class="cb"></span><div><div class="n">Borrow APY +200 bps</div><div class="d">Closed-form horizon projection, 90 days</div><div class="o dim">Not run yet</div></div></div>
+            <div class="li"><span class="cb"></span><div><div class="n">ETHFI −50%</div><div class="d">Own-ecosystem token shock</div><div class="o dim">Not run yet</div></div></div>
+            <div class="lf"><span class="k-btn primary">Run ETH −30%</span><span class="k-btn ghost">Compare…</span></div>
+          </div>
+          <div class="f" style="font-size:12.5px;color:#71868e;margin-top:10px">Committed, versioned scenarios (config v1). No sliders — every result is reproducible.</div>
+        </div>
+        <div>
+          <div class="k-kick">ETH −30% · Cash book <span class="k-pill proj" style="margin-left:8px">Projection</span></div>
+          <div class="k-h1"><b class="crit">$1.28M more Cash debt becomes liquidatable,</b> across 118 accounts.</div>
+          <div class="k-dek">Bad debt would rise by <b>$41K</b> if all 118 were liquidated at the shocked prices. <b>419 accounts</b> move to a worse band; none improve. The 27 accounts already near cap are all among the 118.</div>
+          <div class="k-meta"><span>Result for batch <b>18,251</b></span><span>Scenario <b>eth_minus_30 · v1</b></span><span>Computed <b>1.9s ago</b></span><span>Engines <b>Cash</b> · legacy market <u>below</u></span></div>
+          <div class="k-kpis" style="grid-template-columns:repeat(4,1fr);margin-top:16px">
+            <div class="k-kpi crit"><div class="l">Newly liquidatable</div><div class="v tn">118</div><div class="s">accounts · was 49</div></div>
+            <div class="k-kpi crit"><div class="l">Liquidatable debt</div><div class="v tn">+$1.28M</div><div class="s">$6,952 → $1.29M</div></div>
+            <div class="k-kpi warn"><div class="l">Bad debt at liquidation</div><div class="v tn">+$41K</div><div class="s">collateral no longer covers debt</div></div>
+            <div class="k-kpi"><div class="l">Accounts moved</div><div class="v tn">419</div><div class="s">of 1,406 computed · 0 improved</div></div>
+          </div>
+          <div class="k-card" style="margin-top:12px">
+            <div class="t"><h4>Where accounts move</h4><a>Most affected accounts →</a></div>
+            <div class="f">Rows: room under cap today · columns: after the shock · cells are accounts</div>
+            <div class="k-heat">
+              <div class="hl"></div><div class="hh">over cap</div><div class="hh">&lt;5%</div><div class="hh">5–10%</div><div class="hh">10–25%</div><div class="hh">≥25%</div>
+              <div class="hl">over cap</div><div class="hc" style="background:rgba(217,106,93,0.35)">49</div><div class="hc"></div><div class="hc"></div><div class="hc"></div><div class="hc"></div>
+              <div class="hl">&lt;5%</div><div class="hc" style="background:rgba(217,106,93,0.55)">9</div><div class="hc"></div><div class="hc"></div><div class="hc"></div><div class="hc"></div>
+              <div class="hl">5–10%</div><div class="hc" style="background:rgba(217,106,93,0.55)">18</div><div class="hc"></div><div class="hc"></div><div class="hc"></div><div class="hc"></div>
+              <div class="hl">10–25%</div><div class="hc" style="background:rgba(217,106,93,0.6)">91</div><div class="hc" style="background:rgba(208,160,74,0.45)">38</div><div class="hc" style="background:rgba(208,160,74,0.3)">12</div><div class="hc" style="background:#1b262b;color:#71868e">0</div><div class="hc"></div>
+              <div class="hl">≥25%</div><div class="hc"></div><div class="hc" style="background:rgba(208,160,74,0.3)">44</div><div class="hc" style="background:rgba(208,160,74,0.25)">168</div><div class="hc" style="background:rgba(46,125,140,0.35)">39</div><div class="hc" style="background:#1b262b">938</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="secmap">
+    <div><b>Most affected accounts</b>Table: account, room today → after, debt, becomes liquidatable?; rows open Inspector.</div>
+    <div><b>Compare scenarios</b>When 2+ selected: signed dot plot of liquidatable-debt delta as % of the Cash book, absolute values alongside.</div>
+    <div><b>Legacy · Aave v3 market</b>Collapsed: the same result shape for the legacy engine, never summed with Cash.</div>
+    <div class="dr"><b>Assumptions &amp; out of model (drawer)</b>Path assumption, held-flat inputs, what the model excludes, config version, wire notes verbatim.</div>
+  </div>
+  <ul class="notes">
+    <li><b>Six shared parts</b> carry every page: verdict header (kicker · headline · dek), identity chips, KPI tiles (crit / warn / ok / dashed-refused), chart card, table with status pills, and one evidence drawer per page.</li>
+    <li><b>Materiality</b> is a display rule, not a data change: liquidatable counts and Σ always exist in full; the headline and default views read at the $100 line, and the toggle restates the count below it.</li>
+    <li><b>Refusals</b> stay visible (dashed tile, dimmed row, "Not computed" pill) and never look like zero.</li>
+  </ul>
+</div>
+</body></html>

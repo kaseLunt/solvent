@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Solvent UI mockup · direction</title>
+<style>
+body{margin:0;padding:32px 24px;background:#1d1d1f;color:#e6e6e8;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}
+h2{font-size:22px;margin:0 0 6px}.subtitle{color:#a0a0a6;margin:0 0 24px;max-width:1180px}
+.cards{display:grid;grid-template-columns:1fr;gap:2.5rem}.card{border:1px solid #3d3d3f;border-radius:12px;background:#2d2d2f;overflow:hidden;max-width:1230px;margin:0 auto}
+.card-image{padding:0}.card-body{padding:16px 20px}.card-body h3{margin:0 0 4px;font-size:16px}.card-body p{margin:0 0 6px;color:#c9c9cd;font-size:14px}
+.mockup-note{font-size:12px;color:#8a8a90;margin-bottom:20px}
+</style></head><body>
+<p class="mockup-note">Approved 2026-09-15 · companion screen exported verbatim (interactive selection removed). Authoritative visual reference for docs/specs/2026-09-15-ui-product-register-design.md.</p>
+<h2>Which visual direction?</h2>
+<p class="subtitle">Same page (top of the Book), same real-scale data (batch 18,251 · 9,964 positions · 2 liquidatable), three registers. All three keep the existing palette tokens and the honest-rendering laws. Click one to select, then tell me in the terminal what you like and hate about each.</p>
+
+<style>
+  .mk { width: 100%; max-width: 1180px; margin: 0 auto; overflow: hidden; border-radius: 8px; line-height: 1.45; text-align: left; }
+  .mk * { box-sizing: border-box; margin: 0; padding: 0; }
+  .mk table { border-collapse: collapse; width: 100%; }
+  .mk .tn { font-variant-numeric: tabular-nums; }
+  .dir-cards { display: grid; grid-template-columns: 1fr; gap: 2.5rem; }
+  .dir-cards .card-image { aspect-ratio: auto; display: block; padding: 0; background: none; }
+  .dir-cards .card-body h3 { margin-bottom: 0.25rem; }
+  .dir-cards .card-body p { margin-bottom: 0.5rem; }
+  .dir-cards .card-body .refs { font-size: 0.85rem; opacity: 0.7; }
+
+  /* ================= A · CONSOLE ================= */
+  .a { background: #0c1215; color: #dbe5e8; font-family: Inter, "Segoe UI", system-ui, sans-serif; font-size: 14px; }
+  .a-hd { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 28px; border-bottom: 1px solid #223034; background: #0f171a; }
+  .a-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .a-brand i { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #5ab3c4, #2e7d8c); display: inline-block; }
+  .a-brand small { font-weight: 400; color: #93a5ab; font-size: 13px; margin-left: 6px; }
+  .a-nav { display: flex; gap: 4px; }
+  .a-nav span { padding: 6px 12px; border-radius: 6px; color: #93a5ab; font-size: 14px; }
+  .a-nav span.on { color: #dbe5e8; background: #1b262b; }
+  .a-status { display: flex; align-items: center; gap: 14px; color: #93a5ab; font-size: 13px; }
+  .a-status .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid #223034; border-radius: 999px; color: #dbe5e8; }
+  .a-status .dot { width: 7px; height: 7px; border-radius: 50%; background: #63b98a; box-shadow: 0 0 0 3px rgba(99,185,138,0.18); }
+  .a-body { padding: 32px 28px 28px; }
+  .a-h1 { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; max-width: 820px; }
+  .a-h1 b { color: #d96a5d; font-weight: 600; }
+  .a-dek { color: #93a5ab; font-size: 16px; max-width: 760px; margin-top: 10px; }
+  .a-meta { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .a-meta span { font-size: 12.5px; padding: 4px 10px; border-radius: 6px; background: #131c20; border: 1px solid #223034; color: #93a5ab; }
+  .a-meta span b { color: #dbe5e8; font-weight: 500; }
+  .a-seg { display: inline-flex; margin-top: 28px; border: 1px solid #223034; border-radius: 8px; padding: 3px; background: #0f171a; }
+  .a-seg span { padding: 7px 14px; border-radius: 6px; color: #93a5ab; font-size: 13.5px; }
+  .a-seg span.on { background: #1b262b; color: #dbe5e8; font-weight: 500; }
+  .a-kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-top: 16px; }
+  .a-kpi { background: #131c20; border: 1px solid #223034; border-radius: 10px; padding: 14px 16px; }
+  .a-kpi .l { color: #93a5ab; font-size: 13px; }
+  .a-kpi .v { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-top: 6px; }
+  .a-kpi .s { color: #71868e; font-size: 12.5px; margin-top: 4px; }
+  .a-kpi.crit .v { color: #d96a5d; } .a-kpi.warn .v { color: #d0a04a; }
+  .a-grid { display: grid; grid-template-columns: 7fr 5fr; gap: 16px; margin-top: 16px; }
+  .a-card { background: #131c20; border: 1px solid #223034; border-radius: 10px; padding: 18px 20px; }
+  .a-card .t { display: flex; justify-content: space-between; align-items: baseline; }
+  .a-card .t h4 { font-size: 15px; font-weight: 600; }
+  .a-card .t a { font-size: 13px; color: #5ab3c4; }
+  .a-card .f { color: #93a5ab; font-size: 13.5px; margin-top: 4px; }
+  .a-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; align-items: end; height: 170px; margin-top: 22px; }
+  .a-bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .a-bar i { display: block; width: 100%; background: #2e7d8c; border-radius: 4px 4px 0 0; }
+  .a-bar.crit i { background: #d96a5d; } .a-bar.warn i { background: #d0a04a; }
+  .a-bar .c { font-size: 12.5px; color: #dbe5e8; margin-bottom: 6px; }
+  .a-bar .b { font-size: 12px; color: #71868e; margin-top: 8px; }
+  .a-tbl th { text-align: left; font-weight: 500; color: #93a5ab; font-size: 12.5px; padding: 10px 8px 8px; border-bottom: 1px solid #223034; }
+  .a-tbl td { padding: 10px 8px; border-bottom: 1px solid #1b262b; font-size: 13.5px; white-space: nowrap; }
+  .a-tbl td.r, .a-tbl th.r { text-align: right; }
+  .a-tbl .addr { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; font-size: 12.5px; color: #dbe5e8; }
+  .a-tbl .eng { color: #93a5ab; font-size: 12.5px; }
+  .a-pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; }
+  .a-pill.crit { background: rgba(217,106,93,0.14); color: #d96a5d; }
+  .a-pill.warn { background: rgba(208,160,74,0.14); color: #d0a04a; }
+  .a-pill.ref { background: rgba(95,113,120,0.18); color: #93a5ab; }
+
+  /* ================= B · INSTRUMENT ================= */
+  .b { background: #0a0f12; color: #c7d4d8; font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; }
+  .b .m { font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace; }
+  .b-hd { display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 20px; border-bottom: 1px solid #223034; }
+  .b-brand { font-family: "Cascadia Code", Consolas, monospace; font-weight: 700; font-size: 13px; letter-spacing: 0.12em; color: #dbe5e8; }
+  .b-brand small { font-weight: 400; color: #70838a; letter-spacing: 0.1em; margin-left: 12px; font-size: 11.5px; }
+  .b-nav { display: flex; gap: 22px; font-size: 13px; color: #93a5ab; }
+  .b-nav span.on { color: #dbe5e8; box-shadow: inset 0 -2px 0 #5ab3c4; padding-bottom: 12px; margin-bottom: -12px; }
+  .b-status { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; color: #93a5ab; display: flex; gap: 18px; }
+  .b-status b { color: #63b98a; font-weight: 500; }
+  .b-body { padding: 20px; }
+  .b-lbl { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #70838a; }
+  .b-h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: #dbe5e8; margin-top: 6px; }
+  .b-h1 b { color: #d96a5d; }
+  .b-id { font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; color: #93a5ab; margin-top: 8px; }
+  .b-id b { color: #c7d4d8; font-weight: 500; }
+  .b-strip { display: grid; grid-template-columns: 1.6fr repeat(6, 1fr); border: 1px solid #223034; margin-top: 18px; }
+  .b-strip > div { padding: 10px 12px; border-right: 1px solid #223034; }
+  .b-strip > div:last-child { border-right: 0; }
+  .b-strip .eng { display: flex; flex-direction: column; justify-content: center; gap: 4px; background: #0f171a; }
+  .b-strip .eng .n { font-size: 13px; color: #dbe5e8; font-weight: 600; }
+  .b-strip .eng .w { font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; color: #70838a; }
+  .b-strip .v { font-family: "Cascadia Code", Consolas, monospace; font-size: 18px; color: #dbe5e8; margin-top: 4px; }
+  .b-strip .v.crit { color: #d96a5d; } .b-strip .v.warn { color: #d0a04a; } .b-strip .v.dim { color: #70838a; }
+  .b-strip .s { font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; color: #70838a; margin-top: 2px; }
+  .b-strip.second { margin-top: -1px; }
+  .b-grid { display: grid; grid-template-columns: 7fr 5fr; gap: 12px; margin-top: 18px; }
+  .b-panel { border: 1px solid #223034; }
+  .b-panel .ph { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #223034; background: #0f171a; }
+  .b-panel .ph .b-lbl { color: #93a5ab; }
+  .b-panel .ph .b-lbl b { color: #dbe5e8; font-weight: 600; }
+  .b-panel .fh { font-size: 14px; color: #dbe5e8; padding: 10px 12px 0; font-weight: 600; }
+  .b-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; align-items: end; height: 150px; padding: 18px 12px 0; }
+  .b-bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .b-bar i { display: block; width: 100%; background: #2e7d8c; }
+  .b-bar.crit i { background: #d96a5d; } .b-bar.warn i { background: #d0a04a; }
+  .b-bar .c { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; color: #c7d4d8; margin-bottom: 4px; }
+  .b-axis { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; padding: 6px 12px 12px; border-top: 1px solid #223034; margin-top: 0; }
+  .b-axis span { font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; color: #70838a; text-align: center; }
+  .b-tbl th { text-align: left; font-family: "Cascadia Code", Consolas, monospace; font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; font-size: 11.5px; color: #70838a; padding: 8px 10px; border-bottom: 1px solid #223034; }
+  .b-tbl td { padding: 7px 10px; border-bottom: 1px solid #16211a; border-bottom-color: #172225; font-size: 12.5px; white-space: nowrap; }
+  .b-tbl td.r, .b-tbl th.r { text-align: right; }
+  .b-tbl .addr { font-family: "Cascadia Code", Consolas, monospace; color: #dbe5e8; }
+  .b-tbl .eng { font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; color: #70838a; }
+  .b-tbl .num { font-family: "Cascadia Code", Consolas, monospace; }
+  .b-tag { font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 6px; border: 1px solid; border-radius: 3px; }
+  .b-tag.crit { color: #d96a5d; border-color: rgba(217,106,93,0.5); background: rgba(217,106,93,0.08); }
+  .b-tag.warn { color: #d0a04a; border-color: rgba(208,160,74,0.5); }
+  .b-tag.ref { color: #93a5ab; border-color: #2a3a40; background: repeating-linear-gradient(135deg, transparent 0 3px, rgba(147,165,171,0.12) 3px 4px); }
+
+  /* ================= C · EDITORIAL ================= */
+  .ed { background: #f7f5f0; color: #1c1c1a; font-family: "Segoe UI", system-ui, sans-serif; font-size: 15px; }
+  .ed .sf { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif; }
+  .c-hd { display: flex; align-items: center; justify-content: space-between; height: 60px; padding: 0 40px; border-bottom: 1px solid #e0dbd0; }
+  .c-brand { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .c-brand small { font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; color: #6b6b66; font-weight: 400; margin-left: 12px; }
+  .c-nav { display: flex; gap: 26px; font-size: 14px; color: #6b6b66; }
+  .c-nav span.on { color: #1c1c1a; font-weight: 600; box-shadow: inset 0 -2px 0 #1c1c1a; padding-bottom: 20px; margin-bottom: -20px; }
+  .c-status { font-size: 13px; color: #6b6b66; }
+  .c-status b { color: #1f6b78; font-weight: 600; }
+  .c-body { padding: 44px 40px 36px; }
+  .c-kick { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: #1f6b78; font-weight: 600; }
+  .c-h1 { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 40px; line-height: 1.15; letter-spacing: -0.01em; max-width: 860px; margin-top: 10px; font-weight: 500; }
+  .c-h1 b { color: #b8432f; font-weight: 500; }
+  .c-dek { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 20px; color: #4a4a46; max-width: 780px; margin-top: 14px; line-height: 1.45; }
+  .c-by { font-size: 13.5px; color: #6b6b66; margin-top: 18px; padding-top: 14px; border-top: 1px solid #e0dbd0; max-width: 780px; }
+  .c-by b { color: #1c1c1a; font-weight: 600; }
+  .c-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; margin-top: 34px; border-top: 2px solid #1c1c1a; }
+  .c-stat { padding: 14px 16px 14px 0; border-right: 1px solid #e0dbd0; margin-right: 16px; }
+  .c-stat:last-child { border-right: 0; }
+  .c-stat .l { font-size: 13px; color: #6b6b66; }
+  .c-stat .v { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 32px; letter-spacing: -0.01em; margin-top: 4px; line-height: 1.1; }
+  .c-stat .v.crit { color: #b8432f; } .c-stat .v.warn { color: #9a6b12; }
+  .c-stat .s { font-size: 12.5px; color: #8a8a84; margin-top: 4px; }
+  .c-grid { display: grid; grid-template-columns: 7fr 5fr; gap: 40px; margin-top: 36px; }
+  .c-fig h4 { font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; font-size: 22px; font-weight: 500; line-height: 1.25; }
+  .c-fig .f { font-size: 14px; color: #6b6b66; margin-top: 6px; }
+  .c-bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; align-items: end; height: 170px; margin-top: 26px; border-bottom: 1px solid #1c1c1a; position: relative; }
+  .c-bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .c-bar i { display: block; width: 100%; background: #b9c9cd; }
+  .c-bar.crit i { background: #b8432f; } .c-bar.warn i { background: #d9a441; }
+  .c-bar .c { font-size: 12.5px; color: #1c1c1a; margin-bottom: 6px; }
+  .c-axis { display: grid; grid-template-columns: repeat(7, 1fr); gap: 12px; margin-top: 8px; }
+  .c-axis span { font-size: 12.5px; color: #6b6b66; text-align: center; }
+  .c-anno { position: absolute; left: 0; top: 4px; font-size: 13px; color: #b8432f; max-width: 260px; line-height: 1.35; }
+  .c-anno::after { content: ""; position: absolute; left: 14px; top: 100%; height: 88px; border-left: 1px solid #b8432f; }
+  .c-cap { font-size: 13.5px; color: #4a4a46; margin-top: 14px; max-width: 620px; }
+  .c-cap b { font-weight: 600; }
+  .c-tbl th { text-align: left; font-size: 12.5px; color: #6b6b66; font-weight: 600; padding: 0 8px 8px 0; border-bottom: 1px solid #1c1c1a; }
+  .c-tbl td { padding: 11px 8px 11px 0; border-bottom: 1px solid #e0dbd0; font-size: 14px; white-space: nowrap; }
+  .c-tbl td.r, .c-tbl th.r { text-align: right; }
+  .c-tbl .addr { font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; }
+  .c-tbl .eng { color: #6b6b66; font-size: 12.5px; }
+  .c-tbl .st { font-size: 13px; font-weight: 600; }
+  .c-tbl .st.crit { color: #b8432f; } .c-tbl .st.warn { color: #9a6b12; } .c-tbl .st.ref { color: #8a8a84; font-weight: 400; font-style: italic; }
+</style>
+
+<div class="cards dir-cards">
+
+  <!-- ======================= A ======================= -->
+  <div class="card" data-choice="A-console">
+    <div class="card-image">
+      <div class="mk a">
+        <div class="a-hd">
+          <div class="a-brand"><i></i>Solvent <small>ether.fi Cash risk</small></div>
+          <div class="a-nav"><span class="on">Book</span><span>Inspector</span><span>Scenarios</span><span>History</span><span>Activity</span><span>Proof</span></div>
+          <div class="a-status"><span class="pill"><span class="dot"></span>Live · batch 18,251 · 42s ago</span><span>Docs</span><span>◐</span></div>
+        </div>
+        <div class="a-body">
+          <div class="a-h1"><b>2 positions are liquidatable right now</b> — $159K of debt on Aave v3.</div>
+          <div class="a-dek">Cash Debt Manager is clear. 41 more positions sit within 10% of their liquidation threshold, carrying $1.2M of debt. 6 positions couldn't be computed this batch.</div>
+          <div class="a-meta"><span>Batch <b>18,251</b></span><span>Snapshot <b>42s</b> · fresh</span><span>Coverage <b>9,958 / 9,964</b> computed</span><span>Prices <b>RedStone</b> · 38s</span></div>
+          <div class="a-seg"><span class="on">Aave v3 · EtherFi market · 9,812</span><span>Cash Debt Manager · 152</span></div>
+          <div class="a-kpis">
+            <div class="a-kpi"><div class="l">Positions</div><div class="v tn">9,812</div><div class="s">9,806 computed · 6 refused</div></div>
+            <div class="a-kpi"><div class="l">Total debt</div><div class="v tn">$22.8M</div><div class="s">against $41.2M collateral</div></div>
+            <div class="a-kpi crit"><div class="l">Liquidatable</div><div class="v tn">2</div><div class="s">$159,102 eligible debt</div></div>
+            <div class="a-kpi warn"><div class="l">Near threshold</div><div class="v tn">41</div><div class="s">HF &lt; 1.10 · $1.2M debt</div></div>
+            <div class="a-kpi"><div class="l">Median HF</div><div class="v tn">1.84</div><div class="s">10th pct 1.21</div></div>
+            <div class="a-kpi"><div class="l">Bad debt</div><div class="v tn">$0</div><div class="s">computed, not assumed</div></div>
+          </div>
+          <div class="a-grid">
+            <div class="a-card">
+              <div class="t"><h4>Health factor distribution</h4><a>Exact bins →</a></div>
+              <div class="f">9,812 positions · 361 below 1.25 · liquidation at 1.00</div>
+              <div class="a-bars">
+                <div class="a-bar crit"><span class="c">2</span><i style="height:4px"></i><span class="b">&lt; 1.00</span></div>
+                <div class="a-bar warn"><span class="c">14</span><i style="height:4px"></i><span class="b">1.00–1.05</span></div>
+                <div class="a-bar warn"><span class="c">27</span><i style="height:5px"></i><span class="b">1.05–1.10</span></div>
+                <div class="a-bar"><span class="c">318</span><i style="height:14px"></i><span class="b">1.10–1.25</span></div>
+                <div class="a-bar"><span class="c">1,204</span><i style="height:44px"></i><span class="b">1.25–1.50</span></div>
+                <div class="a-bar"><span class="c">2,890</span><i style="height:88px"></i><span class="b">1.50–2.00</span></div>
+                <div class="a-bar"><span class="c">5,357</span><i style="height:128px"></i><span class="b">&gt; 2.00</span></div>
+              </div>
+            </div>
+            <div class="a-card">
+              <div class="t"><h4>At risk now</h4><a>All 9,812 →</a></div>
+              <div class="f">Sorted by distance to liquidation</div>
+              <table class="a-tbl" style="margin-top:12px">
+                <tr><th>Account</th><th class="r">HF</th><th class="r">Debt</th><th class="r">Status</th></tr>
+                <tr><td><span class="addr">0x7a3f…c21e</span><br><span class="eng">Aave v3</span></td><td class="r tn">0.984</td><td class="r tn">$91,420</td><td class="r"><span class="a-pill crit">Liquidatable</span></td></tr>
+                <tr><td><span class="addr">0x19b0…88d4</span><br><span class="eng">Aave v3</span></td><td class="r tn">0.997</td><td class="r tn">$67,682</td><td class="r"><span class="a-pill crit">Liquidatable</span></td></tr>
+                <tr><td><span class="addr">0xe4c2…0a17</span><br><span class="eng">Aave v3</span></td><td class="r tn">1.021</td><td class="r tn">$212,050</td><td class="r"><span class="a-pill warn">Near</span></td></tr>
+                <tr><td><span class="addr">0xab91…6e02</span><br><span class="eng">Debt Manager</span></td><td class="r tn">$0.31 room</td><td class="r tn">$4,620</td><td class="r"><span class="a-pill warn">Near</span></td></tr>
+                <tr><td><span class="addr">0x02f4…9c7d</span><br><span class="eng">Debt Manager</span></td><td class="r tn">—</td><td class="r tn">$1,500</td><td class="r"><span class="a-pill ref">Not computed</span></td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · Console</h3>
+      <p>A shipped crypto product. Sans everywhere, generous tiles, one accent, verdict as the H1, engines as a segmented control with human names. Mono survives only for addresses. This is the largest visible leap from today.</p>
+      <p class="refs">Register: Linear · Vercel dashboard · Morpho · the good parts of the Aave app.</p>
+    </div>
+  </div>
+
+  <!-- ======================= B ======================= -->
+  <div class="card" data-choice="B-instrument">
+    <div class="card-image">
+      <div class="mk b">
+        <div class="b-hd">
+          <div class="b-brand">SOLVENT <small>ETHER.FI CASH RISK</small></div>
+          <div class="b-nav"><span class="on">Book</span><span>Inspector</span><span>Scenarios</span><span>History</span><span>Activity</span><span>Proof</span><span>API</span></div>
+          <div class="b-status"><span><b>●</b> LIVE</span><span>BATCH 18,251</span><span>SNAPSHOT 42s</span><span>RS 38s</span></div>
+        </div>
+        <div class="b-body">
+          <div class="b-lbl">Book · what is at risk now</div>
+          <div class="b-h1"><b>2 liquidatable</b> · $159,102 eligible debt on Aave v3 · Debt Manager clear · 41 near threshold</div>
+          <div class="b-id">batch <b>18251</b> · computed <b>2026-08-08 20:22:08Z</b> · coverage <b>9,958/9,964</b> · 6 refused · current, not projected</div>
+
+          <div class="b-strip">
+            <div class="eng"><span class="n">Aave v3 · EtherFi market</span><span class="w">aave_v3_etherfi · HF, 8-dec</span></div>
+            <div><div class="b-lbl">Positions</div><div class="v">9,812</div><div class="s">6 refused</div></div>
+            <div><div class="b-lbl">Debt</div><div class="v">22.81M</div><div class="s">coll 41.20M</div></div>
+            <div><div class="b-lbl">Liquidatable</div><div class="v crit">2</div><div class="s">159,102.11</div></div>
+            <div><div class="b-lbl">Near &lt;1.10</div><div class="v warn">41</div><div class="s">1.21M debt</div></div>
+            <div><div class="b-lbl">Median HF</div><div class="v">1.84</div><div class="s">p10 1.21</div></div>
+            <div><div class="b-lbl">Bad debt</div><div class="v">0.00</div><div class="s">computed</div></div>
+          </div>
+          <div class="b-strip second">
+            <div class="eng"><span class="n">Cash Debt Manager</span><span class="w">debt_manager · strict bool, 6-dec</span></div>
+            <div><div class="b-lbl">Positions</div><div class="v">152</div><div class="s">0 refused</div></div>
+            <div><div class="b-lbl">Debt</div><div class="v">412.7K</div><div class="s">coll 1.94M</div></div>
+            <div><div class="b-lbl">Liquidatable</div><div class="v">0</div><div class="s">—</div></div>
+            <div><div class="b-lbl">Near &lt;5% room</div><div class="v warn">3</div><div class="s">11.2K debt</div></div>
+            <div><div class="b-lbl">Median room</div><div class="v">38%</div><div class="s">of cap</div></div>
+            <div><div class="b-lbl">Bad debt</div><div class="v warn">239.60</div><div class="s">standing</div></div>
+          </div>
+
+          <div class="b-grid">
+            <div class="b-panel">
+              <div class="ph"><span class="b-lbl">HF distribution · <b>aave_v3_etherfi</b></span><span class="b-lbl">n 9,812</span></div>
+              <div class="fh">361 positions below 1.25 · 2 already below 1.00</div>
+              <div class="b-bars">
+                <div class="b-bar crit"><span class="c">2</span><i style="height:3px"></i></div>
+                <div class="b-bar warn"><span class="c">14</span><i style="height:3px"></i></div>
+                <div class="b-bar warn"><span class="c">27</span><i style="height:4px"></i></div>
+                <div class="b-bar"><span class="c">318</span><i style="height:11px"></i></div>
+                <div class="b-bar"><span class="c">1,204</span><i style="height:36px"></i></div>
+                <div class="b-bar"><span class="c">2,890</span><i style="height:72px"></i></div>
+                <div class="b-bar"><span class="c">5,357</span><i style="height:104px"></i></div>
+              </div>
+              <div class="b-axis"><span>&lt;1.00</span><span>1.00–05</span><span>1.05–10</span><span>1.10–25</span><span>1.25–50</span><span>1.5–2.0</span><span>&gt;2.0</span></div>
+            </div>
+            <div class="b-panel">
+              <div class="ph"><span class="b-lbl">Triage · <b>nearest to boundary</b></span><span class="b-lbl">5 of 9,964</span></div>
+              <table class="b-tbl">
+                <tr><th>Account</th><th>Engine</th><th class="r">HF / room</th><th class="r">Debt</th><th class="r">State</th></tr>
+                <tr><td class="addr">0x7a3f…c21e</td><td class="eng">aave_v3</td><td class="r num">0.984</td><td class="r num">91,420.00</td><td class="r"><span class="b-tag crit">Liq</span></td></tr>
+                <tr><td class="addr">0x19b0…88d4</td><td class="eng">aave_v3</td><td class="r num">0.997</td><td class="r num">67,682.00</td><td class="r"><span class="b-tag crit">Liq</span></td></tr>
+                <tr><td class="addr">0xe4c2…0a17</td><td class="eng">aave_v3</td><td class="r num">1.021</td><td class="r num">212,050.00</td><td class="r"><span class="b-tag warn">Near</span></td></tr>
+                <tr><td class="addr">0xab91…6e02</td><td class="eng">debt_mgr</td><td class="r num">0.31 · 0.8%</td><td class="r num">4,620.00</td><td class="r"><span class="b-tag warn">Near</span></td></tr>
+                <tr><td class="addr">0x02f4…9c7d</td><td class="eng">debt_mgr</td><td class="r num">refused</td><td class="r num">1,500.00</td><td class="r"><span class="b-tag ref">Refused</span></td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · Instrument</h3>
+      <p>The observatory identity, disciplined. Dense, dark, hairlines, mono numerals, uppercase micro-labels — but with a real verdict headline, both engines side by side in one strip, and a third of the text. Closest to what exists today; wire names stay visible as secondary identity.</p>
+      <p class="refs">Register: Bloomberg · TradingView · Berkeley Graphics · Grafana done well.</p>
+    </div>
+  </div>
+
+  <!-- ======================= C ======================= -->
+  <div class="card" data-choice="C-editorial">
+    <div class="card-image">
+      <div class="mk ed">
+        <div class="c-hd">
+          <div class="c-brand">Solvent <small>The ether.fi Cash risk report, live</small></div>
+          <div class="c-nav"><span class="on">The book</span><span>Inspector</span><span>Scenarios</span><span>History</span><span>Activity</span><span>Proof</span></div>
+          <div class="c-status"><b>● Live</b> · batch 18,251 · 42 seconds ago</div>
+        </div>
+        <div class="c-body">
+          <div class="c-kick">What is at risk now</div>
+          <div class="c-h1 sf"><b>Two positions are liquidatable right now,</b> holding $159,000 of debt on the Aave v3 market.</div>
+          <div class="c-dek sf">The Cash Debt Manager is clear. Forty-one more accounts sit within ten percent of their liquidation threshold; six could not be computed this batch and are counted, not hidden.</div>
+          <div class="c-by">Batch <b>18,251</b> · computed <b>2026-08-08 20:22 UTC</b> · prices from RedStone, 38 seconds old · coverage <b>9,958 of 9,964</b> positions · every figure opens its evidence</div>
+
+          <div class="c-stats">
+            <div class="c-stat"><div class="l">Positions on book</div><div class="v tn">9,964</div><div class="s">9,812 Aave v3 · 152 Debt Manager</div></div>
+            <div class="c-stat"><div class="l">Debt on Aave v3</div><div class="v tn">$22.8M</div><div class="s">Debt Manager holds $413K, kept separate</div></div>
+            <div class="c-stat"><div class="l">Liquidatable now</div><div class="v tn crit">2</div><div class="s">$159,102 eligible debt</div></div>
+            <div class="c-stat"><div class="l">Near threshold</div><div class="v tn warn">44</div><div class="s">41 Aave · 3 Debt Manager</div></div>
+            <div class="c-stat"><div class="l">Could not compute</div><div class="v tn">6</div><div class="s">sweep never ran</div></div>
+            <div class="c-stat"><div class="l">Standing bad debt</div><div class="v tn">$239.60</div><div class="s">Debt Manager, one account</div></div>
+          </div>
+
+          <div class="c-grid">
+            <div class="c-fig">
+              <h4 class="sf">Most of the book is comfortable; the danger is concentrated in 43 accounts.</h4>
+              <div class="f">Aave v3 positions by health factor · liquidation at 1.00 · 9,812 positions</div>
+              <div class="c-bars">
+                <div class="c-anno">2 positions below 1.00<br>— $159K of debt</div>
+                <div class="c-bar crit"><span class="c">2</span><i style="height:4px"></i></div>
+                <div class="c-bar warn"><span class="c">14</span><i style="height:4px"></i></div>
+                <div class="c-bar warn"><span class="c">27</span><i style="height:5px"></i></div>
+                <div class="c-bar"><span class="c">318</span><i style="height:14px"></i></div>
+                <div class="c-bar"><span class="c">1,204</span><i style="height:44px"></i></div>
+                <div class="c-bar"><span class="c">2,890</span><i style="height:88px"></i></div>
+                <div class="c-bar"><span class="c">5,357</span><i style="height:128px"></i></div>
+              </div>
+              <div class="c-axis"><span>below 1.00</span><span>1.00–1.05</span><span>1.05–1.10</span><span>1.10–1.25</span><span>1.25–1.50</span><span>1.50–2.00</span><span>above 2.00</span></div>
+              <div class="c-cap">Bars are counts of positions, not debt. A 10% fall in ETH would move <b>318 more</b> accounts into the two amber bands — see <u>Scenarios</u>.</div>
+            </div>
+            <div class="c-fig">
+              <h4 class="sf">Closest to the edge</h4>
+              <div class="f">Five accounts, ordered by distance to liquidation</div>
+              <table class="c-tbl" style="margin-top:18px">
+                <tr><th>Account</th><th class="r">Distance</th><th class="r">Debt</th><th class="r">Status</th></tr>
+                <tr><td><span class="addr">0x7a3f…c21e</span><br><span class="eng">Aave v3</span></td><td class="r tn">HF 0.984</td><td class="r tn">$91,420</td><td class="r st crit">Liquidatable</td></tr>
+                <tr><td><span class="addr">0x19b0…88d4</span><br><span class="eng">Aave v3</span></td><td class="r tn">HF 0.997</td><td class="r tn">$67,682</td><td class="r st crit">Liquidatable</td></tr>
+                <tr><td><span class="addr">0xe4c2…0a17</span><br><span class="eng">Aave v3</span></td><td class="r tn">HF 1.021</td><td class="r tn">$212,050</td><td class="r st warn">Near threshold</td></tr>
+                <tr><td><span class="addr">0xab91…6e02</span><br><span class="eng">Debt Manager</span></td><td class="r tn">$0.31 of room</td><td class="r tn">$4,620</td><td class="r st warn">Near threshold</td></tr>
+                <tr><td><span class="addr">0x02f4…9c7d</span><br><span class="eng">Debt Manager</span></td><td class="r tn">—</td><td class="r tn">$1,500</td><td class="r st ref">not computed</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C · Editorial</h3>
+      <p>A live risk report, not a dashboard. Light, warm paper; serif headlines that state the finding; charts with annotations and captions that carry the story; numbers in tabular sans. Nothing else in crypto looks like this, which is the point — and the honest-rendering doctrine reads naturally as journalism rather than as disclaimers.</p>
+      <p class="refs">Register: FT visual journalism · NYT Upshot · The Economist · Stripe's annual letters.</p>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:2rem">Not shown: the light theme for A and B (it exists today and stays), and the dark theme for C (would be a warm charcoal, not the current teal-black). Whichever you pick, the next screen is that direction applied to the Inspector and Scenarios pages so you can see it hold across the app.</p>
+</body></html>

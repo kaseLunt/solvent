@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Solvent UI mockup · front-door</title>
+<style>
+body{margin:0;padding:32px 24px;background:#1d1d1f;color:#e6e6e8;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}
+h2{font-size:22px;margin:0 0 6px}.subtitle{color:#a0a0a6;margin:0 0 24px;max-width:1180px}
+.cards{display:grid;grid-template-columns:1fr;gap:2.5rem}.card{border:1px solid #3d3d3f;border-radius:12px;background:#2d2d2f;overflow:hidden;max-width:1230px;margin:0 auto}
+.card-image{padding:0}.card-body{padding:16px 20px}.card-body h3{margin:0 0 4px;font-size:16px}.card-body p{margin:0 0 6px;color:#c9c9cd;font-size:14px}
+.mockup-note{font-size:12px;color:#8a8a90;margin-bottom:20px}
+</style></head><body>
+<p class="mockup-note">Approved 2026-09-15 · companion screen exported verbatim (interactive selection removed). Authoritative visual reference for docs/specs/2026-09-15-ui-product-register-design.md.</p>
+<h2>The front door — what a cold visitor sees at <code>/</code></h2>
+<p class="subtitle">Today <code>/</code> redirects straight to the Book. A hiring manager arriving from a résumé link gets no story. Two options; click one.</p>
+
+<style>
+  .mk { width: 100%; max-width: 1180px; margin: 0 auto; overflow: hidden; border-radius: 8px; line-height: 1.45; text-align: left; background: #0c1215; color: #dbe5e8; font-family: Inter, "Segoe UI", system-ui, sans-serif; font-size: 14px; }
+  .mk * { box-sizing: border-box; margin: 0; padding: 0; }
+  .tn { font-variant-numeric: tabular-nums; }
+  .fd-cards { display: grid; grid-template-columns: 1fr; gap: 2.5rem; }
+  .fd-cards .card-image { aspect-ratio: auto; display: block; padding: 0; background: none; }
+  .fd-cards .card-body h3 { margin-bottom: 0.25rem; }
+  .fd-cards .card-body p { margin-bottom: 0.4rem; }
+
+  .k-hd { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 28px; border-bottom: 1px solid #223034; background: #0f171a; }
+  .k-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .k-brand i { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, #5ab3c4, #2e7d8c); display: inline-block; }
+  .k-brand small { font-weight: 400; color: #93a5ab; font-size: 13px; margin-left: 6px; }
+  .k-nav { display: flex; gap: 4px; }
+  .k-nav span { padding: 6px 12px; border-radius: 6px; color: #93a5ab; font-size: 14px; }
+  .k-nav span.on { color: #dbe5e8; background: #1b262b; }
+  .k-status { display: flex; align-items: center; gap: 14px; color: #93a5ab; font-size: 13px; }
+  .k-status .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid #223034; border-radius: 999px; color: #dbe5e8; }
+  .k-status .dot { width: 7px; height: 7px; border-radius: 50%; background: #63b98a; box-shadow: 0 0 0 3px rgba(99,185,138,0.18); }
+  .k-btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 8px; font-size: 14px; font-weight: 500; border: 1px solid #223034; background: #131c20; color: #dbe5e8; }
+  .k-btn.primary { background: #5ab3c4; color: #0c1215; border-color: #5ab3c4; }
+  .k-btn.ghost { background: none; }
+  .k-meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .k-meta span { font-size: 12.5px; padding: 4px 10px; border-radius: 6px; background: #131c20; border: 1px solid #223034; color: #93a5ab; }
+  .k-meta span b { color: #dbe5e8; font-weight: 500; }
+  .k-meta span.ok b { color: #63b98a; }
+
+  /* hero */
+  .h-body { padding: 56px 28px 40px; }
+  .h-kick { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #5ab3c4; font-weight: 600; margin-bottom: 14px; }
+  .h-h1 { font-size: 44px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; max-width: 900px; }
+  .h-h1 span { color: #93a5ab; font-weight: 500; }
+  .h-dek { color: #93a5ab; font-size: 18px; max-width: 760px; margin-top: 18px; line-height: 1.5; }
+  .h-dek b { color: #dbe5e8; font-weight: 500; }
+  .h-cta { display: flex; gap: 10px; margin-top: 26px; align-items: center; }
+  .h-cta .in { width: 380px; height: 40px; border: 1px solid #223034; border-radius: 8px; background: #0f171a; display: flex; align-items: center; padding: 0 14px; color: #71868e; font-size: 13.5px; }
+
+  /* live verdict strip */
+  .h-live { margin-top: 40px; border: 1px solid #223034; border-radius: 12px; background: #131c20; padding: 20px 22px; display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; }
+  .h-live .lk { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #93a5ab; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .h-live .lk i { width: 7px; height: 7px; border-radius: 50%; background: #63b98a; box-shadow: 0 0 0 3px rgba(99,185,138,0.18); display: inline-block; }
+  .h-live .lv { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin-top: 8px; }
+  .h-live .lv b { color: #d96a5d; font-weight: 600; }
+  .h-live .ls { color: #93a5ab; font-size: 14px; margin-top: 6px; }
+  .h-live .lm { margin-top: 12px; }
+  .h-live .lstats { display: grid; grid-template-columns: repeat(3, auto); gap: 28px; }
+  .h-live .lstats div { text-align: right; }
+  .h-live .lstats .l { color: #93a5ab; font-size: 12.5px; }
+  .h-live .lstats .v { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+
+  /* entry cards */
+  .h-entries { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 16px; }
+  .h-entry { border: 1px solid #223034; border-radius: 12px; padding: 18px 20px; background: #0f171a; }
+  .h-entry .q { font-size: 13px; color: #93a5ab; }
+  .h-entry .n { font-size: 17px; font-weight: 600; margin-top: 4px; }
+  .h-entry .d { font-size: 13.5px; color: #93a5ab; margin-top: 8px; line-height: 1.45; }
+  .h-entry .s { font-size: 13px; margin-top: 12px; color: #5ab3c4; }
+
+  /* pipeline */
+  .h-sec { margin-top: 44px; display: flex; align-items: baseline; justify-content: space-between; }
+  .h-sec h3 { font-size: 17px; font-weight: 600; }
+  .h-sec a { font-size: 13px; color: #5ab3c4; }
+  .h-pipe { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin-top: 14px; border: 1px solid #223034; border-radius: 12px; overflow: hidden; }
+  .h-step { padding: 18px 20px; border-right: 1px solid #223034; background: #0f171a; position: relative; }
+  .h-step:last-child { border-right: 0; }
+  .h-step .num { font-size: 12px; color: #5ab3c4; font-weight: 600; letter-spacing: 0.08em; }
+  .h-step .n { font-size: 15px; font-weight: 600; margin-top: 6px; }
+  .h-step .d { font-size: 13px; color: #93a5ab; margin-top: 6px; line-height: 1.45; min-height: 58px; }
+  .h-step .v { font-size: 13px; margin-top: 10px; color: #dbe5e8; }
+  .h-step .v b { font-weight: 600; }
+  .h-foot { margin-top: 28px; padding-top: 18px; border-top: 1px solid #223034; display: flex; justify-content: space-between; color: #71868e; font-size: 13px; }
+  .h-foot b { color: #93a5ab; font-weight: 500; }
+
+  /* option B */
+  .b-body { padding: 28px 28px 24px; }
+  .b-about { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 16px; border: 1px solid #223034; border-radius: 10px; background: #0f171a; margin-bottom: 22px; }
+  .b-about p { font-size: 13.5px; color: #93a5ab; }
+  .b-about p b { color: #dbe5e8; font-weight: 500; }
+  .b-about .x { color: #71868e; font-size: 13px; white-space: nowrap; }
+  .k-kick { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: #5ab3c4; font-weight: 600; margin-bottom: 8px; }
+  .k-h1 { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; max-width: 860px; }
+  .k-h1 b.crit { color: #d96a5d; font-weight: 600; }
+  .k-dek { color: #93a5ab; font-size: 16px; max-width: 800px; margin-top: 10px; }
+  .k-dek b { color: #dbe5e8; font-weight: 500; }
+  .k-kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-top: 22px; }
+  .k-kpi { background: #131c20; border: 1px solid #223034; border-radius: 10px; padding: 14px 16px; }
+  .k-kpi .l { color: #93a5ab; font-size: 13px; }
+  .k-kpi .v { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin-top: 6px; }
+  .k-kpi .s { color: #71868e; font-size: 12.5px; margin-top: 4px; }
+  .k-kpi.crit .v { color: #d96a5d; } .k-kpi.warn .v { color: #d0a04a; } .k-kpi.ref { border-style: dashed; } .k-kpi.ref .v { color: #93a5ab; }
+</style>
+
+<div class="cards fd-cards">
+
+  <!-- ================= A ================= -->
+  <div class="card" data-choice="A-live-front-page">
+    <div class="card-image">
+      <div class="mk">
+        <div class="k-hd">
+          <div class="k-brand"><i></i>Solvent <small>ether.fi Cash risk</small></div>
+          <div class="k-nav"><span class="on">Overview</span><span>Book</span><span>Inspector</span><span>Scenarios</span><span>History</span><span>Activity</span><span>Proof</span></div>
+          <div class="k-status"><span class="pill"><span class="dot"></span>Live · batch 18,251 · 42s ago</span><span>API</span><span>GitHub</span><span>◐</span></div>
+        </div>
+        <div class="h-body">
+          <div class="h-kick">A live risk surface for ether.fi Cash</div>
+          <div class="h-h1">70,000 people borrow against crypto to spend on a Visa card. <span>This is how close each of them is to liquidation — right now.</span></div>
+          <div class="h-dek">Solvent indexes the Cash lending book straight from chain, recomputes every account's distance to liquidation each batch, and shows its work: <b>every number opens its evidence</b>, and anything it can't defend renders as a named refusal — never a guess, never a zero.</div>
+          <div class="h-cta"><span class="k-btn primary">Open the book</span><div class="in">Inspect an address · 0x…</div><span class="k-btn ghost">Run a stress scenario</span></div>
+
+          <div class="h-live">
+            <div>
+              <div class="lk"><i></i>Cash book · right now</div>
+              <div class="lv"><b>$6,840 of Cash debt is liquidatable right now,</b> across 2 accounts.</div>
+              <div class="ls">47 more positions are technically liquidatable but total $112 · 27 accounts are within 10% of their cap · 6 could not be computed.</div>
+              <div class="k-meta lm"><span>Batch <b>18,251</b></span><span class="ok">Snapshot <b>42s · fresh</b></span><span>Coverage <b>1,406 / 1,412</b></span><span>Prices <b>RedStone · 38s</b></span></div>
+            </div>
+            <div class="lstats">
+              <div><div class="l">Debt outstanding</div><div class="v tn">$24.6M</div></div>
+              <div><div class="l">Collateral</div><div class="v tn">$61.3M</div></div>
+              <div><div class="l">Accounts</div><div class="v tn">1,412</div></div>
+            </div>
+          </div>
+
+          <div class="h-entries">
+            <div class="h-entry"><div class="q">What is at risk now?</div><div class="n">Book →</div><div class="d">The whole Cash lending book: what's liquidatable, what's close, what backs it, and where the bad debt sits.</div><div class="s">$312K within 10% of cap</div></div>
+            <div class="h-entry"><div class="q">Is this address at risk?</div><div class="n">Inspector →</div><div class="d">One account: its distance to liquidation, the prices that decide it, and the exact calculation with its numbers substituted.</div><div class="s">Try 0x7a3f…c21e — $184 from its cap</div></div>
+            <div class="h-entry"><div class="q">What if ETH falls 30%?</div><div class="n">Scenarios →</div><div class="d">Committed, versioned shocks run against the live book. Every shocked number is labeled a projection.</div><div class="s">ETH −30% → +$1.28M liquidatable</div></div>
+          </div>
+
+          <div class="h-sec"><h3>How it works</h3><a>Architecture &amp; verification →</a></div>
+          <div class="h-pipe">
+            <div class="h-step"><div class="num">01 · INDEX</div><div class="n">Reorg-safe indexer</div><div class="d">Raw logs from OP Mainnet and Ethereum into Postgres. Verified-ancestor rewind handles forks of any depth; every derived table rebuilds from raw logs.</div><div class="v"><b>155.3M</b> OP blocks · <b>460K</b> raw logs</div></div>
+            <div class="h-step"><div class="num">02 · COMPUTE</div><div class="n">Risk engine</div><div class="d">Each batch recomputes every account with its engine's own rule — Cash's borrow cap, Aave's health factor — using RedStone prices with a freshness budget.</div><div class="v">A batch every <b>~30s</b> · 1,412 accounts</div></div>
+            <div class="h-step"><div class="num">03 · VERIFY</div><div class="n">Reconciled to chain</div><div class="d">Positions are re-derived against live contract reads; drift is pinned as a proof. What can't be verified is refused and shown as refused.</div><div class="v"><b>87/87</b> gated rows exact · drift <b>0</b></div></div>
+            <div class="h-step"><div class="num">04 · SERVE</div><div class="n">Public API + this UI</div><div class="d">Read-only JSON, every money value a decimal string, a typed TypeScript client, and a live stream. This site is a client of the same API.</div><div class="v"><b>16</b> endpoints · <b>1,647</b> tests</div></div>
+          </div>
+          <div class="h-foot"><span>Built with <b>Go</b> · <b>PostgreSQL</b> · <b>Next.js</b> · <b>TypeScript</b> · OP Mainnet + Ethereum · RedStone</span><span>Open source · <b>github.com/kaseLunt/solvent</b> · a portfolio project, not affiliated with ether.fi</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · Live front page</h3>
+      <p>A real page at <code>/</code>: the one-sentence story, the live verdict (the same component as the Book's header, so it's data, not marketing), three entry cards each answering a question, and a four-step "how it works" with live numbers. The pipeline strip is the thing a staff engineer reads.</p>
+      <p style="opacity:0.7;font-size:0.9em">Nav gains an "Overview" tab; the Book stays one click away and is still the brand link's target from inside the app.</p>
+    </div>
+  </div>
+
+  <!-- ================= B ================= -->
+  <div class="card" data-choice="B-book-is-home">
+    <div class="card-image">
+      <div class="mk">
+        <div class="k-hd">
+          <div class="k-brand"><i></i>Solvent <small>ether.fi Cash risk</small></div>
+          <div class="k-nav"><span class="on">Book</span><span>Inspector</span><span>Scenarios</span><span>History</span><span>Activity</span><span>Proof</span></div>
+          <div class="k-status"><span class="pill"><span class="dot"></span>Live · batch 18,251 · 42s ago</span><span>API</span><span>GitHub</span><span>◐</span></div>
+        </div>
+        <div class="b-body">
+          <div class="b-about"><p><b>Solvent</b> is a live risk surface for ether.fi Cash: the lending book indexed from chain, every account's distance to liquidation recomputed each batch, every number backed by evidence. <b>How it works →</b></p><span class="x">dismiss ×</span></div>
+          <div class="k-kick">Cash book · right now</div>
+          <div class="k-h1"><b class="crit">$6,840 of Cash debt is liquidatable right now,</b> across 2 accounts.</div>
+          <div class="k-dek">47 more positions are technically liquidatable but total <b>$112</b> — below the $100 line and not headlined. <b>27 accounts</b> are within 10% of their borrow cap, carrying <b>$312K</b>. 6 positions could not be computed this batch and are counted, not hidden.</div>
+          <div class="k-kpis">
+            <div class="k-kpi"><div class="l">Debt outstanding</div><div class="v tn">$24.6M</div><div class="s">against $61.3M collateral</div></div>
+            <div class="k-kpi crit"><div class="l">Liquidatable · material</div><div class="v tn">$6,840</div><div class="s">2 accounts · 47 more under $100</div></div>
+            <div class="k-kpi warn"><div class="l">Near cap · &lt;10% room</div><div class="v tn">$312K</div><div class="s">27 accounts</div></div>
+            <div class="k-kpi"><div class="l">Median room</div><div class="v tn">38%</div><div class="s">of borrow cap</div></div>
+            <div class="k-kpi warn"><div class="l">Standing bad debt</div><div class="v tn">$239.60</div><div class="s">1 account</div></div>
+            <div class="k-kpi ref"><div class="l">Not computed</div><div class="v tn">6</div><div class="s">sweep never ran</div></div>
+          </div>
+          <div style="height:40px"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · The Book is home</h3>
+      <p>Keep <code>/</code> → Book. Add a dismissible one-paragraph "what is this" strip and a "How it works" page reachable from it and from the footer. Less to build, no marketing surface — but the story is a paragraph, and the pipeline (the most impressive engineering) stays buried under Proof/Developers.</p>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:2rem">My recommendation is <b>A</b>. It's the page that gets forwarded. Everything on it is either live data or a fact about the system, so it never goes stale or reads as fluff.</p>
+</body></html>
