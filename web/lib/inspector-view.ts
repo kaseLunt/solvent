@@ -319,7 +319,6 @@ export function historyFinding(view: InspectorView): string {
   return `Room has stayed above the 10% line in the newest batch${vantage}${NEAR_LINE_NOTE}`;
 }
 
-/** The stress table's words when it has no rows: the load phase, or the reading's own kind — a withheld book is never "no scenarios". */
 /** The Trust card's spark head: the same ladder as `historyFinding` in one short phrase — an unread or withheld history is never "no history". */
 export function historyHead(view: InspectorView): string {
   if (view.historyLoad.phase === "loading") return "History · loading…";
@@ -332,6 +331,7 @@ export function historyHead(view: InspectorView): string {
   return `History · room % over the last ${String(batches)} batch${batches === 1 ? "" : "es"}`;
 }
 
+/** The stress table's words when it has no rows: the load phase, or the reading's own kind — a withheld book is never "no scenarios". */
 export function stressEmptyText(view: InspectorView): string {
   if (view.stressLoad.phase === "loading") return "Running the committed scenarios…";
   if (view.stressLoad.phase === "error") return `Stress unavailable: ${view.stressLoad.message}`;
