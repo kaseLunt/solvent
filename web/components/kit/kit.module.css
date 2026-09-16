@@ -150,16 +150,16 @@
 .checkSmall { color: var(--ink-3); margin-left: auto; flex: 0 1 auto; max-width: 58%; text-align: right; font-size: var(--type-small); }
 @media (max-width: 720px) { .searchIn { min-width: 0; flex-basis: 100%; } }
 
-/* .k-lib — the scenario library (mockup pages-console.html:278-286) */
+/* .k-lib — the scenario library (mockup pages-console.html rules :117-128, markup :278-286) */
 .lib { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; align-self: start; }
 .libHead { padding: 12px 14px; border-bottom: 1px solid var(--line); font-weight: var(--w-semibold); font-size: var(--type-body); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--ink); }
-.libMode { display: inline-flex; gap: 6px; font-weight: var(--w-medium); font-size: var(--type-small); color: var(--ink-2); }
+.libMode { display: inline-flex; gap: 6px; font-weight: 400; font-size: var(--type-small); color: var(--ink-2); }
 .libMode button { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
-.libModeOn { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.libMode .libModeOn { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .libAddress { padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .libList { list-style: none; margin: 0; padding: 0; }
 .libRow { padding: 11px 14px; border-bottom: 1px solid var(--chip-bg); display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; }
-.libRowOn { background: var(--panel-2); }
+.libRowOn { background: var(--chip-bg); }
 .libCheck { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); }
 .libCheckGap { width: 16px; }
 .libBody { display: grid; gap: 2px; text-align: left; background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; width: 100%; }
@@ -174,18 +174,19 @@
 .libDim { color: var(--ink-3); }
 .libEmpty { padding: 14px; color: var(--ink-2); font-size: var(--type-small); }
 .libFoot { padding: 12px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.libNote { font-size: var(--type-small); color: var(--ink-3); margin: 0; padding: 0 14px 12px; }
+.libNote { font-size: var(--type-small); color: var(--ink-3); margin: 10px 0 0; }
 
-/* .k-heat — where accounts move (mockup pages-console.html:302-309). The tint is a ::before layer whose opacity
+/* .k-heat — where accounts move (mockup pages-console.html rules :129-132, markup :302-309). The tint is a ::before layer whose opacity
    is the cell's share of the largest cell (--heat); the count sits above it at full ink. */
 .heat { display: grid; gap: 4px; margin-top: 16px; font-size: var(--type-floor); }
+.heatRow { display: contents; }
 .heatCorner { color: var(--ink-3); font-size: var(--type-floor); align-self: end; }
 .heatLabel { color: var(--ink-3); display: flex; align-items: center; }
 .heatHead { color: var(--ink-3); text-align: center; align-self: end; }
 .heatCell { position: relative; overflow: hidden; height: 34px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--ink); font-variant-numeric: tabular-nums; }
 .heatCell::before { content: ""; position: absolute; inset: 0; opacity: calc(0.3 + var(--heat, 0) * 0.7); }
 .heatCell > span { position: relative; }
-.heatEmpty { background: var(--panel-2); }
+.heatEmpty { background: var(--chip-bg); }
 .heatHeld::before { background: color-mix(in srgb, var(--ink-3) 30%, transparent); }
 .heatWorse::before { background: color-mix(in srgb, var(--crit) 55%, transparent); }
 .heatBetter::before { background: color-mix(in srgb, var(--ok) 45%, transparent); }

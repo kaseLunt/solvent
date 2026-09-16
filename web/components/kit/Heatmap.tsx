@@ -1,4 +1,4 @@
-import { Fragment, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import { groupInt } from "@/lib/prose";
 import styles from "./kit.module.css";
 
@@ -35,35 +35,68 @@ const MOVE_CLASS: Record<HeatMovement, string | undefined> = {
 };
 
 /** The `.k-heat` grid: rows are the band today, columns the band after; a cell is a count of accounts. An empty cell stays a cell. */
-export function Heatmap({ bands, cells, rowsLabel, colsLabel, merged, testId, cellTestIdPrefix }: HeatmapProps) {
-  const byKey = new Map(cells.map((c) => [`${String(c.from)}-${String(c.to)}`, c]));
-  const id = (r: number, c: number) => (cellTestIdPrefix === undefined ? undefined : `${cellTestIdPrefix}-${String(r)}-${String(c)}`);
+export function Heatmap({
+  bands,
+  cells,
+  rowsLabel,
+  colsLabel,
+  merged,
+  testId,
+  cellTestIdPrefix,
+}: HeatmapProps) {
+  const byKey = new Map(
+    cells.map((c) => [`${String(c.from)}-${String(c.to)}`, c]),
+  );
+  const id = (r: number, c: number) =>
+    cellTestIdPrefix === undefined
+      ? undefined
+      : `${cellTestIdPrefix}-${String(r)}-${String(c)}`;
   return (
     <div
       className={styles.heat}
-      style={{ gridTemplateColumns: `90px repeat(${String(bands.length)}, 1fr)` }}
+      style={{
+        gridTemplateColumns: `90px repeat(${String(bands.length)}, 1fr)`,
+      }}
       data-testid={testId}
       data-merged={merged ? "true" : "false"}
       role="table"
       aria-label={`${rowsLabel} by ${colsLabel}`}
     >
-      <div className={styles.heatCorner} aria-hidden="true">
-        {rowsLabel} ↓ · {colsLabel} →
-      </div>
-      {bands.map((b) => (
-        <div key={`h-${b.key}`} className={styles.heatHead} title={b.title} role="columnheader">
-          {b.label}
+      <div className={styles.heatRow} role="row">
+        <div className={styles.heatCorner} aria-hidden="true">
+          {rowsLabel} ↓ · {colsLabel} →
         </div>
-      ))}
+        {bands.map((b) => (
+          <div
+            key={`h-${b.key}`}
+            className={styles.heatHead}
+            title={b.title}
+            role="columnheader"
+          >
+            {b.label}
+          </div>
+        ))}
+      </div>
       {bands.map((row, r) => (
-        <Fragment key={`r-${row.key}`}>
+        <div key={`r-${row.key}`} className={styles.heatRow} role="row">
           <div className={styles.heatLabel} title={row.title} role="rowheader">
             {row.label}
           </div>
           {bands.map((col, c) => {
             const cell = byKey.get(`${String(r)}-${String(c)}`);
             if (cell === undefined || cell.count === 0) {
-              return <div key={col.key} className={`${styles.heatCell} ${styles.heatEmpty}`} data-testid={id(r, c)} data-count="0" role="cell" />;
+              // A present cell with no rows keeps its movement word: a zero is honestly a zero, and its kind is still a fact.
+              return (
+                <div
+                  key={col.key}
+                  className={`${styles.heatCell} ${styles.heatEmpty}`}
+                  title={cell?.title}
+                  data-testid={id(r, c)}
+                  data-count="0"
+                  data-movement={cell?.movement}
+                  role="cell"
+                />
+              );
             }
             return (
               <div
@@ -80,7 +113,7 @@ export function Heatmap({ bands, cells, rowsLabel, colsLabel, merged, testId, ce
               </div>
             );
           })}
-        </Fragment>
+        </div>
       ))}
     </div>
   );

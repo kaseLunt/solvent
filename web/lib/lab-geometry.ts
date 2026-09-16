@@ -1,4 +1,3 @@
-// web/lib/lab-geometry.ts
 // Geometry for the Scenarios charts. These numbers become an opacity and an x
 // coordinate; they are never printed, so floats are allowed here and nowhere else.
 

@@ -1,4 +1,3 @@
-// web/tests/unit/lab-geometry.spec.ts
 // Geometry only: an opacity and an x coordinate. Nothing here is ever printed.
 import { expect, test } from "@playwright/test";
 import { dotPlotScale, heatIntensity } from "../../lib/lab-geometry";
