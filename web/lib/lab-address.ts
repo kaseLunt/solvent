@@ -98,8 +98,9 @@ function roomWords(room: bigint, decimals: number): string {
   return room < 0n ? `over cap by ${humanUsdFull(-room, decimals)}` : humanUsdFull(room, decimals);
 }
 
+/** A side's room words: "not computed" for a missing, unreadable or unknowable side — the tiles' own word — never a figure beside it. */
 function sideRoomWords(side: StressSide | null, decimals: number): string {
-  const figures = readable(side);
+  const figures = side !== null && side.verdict !== "unknowable" ? readable(side) : null;
   return figures === null ? "not computed" : roomWords(figures.room, decimals);
 }
 

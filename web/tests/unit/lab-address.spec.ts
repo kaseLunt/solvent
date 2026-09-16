@@ -183,12 +183,15 @@ test("an unknowable after verdict refuses its figures beside Not computed, and t
   expect(u.tiles?.capAfter).toEqual(REFUSED);
   expect(u.tiles?.roomAfter).toEqual(REFUSED);
   expect(u.tiles?.statusAfter).toEqual(NOT_COMPUTED);
+  // The dek uses the tiles' own word for the unknowable side: no room figure prints beside a refused register.
   expect(u.headline).toEqual({
     emphasis: "Cannot say whether 0x7a3f…c21e becomes liquidatable under ETH -30 percent.",
     rest: "",
     tone: "refused",
-    dek: "Room today $190.50; after the shock, over cap by $1,069. One side of the comparison is withheld or unknowable.",
+    dek: "Room today $190.50; after the shock, not computed. One side of the comparison is withheld or unknowable.",
   });
+  expect(u.headline.dek).toContain("not computed");
+  expect(u.headline.dek).not.toContain("over cap by");
 });
 
 test("rows beside a withheld Cash book are a cannot-say, never a negative", () => {
