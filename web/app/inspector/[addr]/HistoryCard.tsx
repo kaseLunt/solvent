@@ -31,8 +31,9 @@ export function HistoryCard({ view, reading }: { view: InspectorView; reading: A
   const found = history.phase === "ready" && history.value.outcome === "found" ? history.value.response : null;
   const legacyEngine = found?.engines.find((e) => e.engine === LEGACY) ?? null;
   const legacySeries = found === null || legacyEngine === null || engineNeverPresent(legacyEngine) ? null : buildHistorySeries(legacyEngine, knownBatchAxis(found));
-  // A newest-value label belongs to a plotted newest point; when the newest batch is a gap, no label is printed at an older dot.
-  const newestLabel = room !== null && room.newest !== null && (room.newest.kind === "computed" || room.newest.kind === "zero-cap") ? room.newest.display : undefined;
+  // A newest-value label belongs to a PLOTTED newest point (a zero cap has no geometry either); when the newest batch
+  // is a gap, no label is printed at an older dot.
+  const newestLabel = room !== null && room.newest !== null && room.newest.value !== null ? room.newest.display : undefined;
   const newestKind = streak?.newestKind ?? null;
   const finding =
     history.phase === "loading"

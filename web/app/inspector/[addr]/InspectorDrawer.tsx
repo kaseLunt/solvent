@@ -39,7 +39,7 @@ export function InspectorDrawer({ open, onClose, view, reading }: { open: boolea
               </p>
             ) : (
               <p>
-                Verdict: none served — the engine did not compute this row (<code>debt &gt; maxBorrowLT</code> is the rule it would apply).
+                Verdict: none served — the engine served no verdict for this row (<code>debt &gt; maxBorrowLT</code> is the rule it would apply).
               </p>
             )}
             {cash.refusal !== null && (
