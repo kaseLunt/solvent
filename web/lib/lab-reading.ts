@@ -22,44 +22,23 @@ export interface LabReading {
   readonly reloadListing: () => void;
 }
 
-export const canDispatch = (
-  runs: ReadonlyMap<string, RunRecord>,
-  id: string,
-): boolean => runs.get(id)?.phase !== "running";
-export const canDispatchSet = (set: SetRecord | null): boolean =>
-  set === null || set.phase !== "running";
+export const canDispatch = (runs: ReadonlyMap<string, RunRecord>, id: string): boolean => runs.get(id)?.phase !== "running";
+export const canDispatchSet = (set: SetRecord | null): boolean => set === null || set.phase !== "running";
 
-export function withRunning(
-  runs: ReadonlyMap<string, RunRecord>,
-  id: string,
-  now: number,
-): Map<string, RunRecord> {
+export function withRunning(runs: ReadonlyMap<string, RunRecord>, id: string, now: number): Map<string, RunRecord> {
   const next = new Map(runs);
   next.set(id, { phase: "running", startedAt: now });
   return next;
 }
 
-export function withSettled(
-  runs: ReadonlyMap<string, RunRecord>,
-  id: string,
-  outcome: RunBookOutcome,
-  now: number,
-  monotonicNow: number,
-): Map<string, RunRecord> {
+export function withSettled(runs: ReadonlyMap<string, RunRecord>, id: string, outcome: RunBookOutcome, now: number, monotonicNow: number): Map<string, RunRecord> {
   const next = new Map(runs);
-  next.set(id, {
-    phase: "settled",
-    outcome,
-    at: now,
-    atMonotonicMs: monotonicNow,
-  });
+  next.set(id, { phase: "settled", outcome, at: now, atMonotonicMs: monotonicNow });
   return next;
 }
 
 export function useLabReading(): LabReading {
-  const [listing, setListing] = useState<Phase<ScenariosResponse>>({
-    phase: "loading",
-  });
+  const [listing, setListing] = useState<Phase<ScenariosResponse>>({ phase: "loading" });
   const [epoch, setEpoch] = useState(0);
   const [runs, setRuns] = useState<ReadonlyMap<string, RunRecord>>(new Map());
   const [set, setSet] = useState<SetRecord | null>(null);
@@ -82,8 +61,7 @@ export function useLabReading(): LabReading {
           if (!controller.signal.aborted) setListing({ phase: "ready", value });
         },
         (cause: unknown) => {
-          if (!controller.signal.aborted)
-            setListing({ phase: "error", message: describeLookupError(cause) });
+          if (!controller.signal.aborted) setListing({ phase: "error", message: describeLookupError(cause) });
         },
       );
     return () => {
@@ -108,22 +86,12 @@ export function useLabReading(): LabReading {
       (outcome) => {
         if (controller.signal.aborted) return;
         controllers.current.delete(id);
-        setRuns((prev) =>
-          withSettled(prev, id, outcome, Date.now(), monotonicNowMs()),
-        );
+        setRuns((prev) => withSettled(prev, id, outcome, Date.now(), monotonicNowMs()));
       },
       (cause: unknown) => {
         if (controller.signal.aborted) return;
         controllers.current.delete(id);
-        setRuns((prev) =>
-          withSettled(
-            prev,
-            id,
-            { kind: "unreachable", message: describeLookupError(cause) },
-            Date.now(),
-            monotonicNowMs(),
-          ),
-        );
+        setRuns((prev) => withSettled(prev, id, { kind: "unreachable", message: describeLookupError(cause) }, Date.now(), monotonicNowMs()));
       },
     );
   }, []);
@@ -143,12 +111,7 @@ export function useLabReading(): LabReading {
       (cause: unknown) => {
         if (controller.signal.aborted) return;
         controllers.current.delete("__set__");
-        setSet({
-          phase: "settled",
-          ids: asked,
-          outcome: { kind: "unreachable", message: describeLookupError(cause) },
-          at: Date.now(),
-        });
+        setSet({ phase: "settled", ids: asked, outcome: { kind: "unreachable", message: describeLookupError(cause) }, at: Date.now() });
       },
     );
   }, []);

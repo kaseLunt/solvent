@@ -127,11 +127,7 @@ export interface LiveAgeReading {
 export type ResumeRepair = () => Promise<boolean>;
 
 /** The reading a caller with no receipt at all gets. */
-const NO_READING: LiveAgeReading = {
-  seconds: null,
-  unresolved: false,
-  refreshFailed: false,
-};
+const NO_READING: LiveAgeReading = { seconds: null, unresolved: false, refreshFailed: false };
 
 /**
  * Every lifecycle event this hook listens to: the three that mean "this tab may
@@ -236,11 +232,7 @@ export function useAnchoredAgeSeconds(
     if (wireAgeSeconds === null || receiptId === null) return;
 
     // Receipt: the wire number pinned to BOTH clocks, once.
-    const anchor = anchorWireAge(
-      wireAgeSeconds,
-      receivedAtMs ?? monotonicNowMs(),
-      receivedAtWallMs ?? wallNowMs(),
-    );
+    const anchor = anchorWireAge(wireAgeSeconds, receivedAtMs ?? monotonicNowMs(), receivedAtWallMs ?? wallNowMs());
     // The nondecreasing floor, scoped to THIS receipt (see freshness.ts).
     let floorSeconds = wireAgeSeconds;
     // SEEDED FROM THE RECEIPT, not null: taking the anchor IS a reconcile, so
@@ -249,10 +241,7 @@ export function useAnchoredAgeSeconds(
     // exactly one request. An UNRECONCILED DEPARTURE is carried across —
     // arriving at a new number is not the same as proving the tab was awake.
     trackerRef.current = {
-      lastResume: {
-        monotonicMs: anchor.receivedAtMs,
-        wallMs: anchor.receivedAtWallMs,
-      },
+      lastResume: { monotonicMs: anchor.receivedAtMs, wallMs: anchor.receivedAtWallMs },
       hiddenSinceReconcile: trackerRef.current.hiddenSinceReconcile,
       // A RECEIPT IS NOT A PROVEN RESUME. Arriving at a new number says nothing
       // about whether this tab was awake for the interval before it, so the
@@ -262,12 +251,7 @@ export function useAnchoredAgeSeconds(
     };
 
     const reconcile = (): void => {
-      floorSeconds = anchoredAgeSeconds(
-        anchor,
-        monotonicNowMs(),
-        wallNowMs(),
-        floorSeconds,
-      );
+      floorSeconds = anchoredAgeSeconds(anchor, monotonicNowMs(), wallNowMs(), floorSeconds);
       setLive({ receiptId, wireAgeSeconds, seconds: floorSeconds });
     };
 
@@ -293,9 +277,7 @@ export function useAnchoredAgeSeconds(
     const markExhausted = (): void => {
       if (cancelled) return;
       setBlind((previous) =>
-        previous !== null &&
-        previous.receiptId === receiptId &&
-        !previous.exhausted
+        previous !== null && previous.receiptId === receiptId && !previous.exhausted
           ? { receiptId, exhausted: true }
           : previous,
       );
@@ -420,9 +402,7 @@ export function useAnchoredAgeSeconds(
   // A committed reading from ANOTHER receipt is not this receipt's age — the
   // wire's own number stands until this receipt has been reconciled once.
   const seconds =
-    live === null ||
-    live.receiptId !== receiptId ||
-    live.wireAgeSeconds !== wireAgeSeconds
+    live === null || live.receiptId !== receiptId || live.wireAgeSeconds !== wireAgeSeconds
       ? wireAgeSeconds
       : live.seconds;
   return { seconds, unresolved, refreshFailed: unresolved && blind.exhausted };

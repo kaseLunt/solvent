@@ -1,12 +1,7 @@
 // The one-address workspace. It is the Inspector's reading — its stress rows,
 // its decimals, its Cash position as today — arranged under the selected
 // scenario. No second stress reader exists; the Inspector's laws hold here.
-import {
-  horizonLabel,
-  type StressHorizon,
-  type StressRow,
-  type StressSide,
-} from "./address-stress";
+import { horizonLabel, type StressHorizon, type StressRow, type StressSide } from "./address-stress";
 import { truncateAddress } from "./format";
 import { headroomBand } from "./headroom";
 import { humanUsdFull } from "./human-price";
@@ -16,14 +11,7 @@ import type { LabHeadline } from "./lab-headline";
 import type { LibraryOutcome } from "./lab-library";
 import { isWireScale } from "./wireGuard";
 
-export type AddressWorkspaceState =
-  | "idle"
-  | "invalid"
-  | "loading"
-  | "unavailable"
-  | "no-position"
-  | "withheld"
-  | "rows";
+export type AddressWorkspaceState = "idle" | "invalid" | "loading" | "unavailable" | "no-position" | "withheld" | "rows";
 export type TileTone = "crit" | "warn" | "ok" | "neutral" | "refused";
 export interface AddressTile {
   readonly value: string;
@@ -51,12 +39,7 @@ export interface AddressWorkspace {
   readonly cause: string | null;
 }
 
-const refused = (emphasis: string, dek: string): LabHeadline => ({
-  emphasis,
-  rest: "",
-  tone: "refused",
-  dek,
-});
+const refused = (emphasis: string, dek: string): LabHeadline => ({ emphasis, rest: "", tone: "refused", dek });
 const REFUSED_TILE: AddressTile = { value: "—", tone: "refused" };
 const NOT_COMPUTED: AddressTile = { value: "Not computed", tone: "refused" };
 
@@ -66,23 +49,8 @@ function sentence(text: string): string {
   return /[.!?]$/.test(c) ? c : `${c}.`;
 }
 
-function empty(
-  state: AddressWorkspaceState,
-  address: string,
-  headline: LabHeadline,
-  cause: string | null = null,
-): AddressWorkspace {
-  return {
-    state,
-    address,
-    rows: [],
-    selected: null,
-    headline,
-    tiles: null,
-    batchId: null,
-    decimals: null,
-    cause,
-  };
+function empty(state: AddressWorkspaceState, address: string, headline: LabHeadline, cause: string | null = null): AddressWorkspace {
+  return { state, address, rows: [], selected: null, headline, tiles: null, batchId: null, decimals: null, cause };
 }
 
 const STATUS_WORD: Record<CashStatus, AddressTile> = {
@@ -103,21 +71,8 @@ const NEAR_BANDS: ReadonlySet<number> = new Set([0, 1, 2, 3]);
  * non-negative — the Inspector's rule for a position. A negative wire decimal
  * is a legal string and not a figure: nothing prints from it, the room included.
  */
-function readable(
-  side: StressSide | null,
-): {
-  readonly debt: bigint;
-  readonly cap: bigint;
-  readonly room: bigint;
-} | null {
-  if (
-    side === null ||
-    side.debt === null ||
-    side.cap === null ||
-    side.debt < 0n ||
-    side.cap < 0n
-  )
-    return null;
+function readable(side: StressSide | null): { readonly debt: bigint; readonly cap: bigint; readonly room: bigint } | null {
+  if (side === null || side.debt === null || side.cap === null || side.debt < 0n || side.cap < 0n) return null;
   return { debt: side.debt, cap: side.cap, room: side.cap - side.debt };
 }
 
@@ -139,12 +94,9 @@ function computable(side: StressSide | null): ReturnType<typeof readable> {
 function afterStatus(side: StressSide | null): AddressTile {
   const figures = computable(side);
   if (side === null || figures === null) return NOT_COMPUTED;
-  if (side.verdict === "liquidatable")
-    return { value: "Liquidatable", tone: "crit" };
+  if (side.verdict === "liquidatable") return { value: "Liquidatable", tone: "crit" };
   const band = headroomBand(figures.cap, figures.debt);
-  return band !== null && NEAR_BANDS.has(band)
-    ? { value: "Near cap", tone: "warn" }
-    : { value: "Healthy", tone: "ok" };
+  return band !== null && NEAR_BANDS.has(band) ? { value: "Near cap", tone: "warn" } : { value: "Healthy", tone: "ok" };
 }
 
 /** Negative room is worded "over cap by" a positive figure in the crit tone: a minus sign on a dollar figure never prints as room. */
@@ -153,9 +105,7 @@ function roomTile(room: bigint, decimals: number, tone: TileTone): AddressTile {
 }
 
 function roomWords(room: bigint, decimals: number): string {
-  return room < 0n
-    ? `over cap by ${humanUsdFull(-room, decimals)}`
-    : humanUsdFull(room, decimals);
+  return room < 0n ? `over cap by ${humanUsdFull(-room, decimals)}` : humanUsdFull(room, decimals);
 }
 
 /** A side's room words: "not computed" for a missing, unreadable or unknowable side — the tiles' own word — never a figure beside it. */
@@ -172,48 +122,19 @@ function sideRoomWords(side: StressSide | null, decimals: number): string {
  * the longest horizon. The dek is each horizon's extra interest, delta-only;
  * a missing or negative delta is "not computed".
  */
-function projectionHeadline(
-  short: string,
-  label: string,
-  horizons: readonly StressHorizon[],
-  today: string,
-  decimals: number,
-): LabHeadline {
+function projectionHeadline(short: string, label: string, horizons: readonly StressHorizon[], today: string, decimals: number): LabHeadline {
   const cannot = `Cannot say whether ${short} becomes liquidatable under ${label}.`;
-  const longest = horizons.reduce<StressHorizon | null>(
-    (a, h) => (a === null || h.seconds > a.seconds ? h : a),
-    null,
-  );
-  if (longest === null)
-    return refused(
-      cannot,
-      `Room today ${today}. The projection carries no horizon.`,
-    );
+  const longest = horizons.reduce<StressHorizon | null>((a, h) => (a === null || h.seconds > a.seconds ? h : a), null);
+  if (longest === null) return refused(cannot, `Room today ${today}. The projection carries no horizon.`);
   const interest = horizons.map(
-    (h) =>
-      `${horizonLabel(h.seconds)}: ${h.extraInterest === null || h.extraInterest < 0n ? "not computed" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`,
+    (h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null || h.extraInterest < 0n ? "not computed" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`,
   );
   const dek = `Room today ${today}; ${interest.join("; ")}.`;
   const unknowable = horizons.find((h) => h.verdict === "unknowable");
-  if (unknowable !== undefined)
-    return refused(
-      cannot,
-      `${dek} The ${horizonLabel(unknowable.seconds)} horizon carries no verdict.`,
-    );
+  if (unknowable !== undefined) return refused(cannot, `${dek} The ${horizonLabel(unknowable.seconds)} horizon carries no verdict.`);
   const within = horizons.find((h) => h.verdict === "liquidatable");
-  if (within !== undefined)
-    return {
-      emphasis: `${short} becomes liquidatable within ${horizonLabel(within.seconds)} under ${label}.`,
-      rest: "",
-      tone: "warn",
-      dek,
-    };
-  return {
-    emphasis: `${short} stays inside its cap through ${horizonLabel(longest.seconds)} under ${label}.`,
-    rest: "",
-    tone: "ok",
-    dek,
-  };
+  if (within !== undefined) return { emphasis: `${short} becomes liquidatable within ${horizonLabel(within.seconds)} under ${label}.`, rest: "", tone: "warn", dek };
+  return { emphasis: `${short} stays inside its cap through ${horizonLabel(longest.seconds)} under ${label}.`, rest: "", tone: "ok", dek };
 }
 
 /**
@@ -223,16 +144,8 @@ function projectionHeadline(
  * say of it: that gate is asked before a projection reads its horizons or a
  * spot shock reads the reader's flip.
  */
-function rowHeadline(
-  short: string,
-  row: StressRow,
-  decimals: number,
-): LabHeadline {
-  if (!row.applicable)
-    return refused(
-      `${row.label} does not apply to ${short}.`,
-      sentence(row.reason ?? "the engine gave no reason"),
-    );
+function rowHeadline(short: string, row: StressRow, decimals: number): LabHeadline {
+  if (!row.applicable) return refused(`${row.label} does not apply to ${short}.`, sentence(row.reason ?? "the engine gave no reason"));
   // A projection has no shock: its refusal speaks of the projection and its projected figures; a spot row of its shock.
   const projected = row.projection !== null;
   const today = sideRoomWords(row.before, decimals);
@@ -248,238 +161,74 @@ function rowHeadline(
       : "One side of the comparison is withheld or unknowable.";
     return refused(cannot, `${dek} ${cause}`);
   }
-  if (row.projection !== null)
-    return projectionHeadline(
-      short,
-      row.label,
-      row.projection,
-      today,
-      decimals,
-    );
-  if (row.flips === null)
-    return refused(
-      cannot,
-      `${dek} One side of the comparison is withheld or unknowable.`,
-    );
-  if (row.flips)
-    return {
-      emphasis: `${short} becomes liquidatable under ${row.label}.`,
-      rest: "",
-      tone: "crit",
-      dek,
-    };
-  if (row.after?.verdict === "liquidatable")
-    return {
-      emphasis: `${short} is liquidatable today and stays so under ${row.label}.`,
-      rest: "",
-      tone: "crit",
-      dek,
-    };
-  return {
-    emphasis: `${short} stays inside its cap under ${row.label}.`,
-    rest: "",
-    tone: "ok",
-    dek,
-  };
+  if (row.projection !== null) return projectionHeadline(short, row.label, row.projection, today, decimals);
+  if (row.flips === null) return refused(cannot, `${dek} One side of the comparison is withheld or unknowable.`);
+  if (row.flips) return { emphasis: `${short} becomes liquidatable under ${row.label}.`, rest: "", tone: "crit", dek };
+  if (row.after?.verdict === "liquidatable") return { emphasis: `${short} is liquidatable today and stays so under ${row.label}.`, rest: "", tone: "crit", dek };
+  return { emphasis: `${short} stays inside its cap under ${row.label}.`, rest: "", tone: "ok", dek };
 }
 
-export function addressWorkspace(input: {
-  address: string;
-  view: InspectorView | null;
-  selectedId: string | null;
-}): AddressWorkspace {
+export function addressWorkspace(input: { address: string; view: InspectorView | null; selectedId: string | null }): AddressWorkspace {
   const { address, view, selectedId } = input;
   if (view === null || address === "") {
-    return empty(
-      "idle",
-      address,
-      refused(
-        "Stress one address.",
-        "Enter an address; the committed scenarios are applied to its Cash position.",
-      ),
-    );
+    return empty("idle", address, refused("Stress one address.", "Enter an address; the committed scenarios are applied to its Cash position."));
   }
   const short = truncateAddress(address);
-  if (view.state === "invalid")
-    return empty(
-      "invalid",
-      address,
-      refused(
-        "Not an address.",
-        "An address is 0x followed by exactly 40 hex characters. Nothing was looked up.",
-      ),
-    );
-  if (view.state === "loading")
-    return empty(
-      "loading",
-      address,
-      refused(
-        `Looking up ${short}…`,
-        "The position first; the committed scenarios follow it.",
-      ),
-    );
+  if (view.state === "invalid") return empty("invalid", address, refused("Not an address.", "An address is 0x followed by exactly 40 hex characters. Nothing was looked up."));
+  if (view.state === "loading") return empty("loading", address, refused(`Looking up ${short}…`, "The position first; the committed scenarios follow it."));
   if (view.state === "unavailable") {
-    return empty(
-      "unavailable",
-      address,
-      refused(
-        `The lookup for ${short} could not be completed.`,
-        `${sentence(view.headline.dek.split(". ")[0] ?? view.headline.dek)} Nothing about this address is known from a failed lookup.`,
-      ),
-    );
+    return empty("unavailable", address, refused(`The lookup for ${short} could not be completed.`, `${sentence(view.headline.dek.split(". ")[0] ?? view.headline.dek)} Nothing about this address is known from a failed lookup.`));
   }
-  if (view.stressLoad.phase === "loading")
-    return empty(
-      "loading",
-      address,
-      refused(
-        `Running the committed scenarios for ${short}…`,
-        "One evaluation per scenario against this batch; nothing is written.",
-      ),
-    );
-  if (view.stressLoad.phase === "error")
-    return empty(
-      "unavailable",
-      address,
-      refused(
-        `The scenarios for ${short} could not be run.`,
-        `${sentence(view.stressLoad.message)} The position above is unaffected.`,
-      ),
-    );
+  if (view.stressLoad.phase === "loading") return empty("loading", address, refused(`Running the committed scenarios for ${short}…`, "One evaluation per scenario against this batch; nothing is written."));
+  if (view.stressLoad.phase === "error") return empty("unavailable", address, refused(`The scenarios for ${short} could not be run.`, `${sentence(view.stressLoad.message)} The position above is unaffected.`));
   const stress = view.stress;
-  if (stress === null)
-    return empty(
-      "loading",
-      address,
-      refused(
-        `Running the committed scenarios for ${short}…`,
-        "One evaluation per scenario against this batch; nothing is written.",
-      ),
-    );
+  if (stress === null) return empty("loading", address, refused(`Running the committed scenarios for ${short}…`, "One evaluation per scenario against this batch; nothing is written."));
   const batchId = view.batchId;
   if (stress.kind === "no-position") {
-    return empty(
-      "no-position",
-      address,
-      refused(
-        `No Cash position for ${short} in batch ${batchId === null ? "?" : String(batchId)}.`,
-        "The lookup is complete: there is nothing to stress.",
-      ),
-    );
+    return empty("no-position", address, refused(`No Cash position for ${short} in batch ${batchId === null ? "?" : String(batchId)}.`, "The lookup is complete: there is nothing to stress."));
   }
   if (stress.kind === "withheld") {
-    return empty(
-      "withheld",
-      address,
-      refused(
-        `Cannot say — the Cash book is withheld for ${short}.`,
-        `${sentence(stress.cause)} A withheld book is not a computed book.`,
-      ),
-      stress.cause,
-    );
+    return empty("withheld", address, refused(`Cannot say — the Cash book is withheld for ${short}.`, `${sentence(stress.cause)} A withheld book is not a computed book.`), stress.cause);
   }
   const rows = stress.rows;
   const selected = rows.find((r) => r.id === selectedId) ?? rows[0] ?? null;
-  const decimals =
-    view.decimals !== null && isWireScale(view.decimals) ? view.decimals : null;
-  const bare = (headline: LabHeadline): AddressWorkspace => ({
-    state: "rows",
-    address,
-    rows,
-    selected,
-    headline,
-    tiles: null,
-    batchId,
-    decimals,
-    cause: null,
-  });
-  if (selected === null)
-    return bare(
-      refused(
-        `No scenario applies to ${short}.`,
-        "The stress response carried no scenario for this account.",
-      ),
-    );
+  const decimals = view.decimals !== null && isWireScale(view.decimals) ? view.decimals : null;
+  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, selected, headline, tiles: null, batchId, decimals, cause: null });
+  if (selected === null) return bare(refused(`No scenario applies to ${short}.`, "The stress response carried no scenario for this account."));
   // Rows beside no Cash position are two responses disagreeing; a position at a scale the guard refused prints no figure.
   // Neither is the scenarios' doing, so neither borrows their sentence. The position is asked before its scale: no
   // position has no scale, and the disagreement is the truer sentence. A withheld Cash book is asked first of all: the
   // lookup's answer there is cannot-say, and a withheld book is never "no position" — only a complete not-found or a
   // legacy-only lookup is.
   if (view.state === "cannot-compute") {
-    return bare(
-      refused(
-        `Cannot say — the Cash book is withheld for ${short}.`,
-        "The stress response carries scenarios while the lookup's Cash book is withheld — the two answers disagree.",
-      ),
-    );
+    return bare(refused(`Cannot say — the Cash book is withheld for ${short}.`, "The stress response carries scenarios while the lookup's Cash book is withheld — the two answers disagree."));
   }
-  if (view.cash === null)
-    return bare(
-      refused(
-        `No Cash position for ${short} to stress.`,
-        "The stress response carries scenarios, but the lookup found no Cash position — the two answers disagree.",
-      ),
-    );
-  if (decimals === null)
-    return bare(
-      refused(
-        "The Cash position's scale could not be read.",
-        "No figure prints at an unreadable scale.",
-      ),
-    );
-  const money = (v: bigint | null): AddressTile =>
-    v === null || v < 0n
-      ? REFUSED_TILE
-      : { value: humanUsdFull(v, decimals), tone: "neutral" };
+  if (view.cash === null) return bare(refused(`No Cash position for ${short} to stress.`, "The stress response carries scenarios, but the lookup found no Cash position — the two answers disagree."));
+  if (decimals === null) return bare(refused("The Cash position's scale could not be read.", "No figure prints at an unreadable scale."));
+  const money = (v: bigint | null): AddressTile => (v === null || v < 0n ? REFUSED_TILE : { value: humanUsdFull(v, decimals), tone: "neutral" });
   const before = view.cash;
   // The before tiles are refused exactly where the Inspector refuses its own: a refused or unknowable position keeps
   // its status word and prints no figure — a persisted debt beside "Not computed" would read as a computed one.
   const refusedBefore = view.refusedTiles;
-  const roomToneBefore: TileTone =
-    before.status === "liquidatable"
-      ? "crit"
-      : before.status === "near"
-        ? "warn"
-        : "neutral";
+  const roomToneBefore: TileTone = before.status === "liquidatable" ? "crit" : before.status === "near" ? "warn" : "neutral";
   const side = selected.after;
   // An uncomputable after side refuses its figures as the Inspector refuses an unknowable position's: a debt beside
   // "Not computed" would read as a computed one.
   const after = computable(side);
   // The after room carries its status's tone as the before pair does: crit beside Liquidatable, warn beside Near cap.
   const statusAfter = afterStatus(side);
-  const roomToneAfter: TileTone =
-    statusAfter.tone === "crit"
-      ? "crit"
-      : statusAfter.tone === "warn"
-        ? "warn"
-        : "neutral";
+  const roomToneAfter: TileTone = statusAfter.tone === "crit" ? "crit" : statusAfter.tone === "warn" ? "warn" : "neutral";
   const tiles: AddressTiles = {
     debtBefore: refusedBefore ? REFUSED_TILE : money(before.debt),
     capBefore: refusedBefore ? REFUSED_TILE : money(before.cap),
-    roomBefore:
-      refusedBefore || before.room === null
-        ? REFUSED_TILE
-        : roomTile(before.room, decimals, roomToneBefore),
+    roomBefore: refusedBefore || before.room === null ? REFUSED_TILE : roomTile(before.room, decimals, roomToneBefore),
     statusBefore: STATUS_WORD[before.status],
     debtAfter: after === null ? REFUSED_TILE : money(after.debt),
     capAfter: after === null ? REFUSED_TILE : money(after.cap),
-    roomAfter:
-      after === null
-        ? REFUSED_TILE
-        : roomTile(after.room, decimals, roomToneAfter),
+    roomAfter: after === null ? REFUSED_TILE : roomTile(after.room, decimals, roomToneAfter),
     statusAfter,
   };
-  return {
-    state: "rows",
-    address,
-    rows,
-    selected,
-    headline: rowHeadline(short, selected, decimals),
-    tiles,
-    batchId,
-    decimals,
-    cause: null,
-  };
+  return { state: "rows", address, rows, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, decimals, cause: null };
 }
 
 /**
@@ -489,17 +238,8 @@ export function addressWorkspace(input: {
  * the engine's reason; an unknowable verdict is a cannot-say, never a "No".
  */
 export function rowOutcome(row: StressRow | undefined): LibraryOutcome {
-  if (row === undefined)
-    return { key: "not-covered", text: "Not on this address", tone: "dim" };
-  if (!row.applicable)
-    return {
-      key: "not-covered",
-      text: `Not applicable: ${row.reason ?? "the engine gave no reason"}`,
-      tone: "dim",
-    };
-  if (row.flips === null)
-    return { key: "withheld", text: "Cannot say", tone: "refused" };
-  return row.flips
-    ? { key: "result", text: "Becomes liquidatable", tone: "crit" }
-    : { key: "result", text: "Stays inside its cap", tone: "ok" };
+  if (row === undefined) return { key: "not-covered", text: "Not on this address", tone: "dim" };
+  if (!row.applicable) return { key: "not-covered", text: `Not applicable: ${row.reason ?? "the engine gave no reason"}`, tone: "dim" };
+  if (row.flips === null) return { key: "withheld", text: "Cannot say", tone: "refused" };
+  return row.flips ? { key: "result", text: "Becomes liquidatable", tone: "crit" } : { key: "result", text: "Stays inside its cap", tone: "ok" };
 }
