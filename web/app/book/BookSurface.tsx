@@ -1,386 +1,225 @@
 "use client";
 
-// The Book surface (W1, spec §3.1): the whole position set, one glance.
-// Sections: per-engine stat rows → HF histograms → liquidation waterfall →
-// bad-debt census → position table (+ risk map fed from its pages) →
-// stampline. /v1/book arrives via @solvent/client (the only data path);
-// /v1/positions via lib/positions (the documented C1 seam).
-//
-// Degraded honesty: a 503 (no servable batch) renders the refusal as the
-// surface's own state with the server's message — the global PostureRibbon /
-// DegradationBanner own the app-level layer and are NOT duplicated here.
-
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import {
-  UnavailableError,
-  type BookResponse,
-  type EngineRefusal,
-  type Stamp,
-} from "@solvent/client";
-import { getSolventClient } from "@/lib/api";
-import { Stampline, StampItem } from "@/components/Stampline";
-import { RefusedTag } from "@/components/RefusedTag";
-import { formatBlock, EM_DASH } from "@/lib/format";
-import { readWirePopulation } from "@/lib/wireGuard";
-import {
-  batchFreshnessLine,
-  batchFreshnessLineUnknown,
-  batchFreshnessStamp,
-  batchFreshnessStampUnknown,
-  receiptIdentity,
-} from "@/lib/freshness";
-import { useAnchoredAgeSeconds } from "@/lib/live-age";
-import { BOOK_DEK_LOADING, bookDek } from "./bookDek";
-import { BookStatRows } from "./BookStatRows";
-import { BookHistogram } from "./BookHistogram";
-import { BookWaterfall } from "./BookWaterfall";
-import { BookBadDebt } from "./BookBadDebt";
-import { BookPositions } from "./BookPositions";
+import { useState } from "react";
+import { BandBars, ChartCard, KpiTile, SectionHead, VerdictHeader, type Band, type IdentityChip } from "@/components/kit";
+import kit from "@/components/kit/kit.module.css";
+import type { Headline } from "@/lib/book-headline";
+import { useCashBook } from "@/lib/cash-book";
+import { summarizeCash, unavailableHeadline } from "@/lib/cash-summary";
+import { humanAge } from "@/lib/freshness";
+import { freshnessTier } from "@/lib/freshnessTiers";
+import { humanUsd } from "@/lib/human-usd";
+import { useMetaConstants } from "@/lib/meta";
+import { plainCause } from "@/lib/refusal-phrasebook";
+import { stressPreview } from "@/lib/stress-preview";
+import { BookLegacy } from "./BookLegacy";
+import { BookMethodology } from "./BookMethodology";
+import { NeedsAttention } from "./NeedsAttention";
+import { StressPreview } from "./StressPreview";
 import styles from "./book.module.css";
 
-type BookState =
-  | { phase: "loading" }
-  | { phase: "ok"; book: BookResponse }
-  | { phase: "no-batch"; message: string; retryAfterSeconds: number | null }
-  | { phase: "error"; message: string };
+const NEAR_BANDS: ReadonlySet<string> = new Set(["0-2", "2-5", "5-10"]);
+const bandTone = (id: string): Band["tone"] => (id === "breached" ? "crit" : NEAR_BANDS.has(id) ? "warn" : "neutral");
+const bandLabel = (id: string, label: string): string =>
+  id === "breached" ? "over cap · liquidatable" : id === "0-2" ? "< 2% room" : id === "50-plus" ? "≥ 50% room" : label;
 
-function marksSummary(watermarks: readonly Stamp[]): string {
-  return watermarks
-    .map((stamp) => {
-      // p1b-14: the failed tally passes the population guard before the
-      // glyph branch — a -0 token must refuse, never read as sweep✓.
-      const sweep =
-        stamp.sweep === null
-          ? ""
-          : readWirePopulation(stamp.sweep.failed, "sweep.failed") > 0
-            ? " · sweep⚠"
-            : " · sweep✓";
-      return `${stamp.engine} @${formatBlock(stamp.last_block)}${sweep}`;
-    })
-    .join(" · ");
-}
+const LOADING: Headline = {
+  variant: "refused",
+  tone: "refused",
+  emphasis: "Loading the Cash book…",
+  rest: "",
+  dek: "Fetching the newest batch.",
+};
 
-function gatePosture(engines: number, refused: readonly EngineRefusal[]): string {
-  if (refused.length === 0) return `${String(engines)}/${String(engines)} engines allowed`;
-  const names = refused.map((refusal) => refusal.engine ?? refusal.code ?? "unnamed").join(", ");
-  return `${String(engines - refused.length)}/${String(engines)} allowed · withheld: ${names}`;
-}
-
+/** The Book (spec 2026-09-15 §5.2): Cash first, money first, one methodology drawer. */
 export function BookSurface() {
-  const [state, setState] = useState<BookState>({ phase: "loading" });
-  const controllerRef = useRef<AbortController | null>(null);
-  /** The batch id of the /v1/book response currently rendered. */
-  const bookBatchRef = useRef<number | null>(null);
-  /** The last batch id the table reported — the heal-once guard. */
-  const reportedBatchRef = useRef<number | null>(null);
+  const reading = useCashBook();
+  const meta = useMetaConstants();
+  const [methodOpen, setMethodOpen] = useState(false);
 
-  // Fetch (or RE-fetch) /v1/book. A refetch keeps the current book on screen
-  // until the fresh one lands — the aggregates stay whichever batch they
-  // honestly are, and the table's batch guard discloses any mismatch.
-  //
-  // `keepOnFailure` (Wave R4) is for the RESUME re-fetch: a background
-  // reconcile may not make the page worse than it found it. A woken laptop
-  // whose network is not up yet must not trade a real book (rendered under an
-  // age that is still climbing, and still true) for an error strip. A
-  // FOREGROUND failure is still stated, in full.
-  //
-  // WAVE R6 (round-13 MEDIUM 2): AND IT REPORTS. `keepOnFailure` hides the
-  // failure from the SCREEN — deliberately, and correctly — but R5 also hid it
-  // from the age hook, which fired this off and forgot it. With both clocks
-  // blind, a failed repair therefore left an understated age standing as if the
-  // wire had confirmed it. So this resolves TRUE only when a receipt was
-  // applied, and FALSE on every failure, which is what drives the bounded retry.
-  const loadBook = useCallback((options?: { keepOnFailure?: boolean }): Promise<boolean> => {
-    const keepOnFailure = options?.keepOnFailure ?? false;
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    return getSolventClient()
-      .book(controller.signal)
-      .then(
-        (book) => {
-          // p1b-6 fix 1: the SAME supersession law the failure arm below has
-          // carried since W-UX — an aborted request was replaced by a newer
-          // one, which reports for itself. Without this mirror, a superseded
-          // success that had already left the wire could land its stale book
-          // (and receipt) OVER the newer request's answer.
-          if (controller.signal.aborted) return false;
-          bookBatchRef.current = book.batch.id;
-          setState({ phase: "ok", book });
-          return true;
-        },
-        (cause: unknown) => {
-          // An ABORT is a supersession, not an answer: this request was replaced
-          // by a newer one, which will report for itself.
-          if (controller.signal.aborted) return false;
-          const failure: BookState =
-            cause instanceof UnavailableError
-              ? {
-                  phase: "no-batch",
-                  message: cause.body.error.message,
-                  retryAfterSeconds: cause.retryAfterSeconds,
-                }
-              : { phase: "error", message: cause instanceof Error ? cause.message : String(cause) };
-          setState((previous) => (keepOnFailure && previous.phase === "ok" ? previous : failure));
-          return false;
-        },
-      );
-  }, []);
+  const cash = reading.cash;
+  const decimals = cash.engine?.value_decimals ?? 6;
+  const loaded = reading.phase === "ok";
+  const summary = loaded
+    ? summarizeCash({
+        rows: cash.rows,
+        decimals,
+        refusedPositions: cash.engine?.refused_positions ?? 0,
+        walkComplete: cash.walkComplete,
+        refusedWhole: cash.refusedWhole,
+      })
+    : null;
+  const headline =
+    summary?.headline ??
+    (reading.phase === "loading" ? LOADING : unavailableHeadline(reading.failure?.message ?? "the service did not answer"));
+  const refusedTiles = !loaded || cash.refusedWhole !== null;
+  const walking = loaded && cash.refusedWhole === null && !cash.walkComplete && cash.walkFailure === null;
 
-  useEffect(() => {
-    void loadBook();
-    return () => { controllerRef.current?.abort(); };
-  }, [loadBook]);
+  const ageSeconds = reading.age.unresolved ? null : reading.age.seconds;
+  const tier = ageSeconds === null ? null : freshnessTier(ageSeconds, meta.constants);
+  const chips: IdentityChip[] =
+    !loaded || reading.book === null
+      ? []
+      : [
+          { label: "Batch", value: reading.book.batch.id.toLocaleString("en-US") },
+          {
+            label: "Snapshot",
+            value: ageSeconds === null ? "age unknown" : `${humanAge(ageSeconds)} · ${tier ?? ""}`.trim(),
+            tone: tier === null ? "refused" : tier === "fresh" ? "ok" : tier === "aging" ? "warn" : "crit",
+          },
+          {
+            label: "Coverage",
+            value: `${(cash.engine?.computed_positions ?? 0).toLocaleString("en-US")} / ${(cash.engine?.positions ?? 0).toLocaleString("en-US")} computed`,
+          },
+          { label: "Current", value: "not projected" },
+        ];
 
-  // Wave R3 (round-10 MEDIUM): the batch's age ANCHORED at receipt, so the
-  // head line and the stampline keep counting instead of freezing at the
-  // number this response was built with.
-  //
-  // Wave R4 (round-11 MEDIUM): and on a RESUME — bfcache restore, tab brought
-  // forward, window raised — the age is recomputed against both clocks
-  // immediately AND /v1/book is re-fetched in the background, because this
-  // surface owns that fetch. The clamped estimate holds the line meanwhile:
-  // no spinner over a stale number, and no "refreshing" claim, because the
-  // estimate is not a placeholder — it is a true statement about the batch.
-  const reloadBookOnResume = useCallback(
-    () => loadBook({ keepOnFailure: true }),
-    [loadBook],
-  );
-  //
-  // Wave R5 (round-12 MEDIUM): and the anchor is keyed to THIS RESPONSE's
-  // identity — `served_at` with the batch id — not to its integer age. The
-  // resume re-fetch above exists to replace an estimate with the wire's own
-  // number; keyed on the value, a fresh batch that happened to land at the same
-  // `age_seconds` as the stale one could not land at all, and the reader kept
-  // the estimate's hours over a batch that was minutes old.
-  //
-  // Wave R6 (round-13 MEDIUM 2): and the reading now carries whether this page
-  // is still ENTITLED to state the age. On a blind resume — proven by the
-  // lifecycle, measured by neither clock — the re-fetch above is the only thing
-  // that can restore a measured age, so its failure is disclosed rather than
-  // absorbed: the age renders UNKNOWN, the retry is bounded, and the book
-  // itself stays on screen throughout. Freshness is never a reason to blank
-  // data.
-  const age = useAnchoredAgeSeconds(
-    state.phase === "ok"
-      ? {
-          ageSeconds: state.book.batch.age_seconds,
-          receiptId: receiptIdentity(state.book.served_at, state.book.batch.id),
-        }
-      : null,
-    reloadBookOnResume,
-  );
-
-  // The table's pages landed on a batch (W-UX-C): when it differs from the
-  // book we hold — e.g. after a 409 restart onto a fresh batch — re-fetch
-  // /v1/book so the footer's batch guard HEALS instead of pinning a
-  // permanent mismatch. Once per reported id, so a server still serving the
-  // old book cannot be hammered.
-  const handleTableBatch = useCallback(
-    (batchId: number) => {
-      if (reportedBatchRef.current === batchId) return;
-      reportedBatchRef.current = batchId;
-      if (bookBatchRef.current !== null && bookBatchRef.current !== batchId) void loadBook();
-    },
-    [loadBook],
-  );
+  const money = (v: string | null | undefined): string => (v == null ? "—" : humanUsd(BigInt(v), decimals));
+  const bands: Band[] = (summary?.bands ?? []).map((b) => ({
+    id: b.id,
+    label: bandLabel(b.id, b.label),
+    count: b.count,
+    value: b.debt,
+    tone: bandTone(b.id),
+  }));
+  const nearTenPct = (summary?.bands ?? []).filter((b) => NEAR_BANDS.has(b.id)).reduce((s, b) => s + b.debt, 0n);
+  const refusalKey = cash.engine?.refusals[0]?.key;
+  const badDebt = cash.badDebt;
+  const badDebtValue = badDebt?.current_bad_debt_usd == null ? null : BigInt(badDebt.current_bad_debt_usd);
+  const preview =
+    reading.book === null || reading.book.waterfall === null ? null : stressPreview(reading.book.waterfall, "debt_manager");
+  const walkFailure =
+    cash.walkFailure === null
+      ? null
+      : { message: cash.walkFailure.message, retryable: cash.walkFailure.register === "transport" };
+  const plural = (n: number, word: string): string => `${String(n)} ${word}${n === 1 ? "" : "s"}`;
 
   return (
-    <>
-      <div className={styles.head}>
-        <h1>Book</h1>
-        {/* THE VERDICT DEK (Wave R1 item 9): computed from the SAME /v1/book
-            response the cards render — never a static sentence about what the
-            surface is. Counts funnel through bookDek's single count source. */}
-        <p data-testid="book-dek">
-          {state.phase === "ok"
-            ? bookDek({
-                batchId: state.book.batch.id,
-                engines: state.book.engines,
-                badDebt: state.book.bad_debt,
-              })
-            : BOOK_DEK_LOADING}
-        </p>
-        {/* FRESHNESS (Wave R1 item 3): the wire's own age, beside the batch
-            id, so "batch #5" can never be read as "now". */}
-        {state.phase === "ok" && (
-          <p className={styles.freshness} data-testid="book-freshness">
-            {age.unresolved
-              ? batchFreshnessLineUnknown(state.book.batch, age.refreshFailed)
-              : batchFreshnessLine(state.book.batch, age.seconds ?? undefined)}
-          </p>
-        )}
+    <div className={styles.page}>
+      <VerdictHeader
+        testId="book-verdict"
+        kicker="Cash book · right now"
+        emphasis={headline.emphasis}
+        rest={headline.rest}
+        tone={headline.tone}
+        dek={headline.dek}
+        chips={chips}
+        actions={
+          <button
+            type="button"
+            className={`${kit.btn} ${kit.btnGhost}`}
+            onClick={() => setMethodOpen(true)}
+            data-testid="book-methodology"
+          >
+            Methodology &amp; evidence
+          </button>
+        }
+      />
+      <SectionHead
+        title="Cash"
+        qualifier={`Debt Manager engine · OP Mainnet · ${(cash.engine?.positions ?? 0).toLocaleString("en-US")} borrowing accounts`}
+        link={{ href: "#legacy", label: "Legacy Aave v3 market ↓" }}
+      />
+      <div className={kit.kpis}>
+        <KpiTile
+          testId="book-kpi-debt"
+          label="Debt outstanding"
+          value={money(cash.engine?.total_debt)}
+          sub={`against ${money(cash.engine?.total_collateral)} collateral`}
+          tone={refusedTiles ? "refused" : "neutral"}
+        />
+        <KpiTile
+          testId="book-kpi-liquidatable"
+          label="Liquidatable · material"
+          value={summary === null ? "—" : humanUsd(summary.material.sum, decimals)}
+          sub={
+            summary === null
+              ? ""
+              : `${plural(summary.material.count, "account")} · ${String(summary.belowLine.count)} more under $100`
+          }
+          tone={refusedTiles ? "refused" : summary !== null && summary.material.count > 0 ? "crit" : "neutral"}
+          pending={walking && (summary?.liquidatable.material.length ?? 0) === 0}
+        />
+        <KpiTile
+          testId="book-kpi-near"
+          label="Near cap · <10% room"
+          value={summary === null ? "—" : humanUsd(summary.nearCap.sum, decimals)}
+          sub={summary === null ? "" : `${String(summary.nearCap.count)} accounts`}
+          tone={refusedTiles ? "refused" : summary !== null && summary.nearCap.count > 0 ? "warn" : "neutral"}
+          pending={walking}
+        />
+        <KpiTile
+          testId="book-kpi-median"
+          label="Median room"
+          value={summary?.percentiles.median ?? "—"}
+          sub={summary?.percentiles.p10 == null ? "of borrow cap" : `of borrow cap · 10th pct ${summary.percentiles.p10}`}
+          tone={refusedTiles ? "refused" : "neutral"}
+          pending={walking}
+        />
+        <KpiTile
+          testId="book-kpi-baddebt"
+          label="Standing bad debt"
+          value={badDebt === null || badDebtValue === null ? "—" : humanUsd(badDebtValue, badDebt.usd_decimals)}
+          sub={badDebt === null ? "" : badDebt.insolvent_positions === null ? "accounts unknown" : plural(badDebt.insolvent_positions, "account")}
+          tone={refusedTiles ? "refused" : badDebtValue !== null && badDebtValue > 0n ? "warn" : "neutral"}
+        />
+        <KpiTile
+          testId="book-kpi-notcomputed"
+          label="Not computed"
+          value={cash.engine === null ? "—" : String(cash.engine.refused_positions)}
+          sub={refusalKey === undefined ? "nothing refused" : plainCause(refusalKey)}
+          tone="refused"
+        />
       </div>
 
-      {state.phase === "loading" && (
-        <div className={styles.panel}>
-          <div className={styles.emptyReason} data-testid="book-loading">
-            loading /v1/book…
-          </div>
-        </div>
-      )}
-
-      {state.phase === "no-batch" && (
-        <div className={styles.panel}>
-          <div className={styles.emptyReason} data-testid="book-no-batch">
-            <RefusedTag reason="NO SERVABLE BATCH" /> {state.message}
-            {state.retryAfterSeconds !== null &&
-              ` (retry after ${String(state.retryAfterSeconds)}s)`}{" "}
-            {/* Scoped for the same reason the fetch-failure strip is: the
-                positions table below walks its own endpoint and may serve a
-                computed zero while no batch is servable here. */}
-            · unavailable aggregate values are not rendered as zero.
-          </div>
-        </div>
-      )}
-
-      {state.phase === "error" && (
-        <div className={styles.warnStrip} role="alert">
-          <b>BOOK FETCH FAILED</b>
-          {/* SCOPE. The old sentence said "nothing here is rendered as zero",
-              which is a claim about the whole page — and the positions table
-              below walks its OWN endpoint and legitimately renders computed
-              zeros while /v1/book is down. Over-claiming a refusal is the same
-              failure as hiding one: the reader stops trusting the register.
-              This strip speaks for the AGGREGATES, which are what it lost. */}
-          <span>
-            {state.message}. The aggregates are unavailable. Unavailable aggregate values are not
-            rendered as zero.
-          </span>
-        </div>
-      )}
-
-      {state.phase === "ok" && (
-        <>
-          {state.book.refused_engines.length > 0 && (
-            <div className={styles.refusalStrip} data-testid="book-refused-engines">
-              {state.book.refused_engines.map((refusal) => (
-                <span key={refusal.engine ?? refusal.code}>
-                  <RefusedTag reason={refusal.code ?? "withheld"} /> <b>{refusal.engine}</b>: whole
-                  book withheld on this batch
-                  {refusal.detail !== undefined ? `: ${refusal.detail}` : ""}
-                </span>
-              ))}
-            </div>
+      <div className={kit.grid}>
+        <ChartCard
+          title="Distance to liquidation, by debt"
+          finding={
+            <>
+              Cash debt grouped by room under the borrow cap · bars are dollars, counts printed ·{" "}
+              <b>{humanUsd(nearTenPct, decimals)}</b> sits within 10% of the cap
+            </>
+          }
+          link={{ onClick: () => setMethodOpen(true), label: "How the bands are cut →" }}
+          testId="book-bands-card"
+        >
+          {summary === null ? (
+            <p className={styles.note}>{refusedTiles ? "Not computed." : "Loading…"}</p>
+          ) : (
+            <BandBars bands={bands} decimals={decimals} weightedBy="value" testId="book-bands" />
           )}
+        </ChartCard>
+        <ChartCard title="Needs attention" finding="Material first, then by room">
+          {summary === null ? (
+            <p className={styles.note}>{refusedTiles ? "Not computed." : "Loading…"}</p>
+          ) : (
+            <NeedsAttention summary={summary} rows={cash.rows} walkFailure={walkFailure} onRetry={reading.reload} />
+          )}
+        </ChartCard>
+      </div>
 
-          {/* Aggregates + bad_debt travel down (SUPPLEMENT §17): the stat
-              rows and the histogram reading lines compute from the SAME
-              /v1/book response. */}
-          <BookStatRows engines={state.book.engines} badDebt={state.book.bad_debt} />
-        </>
+      {reading.book !== null && (
+        <div className={kit.grid}>
+          <StressPreview preview={preview} />
+          <ChartCard
+            title="Bad debt on the book"
+            testId="book-baddebt"
+            finding={
+              badDebt === null || badDebtValue === null
+                ? "Not reported."
+                : `${humanUsd(badDebtValue, badDebt.usd_decimals)} of debt is no longer covered by collateral, across ${badDebt.insolvent_positions === null ? "an unknown number of accounts" : plural(badDebt.insolvent_positions, "account")}.`
+            }
+          >
+            <p className={styles.note}>
+              Standing bad debt is measured, not projected: collateral value today is below the debt it secures.
+            </p>
+          </ChartCard>
+        </div>
       )}
 
-      {/* The position table walks its own endpoint; it renders (and states its
-          own posture) even while /v1/book is degraded. The Suspense boundary
-          is useSearchParams' static-prerender contract: the table hydrates
-          client-side with the REAL query string, normalized before its first
-          fetch (W-UX-B part 10). The aggregates feed (W-UX-C) hands it the
-          batch-guarded counts and the decimals the dust filter composes
-          min_value from — its first walk waits for /v1/book to SETTLE, ok or
-          failed, and never on a stall alone.
-
-          ORDER (Wave R1 item 8, ruling §II.1): the positions block sits ABOVE
-          the histogram — accounts first, distributions after. */}
-      <Suspense fallback={null}>
-        <BookPositions
-          bookFeed={{
-            settled: state.phase !== "loading",
-            batchId: state.phase === "ok" ? state.book.batch.id : null,
-            aggregates: state.phase === "ok" ? state.book.engines : null,
-          }}
-          onBatchChange={handleTableBatch}
-        />
-      </Suspense>
-
-      {state.phase === "ok" && (
-        <>
-          <BookHistogram
-            histogram={state.book.hf_histogram}
-            aggregates={state.book.engines}
-            badDebt={state.book.bad_debt}
-          />
-          {/* CENSUS ABOVE THE WATERFALL (Wave R1 item 8): the standing loss is
-              a fact; the waterfall is a projection off it. Fact first. */}
-          <BookBadDebt badDebt={state.book.bad_debt} />
-          <BookWaterfall waterfall={state.book.waterfall} />
-        </>
-      )}
-
-      {state.phase === "ok" && (
-        // WAVE W-3L — the keepOpen split. The strip used to put a neutral
-        // batch id and a `gate withheld: …` at identical visual weight. Now:
-        //
-        //   INLINE, always — gate, coverage, and the marks vector whenever it
-        //   carries a failed sweep. All three are refusal- or coverage-class,
-        //   and `coverage: partial` in particular is a withheld-engine
-        //   statement rather than a metric.
-        //   COLLAPSED — batch and key, behind a summary that COUNTS them. The
-        //   head already carries the freshness line verbatim, so its stampline
-        //   twin is the safest thing on this surface to fold.
-        <Stampline collapse summaryTestId="book-stamp-evidence-summary">
-          {/* The stampline carries the SAME freshness line as the head (Wave
-              R1 item 3) — its own `batch` label supplies the leading word. */}
-          <StampItem
-            label="batch"
-            value={
-              <span data-testid="book-stamp-freshness">
-                {age.unresolved
-                  ? batchFreshnessStampUnknown(state.book.batch, age.refreshFailed)
-                  : batchFreshnessStamp(state.book.batch, age.seconds ?? undefined)}
-              </span>
-            }
-          />
-          <StampItem
-            label="marks"
-            value={marksSummary(state.book.batch.watermarks)}
-            tone={state.book.batch.watermarks.some((stamp) => (stamp.sweep?.failed ?? 0) > 0) ? "warn" : "ok"}
-            testId="book-stamp-marks"
-          />
-          <StampItem
-            label="gate"
-            value={gatePosture(state.book.engines.length, state.book.refused_engines)}
-            tone={state.book.refused_engines.length === 0 ? "ok" : "warn"}
-            /* HAZARD: a gate stating `withheld: …` is a refusal. It is inline
-               whatever its tone, so a future all-clear tone cannot fold it. */
-            keepOpen
-            testId="book-stamp-gate"
-          />
-          <StampItem
-            label="key"
-            value={EM_DASH}
-            tone="dim"
-            note={
-              <>
-                (materialization key is served by /v1/evidence,{" "}
-                <Link href="/proof">see /proof</Link>; not fabricated here)
-              </>
-            }
-          />
-          <StampItem
-            label="coverage"
-            value={
-              state.book.coverage.stress_coverage_is_full
-                ? "full"
-                : `partial · ${String(
-                    // p1b-14: a coverage tally is a wire population.
-                    readWirePopulation(
-                      state.book.coverage.excluded_by_this_layer,
-                      "coverage.excluded_by_this_layer",
-                    ),
-                  )} excluded, ${String(
-                    state.book.coverage.withheld_engines.length,
-                  )} engine(s) withheld`
-            }
-            tone={state.book.coverage.stress_coverage_is_full ? "ok" : "warn"}
-            /* HAZARD: coverage-partial is a withheld-engine statement, so this
-               pin never collapses in either direction. */
-            keepOpen
-            testId="book-stamp-coverage"
-          />
-        </Stampline>
-      )}
-    </>
+      <BookLegacy engine={reading.legacy.engine} badDebt={reading.legacy.badDebt} histogram={reading.legacy.histogram} />
+      <BookMethodology open={methodOpen} onClose={() => setMethodOpen(false)} book={reading.book} />
+    </div>
   );
 }

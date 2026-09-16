@@ -119,7 +119,7 @@ for (let i = 0; i < 6; i += 1) rows.push(refusedRow());
 // i.e. r/(1+r) — a debt-relative draw below 1/9 would land in the 5–10% band, so the floor is 0.12 ≈ 10.7% of cap.)
 for (let i = 0; i < 1330; i += 1) {
   const size = Math.exp(between(Math.log(300), Math.log(120000)));
-  rows.push(computedRow(size, between(0.12, 0.8)));
+  rows.push(computedRow(size, between(0.12, 2.4)));
 }
 // Server ordering for sort=headroom asc: least room first as the EXACT rational (cap − debt)/cap, compared by
 // cross-multiplication (cap > 0 on every computed row); breached (negative) first, refused (no cap) last; equal

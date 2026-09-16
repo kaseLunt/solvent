@@ -21,7 +21,7 @@ const SURFACES = [
 ] as const;
 
 /** Pages whose rebuild has not landed yet; their H1 pins are fixme until it does. */
-const PENDING_PAGES: ReadonlySet<string> = new Set(["/", "/book"]);
+const PENDING_PAGES: ReadonlySet<string> = new Set([]);
 
 const NAV_LABELS = SURFACES.map((s) => s.label);
 

@@ -1,0 +1,120 @@
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+import { KitTable, SmallToggle, StatusPill, type KitRow } from "@/components/kit";
+import kit from "@/components/kit/kit.module.css";
+import type { CashRow, SizedCashRow } from "@/lib/cash-rows";
+import type { CashSummary } from "@/lib/cash-summary";
+import { humanUsd, MINUS } from "@/lib/human-usd";
+import { plainCause } from "@/lib/refusal-phrasebook";
+import styles from "./book.module.css";
+
+const DEFAULT_ROWS = 8;
+const short = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+function byRoom(a: CashRow, b: CashRow): number {
+  const x = a.roomTenths ?? 0n;
+  const y = b.roomTenths ?? 0n;
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+function toRow(r: SizedCashRow, status: "liquidatable" | "near"): KitRow {
+  const room = r.room ?? 0n;
+  return {
+    key: r.account,
+    testId: `book-row-${r.account}`,
+    cells: {
+      account: (
+        <Link href={`/inspector/${r.account}`} className={kit.addr}>
+          {short(r.account)}
+        </Link>
+      ),
+      room: status === "liquidatable" ? `${MINUS}${humanUsd(room < 0n ? -room : room, r.decimals)}` : (r.roomPercent ?? "—"),
+      debt: humanUsd(r.debt, r.decimals),
+      status:
+        status === "liquidatable" ? (
+          <StatusPill tone="crit">Liquidatable</StatusPill>
+        ) : (
+          <StatusPill tone="warn">Near cap</StatusPill>
+        ),
+    },
+  };
+}
+
+function refusedRow(r: CashRow): KitRow {
+  return {
+    key: r.account,
+    testId: `book-row-${r.account}`,
+    dim: true,
+    cells: {
+      account: (
+        <Link href={`/inspector/${r.account}`} className={kit.addr}>
+          {short(r.account)}
+        </Link>
+      ),
+      room: "—",
+      debt: r.debt === null ? "—" : humanUsd(r.debt, r.decimals),
+      status: (
+        <StatusPill tone="refused" title={r.refusal === null ? undefined : `${plainCause(r.refusal.code, r.refusal.detail)} · ${r.refusal.code}`}>
+          Not computed
+        </StatusPill>
+      ),
+    },
+  };
+}
+
+export interface NeedsAttentionProps {
+  summary: CashSummary;
+  rows: readonly CashRow[];
+  /** A transport-class walk failure with the one honest retry. */
+  walkFailure: { message: string; retryable: boolean } | null;
+  onRetry: () => void;
+}
+
+/** Material liquidatable first, then near cap by room, then the refused rows — dimmed, never dropped. */
+export function NeedsAttention({ summary, rows, walkFailure, onRetry }: NeedsAttentionProps) {
+  const [showSmall, setShowSmall] = useState(false);
+  const material = [...summary.liquidatable.material].sort(byRoom).map((r) => toRow(r, "liquidatable"));
+  const near = summary.nearCapRows.map((r) => toRow(r, "near"));
+  const refused = rows.filter((r) => !r.computed).map(refusedRow);
+  const belowLine = [...summary.liquidatable.small, ...summary.liquidatable.dust]
+    .sort(byRoom)
+    .map((r) => toRow(r, "liquidatable"));
+  const base = [...material, ...near, ...refused].slice(0, Math.max(DEFAULT_ROWS, material.length + refused.length));
+  const shown = showSmall ? [...base, ...belowLine] : base;
+  const n = summary.liquidatable.counts.belowLine;
+  return (
+    <>
+      <KitTable
+        testId="book-attention"
+        columns={[
+          { key: "account", header: "Account" },
+          { key: "room", header: "Room", align: "right" },
+          { key: "debt", header: "Debt", align: "right" },
+          { key: "status", header: "Status", align: "right" },
+        ]}
+        rows={shown}
+        emptyText={summary.settled ? "No account needs attention." : "Walking the book…"}
+      />
+      {walkFailure !== null && (
+        <p className={styles.walkFailure} role="alert" data-testid="book-walk-failure">
+          The walk stopped: {walkFailure.message}.{" "}
+          {walkFailure.retryable && (
+            <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={onRetry}>
+              Retry
+            </button>
+          )}
+        </p>
+      )}
+      {n > 0 && (
+        <SmallToggle
+          on={showSmall}
+          onChange={setShowSmall}
+          testId="book-dust-toggle"
+          label={`Show ${String(n)} small & dust positions (${humanUsd(summary.liquidatable.sums.belowLine, summary.decimals)})`}
+        />
+      )}
+    </>
+  );
+}
