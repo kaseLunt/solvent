@@ -72,15 +72,20 @@ export function useAddressLookup(addr: string): AddressReading {
   const [lookupResult, setLookupResult] = useState<Keyed<AddressLookup>>(null);
   const [evidence, setEvidence] = useState<EvidenceManifest | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  /** The load currently in flight, if any. A resume repair rides it rather than aborting it. */
+  const inFlightRef = useRef<Promise<boolean> | null>(null);
 
   const loadLookup = useCallback(
     (options?: { keepOnFailure?: boolean }): Promise<boolean> => {
       if (!valid) return Promise.resolve(false);
       const keepOnFailure = options?.keepOnFailure ?? false;
+      // A repair never supersedes a load already under way: that load's own outcome (true when it lands,
+      // false on its own failure) is the repair's answer. A foreground call still aborts and starts fresh.
+      if (keepOnFailure && inFlightRef.current !== null) return inFlightRef.current;
       controllerRef.current?.abort();
       const controller = new AbortController();
       controllerRef.current = controller;
-      return getSolventClient()
+      const request: Promise<boolean> = getSolventClient()
         .address(addr, controller.signal)
         .then(
           (value) => {
@@ -99,6 +104,12 @@ export function useAddressLookup(addr: string): AddressReading {
             return false;
           },
         );
+      inFlightRef.current = request;
+      void request.finally(() => {
+        // Only the request still on the ref clears it: a superseded request must not erase its successor.
+        if (inFlightRef.current === request) inFlightRef.current = null;
+      });
+      return request;
     },
     [addr, valid],
   );
@@ -121,7 +132,11 @@ export function useAddressLookup(addr: string): AddressReading {
   const params = useKeyedFetch(addr, hasCash, epoch, fetchCashParams);
 
   // Book-level, not address-keyed: the committed reconcile receipt behind the Trust card's last item.
+  // Not fetched on the invalid-address page. A failed fetch that was NOT aborted clears the manifest:
+  // a reload() whose receipt fetch fails must not leave the previous receipt standing as current —
+  // the Trust item reads "receipt unavailable" instead.
   useEffect(() => {
+    if (!valid) return;
     const controller = new AbortController();
     getSolventClient()
       .evidence(controller.signal)
@@ -130,13 +145,13 @@ export function useAddressLookup(addr: string): AddressReading {
           if (!controller.signal.aborted) setEvidence(manifest);
         },
         () => {
-          /* the Trust item reads "receipt unavailable" */
+          if (!controller.signal.aborted) setEvidence(null);
         },
       );
     return () => {
       controller.abort();
     };
-  }, [epoch]);
+  }, [epoch, valid]);
 
   const repair = useCallback(() => loadLookup({ keepOnFailure: true }), [loadLookup]);
   const age = useAnchoredAgeSeconds(
