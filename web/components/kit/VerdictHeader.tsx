@@ -3,7 +3,7 @@ import { IdentityChips, type IdentityChip } from "./IdentityChips";
 import styles from "./kit.module.css";
 
 export interface VerdictHeaderProps {
-  kicker: string;
+  kicker: ReactNode;
   /** The money phrase that carries the verdict color. */
   emphasis: string;
   rest?: string;
@@ -31,7 +31,7 @@ export function VerdictHeader({ kicker, emphasis, rest = "", tone, dek, chips, a
       <p className={styles.kick}>{kicker}</p>
       <h1 className={styles.h1} data-testid={sub("headline")}>
         <b className={EM_CLASS[tone]}>{emphasis}</b>
-        {rest}
+        {rest === "" ? null : /^\s/.test(rest) ? rest : ` ${rest}`}
       </h1>
       <p className={styles.dek} data-testid={sub("dek")}>
         {dek}

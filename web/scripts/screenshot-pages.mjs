@@ -3,7 +3,7 @@
 // with the approved mockups before a page lands.
 //
 // Usage (from web/, with a production server on :3111):
-//   node scripts/screenshot-pages.mjs <outDir> [overview|book ...]
+//   node scripts/screenshot-pages.mjs <outDir> [overview|book|inspector ...]
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -15,12 +15,11 @@ const { chromium } = require("playwright");
 const [outArg, ...pageArgs] = process.argv.slice(2);
 const out = outArg ?? "screenshots";
 mkdirSync(out, { recursive: true });
-const PAGES = { overview: "/", book: "/book" };
-const wanted = pageArgs.length === 0 ? Object.keys(PAGES) : pageArgs;
-
 const fx = (name) => import(pathToFileURL(path.resolve("tests/fixtures", name)).href);
 const demo = await fx("demo/index.ts");
 const proof = await fx("proof.ts");
+const PAGES = { overview: "/", book: "/book", inspector: `/inspector/${demo.DEMO_NEAR_ADDR}` };
+const wanted = pageArgs.length === 0 ? Object.keys(PAGES) : pageArgs;
 const CORS = { "access-control-allow-origin": "*" };
 const json = (route, body) =>
   route.fulfill({ status: 200, headers: CORS, contentType: "application/json", body: JSON.stringify(body) });
@@ -51,6 +50,12 @@ for (const theme of ["dark", "light"]) {
           : demo.DEMO_POSITIONS_DM_PAGE_2,
       ),
     );
+    // The Inspector's routes: `*` never crosses `/`, so /history and /stress are not swallowed by the address route.
+    await page.route("**/v1/params*", (r) => json(r, demo.DEMO_PARAMS_DM));
+    await page.route("**/v1/events*", (r) => json(r, demo.DEMO_EVENTS_NEAR));
+    await page.route("**/v1/address/*/history*", (r) => json(r, demo.DEMO_HISTORY_NEAR));
+    await page.route("**/v1/address/*/stress*", (r) => json(r, demo.DEMO_STRESS_NEAR));
+    await page.route("**/v1/address/*", (r) => json(r, demo.DEMO_ADDRESS_NEAR));
     await page.goto(`http://localhost:3111${url}`, { waitUntil: "networkidle" });
     await page.waitForTimeout(600);
     await page.screenshot({ path: path.join(out, `${name}-${theme}-fold.png`) });

@@ -146,5 +146,6 @@
 .checkWarn { color: var(--warn-text); }
 .checkRefused { color: var(--crit-text); }
 .checkDim { color: var(--ink-3); }
-.checkSmall { color: var(--ink-3); margin-left: auto; white-space: nowrap; font-size: var(--type-small); }
-@media (max-width: 720px) { .searchIn { min-width: 0; flex-basis: 100%; } .checkSmall { white-space: normal; text-align: right; } }
+.checkLabel { flex: 1 1 auto; min-width: 0; }
+.checkSmall { color: var(--ink-3); margin-left: auto; flex: 0 1 auto; max-width: 58%; text-align: right; font-size: var(--type-small); }
+@media (max-width: 720px) { .searchIn { min-width: 0; flex-basis: 100%; } }

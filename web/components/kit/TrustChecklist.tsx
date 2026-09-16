@@ -29,7 +29,7 @@ export function TrustChecklist({ items, testId }: { items: readonly TrustCheckIt
             {GLYPH[item.state]}
           </span>
           <span className={styles.srOnly}>{STATE_WORD[item.state]}: </span>
-          <span>{item.label}</span>
+          <span className={styles.checkLabel}>{item.label}</span>
           <small className={styles.checkSmall}>{item.detail}</small>
         </li>
       ))}
