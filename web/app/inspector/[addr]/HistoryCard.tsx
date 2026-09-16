@@ -1,7 +1,7 @@
 import { ChartCard, SectionHead } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import type { AddressReading } from "@/lib/address-lookup";
-import { buildHistorySeries } from "@/lib/history-series";
+import { buildHistorySeries, engineNeverPresent, knownBatchAxis } from "@/lib/history-series";
 import { LEGACY } from "@/lib/inspector-position";
 import type { InspectorView } from "@/lib/inspector-view";
 import { NEAR_LINE_TENTHS, type RoomPointKind } from "@/lib/room-history";
@@ -26,9 +26,13 @@ export function HistoryCard({ view, reading }: { view: InspectorView; reading: A
     view.historyBatchId !== null && view.batchId !== null && view.historyBatchId !== view.batchId
       ? ` · history as of batch ${n(view.historyBatchId)}, position as of batch ${n(view.batchId)}`
       : "";
-  const legacyEngine =
-    history.phase === "ready" && history.value.outcome === "found" ? (history.value.response.engines.find((e) => e.engine === LEGACY) ?? null) : null;
-  const legacySeries = legacyEngine === null ? null : buildHistorySeries(legacyEngine);
+  // The API lists every engine in the window even with zero points: a legacy chart exists only when the
+  // engine was ever present, and it shares the response's whole batch axis so its gaps are the Cash chart's gaps.
+  const found = history.phase === "ready" && history.value.outcome === "found" ? history.value.response : null;
+  const legacyEngine = found?.engines.find((e) => e.engine === LEGACY) ?? null;
+  const legacySeries = found === null || legacyEngine === null || engineNeverPresent(legacyEngine) ? null : buildHistorySeries(legacyEngine, knownBatchAxis(found));
+  // A newest-value label belongs to a plotted newest point; when the newest batch is a gap, no label is printed at an older dot.
+  const newestLabel = room !== null && room.newest !== null && (room.newest.kind === "computed" || room.newest.kind === "zero-cap") ? room.newest.display : undefined;
   const newestKind = streak?.newestKind ?? null;
   const finding =
     history.phase === "loading"
@@ -62,7 +66,7 @@ export function HistoryCard({ view, reading }: { view: InspectorView; reading: A
               height={140}
               label="room as a percent of the borrow cap, per batch; the dashed line is the 10% near-cap line"
               xLabels={{ start: `batch ${n(room.points[0]?.batchId ?? 0)}`, end: `batch ${n(room.newest?.batchId ?? 0)}` }}
-              newestLabel={room.newest?.display}
+              newestLabel={newestLabel}
             />
           )}
         </ChartCard>

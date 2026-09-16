@@ -20,6 +20,7 @@ type Props = Omit<SparklineProps, "width"> & {
  * parent that mounted earlier would keep the fallback width forever.
  */
 export function MeasuredSparkline({ min, max, fallback, className, testId, ...sparkline }: Props) {
+  // `width` is state the hook sets from a ResizeObserver; no ref `.current` is read during render.
   const { ref, width } = useMeasuredWidth<HTMLDivElement>({ min, max, fallback });
   return (
     <div ref={ref} className={`${styles.frame} ${className ?? ""}`} data-testid={testId}>

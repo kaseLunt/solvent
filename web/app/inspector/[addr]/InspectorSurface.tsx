@@ -30,7 +30,8 @@ export function InspectorSurface({ addr }: { addr: string }) {
   const meta = useMetaConstants();
   const view = deriveInspectorView(reading, meta.constants);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const found = reading.lookup.phase === "ready" && reading.lookup.value.outcome === "found";
+  // The drawer explains the Cash calculation: it exists only when there is a Cash position to explain.
+  const explainable = view.cashWire !== null;
   // The wire's own decimals per engine, never hardcoded: amounts in the activity table scale by them.
   const scale: ActivityScale = {
     valueDecimalsByEngine: {
@@ -71,7 +72,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
         dek={view.headline.dek}
         chips={view.chips}
         actions={
-          found ? (
+          explainable ? (
             <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={() => setDrawerOpen(true)} data-testid="inspector-drawer">
               Inputs · Calculation · Provenance
             </button>
@@ -86,8 +87,10 @@ export function InspectorSurface({ addr }: { addr: string }) {
             <TrustCard view={view} />
           </div>
           <HistoryCard view={view} reading={reading} />
-          {/* key={addr}: a fresh mount can never hold another address's rows (the surface is keyed too — a double lock). */}
-          <ActivityTable key={addr} addr={addr} valid={reading.valid} scale={scale} />
+          {/* key={addr}: a fresh mount can never hold another address's rows (the surface is keyed too — a double lock).
+              Mounted once the lookup has answered, so amounts are scaled by the wire's decimals from the first render
+              instead of flipping from "raw units" when the position lands. */}
+          {reading.lookup.phase !== "loading" && <ActivityTable key={addr} addr={addr} valid={reading.valid} scale={scale} />}
           {view.legacy !== null && <LegacyCard position={view.legacy} />}
           {view.cash !== null && <StressTable reading={reading} view={view} />}
           <InspectorDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} view={view} reading={reading} />

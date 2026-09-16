@@ -1,7 +1,9 @@
 import { ChartCard, KitTable, StatusPill, type KitRow } from "@/components/kit";
-import { humanUsdFull } from "@/lib/human-price";
+import { humanAge } from "@/lib/freshness";
+import { oldestPriceAge } from "@/lib/inspector-position";
 import type { InspectorView } from "@/lib/inspector-view";
 import styles from "../inspector.module.css";
+import { moneyFor } from "./money";
 
 const COLUMNS = [
   { key: "asset", header: "Asset" },
@@ -15,9 +17,8 @@ const COLUMNS = [
 /** What backs this debt: one row per collateral asset, the cap total row, and the boundary sentence (spec §5.3). */
 export function BackingTable({ view, onPrices }: { view: InspectorView; onPrices: () => void }) {
   const { table, cash, decimals, boundary } = view;
-  const money = (v: bigint | null | undefined): string => (v == null ? "—" : humanUsdFull(v, decimals));
-  const ages = view.cashWire?.price_inputs.map((i) => i.age_seconds).filter((a): a is number => a !== null) ?? [];
-  const oldest = ages.length === 0 ? null : Math.max(...ages);
+  const money = moneyFor(decimals);
+  const oldest = view.cashWire === null ? null : oldestPriceAge(view.cashWire.price_inputs);
   const rows: KitRow[] =
     table === null
       ? []
@@ -77,7 +78,7 @@ export function BackingTable({ view, onPrices }: { view: InspectorView; onPrices
           ? view.state === "loading"
             ? "Loading…"
             : "Not computed."
-          : `Cap = Σ (collateral value × that asset's LTV)${oldest === null ? "" : ` · prices as of ${String(oldest)}s ago`}`
+          : `Cap = Σ (collateral value × that asset's LTV)${oldest === null ? "" : ` · prices as of ${humanAge(oldest)} ago`}`
       }
     >
       {table === null ? (

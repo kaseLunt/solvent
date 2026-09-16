@@ -4,20 +4,35 @@ import { NEAR_LINE_TENTHS } from "@/lib/room-history";
 import styles from "../inspector.module.css";
 import { MeasuredSparkline } from "./MeasuredSparkline";
 
+/** What the Trust card says when there is no Cash position to vouch for — in the state's own words. */
+function emptyWords(state: InspectorView["state"]): string {
+  switch (state) {
+    case "loading":
+      return "Loading…";
+    case "no-position":
+      return "No Cash position in this batch — nothing to vouch for.";
+    case "legacy-only":
+      return "No Cash position in this batch; the legacy position is judged below.";
+    case "cannot-compute":
+      return "The Cash book is withheld this batch — nothing can be vouched for.";
+    case "unavailable":
+      return "The lookup could not be completed.";
+    default:
+      return "Not computed.";
+  }
+}
+
 /** Trust: the five-item checklist and the room-over-batches mini sparkline with the 10 % line (spec §5.3). */
 export function TrustCard({ view }: { view: InspectorView }) {
   const { trust, room } = view;
   const nearLine = Number(NEAR_LINE_TENTHS) / 10;
   const plotted = room?.values.filter((v): v is number => v !== null) ?? [];
+  const batches = room?.points.length ?? 0;
   return (
     <ChartCard title="Trust" testId="inspector-trust-card" link={{ href: "/proof", label: "Evidence →" }}>
-      {trust === null ? (
-        <p className={styles.note}>{view.state === "loading" ? "Loading…" : "Not computed."}</p>
-      ) : (
-        <TrustChecklist items={trust} testId="inspector-trust" />
-      )}
+      {trust === null ? <p className={styles.note}>{emptyWords(view.state)}</p> : <TrustChecklist items={trust} testId="inspector-trust" />}
       <p className={`${styles.note} ${styles.sparkHead}`}>
-        {room === null ? "History · no Cash history for this account" : `History · room % over the last ${String(room.points.length)} batches`}
+        {room === null ? "History · no Cash history for this account" : `History · room % over the last ${String(batches)} batch${batches === 1 ? "" : "es"}`}
       </p>
       {room !== null && (
         <div className={styles.spark}>

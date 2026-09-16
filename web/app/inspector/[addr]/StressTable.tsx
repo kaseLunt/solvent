@@ -5,6 +5,7 @@ import { humanUsdFull } from "@/lib/human-price";
 import type { InspectorView } from "@/lib/inspector-view";
 import { isWireScale } from "@/lib/wireGuard";
 import styles from "../inspector.module.css";
+import { moneyFor } from "./money";
 
 const COLUMNS = [
   { key: "scenario", header: "Scenario" },
@@ -12,7 +13,8 @@ const COLUMNS = [
   { key: "after", header: "Room after", align: "right" as const },
   { key: "flips", header: "Becomes liquidatable?", align: "right" as const },
 ];
-const days = (seconds: number): string => `${String(Math.round(seconds / 86_400))}d`;
+/** A horizon in days, or hours under a day — never "0d". */
+const days = (seconds: number): string => (seconds < 86_400 ? `${String(Math.max(1, Math.round(seconds / 3_600)))}h` : `${String(Math.round(seconds / 86_400))}d`);
 
 function realization(r: StressRow): string | null {
   const m = r.marketRealization;
@@ -25,7 +27,8 @@ function realization(r: StressRow): string | null {
 /** The committed scenarios applied to this account — the wire's own before/after sides; a rate step is a delta-only projection. */
 export function StressTable({ reading, view }: { reading: AddressReading; view: InspectorView }) {
   const { decimals } = view;
-  const room = (side: StressSide | null): string => (side === null || side.room === null ? "—" : humanUsdFull(side.room, decimals));
+  const money = moneyFor(decimals);
+  const room = (side: StressSide | null): string => money(side?.room);
   const stress = reading.stress;
   const result = stress.phase === "ready" ? stressReading(stress.value, reading.address) : null;
   const rows: KitRow[] =
@@ -49,7 +52,7 @@ export function StressTable({ reading, view }: { reading: AddressReading; view: 
               before: room(r.before),
               after:
                 r.projection !== null ? (
-                  r.projection.map((h) => `${days(h.seconds)}: ${h.extraInterest === null ? "—" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`).join(" · ")
+                  r.projection.map((h) => `${days(h.seconds)}: ${h.extraInterest === null ? "—" : `+${money(h.extraInterest)}`} interest`).join(" · ")
                 ) : extra === null ? (
                   room(r.after)
                 ) : (

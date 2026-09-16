@@ -1,25 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { formatUnits } from "@solvent/client";
 import { Drawer } from "@/components/Drawer";
 import type { AddressReading } from "@/lib/address-lookup";
-import { groupDecimalString } from "@/lib/book-format";
 import { formatBlock, renderBlockTime } from "@/lib/format";
-import { humanPrice, humanUsdFull } from "@/lib/human-price";
-import { sourceDisplay, symbolFor } from "@/lib/inspector-position";
+import { isComputedCash, sourceDisplay, symbolFor } from "@/lib/inspector-position";
 import type { InspectorView } from "@/lib/inspector-view";
 import { plainCause } from "@/lib/refusal-phrasebook";
-import { isWireDecimal } from "@/lib/wireGuard";
 import styles from "../inspector.module.css";
-
-const exact = (v: string | null, decimals: number): string => (v !== null && isWireDecimal(v) ? groupDecimalString(formatUnits(v, decimals, { trim: false })) : "—");
+import { moneyFor, wireExact, wirePrice } from "./money";
 
 /** Inputs · Calculation · Provenance — the formula with this account's numbers substituted, every input's source and age, the exact wire values. */
 export function InspectorDrawer({ open, onClose, view, reading }: { open: boolean; onClose: () => void; view: InspectorView; reading: AddressReading }) {
   const p = view.cashWire;
   const cash = view.cash;
-  const money = (v: bigint | null): string => (v === null ? "—" : humanUsdFull(v, view.decimals));
+  const money = moneyFor(view.decimals);
+  const exact = (v: string | null, decimals: number): string => wireExact(v, decimals);
   const batch = reading.lookup.phase === "ready" ? reading.lookup.value.response.batch : null;
   const servedAt = reading.lookup.phase === "ready" ? reading.lookup.value.response.served_at : null;
   return (
@@ -36,10 +32,16 @@ export function InspectorDrawer({ open, onClose, view, reading }: { open: boolea
             <p>
               Room = cap − debt = {money(cash.cap)} − {money(cash.debt)} = <b>{money(cash.room)}</b> ({cash.roomPercent ?? "—"} of cap)
             </p>
-            <p>
-              Verdict: debt {cash.debt !== null && cash.cap !== null && cash.debt > cash.cap ? ">" : "≤"} cap → <b>{cash.verdict}</b> (the engine’s strict boolean,{" "}
-              <code>debt &gt; maxBorrowLT</code>; equality is healthy)
-            </p>
+            {isComputedCash(cash) ? (
+              <p>
+                Verdict: debt {cash.debt > cash.cap ? ">" : "≤"} cap → <b>{cash.verdict}</b> (the engine’s strict boolean, <code>debt &gt; maxBorrowLT</code>; equality is
+                healthy)
+              </p>
+            ) : (
+              <p>
+                Verdict: none served — the engine did not compute this row (<code>debt &gt; maxBorrowLT</code> is the rule it would apply).
+              </p>
+            )}
             {cash.refusal !== null && (
               <p>
                 Refused: {plainCause(cash.refusal.code, cash.refusal.detail ?? undefined)} · <code>{cash.refusal.code}</code>
@@ -50,7 +52,7 @@ export function InspectorDrawer({ open, onClose, view, reading }: { open: boolea
               {p.price_inputs.map((i) => (
                 <li key={i.asset}>
                   {symbolFor(p, i.asset)} · {sourceDisplay(i.source)} (<code>{i.source}</code>) · {i.provenance} ·{" "}
-                  {i.value !== null && i.decimals !== null && isWireDecimal(i.value) ? humanPrice(BigInt(i.value), i.decimals) : "—"} ·{" "}
+                  {wirePrice(i.value, i.decimals)} ·{" "}
                   {i.age_seconds === null ? "age unknown" : `${String(i.age_seconds)}s`} · {i.verdict}
                   {i.block_number === null ? "" : ` · block ${formatBlock(i.block_number)}`}
                 </li>

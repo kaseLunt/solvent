@@ -2,11 +2,8 @@ import type { RefinedPosition } from "@solvent/client";
 import { KpiTile, StatusPill } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { displayHf } from "@/lib/history-series";
-import { humanUsdFull } from "@/lib/human-price";
-import { isWireDecimal } from "@/lib/wireGuard";
 import styles from "../inspector.module.css";
-
-const money = (v: string | null, decimals: number): string => (v !== null && isWireDecimal(v) ? humanUsdFull(BigInt(v), decimals) : "—");
+import { wireMoney } from "./money";
 
 /** Only when the address holds a legacy Aave v3 position. HF-based, labeled legacy, never beside a Cash sum. */
 export function LegacyCard({ position }: { position: RefinedPosition }) {
@@ -20,8 +17,8 @@ export function LegacyCard({ position }: { position: RefinedPosition }) {
       <summary>Legacy · Aave v3 market position</summary>
       <div className={`${kit.kpis} ${kit.kpis4} ${styles.legacyBody}`}>
         <KpiTile label="Health factor" value={hf ?? "—"} sub="liquidatable strictly below 1.0" tone={verdict === "liquidatable" ? "crit" : verdict === "unknowable" ? "refused" : "neutral"} />
-        <KpiTile label="Collateral" value={money(position.total_collateral_base, position.value_decimals)} sub="legacy market · own unit" />
-        <KpiTile label="Debt" value={money(position.total_debt_base, position.value_decimals)} sub="never added to Cash" />
+        <KpiTile label="Collateral" value={wireMoney(position.total_collateral_base, position.value_decimals)} sub="legacy market · own unit" />
+        <KpiTile label="Debt" value={wireMoney(position.total_debt_base, position.value_decimals)} sub="never added to Cash" />
         <KpiTile label="Status" value={status} sub={stale ? "stale price input" : "own health factor"} tone={tone} />
       </div>
       {stale && (
