@@ -600,7 +600,7 @@ export function isComputedCash(p: CashPosition): p is ComputedCash;
 export interface CollateralLeg { asset; symbol; amount: string|null; price: string|null; priceVerdict: PriceInput["verdict"]|null; value: bigint|null; contribution: bigint|null; ltv: string|null; counted: RefinedLeg["collateral_use"] }
 export interface CollateralTable { legs: CollateralLeg[]; sumValue: bigint|null; sumContribution: bigint|null; capAgrees: boolean|null; collateralAgrees: boolean|null }
 export function collateralTable(position: RefinedPosition, cash: CashPosition): CollateralTable;
-export type Boundary = {kind:"absent"} | {kind:"breached"} | {kind:"no-price-path"; sentence; title} | {kind:"unreadable"; fields: string[]} | {kind:"boundary"; sentence; title; diagnostic: boolean; certified: boolean};
+export type Boundary = {kind:"absent"} | {kind:"breached"} | {kind:"no-price-path"; sentence; title} | {kind:"unreadable"; fields: string[]} | {kind:"contradictory"; detail: string} | {kind:"boundary"; sentence; title; diagnostic: boolean; certified: boolean}; // contradictory added at review: a rise or already_breached under a not-liquidatable verdict
 export function boundaryOf(position: RefinedPosition, cash: CashPosition): Boundary;
 export function sourceDisplay(source: string): string;
 export function symbolFor(position: RefinedPosition, asset: string): string;
@@ -1355,10 +1355,10 @@ git commit -m "feat(web): the Inspector's Trust checklist - five items with stat
 - Produces:
 
 ```ts
-export type RoomPointKind = "computed" | "refused" | "withheld" | "no-row" | "unpublished";
+export type RoomPointKind = "computed" | "refused" | "withheld" | "no-row" | "unpublished" | "zero-cap"; // zero-cap: a published zero cap with debt — past the cap, no percent geometry (review ruling)
 export interface RoomPoint { readonly batchId: number; readonly computedAt: string | null; readonly roomTenths: bigint | null; readonly value: number | null; readonly kind: RoomPointKind; readonly title: string; readonly display: string }
 export interface RoomSeries { readonly points: RoomPoint[]; readonly values: (number | null)[]; readonly titles: string[]; readonly newest: RoomPoint | null; readonly computedCount: number }
-export interface Streak { readonly batches: number; readonly spanSeconds: number | null }
+export interface Streak { readonly batches: number; readonly spanSeconds: number | null; readonly newestKind: RoomPointKind | null } // newestKind added at review: a consumer can say the newest batch is withheld
 export const NEAR_LINE_TENTHS: bigint; // 10 % as tenths = 100n
 export function roomSeries(engine: AddressHistoryEngine, knownBatchIds?: readonly number[]): RoomSeries;
 export function nearCapStreak(series: RoomSeries): Streak;
@@ -2656,7 +2656,7 @@ test("near cap: state, kicker, headline, chips, table, boundary, trust and the r
   expect(view.boundary?.kind).toBe("boundary");
   expect(view.trust?.map((t) => t.id)).toEqual(["computed", "prices", "sweep", "provenance", "reconcile"]);
   expect(view.room?.computedCount).toBe(3);
-  expect(view.streak).toEqual({ batches: 3, spanSeconds: 120 });
+  expect(view.streak).toEqual({ batches: 3, spanSeconds: 120, newestKind: "computed" });
   expect(view.historyBatchId).toBe(1);
   expect(view.refusedTiles).toBe(false);
   expect(view.legacy).toBeNull();
@@ -3061,7 +3061,7 @@ test("the history's newest point IS the position; 14 batches sit under the 10 % 
   expect(engine.withheld_batch_ids).toEqual([DEMO_BATCH_ID - 50, DEMO_BATCH_ID - 49]);
   const series = roomSeries(engine, engine.withheld_batch_ids);
   expect(series.computedCount).toBe(97);
-  expect(nearCapStreak(series)).toEqual({ batches: 14, spanSeconds: 390 });
+  expect(nearCapStreak(series)).toEqual({ batches: 14, spanSeconds: 390, newestKind: "computed" });
 });
 
 test("stress: ETH −30 % and ETHFI −50 % flip the account; the rate projection does not", () => {
@@ -3849,6 +3849,7 @@ export function BackingTable({ view, onPrices }: { view: InspectorView; onPrices
               {boundary.kind === "no-price-path" && boundary.sentence}
               {boundary.kind === "absent" && "No boundary price was published for this position."}
               {boundary.kind === "unreadable" && `Boundary published but unreadable (${boundary.fields.join(", ")}) — not read.`}
+              {boundary.kind === "contradictory" && `Boundary withheld: ${boundary.detail}.`}
             </p>
           )}
         </>
