@@ -1,0 +1,51 @@
+/* Overview-only layout (mockup docs/specs/2026-09-15-ui-mockups/front-door.html, option A).
+ * Everything reusable is the kit; only the hero, the live strip, the entry
+ * cards and the pipeline strip live here. */
+
+.hero { padding: 56px 28px 40px; }
+.h1 { font-size: var(--type-hero); font-weight: var(--w-semibold); letter-spacing: -0.025em; line-height: 1.1; max-width: 900px; margin: 0; color: var(--ink); }
+.h1 span { color: var(--ink-2); font-weight: var(--w-medium); }
+.dek { color: var(--ink-2); font-size: var(--type-dek); max-width: 760px; margin: 18px 0 0; line-height: 1.5; }
+.dek b { color: var(--ink); font-weight: var(--w-medium); }
+.cta { display: flex; gap: 10px; margin-top: 26px; align-items: center; flex-wrap: wrap; }
+.ctaInput { width: 380px; max-width: 100%; height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); padding: 0 14px; font-family: var(--mono); font-size: var(--type-mono); }
+.ctaInput::placeholder { color: var(--ink-3); font-family: var(--sans); }
+
+.live { margin-top: 40px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 20px 22px; display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center; }
+.liveKick { font-size: var(--type-small); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); font-weight: var(--w-semibold); display: flex; align-items: center; gap: 8px; margin: 0; }
+.liveH { font-size: var(--type-kpi); font-weight: var(--w-semibold); letter-spacing: -0.02em; margin: 8px 0 0; color: var(--ink); line-height: 1.25; }
+.liveS { color: var(--ink-2); font-size: var(--type-body); margin: 6px 0 0; }
+.liveStats { display: grid; grid-template-columns: repeat(3, auto); gap: 28px; }
+.liveStats div { text-align: right; }
+.liveStatL { color: var(--ink-2); font-size: var(--type-small); }
+.liveStatV { font-size: var(--type-h2); font-weight: var(--w-semibold); letter-spacing: -0.02em; margin-top: 2px; font-variant-numeric: tabular-nums; color: var(--ink); }
+
+.entries { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 16px; }
+.entry { border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; background: var(--panel-2); color: inherit; display: block; }
+.entry:hover { border-color: var(--accent); }
+.entryQ { font-size: var(--type-label); color: var(--ink-2); }
+.entryN { font-size: var(--type-h2); font-weight: var(--w-semibold); margin-top: 4px; color: var(--ink); }
+.entryD { font-size: var(--type-body); color: var(--ink-2); margin-top: 8px; line-height: 1.45; }
+.entryS { font-size: var(--type-label); margin-top: 12px; color: var(--accent-text); }
+
+.sec { margin-top: 44px; display: flex; align-items: baseline; justify-content: space-between; }
+.sec h2 { font-size: var(--type-h2); font-weight: var(--w-semibold); margin: 0; color: var(--ink); }
+.sec a { font-size: var(--type-label); color: var(--accent-text); }
+.pipe { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.step { padding: 18px 20px; border-right: 1px solid var(--line); background: var(--panel-2); min-width: 0; }
+.step:last-child { border-right: 0; }
+.stepNum { font-size: var(--type-floor); color: var(--accent-text); font-weight: var(--w-semibold); letter-spacing: 0.08em; }
+.stepN { font-size: var(--type-card); font-weight: var(--w-semibold); margin-top: 6px; color: var(--ink); }
+.stepD { font-size: var(--type-label); color: var(--ink-2); margin-top: 6px; line-height: 1.45; min-height: 58px; }
+.stepV { font-size: var(--type-label); margin-top: 10px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.stepV b { font-weight: var(--w-semibold); }
+.foot { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; color: var(--ink-3); font-size: var(--type-label); flex-wrap: wrap; }
+.foot b { color: var(--ink-2); font-weight: var(--w-medium); }
+
+@media (max-width: 900px) {
+  .hero { padding: 32px 16px; }
+  .live { grid-template-columns: 1fr; }
+  .liveStats div { text-align: left; }
+  .entries, .pipe { grid-template-columns: 1fr; }
+  .step { border-right: 0; border-bottom: 1px solid var(--line); }
+}

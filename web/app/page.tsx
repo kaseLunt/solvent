@@ -1,6 +1,9 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
+import { OverviewSurface } from "./overview/OverviewSurface";
 
-/** The Book is the front door. */
+export const metadata: Metadata = { title: "Overview" };
+
+/** The front door (spec 2026-09-15 §5.1). */
 export default function RootPage() {
-  redirect("/book");
+  return <OverviewSurface />;
 }
