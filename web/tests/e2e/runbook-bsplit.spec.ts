@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { truncateAddress } from "../../lib/format";
 import { ADDRESS_FOUND, EVENTS, HISTORY, PARAMS } from "../fixtures/inspector";
+import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 
 const API = "http://localhost:8080";
 
@@ -357,11 +358,20 @@ async function runScenarioNamingNobody(page: Page) {
  * account, so the surface never has to reconcile two different addresses.
  */
 async function mockInspectorFor(page: Page, address: string) {
+  // The committed DM stress body (tests/fixtures/generate.mjs), re-identified
+  // like the others so the inline stress card answers for the mover.
+  const stress = JSON.parse(fixture("stress-dm.json")) as { address: string };
   await page.route("**/v1/stream*", (route) => route.abort());
+  await page.route("**/v1/evidence*", (route) =>
+    route.fulfill({ json: EVIDENCE_MANIFEST, headers: CORS }),
+  );
   await page.route("**/v1/params*", (route) => route.fulfill({ json: PARAMS, headers: CORS }));
   await page.route("**/v1/events*", (route) => route.fulfill({ json: EVENTS, headers: CORS }));
   await page.route("**/v1/address/*/history*", (route) =>
     route.fulfill({ json: { ...HISTORY, address }, headers: CORS }),
+  );
+  await page.route("**/v1/address/*/stress*", (route) =>
+    route.fulfill({ json: { ...stress, address }, headers: CORS }),
   );
   await page.route("**/v1/address/*", (route) =>
     route.fulfill({ json: { ...ADDRESS_FOUND, address }, headers: CORS }),
@@ -383,21 +393,17 @@ test("CLICKING a mover opens the Inspector's DYNAMIC route with that account on 
 
   // The DYNAMIC route, not the entry form.
   await expect(page).toHaveURL(new RegExp(`/inspector/${DM_MOVER_ACCOUNT}$`));
-  // The surface mounted: the entry form is GONE — that form is what the old
-  // `?address=` href actually landed on.
-  await expect(page.getByLabel("address to inspect")).toHaveCount(0);
-  // The account the run measured is the account on screen. `AddressMono`
-  // truncates for display and carries the full address in its title, so both
-  // are checked — the visible identity and the exact one.
-  const heading = page.getByRole("heading", { level: 1 });
-  await expect(heading).toContainText(truncateAddress(DM_MOVER_ACCOUNT));
-  await expect(heading.locator(`[title="${DM_MOVER_ACCOUNT}"]`)).toBeVisible();
-  // And it is the POSITION surface — the account the run measured, answered.
-  // r74: found-specific, not merely rendered — the outcome line exists on
-  // every ready arm.
-  await expect(
-    page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
-  ).toBeVisible();
+  // The deep link CARRIES the address (spec 2026-09-15 §7): it is in the
+  // toolbar field, in the verdict's identity kicker, and the surface rendered
+  // a verdict for it — the account the run measured, answered.
+  await expect(page.getByTestId("inspector-address-input")).toHaveValue(DM_MOVER_ACCOUNT);
+  await expect(page.getByTestId("inspector-verdict")).toContainText(
+    truncateAddress(DM_MOVER_ACCOUNT),
+  );
+  await expect(page.getByTestId("inspector-surface")).toHaveAttribute(
+    "data-state",
+    /liquidatable|near|healthy/,
+  );
 });
 
 // ---------------------------------------------------------------------------

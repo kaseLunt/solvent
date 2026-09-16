@@ -6,9 +6,6 @@
 // What this file pins, item by item:
 //   (1)  `never` → `no price path`, with the wire reason in the hover, a
 //        RENDERED legend, and the column header's own scope title;
-//   (2)  the Inspector badge NEVER renders under a liquidatable verdict, and
-//        wears the axis-scoped vocabulary when it does render;
-//   (3)  batch freshness on the Book head, its stampline, and the Inspector;
 //   (4)  feed amounts are scaled by the engine's OWN value_decimals when the
 //        wire supplies them, and stay raw + tagged when nothing licenses a
 //        scale;
@@ -19,16 +16,18 @@
 //   (7)  numeric column HEADERS are right-aligned over their cells;
 //   (8)  section order: map above table, positions above histogram, census
 //        above waterfall;
-//   (9)  the Book dek is COMPUTED from /v1/book;
-//   (10) the adjudicated intros render, and the endpoint lines are demoted;
-//   (11) the HF-history vocabulary separates plots from witnessed batches;
-//   (12) the DM card renders its OWN totals and its params as percentages.
+//   (9)  the Book dek is COMPUTED from /v1/book.
+//
+// Items (2), (3), (10), (11) and (12) — the old Inspector's badge, freshness
+// line, landing intro, HF-history vocabulary and DM card — were RETIRED with
+// the Inspector rebuild (2026-09-15): the laws now live in the unit specs
+// inspector-position / inspector-view and in tests/e2e/inspector.spec.ts.
+// Ledger: .superpowers/sdd/progress-ui-overhaul.md, "Plan 2 (Inspector) — retirements".
 
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { FEED_UNITS, FEED_POSTURE_SNAPSHOT } from "../fixtures/feed";
-import { ADDRESS_FOUND, EVENTS, FOUND_ADDR, HISTORY, PARAMS } from "../fixtures/inspector";
 
 const CORS = { "access-control-allow-origin": "*" };
 const API = "http://localhost:8080";
@@ -45,190 +44,6 @@ function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
 async function muteStream(page: Page): Promise<void> {
   await page.route("**/v1/stream**", (route) => route.abort());
 }
-
-// ---------------------------------------------------------------------------
-// (2) + (3) + (11) + (12) — the Inspector.
-// ---------------------------------------------------------------------------
-
-async function mockInspector(page: Page, address: unknown, history: unknown = HISTORY) {
-  await page.route("**/v1/stream*", (route) => route.abort());
-  await page.route("**/v1/params*", (route) => route.fulfill({ json: PARAMS, headers: CORS }));
-  await page.route("**/v1/events*", (route) => route.fulfill({ json: EVENTS, headers: CORS }));
-  await page.route("**/v1/address/*/history*", (route) =>
-    route.fulfill({ json: history as object, headers: CORS }),
-  );
-  await page.route("**/v1/address/*", (route) =>
-    route.fulfill({ json: address as object, headers: CORS }),
-  );
-}
-
-test("(2) THE BLOCKER: never_liquidatable NEVER renders beside a liquidatable verdict", async ({
-  page,
-}) => {
-  // DERIVED /v1/address: the DM position (liquidatable: true) gains a
-  // liquidation_price whose `never_liquidatable` is TRUE — the axis-scoped
-  // combination the live wire really serves. The Aave position is untouched.
-  const body = structuredClone(ADDRESS_FOUND);
-  const dm = body.positions[1];
-  if (dm === undefined) throw new Error("fixture shape drifted");
-  expect(dm.liquidatable).toBe(true);
-  dm.liquidation_price = {
-    in_factor: false,
-    never_liquidatable: true,
-    reason: "position holds no counted collateral in the factor",
-    scale_factor_num: null,
-    scale_factor_den: null,
-    already_breached: false,
-    prices: [],
-    factor_assets: [],
-    held_assets: [],
-    boundary_is_healthy: true,
-    per_token_floor_omitted: false,
-    diagnostic: false,
-    axis: "eth_usd",
-    note: "n",
-  };
-
-  await mockInspector(page, body);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const card = page.getByTestId("position-debt_manager");
-  await expect(card).toBeVisible();
-  // The verdict row speaks; the slot renders NOTHING.
-  await expect(card.getByTestId("no-price-path-badge")).toHaveCount(0);
-  await expect(card).not.toContainText(/never liquidatable/i);
-});
-
-test("(2) a HEALTHY never_liquidatable renders the axis-scoped badge with the wire reason", async ({
-  page,
-}) => {
-  // DERIVED /v1/address: the AAVE position (healthy — hf wad above 1e18)
-  // gains never_liquidatable with the solver's outside-covers reason.
-  const body = structuredClone(ADDRESS_FOUND);
-  const aave = body.positions[0];
-  if (aave === undefined || aave.liquidation_price === null) {
-    throw new Error("fixture shape drifted");
-  }
-  aave.liquidation_price.never_liquidatable = true;
-  aave.liquidation_price.reason =
-    "collateral outside the factor already covers the debt at threshold";
-
-  await mockInspector(page, body);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const badge = page.getByTestId("position-aave_v3_etherfi").getByTestId("no-price-path-badge");
-  await expect(badge).toHaveText("no price path");
-  await expect(badge).toHaveAttribute(
-    "title",
-    "Collateral outside the shocked asset already covers the debt at the liquidation " +
-      "threshold, so no fall of the shocked asset alone reaches the boundary; interest or " +
-      "parameter changes still can. Wire: 'collateral outside the factor already covers the " +
-      "debt at threshold'.",
-  );
-});
-
-test("(12) the DM card renders its OWN totals — the em dashes were a rendering bug", async ({
-  page,
-}) => {
-  // DERIVED /v1/address: the DM position's `total_collateral_base` /
-  // `total_debt_base` are nulled to match what the LIVE wire serves for this
-  // engine (they are Aave's base-currency fields). Its own
-  // `collateral_value_usd` / `borrowings` are untouched.
-  const body = structuredClone(ADDRESS_FOUND);
-  const dm = body.positions[1];
-  if (dm === undefined) throw new Error("fixture shape drifted");
-  dm.total_collateral_base = null;
-  dm.total_debt_base = null;
-
-  await mockInspector(page, body);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const card = page.getByTestId("position-debt_manager");
-  // 4000000000 at 6 decimals, grouped — and 4620000000 likewise.
-  await expect(card).toContainText("4,000");
-  await expect(card).toContainText("4,620");
-});
-
-test("(12) DM risk params render as PERCENTAGES in the engine's own 100e18 scale", async ({
-  page,
-}) => {
-  // DERIVED /v1/address: the DM leg gains the live deployment's own params —
-  // LT 95e18 and bonus 3.5e18 in the Debt Manager's 100e18 percent scale.
-  const body = structuredClone(ADDRESS_FOUND);
-  const leg = body.positions[1]?.legs[0];
-  if (leg === undefined) throw new Error("fixture shape drifted");
-  leg.liq_threshold = "95000000000000000000";
-  leg.liq_bonus = "3500000000000000000";
-
-  await mockInspector(page, body);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const params = page.getByTestId("leg-params-debt_manager").first();
-  await expect(params).toContainText("LT 95% · bonus 3.5%");
-  await expect(params).toContainText("100e18 scale");
-  await expect(params).not.toContainText("95000000000000000000");
-
-  // Aave keeps ITS denomination — no cross-engine normalization.
-  const aaveParams = page.getByTestId("leg-params-aave_v3_etherfi").first();
-  await expect(aaveParams).toContainText("bps · 1e4 scale");
-});
-
-test("(3) the Inspector states its own lookup's batch age", async ({ page }) => {
-  // DERIVED /v1/address: the envelope batch is 2h 0m old (age_seconds 5 →
-  // 7200). No other byte changes.
-  const body = structuredClone(ADDRESS_FOUND);
-  body.batch.age_seconds = 7200;
-  await mockInspector(page, body);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-  await expect(page.getByTestId("inspector-freshness")).toHaveText(
-    "batch #1 · computed 2026-07-29T10:00:00Z · 2h 0m ago",
-  );
-});
-
-test("(11) the history head and meta line separate what PLOTS from what is witnessed", async ({
-  page,
-}) => {
-  await mockInspector(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  // Phase 0 fix 4: the SECTION head went neutral (it spans both engines'
-  // cards); the health-factor claim now lives on the Aave card's own head.
-  await expect(page.getByTestId("hf-history")).toContainText("Risk history across batches");
-  await expect(page.getByTestId("history-aave_v3_etherfi")).toContainText(
-    "Health factor across batches",
-  );
-  await expect(page.getByTestId("history-meta-aave_v3_etherfi")).toContainText(
-    "witnessed batches plot",
-  );
-  await expect(page.getByTestId("hf-history")).toContainText(
-    "gaps break the line. Hover any tick for that batch's named reason.",
-  );
-  // The full doctrine is one click away, not gone.
-  await expect(
-    page.getByRole("group").filter({ hasText: "how gaps and the 1.0 line work" }).first(),
-  ).toBeVisible();
-});
-
-test("(11) an engine the account has NEVER touched renders one line, not an empty chart", async ({
-  page,
-}) => {
-  // DERIVED /v1/address/{addr}/history: a second engine block with no points
-  // and no withheld batches — the account has never held a DM position.
-  const history = structuredClone(HISTORY) as typeof HISTORY & {
-    engines: { engine: string; points: unknown[]; withheld_batch_ids: number[] }[];
-  };
-  history.engines.push({ engine: "debt_manager", points: [], withheld_batch_ids: [] });
-
-  await mockInspector(page, ADDRESS_FOUND, history);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  await expect(page.getByTestId("history-absent-debt_manager")).toContainText(
-    "no debt_manager history: this address has never had a debt_manager position in the " +
-      "retained window.",
-  );
-  // No frame at all for that engine.
-  await expect(page.getByTestId("history-debt_manager")).toHaveCount(0);
-});
 
 // ---------------------------------------------------------------------------
 // (4) — feed amounts.
@@ -389,56 +204,4 @@ test("(6) Proof's H1 is the surface's own name", async ({ page }) => {
   await muteStream(page);
   await page.goto("/proof");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Proof");
-});
-
-test("(10) the adjudicated intros render, and the endpoint lines are demoted", async ({ page }) => {
-  await muteStream(page);
-
-  await page.goto("/inspector");
-  await expect(page.locator("main")).toContainText(
-    "Look up one address: its current position, the price inputs behind it, its distance to " +
-      "liquidation, and its history across batches. Anything the service cannot defend renders " +
-      "as a named refusal, never a guess.",
-  );
-  // The provenance line survives — BELOW the entry form, not above it.
-  const entryY = (await page.getByTestId("lab-address-input").or(page.locator("form")).first().boundingBox())?.y ?? 0;
-  const fedByY =
-    (await page.getByText("fed by", { exact: false }).first().boundingBox())?.y ?? 0;
-  expect(fedByY).toBeGreaterThan(entryY);
-
-  // W-SD-A CHANGED THIS SENTENCE: whole book comes FIRST in the intro because
-  // whole book is the default register the surface now opens in.
-  await page.goto("/lab");
-  await expect(page.locator("main")).toContainText(
-    "What would break this book: the committed stress scenarios, fixed and versioned shocks " +
-      "with no sliders, run against the whole book or against one address.",
-  );
-
-  await page.goto("/observatory");
-  await expect(page.locator("main")).toContainText(
-    "How each engine's book has moved, hour by hour, in a record that outlives batch " +
-      "retention. An hour with no complete batch renders as a hole, which is never smoothed " +
-      "over and never drawn as a zero; one engine per view, never combined onto one axis.",
-  );
-
-  await page.goto("/feed");
-  await expect(page.locator("main")).toContainText(
-    "Chain actions as recorded: borrows, repays, supplies, withdrawals, liquidations. The " +
-      "live strip shows the stream's posture now; the list below pages through durable " +
-      "history. The two never blend.",
-  );
-
-  await page.goto("/proof");
-  await expect(page.locator("main")).toContainText(
-    "What this deployment is, exactly: the pinned proof of its last reconcile and the identity " +
-      "of the batch it serves now. Nothing here is measured on request: every field is carried " +
-      "by the build or persisted by a batch.",
-  );
-
-  await page.goto("/developers");
-  await expect(page.locator("main")).toContainText(
-    "The committed API contract, rendered from its own examples: read-only JSON, no auth, " +
-      "every money value a decimal string. If a handler disagrees with this page, that is a " +
-      "failure, not documentation lag.",
-  );
 });

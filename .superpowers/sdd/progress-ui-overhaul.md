@@ -4382,3 +4382,17 @@ PostureRibbon/Ribbon/Stampline/StatCard (still imported by History/Activity/Veri
 styleguide), the theme-toggle register, the "All N accounts" explorer decision, Collateral-mix (needs
 per-asset collateral on the wire). Deferred minors are enumerated in
 .superpowers/sdd/2026-09-15-ui-kit-overview-book/progress.md.
+
+## 2026-09-15 · Plan 2 (Inspector) — retirements
+
+- tests/e2e/inspector.spec.ts: rewritten as the Inspector page-test contract (15 pins); the 19 old pins described the retired position card, HF-history card and proof fold.
+- tests/e2e/p0-fixes.spec.ts: 7 Inspector pins retired (p0-3, p0-4, p0-8 boundary arms, p0-9 f3) — the boundary arms are unit-pinned in tests/unit/inspector-position.spec.ts.
+- tests/e2e/p1b-fixes.spec.ts: 4 retired (p1b-4 ×2 → unit "unreadable" arms; p1b-6 fix 4 ×2 → contract "history: a differing vantage is stated").
+- tests/e2e/r1-fixes.spec.ts: 8 retired — never_liquidatable vs verdict, own totals, DM percent params, own age, history head, never-touched engine, landing intro; laws now in inspector-position / inspector-view unit specs and the contract.
+- tests/e2e/r3-fixes.spec.ts: 3 retired — liq-bonus premium rendering left the Inspector with the position card; params-format.spec.ts keeps the arithmetic. (Its three tests were the file's only pins, so the file is deleted.)
+- tests/e2e/r4-fixes.spec.ts, r6-fixes.spec.ts: 1 each retired → contract "resume: a failed background repair never replaces the rendered position". (Each held only that one pin, so both files are deleted.)
+- tests/e2e/state-matrix.spec.ts: 7 Inspector cells re-expressed against data-state and the pinned headlines.
+- tests/e2e/runbook-bsplit.spec.ts: the mover deep link re-expressed (field value, kicker, data-state).
+- tests/e2e/shell.spec.ts: /inspector H1 → "Is this address at risk?" (ruling R9).
+- tests/unit/inspector-lines.spec.ts: retired with lib/inspector-lines.ts; activityTakeaway and its pins moved verbatim to lib/activity-rows.ts / tests/unit/activity-rows.spec.ts.
+- Deleted: app/inspector/AddressEntry.tsx, app/inspector/[addr]/{InspectorPositionCard,InspectorHistory,InspectorActivity}.tsx, lib/inspector-lines.ts.

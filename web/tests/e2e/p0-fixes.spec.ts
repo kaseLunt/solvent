@@ -11,21 +11,19 @@
 //         engine says "no effective movement" — bad debt and shortfall can no
 //         longer hide behind a $0 eligible-debt delta.
 //
-//   p0-3 · health boundary price: the Inspector's boundary row names HEALTH —
-//         the number is the price at which the position is still healthy, not
-//         a liquidation trigger — carries the current mark alongside, and the
-//         evidence drawer is retitled to match.
+//   p0-3 · health boundary price, p0-4 · engine terminology, p0-8 finding 1
+//         (absent boundaries) and p0-9 finding 3 (prices:null): RETIRED with
+//         the Inspector rebuild (2026-09-15) — the boundary arms are pinned in
+//         tests/unit/inspector-position.spec.ts. Ledger:
+//         .superpowers/sdd/progress-ui-overhaul.md, "Plan 2 (Inspector) — retirements".
 //
 // Mock shapes, fixture files, and the hydration-race fill idiom are reused
 // from tests/e2e/lab.spec.ts — the fixtures are the committed, generated
 // bodies that spec documents (tests/fixtures/generate.mjs provenance).
-// p0-3's inspector mocks instead reuse tests/e2e/inspector.spec.ts's pattern
-// (typed TS fixtures from tests/fixtures/inspector.ts).
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { ADDRESS_FOUND, EVENTS, FOUND_ADDR, HISTORY, PARAMS } from "../fixtures/inspector";
 
 const API = "http://localhost:8080";
 
@@ -237,219 +235,6 @@ test.describe("p0-2 · outcome-aware matrix cells", () => {
 });
 
 // ---------------------------------------------------------------------------
-// p0-3 · health boundary price
-// ---------------------------------------------------------------------------
-
-/**
- * The inspector.spec.ts mock, same helper shape: fulfilled responses still
- * cross an origin (3818 → 8080), so CORS applies, and the trailing `*` in the
- * address route never crosses `/`, so it does NOT swallow the /history route.
- */
-async function mockInspectorFound(page: Page) {
-  await page.route("**/v1/stream*", (route) => route.abort());
-  await page.route("**/v1/params*", (route) => route.fulfill({ json: PARAMS, headers: CORS }));
-  await page.route("**/v1/events*", (route) => route.fulfill({ json: EVENTS, headers: CORS }));
-  await page.route("**/v1/address/*/history*", (route) =>
-    route.fulfill({ json: HISTORY, headers: CORS }),
-  );
-  await page.route("**/v1/address/*", (route) =>
-    route.fulfill({ json: ADDRESS_FOUND, headers: CORS }),
-  );
-}
-
-test.describe("p0-3 · health boundary price", () => {
-  test("the boundary row names health, shows the current mark, and never says Liquidation price", async ({ page }) => {
-    await mockInspectorFound(page);
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    const card = page.getByTestId("position-aave_v3_etherfi");
-    await expect(card.getByText("Health boundary price")).toBeVisible();
-    await expect(card).toContainText("current");
-    // current_price "400000000000" @ 8dec — money() at this callsite has NO
-    // "$" prefix and renders "4,000"; pinned WITH its label because a bare
-    // "4,000" already matches the weETH price-input row of the same card.
-    await expect(card).toContainText("current weETH ≈ 4,000");
-    // boundary "370370370371" @ 8dec — money()'s real output, the full string.
-    await expect(card).toContainText("3,703.70370371");
-    await expect(card.getByText("Liquidation price")).toHaveCount(0);
-    await expect(
-      card.getByRole("button", { name: "explain health boundary price" }),
-    ).toBeVisible();
-  });
-
-  test("the evidence drawer is retitled", async ({ page }) => {
-    await mockInspectorFound(page);
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    await page
-      .getByTestId("position-aave_v3_etherfi")
-      .getByRole("button", { name: "explain health boundary price" })
-      .click();
-    await expect(page.getByText("EXPLAIN · HEALTH BOUNDARY PRICE")).toBeVisible();
-    await expect(page.getByText("EXPLAIN · LIQUIDATION PRICE")).toHaveCount(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// p0-4 · engine-specific terminology
-// ---------------------------------------------------------------------------
-
-/**
- * p0-4: the committed HISTORY body carries only the aave engine, and the DM
- * vocabulary needs a DM card on the page. Single documented derivation: the
- * aave engine block re-shaped as a debt_manager block holding ONE computed
- * point whose health_factor is the DM's num/den DISCLOSURE (wad null, the
- * exact rational maxBorrowLT/borrowings) with a sweep mark — the shape the
- * unit suite's DM fixtures use. The aave engine stays byte-identical.
- */
-const AAVE_HISTORY_ENGINE = HISTORY.engines[0];
-if (AAVE_HISTORY_ENGINE === undefined) {
-  throw new Error("fixture invariant: aave history engine expected");
-}
-const AAVE_COMPUTED_POINT = AAVE_HISTORY_ENGINE.points[0];
-if (AAVE_COMPUTED_POINT === undefined) {
-  throw new Error("fixture invariant: computed point expected");
-}
-
-const DM_HISTORY_ENGINE: typeof AAVE_HISTORY_ENGINE = {
-  ...structuredClone(AAVE_HISTORY_ENGINE),
-  engine: "debt_manager",
-  value_decimals: 6,
-  points: [
-    {
-      ...structuredClone(AAVE_COMPUTED_POINT),
-      sweep_block: 154796500,
-      liquidatable: true,
-      health_factor: {
-        wad: null,
-        num: "3200000000",
-        den: "4200000000",
-        infinite: false,
-        note: "maxBorrowLT/borrowings is a disclosure; the verdict is the engine's strict boolean.",
-      },
-      total_collateral_base: "3200000000",
-      total_debt_base: "4200000000",
-    },
-  ],
-};
-
-/**
- * p0-3's inspector mocks, plus a LATER history route (Playwright consults
- * routes newest-first, so this override wins) serving BOTH engines' history.
- */
-async function mockInspectorBothHistories(page: Page) {
-  await mockInspectorFound(page);
-  const history = structuredClone(HISTORY);
-  history.engines.push(DM_HISTORY_ENGINE);
-  await page.route("**/v1/address/*/history*", (route) =>
-    route.fulfill({ json: history, headers: CORS }),
-  );
-}
-
-test.describe("p0-4 · engine-specific terminology", () => {
-  test("the DM history card is headed as a disclosure, the Aave card as a health factor", async ({ page }) => {
-    await mockInspectorBothHistories(page);
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    await expect(page.getByText("Borrow headroom (disclosure) across batches")).toBeVisible();
-    await expect(page.getByText("Health factor across batches")).toBeVisible();
-    // the SECTION head spans both engines' cards, so it claims neither
-    // engine's vocabulary; each card's own head makes the engine's claim.
-    await expect(page.getByTestId("hf-history")).toContainText("Risk history across batches");
-    // the DM sparkline no longer claims a health factor in its aria label
-    await expect(
-      page.getByLabel("debt_manager health factor across retained batches"),
-    ).toHaveCount(0);
-    await expect(
-      page.getByLabel("debt_manager borrow-headroom disclosure across retained batches"),
-    ).toBeVisible();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// p0-8 finding 1 · absent boundaries refuse the health assertion.
-// The wire legally serves `liquidation_price` with an EMPTY `prices` array
-// (no-debt / no-factor solves) or with `lowest_healthy_price: null`
-// (NullableDecimal), and `boundary_is_healthy` is the wire's OWN say on
-// whether the boundary is a health claim. The row may say "still healthy at
-// exactly this price (ceil P*)" ONLY when a numeric boundary exists AND
-// `boundary_is_healthy` is true — an em dash dressed with a health sentence
-// asserted an unknowable as healthy.
-// Variants: structuredClone of the committed ADDRESS_FOUND fixture
-// (tests/fixtures/inspector.ts), one documented purpose each, all
-// contract-legal per api/openapi.yaml (LiquidationPrice / FactorPrice).
-// ---------------------------------------------------------------------------
-
-test.describe("p0-8 · absent boundaries refuse the health assertion", () => {
-  test("(a) empty prices: the row states the boundary is not established — no health claim", async ({ page }) => {
-    // Single documented purpose: the empty-prices arm with the wire's own
-    // reason. The Aave position's liquidation_price gets `prices: []` and the
-    // optional `reason` the solver serves alongside it; nothing else moves.
-    const body = structuredClone(ADDRESS_FOUND);
-    const aave = body.positions[0];
-    if (aave === undefined || aave.liquidation_price === null) {
-      throw new Error("fixture shape drifted");
-    }
-    aave.liquidation_price.prices = [];
-    aave.liquidation_price.reason = "position holds no counted collateral in the factor";
-    await mockInspectorFound(page);
-    await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    const card = page.getByTestId("position-aave_v3_etherfi");
-    await expect(card.getByText("Health boundary price")).toBeVisible();
-    // The not-established register, with the wire's reason exposed.
-    const row = card.getByTestId("boundary-not-established");
-    await expect(row).toBeVisible();
-    await expect(row).toContainText("not established");
-    await expect(row).toContainText("position holds no counted collateral in the factor");
-    // The kill pin: no exact-price health assertion anywhere on the card.
-    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
-  });
-
-  test("(b) null lowest_healthy_price: a served FactorPrice without a boundary refuses too", async ({ page }) => {
-    // Single documented purpose: the null-boundary arm. Only
-    // prices[0].lowest_healthy_price flips to null (NullableDecimal);
-    // current_price stays served — a mark without a boundary is still not
-    // a health claim.
-    const body = structuredClone(ADDRESS_FOUND);
-    const price = body.positions[0]?.liquidation_price?.prices[0];
-    if (price === undefined) throw new Error("fixture shape drifted");
-    price.lowest_healthy_price = null;
-    await mockInspectorFound(page);
-    await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    const card = page.getByTestId("position-aave_v3_etherfi");
-    const row = card.getByTestId("boundary-not-established");
-    await expect(row).toBeVisible();
-    await expect(row).toContainText("not established");
-    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
-  });
-
-  test("(c) boundary_is_healthy false: the number and the mark render WITHOUT the assertion", async ({ page }) => {
-    // Single documented purpose: the declined-assertion arm. Only
-    // boundary_is_healthy flips to false — the numeric boundary stays, the
-    // current mark stays, and the health sentence may not.
-    const body = structuredClone(ADDRESS_FOUND);
-    const aave = body.positions[0];
-    if (aave === undefined || aave.liquidation_price === null) {
-      throw new Error("fixture shape drifted");
-    }
-    aave.liquidation_price.boundary_is_healthy = false;
-    await mockInspectorFound(page);
-    await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    const card = page.getByTestId("position-aave_v3_etherfi");
-    // boundary value + current mark still render (p0-3's own pins, unchanged
-    // fixture numbers)…
-    await expect(card).toContainText("3,703.70370371");
-    await expect(card).toContainText("current weETH ≈ 4,000");
-    // …but the exact-price health assertion is gone — the row's kill pin.
-    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
-    // The drawer obeys the same law: no ceil-health sentence.
-    await card.getByRole("button", { name: "explain health boundary price" }).click();
-    await expect(page.getByText("EXPLAIN · HEALTH BOUNDARY PRICE")).toBeVisible();
-    await expect(page.getByText(/still HEALTHY/)).toHaveCount(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // p0-8 finding 2 · malformed deltas refuse the quiet arm.
 // Run-book bodies are JSON-cast without runtime validation, so a delta outside
 // the wire Decimal contract (api/openapi.yaml `Decimal`: ^-?[0-9]+$) can reach
@@ -644,34 +429,5 @@ test.describe("p0-9 · codex round 2", () => {
     await expect(cell).toContainText("at batch #1");
     await expect(cell).toContainText("matrix reads #2");
     await expect(cell).toContainText("re-run this row");
-  });
-
-  test("finding 3: the observed prices:null solver-error serialization folds into the absent-boundary arm", async ({ page }) => {
-    // Single documented purpose: REPRODUCE the API's actual solver-error
-    // serialization — cmd/api's wireLiquidationPrice marshals a Go nil slice
-    // as `prices: null`, violating api/openapi.yaml's required-array contract
-    // but OBSERVED on the wire. `as never` marks the deliberate violation;
-    // the reason is the wire's own say on why the solve served nothing.
-    const body = structuredClone(ADDRESS_FOUND);
-    const aave = body.positions[0];
-    if (aave === undefined || aave.liquidation_price === null) {
-      throw new Error("fixture shape drifted");
-    }
-    aave.liquidation_price.prices = null as never;
-    aave.liquidation_price.reason = "solver error: the boundary solve did not complete";
-    await mockInspectorFound(page);
-    await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    const card = page.getByTestId("position-aave_v3_etherfi");
-    // RENDERS-WITHOUT-CRASH PIN: the card and its refusal register are on
-    // screen. With the defense removed, `lp.prices[0]` throws and the route
-    // never paints this card — this visibility pin dies first.
-    const row = card.getByTestId("boundary-not-established");
-    await expect(row).toBeVisible();
-    await expect(row).toContainText("not established");
-    // The wire's own reason stays exposed through the fold.
-    await expect(row).toContainText("solver error: the boundary solve did not complete");
-    // No health claim is invented over an absent boundary.
-    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
   });
 });

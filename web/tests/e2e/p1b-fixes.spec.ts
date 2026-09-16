@@ -26,7 +26,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import type { components } from "@solvent/client";
-import { ADDRESS_FOUND, EVENTS, FOUND_ADDR, HISTORY, PARAMS } from "../fixtures/inspector";
+import { EVENTS } from "../fixtures/inspector";
 import { OBSERVATORY_SERIES_AAVE } from "../fixtures/observatory";
 
 const API = "http://localhost:8080";
@@ -293,94 +293,6 @@ test.describe("p1b-2 · the classifier covers the whole engine subtree", () => {
 });
 
 // ---------------------------------------------------------------------------
-// p1b-4 · factor-price entries are classified before they are read.
-//
-// Inspector mocks in p0-fixes.spec.ts's register (its mockInspectorFound,
-// parameterized over the address body): stream aborted, params/events/history
-// pinned from the typed TS fixtures, the address route answered with a
-// structuredClone of ADDRESS_FOUND carrying ONE documented contract
-// violation each — reproducing OBSERVED server classes (the p0-9 family:
-// cmd/api marshals Go nil pointers as JSON null; a version-skewed or partial
-// serializer omits fields).
-// ---------------------------------------------------------------------------
-
-type AddressBody = typeof ADDRESS_FOUND;
-
-async function mockInspector(page: Page, body: AddressBody) {
-  await page.route("**/v1/stream*", (route) => route.abort());
-  await page.route("**/v1/params*", (route) => route.fulfill({ json: PARAMS, headers: CORS }));
-  await page.route("**/v1/events*", (route) => route.fulfill({ json: EVENTS, headers: CORS }));
-  await page.route("**/v1/address/*/history*", (route) =>
-    route.fulfill({ json: HISTORY, headers: CORS }),
-  );
-  await page.route("**/v1/address/*", (route) => route.fulfill({ json: body, headers: CORS }));
-}
-
-test.describe("p1b-4 · factor-price entries are classified before they are read", () => {
-  test("an entry-level null (prices: [null]) renders the malformed register — the card stays live", async ({
-    page,
-  }) => {
-    // Single documented purpose: the entry-level-null arm. REPRODUCES the
-    // p0-9 serialization class one level down — cmd/api marshals a Go nil
-    // pointer as JSON null, and inside a served slice that is
-    // `prices: [null]`: contract-violating per api/openapi.yaml (FactorPrice
-    // is non-nullable in `prices`) but the same observed server family as
-    // p0-9's `prices: null`. `as never` marks the deliberate violation.
-    const body = structuredClone(ADDRESS_FOUND);
-    const aave = body.positions[0];
-    if (aave === undefined || aave.liquidation_price === null) {
-      throw new Error("fixture shape drifted");
-    }
-    aave.liquidation_price.prices = [null as never];
-    await mockInspector(page, body);
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    const card = page.getByTestId("position-aave_v3_etherfi");
-    // RENDERS-WITHOUT-CRASH PIN: with the guard absent (or its {ok: false}
-    // routed to the value arm), `lowest_healthy_price` is read off null, the
-    // TypeError reaches the route boundary and this card never paints — the
-    // visibility pin below dies first.
-    const row = card.getByTestId("boundary-malformed");
-    await expect(row).toBeVisible();
-    await expect(row).toContainText("unreadable");
-    await expect(row).toContainText("malformed");
-    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
-    // No health claim is invented over an unreadable entry.
-    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
-  });
-
-  test("a deleted price_decimals refuses — the RAW scaled integer never renders as a price", async ({
-    page,
-  }) => {
-    // Single documented purpose: the silent-raw-render arm (the WORST class:
-    // no throw, just a wrong number). Deleting the REQUIRED `price_decimals`
-    // (a version-skewed or partial serializer's shape, the same observed
-    // omission family) hits money()'s no-scale branch, which renders the RAW
-    // scaled integer "370370370371" — grouped to "370,370,370,371" — as a
-    // plausible boundary price.
-    const body = structuredClone(ADDRESS_FOUND);
-    const price = body.positions[0]?.liquidation_price?.prices[0];
-    if (price === undefined) throw new Error("fixture shape drifted");
-    delete (price as { price_decimals?: number }).price_decimals;
-    await mockInspector(page, body);
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    const card = page.getByTestId("position-aave_v3_etherfi");
-    await expect(card.getByText("Health boundary price")).toBeVisible();
-    // THE SILENT-RAW-RENDER KILL PINS, first — the fixture's raw
-    // lowest_healthy_price digits may not appear on the card in EITHER
-    // spelling: the wire's own digit-run, or money()'s grouped rendering of
-    // the same digits (the branch actually reached from the card).
-    await expect(card).not.toContainText("370370370371");
-    await expect(card).not.toContainText("370,370,370,371");
-    // The malformed register names the missing scale.
-    const row = card.getByTestId("boundary-malformed");
-    await expect(row).toBeVisible();
-    await expect(row).toContainText("price_decimals");
-    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
-    await expect(card.getByText(/still healthy/i)).toHaveCount(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // p1b-5 · stress results carry their full identity (cross-page brief §5).
 //
 // The Lab's address mode bound ONLY the address (p0-1's `results for {addr}`
@@ -478,29 +390,18 @@ test.describe("p1b-5 · stress results carry their full identity", () => {
 
 // ---------------------------------------------------------------------------
 // p1b-6 · the identity gap audit closes (Task 6): abort symmetry, scoped
-// feed echoes, the observatory's verbatim as-of, the history batch weld,
-// and the Lab arms' computed-at + run-again register.
+// feed echoes, the observatory's verbatim as-of, and the Lab arms'
+// computed-at + run-again register. (Fix 4, the history batch weld, and
+// p1b-4's factor-price arms were RETIRED with the Inspector rebuild
+// (2026-09-15): the weld is tests/e2e/inspector.spec.ts "history: a differing
+// vantage is stated"; the arms are tests/unit/inspector-position.spec.ts.
+// Ledger: .superpowers/sdd/progress-ui-overhaul.md, "Plan 2 (Inspector) — retirements".)
 //
 // Mock shapes reused from the sections above (mockCold/mockStress/runStress,
-// mockInspector, observatory.spec.ts's series route). Every corruption or
-// variant is a structuredClone of a committed fixture with its documented
-// change(s) at the site.
+// observatory.spec.ts's series route). Every corruption or variant is a
+// structuredClone of a committed fixture with its documented change(s) at
+// the site.
 // ---------------------------------------------------------------------------
-
-type HistoryBody = typeof HISTORY;
-
-/** mockInspector with a CALLER-CHOSEN history body (the weld needs both vantages). */
-async function mockInspectorHistory(page: Page, history: HistoryBody) {
-  await page.route("**/v1/stream*", (route) => route.abort());
-  await page.route("**/v1/params*", (route) => route.fulfill({ json: PARAMS, headers: CORS }));
-  await page.route("**/v1/events*", (route) => route.fulfill({ json: EVENTS, headers: CORS }));
-  await page.route("**/v1/address/*/history*", (route) =>
-    route.fulfill({ json: history, headers: CORS }),
-  );
-  await page.route("**/v1/address/*", (route) =>
-    route.fulfill({ json: ADDRESS_FOUND, headers: CORS }),
-  );
-}
 
 test.describe("p1b-6 · the identity gap audit closes", () => {
   test("fix 2: a stale walk's page cannot write its filter echo over the current walk's", async ({
@@ -597,35 +498,6 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
     await expect(page.getByTestId("observatory-as-of")).toHaveText(
       `as of ${OBSERVATORY_SERIES_AAVE.served_at}`,
     );
-  });
-
-  test("fix 4: the history section welds its vantage to the position's batch when they differ", async ({
-    page,
-  }) => {
-    // The COMMITTED fixtures already differ: the history example is served
-    // from batch 2 while the address example's lookup batch is 1 — exactly
-    // the fresh-batch-between-two-fetches seam the weld exists to state.
-    await mockInspector(page, ADDRESS_FOUND);
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    await expect(page.getByTestId("history-batch-weld")).toHaveText(
-      `history window newest batch #${String(HISTORY.batch.id)} · position read at batch #${String(ADDRESS_FOUND.batch.id)}`,
-    );
-  });
-
-  test("fix 4: matching batches render NO weld — the line exists only for a real seam", async ({
-    page,
-  }) => {
-    // Single documented change to the committed history fixture, one purpose
-    // (the no-seam arm): its vantage batch re-pinned to the lookup's batch id
-    // (2 → 1), so the two sections describe one world.
-    const history = structuredClone(HISTORY);
-    history.batch.id = ADDRESS_FOUND.batch.id;
-    await mockInspectorHistory(page, history);
-    await page.goto(`/inspector/${FOUND_ADDR}`);
-    // Anchor on the SETTLED history card first, so the zero-count below is a
-    // statement about the ready state rather than about a loading gap.
-    await expect(page.getByTestId("history-frame-aave_v3_etherfi")).toBeVisible();
-    await expect(page.getByTestId("history-batch-weld")).toHaveCount(0);
   });
 
   test("item 7: the not-found stress arm states the batch computed_at verbatim", async ({

@@ -12,7 +12,7 @@ import { expect, test } from "@playwright/test";
 const SURFACES = [
   { path: "/", label: "Overview", h1: /70,000 people borrow against crypto/ },
   { path: "/book", label: "Book", h1: /liquidatable|could not be computed|could not be loaded/ },
-  { path: "/inspector", label: "Inspector", h1: "Inspector" },
+  { path: "/inspector", label: "Inspector", h1: "Is this address at risk?" },
   { path: "/lab", label: "Scenarios", h1: "Scenario Lab" },
   { path: "/observatory", label: "History", h1: "Observatory" },
   { path: "/feed", label: "Activity", h1: "Feed" },

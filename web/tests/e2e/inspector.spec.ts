@@ -1,535 +1,291 @@
-// W2 Inspector e2e — against the production build, with the API mocked from
-// openapi-example-derived fixtures (tests/fixtures/inspector.ts).
-//
-// What this pins:
-//   - the THREE found states render DISTINCTLY at the page level
-//     (found / definitive-none-with-completeness / cannot-be-established);
-//   - a stale price verdict is VISIBLE as its own state;
-//   - the formula block is ENGINE-CORRECT (aave law vs DM comparator);
-//   - the history sparkline renders a refused point as a GAP with its reason;
-//   - the drawer opens with body scroll LOCKED and Escape restores it;
-//   - a null block_time falls back to the block number;
-//   - the landing's strict 0x-40hex law refuses inline, never navigates;
-//   - W-OBS-B: the sparkline's label expectations are COMPUTED here from the
-//     same fixture bytes the route mock serves, through the unit-tested pure
-//     helpers (lib/history-series, lib/sparkline-scale) — never pinned as
-//     literals a hardcoding component could coincidentally match.
-
-import { expect, test, type Page } from "@playwright/test";
+// web/tests/e2e/inspector.spec.ts
+// The Inspector's page-test contract (spec 2026-09-15 §5.3, §7). Mocked from
+// committed fixtures: the demo dataset for the primary state (the mockup's
+// near-cap account) and the openapi-example fixtures for the other outcomes.
+// Every headline string here is produced by lib/inspector-headline.ts.
+import { expect, test, type Page, type Route } from "@playwright/test";
+import { BOOK_ERROR_UNAVAILABLE } from "../fixtures/book";
 import {
-  buildHistorySeries,
-  historyMetaLine,
-  knownBatchAxis,
-  newestPlottedLabel,
-  tallyHistory,
-} from "../../lib/history-series";
-import { hfAxisMaxLabel, hfAxisMinLabel, paddedSparklineDomain } from "../../lib/sparkline-scale";
-import {
-  ADDRESS_FOUND,
-  ADDRESS_NOT_FOUND,
-  ADDRESS_UNKNOWABLE,
-  EVENTS,
-  FOUND_ADDR,
-  HISTORY,
-  HISTORY_FLAT,
-  HISTORY_QUALIFIED,
-  NOT_FOUND_ADDR,
-  PARAMS,
-  UNKNOWABLE_ADDR,
-} from "../fixtures/inspector";
+  DEMO_ADDRESS_HEALTHY,
+  DEMO_ADDRESS_LIQUIDATABLE,
+  DEMO_ADDRESS_NEAR,
+  DEMO_ADDRESS_REFUSED,
+  DEMO_EVENTS_NEAR,
+  DEMO_HEALTHY_ADDR,
+  DEMO_HISTORY_NEAR,
+  DEMO_LIQUIDATABLE_ADDR,
+  DEMO_META,
+  DEMO_NEAR_ADDR,
+  DEMO_PARAMS_DM,
+  DEMO_REFUSED_ADDR,
+  DEMO_STRESS_NEAR,
+} from "../fixtures/demo";
+import { ADDRESS_FOUND, ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, EVENTS, FOUND_ADDR, HISTORY, NOT_FOUND_ADDR, PARAMS, UNKNOWABLE_ADDR } from "../fixtures/inspector";
+import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 
-// Fulfilled responses still cross an origin (3111 → 8080), so CORS applies.
 const CORS = { "access-control-allow-origin": "*" };
+const json = (route: Route, body: unknown, status = 200) =>
+  route.fulfill({ status, headers: CORS, contentType: "application/json", body: JSON.stringify(body) });
 
-async function mockApi(page: Page, address: unknown, history: unknown = HISTORY) {
-  await page.route("**/v1/stream*", (route) => route.abort());
-  await page.route("**/v1/params*", (route) => route.fulfill({ json: PARAMS, headers: CORS }));
-  await page.route("**/v1/events*", (route) => route.fulfill({ json: EVENTS, headers: CORS }));
-  await page.route("**/v1/address/*/history*", (route) =>
-    route.fulfill({ json: history, headers: CORS }),
-  );
-  // `*` never crosses `/`, so this does NOT swallow the /history route above.
-  await page.route("**/v1/address/*", (route) => route.fulfill({ json: address, headers: CORS }));
+interface Mocks {
+  address: unknown;
+  history?: unknown;
+  events?: unknown;
+  params?: unknown;
+  stress?: unknown;
+  addressStatus?: number;
 }
 
-test("found: the position layout renders, with the stale price verdict visible", async ({ page }) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
+/** `*` never crosses `/`, so the /history and /stress routes are not swallowed by the address route. */
+async function mockInspector(page: Page, m: Mocks) {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, DEMO_META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_MANIFEST));
+  await page.route("**/v1/params*", (route) => json(route, m.params ?? DEMO_PARAMS_DM));
+  await page.route("**/v1/events*", (route) => json(route, m.events ?? DEMO_EVENTS_NEAR));
+  await page.route("**/v1/address/*/history*", (route) => json(route, m.history ?? DEMO_HISTORY_NEAR));
+  await page.route("**/v1/address/*/stress*", (route) => json(route, m.stress ?? DEMO_STRESS_NEAR));
+  await page.route("**/v1/address/*", (route) => json(route, m.address, m.addressStatus ?? 200));
+}
 
-  await expect(
-    page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
-  ).toBeVisible();
-  await expect(page.getByTestId("position-aave_v3_etherfi")).toBeVisible();
-  await expect(page.getByTestId("position-debt_manager")).toBeVisible();
+const surface = (page: Page) => page.getByTestId("inspector-surface");
+const headline = (page: Page) => page.getByTestId("inspector-verdict-headline");
+const dek = (page: Page) => page.getByTestId("inspector-verdict-dek");
+const chip = (page: Page, label: string) => page.locator(`[data-chip='${label}']`);
 
-  // W-3L INS-B — the hazard split, both directions: the STALE verdict is a
-  // hazard and renders OUTSIDE the fold with no click; the FRESH input is
-  // forensic ledger and appears only when the fold opens.
-  await expect(page.getByTestId("price-verdict").filter({ hasText: "stale" })).toBeVisible();
-  await expect(page.getByTestId("price-verdict").filter({ hasText: "fresh" })).not.toBeVisible();
-  // The fixture's fresh input is the DM card's — its fold is the one that
-  // reveals it.
-  await page.getByTestId("position-forensics-debt_manager").locator("summary").click();
-  await expect(page.getByTestId("price-verdict").filter({ hasText: "fresh" })).toBeVisible();
+test("near cap — the mockup's account: one sentence, five tiles, chips, what backs the debt, trust, the room sparkline", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "near");
+  await expect(headline(page)).toHaveText("Within $190.50 of its borrow cap. Not liquidatable yet.");
+  await expect(dek(page)).toContainText("Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, makes this account liquidatable.");
+  await expect(dek(page)).toContainText("within 10% of its cap for the last 14 batches (≈6m).");
+  await expect(page.getByTestId("inspector-verdict-identity")).toContainText("Batch 18,251");
+  await expect(chip(page, "Lookup")).toContainText("complete · both engines");
+  await expect(chip(page, "Prices")).toContainText("PriceProvider v2 · 35s");
+  await expect(chip(page, "Current")).toContainText("not projected");
+  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("$4,822");
+  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("4,822.000000 exact");
+  await expect(page.getByTestId("inspector-kpi-cap")).toContainText("$5,012");
+  await expect(page.getByTestId("inspector-kpi-room")).toContainText("$190.50");
+  await expect(page.getByTestId("inspector-kpi-room")).toContainText("3.8% of cap");
+  await expect(page.getByTestId("inspector-kpi-room")).toHaveAttribute("data-tone", "warn");
+  await expect(page.getByTestId("inspector-kpi-collateral")).toContainText("$12,462");
+  await expect(page.getByTestId("inspector-kpi-status")).toContainText("Near cap");
+  const backing = page.getByTestId("inspector-backing");
+  await expect(backing.locator("tbody tr")).toHaveCount(3);
+  await expect(backing).toContainText("weETH");
+  await expect(backing).toContainText("$4,000.00");
+  await expect(backing).toContainText("50%");
+  await expect(backing).toContainText("20%");
+  await expect(page.getByTestId("inspector-backing-cap")).toContainText("$5,012");
+  await expect(page.getByTestId("inspector-boundary")).toHaveText("Boundary: Liquidatable if weETH falls below $3,818.57 — a 4.5% fall — with ETHFI flat.");
+  const trust = page.getByTestId("inspector-trust");
+  await expect(trust.locator("li")).toHaveCount(5);
+  await expect(page.getByTestId("inspector-trust-computed")).toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("inspector-trust-prices")).toContainText("35s · within 180s");
+  await expect(page.getByTestId("inspector-trust-sweep")).toHaveAttribute("data-state", "warn");
+  await expect(page.getByTestId("inspector-trust-sweep")).toContainText("1 of 3 rows failed · gen 4");
+  await expect(page.getByTestId("inspector-trust-reconcile")).toContainText("29/29 Cash rows exact");
+  await expect(page.getByTestId("inspector-room-spark").locator("svg")).toBeVisible();
+  await expect(page.getByTestId("inspector-legacy")).toHaveCount(0);
+  await expect(page.getByTestId("inspector-address-secondary")).toHaveAttribute("href", "#stress");
 });
 
-test("the formula block is engine-correct — the aave law and the DM comparator, never shared", async ({
-  page,
-}) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const aave = page.getByTestId("position-aave_v3_etherfi").getByTestId("formula-block");
-  await expect(aave).toContainText("HF = floor");
-  await expect(aave).toContainText("1080000000000000000"); // THIS position's wad, substituted
-  await expect(aave).not.toContainText("maxBorrowLT");
-
-  const dm = page.getByTestId("position-debt_manager").getByTestId("formula-block");
-  await expect(dm).toContainText("debt > maxBorrowLT");
-  await expect(dm).toContainText("STRICT boolean");
-  await expect(dm).toContainText("4620000000"); // THIS position's debt, substituted
-  await expect(dm).toContainText("liquidatable");
-  await expect(dm).not.toContainText("wadDiv");
+test("liquidatable and healthy — the other two spec templates, verbatim", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_LIQUIDATABLE });
+  await page.goto(`/inspector/${DEMO_LIQUIDATABLE_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "liquidatable");
+  await expect(headline(page)).toHaveText("Liquidatable now — $5,400 against a $5,012 cap.");
+  await expect(page.getByTestId("inspector-kpi-status")).toHaveAttribute("data-tone", "crit");
+  await expect(page.getByTestId("inspector-kpi-room")).toContainText("−$387.50");
+  await expect(page.getByTestId("inspector-boundary")).toHaveAttribute("data-kind", "breached");
+  await page.unroute("**/v1/address/*");
+  await page.route("**/v1/address/*", (route) => json(route, DEMO_ADDRESS_HEALTHY));
+  await page.goto(`/inspector/${DEMO_HEALTHY_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "healthy");
+  await expect(headline(page)).toHaveText("58.1% of its borrow cap unused. Not close to liquidation.");
+  await expect(page.getByTestId("inspector-kpi-status")).toHaveAttribute("data-tone", "ok");
 });
 
-test("definitive none: the honest statement WITH lookup completeness shown", async ({ page }) => {
-  await mockApi(page, ADDRESS_NOT_FOUND);
-  await page.goto(`/inspector/${NOT_FOUND_ADDR}`);
-
-  // W-3L: the definitive-negative SENTENCE lives in the head takeaway; the
-  // box below carries the entitlement (the method) and the wire note.
-  await expect(
-    page.getByTestId("inspector-outcome").filter({ hasText: "no position in this batch" }),
-  ).toBeVisible();
-  const negative = page.getByTestId("found-negative");
-  await expect(negative).toBeVisible();
-  await expect(negative).toContainText("complete");
-  await expect(negative).toContainText("withheld engines: none");
-
-  await expect(page.getByTestId("found-unknowable")).toHaveCount(0);
-  await expect(page.getByTestId("position-aave_v3_etherfi")).toHaveCount(0);
-});
-
-test("unknowable: cannot-be-established with the withheld engine NAMED — never 'no position'", async ({
-  page,
-}) => {
-  await mockApi(page, ADDRESS_UNKNOWABLE);
-  await page.goto(`/inspector/${UNKNOWABLE_ADDR}`);
-
-  const unknowable = page.getByTestId("found-unknowable");
-  await expect(unknowable).toBeVisible();
-  await expect(unknowable).toContainText("cannot be established");
-  await expect(unknowable).toContainText("debt_manager · FLAG_CUSTODY_UNPROVEN");
-
-  // The one phrase the definitive negative owns must NOT appear anywhere here.
-  await expect(page.getByText("no position in this batch")).toHaveCount(0);
-  await expect(page.getByTestId("found-negative")).toHaveCount(0);
-});
-
-test("history sparkline: a refused point is a GAP carrying its named reason", async ({ page }) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const history = page.getByTestId("history-aave_v3_etherfi");
-  await expect(history).toBeVisible();
-  const gaps = history.getByTestId("sparkline-gap");
-  await expect(gaps).toHaveCount(1);
-  await expect(gaps.locator("title")).toHaveText(/REFUSED · G1/);
-  // The HF = 1.0 reference line is present.
-  await expect(history.getByTestId("sparkline-reference")).toHaveCount(1);
-});
-
-test("W-OBS: the HF sparkline is a measured, labelled instrument", async ({ page }) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.setViewportSize({ width: 1000, height: 900 });
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const frame = page.getByTestId("history-frame-aave_v3_etherfi");
-  await expect(frame).toBeVisible();
-
-  // LAW-3 at two viewports: the SVG width attribute tracks the frame's
-  // CONTENT box (padding-correct), renders 1:1 (viewBox = width, no scale
-  // factor), and grows with the viewport — the fixed-width constant is gone.
-  const measure = () =>
-    frame.evaluate((node) => {
-      const svg = node.querySelector("svg");
-      if (svg === null) throw new Error("no svg in the history frame");
-      const style = getComputedStyle(node);
-      const content =
-        node.clientWidth -
-        (Number.parseFloat(style.paddingLeft) || 0) -
-        (Number.parseFloat(style.paddingRight) || 0);
-      return {
-        widthAttr: Number(svg.getAttribute("width")),
-        viewBoxW: (svg.getAttribute("viewBox") ?? "").split(" ")[2],
-        rendered: svg.getBoundingClientRect().width,
-        content,
-      };
-    });
-
-  const narrow = await measure();
-  expect(Math.abs(narrow.widthAttr - narrow.content)).toBeLessThanOrEqual(1);
-  expect(narrow.viewBoxW).toBe(String(narrow.widthAttr));
-  expect(narrow.rendered).toBeCloseTo(narrow.widthAttr, 0);
-
-  await page.setViewportSize({ width: 1400, height: 900 });
-  await expect
-    .poll(async () => (await measure()).widthAttr, { message: "svg width tracks the frame" })
-    .toBeGreaterThan(narrow.widthAttr);
-  const wide = await measure();
-  expect(Math.abs(wide.widthAttr - wide.content)).toBeLessThanOrEqual(1);
-  expect(wide.viewBoxW).toBe(String(wide.widthAttr));
-
-  // EVERY label below is COMPUTED from the fixture bytes the route mock
-  // serves, through the unit-tested pure helpers — a hardcoding component
-  // fails the moment the fixture moves. The bounds are the OUTWARD-directed
-  // renderings of the drawn domain (min floors, max ceils; the reference 1.0
-  // always inside it) — the scale law is pinned pure in
-  // tests/unit/sparkline-scale.spec.ts.
-  const engine = HISTORY.engines[0];
-  if (engine === undefined) throw new Error("fixture invariant: one engine series expected");
-  const series = buildHistorySeries(engine, knownBatchAxis(HISTORY));
-  const domain = paddedSparklineDomain(series.values, 1);
-  await expect(frame.getByTestId("sparkline-ymax-label")).toHaveText(hfAxisMaxLabel(domain.max));
-  await expect(frame.getByTestId("sparkline-ymin-label")).toHaveText(hfAxisMinLabel(domain.min));
-
-  // X extents: the oldest and newest witnessed batch ids from the wire.
-  const oldestEntry = series.entries[0];
-  const newestEntry = series.entries[series.entries.length - 1];
-  if (oldestEntry === undefined || newestEntry === undefined) {
-    throw new Error("fixture invariant: the series carries entries");
+test("a refused Cash position: cannot say, tiles refused, the last readable debt named, never $0", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_REFUSED });
+  await page.goto(`/inspector/${DEMO_REFUSED_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "not-computed");
+  await expect(headline(page)).toHaveText("Cannot say — this account's Cash position was not computed this batch.");
+  await expect(dek(page)).toContainText("Its last readable debt is $4,100; no verdict is served for it.");
+  for (const id of ["debt", "cap", "room", "collateral", "status"]) {
+    await expect(page.getByTestId(`inspector-kpi-${id}`)).toHaveAttribute("data-tone", "refused");
   }
-  await expect(frame.getByTestId("sparkline-x-start")).toHaveText(
-    `batch ${String(oldestEntry.batchId)}`,
-  );
-  await expect(frame.getByTestId("sparkline-x-end")).toHaveText(
-    `batch ${String(newestEntry.batchId)}`,
-  );
-
-  // The newest plotted point prints the SAME computed string the meta line
-  // cites — one source (newestPlottedLabel over HistorySeriesEntry.display).
-  // On this fixture the newest witnessed batch plots, so the PLAIN arm holds
-  // and the whole meta line is itself computed from the same bytes.
-  const newest = newestPlottedLabel(series);
-  if (newest === null) throw new Error("fixture invariant: the series plots a point");
-  expect(newest.atNewestBatch).toBe(true);
-  expect(newest.directLabel).toBe(newest.entry.display);
-  await expect(frame.getByTestId("sparkline-newest-value")).toHaveText(newest.directLabel);
-  await expect(page.getByTestId("history-meta-aave_v3_etherfi")).toHaveText(
-    historyMetaLine(tallyHistory(series), series.newest, engine.engine, HISTORY.limit),
-  );
-
-  // Kept laws: the refused point still breaks the line with its named
-  // reason, and the 1.0 reference line still renders.
-  await expect(frame.getByTestId("sparkline-gap")).toHaveCount(1);
-  await expect(frame.getByTestId("sparkline-reference")).toHaveCount(1);
+  await expect(page.getByTestId("inspector-kpi-cap")).toContainText("—");
+  await expect(page.getByTestId("inspector-trust-computed")).toHaveAttribute("data-state", "refused");
+  await expect(page.locator("main")).not.toContainText("$0");
 });
 
-test("W-OBS-B: an older sparkline label states WHICH batch; the meta keeps the refusal", async ({
-  page,
-}) => {
-  await mockApi(page, ADDRESS_FOUND, HISTORY_QUALIFIED);
+test("no position — the definitive negative, entitled by a complete lookup", async ({ page }) => {
+  await mockInspector(page, { address: ADDRESS_NOT_FOUND, history: HISTORY, events: EVENTS, params: PARAMS });
+  await page.goto(`/inspector/${NOT_FOUND_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "no-position");
+  await expect(headline(page)).toHaveText("No Cash or Aave position in batch 1.");
+  await expect(chip(page, "Lookup")).toContainText("complete");
+  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("—");
+  await expect(page.locator("main")).not.toContainText("$0");
+  await expect(page.locator("main")).not.toContainText("Cannot say");
+});
+
+test("cannot compute — a withheld book is named and is never 'no position'", async ({ page }) => {
+  await mockInspector(page, { address: ADDRESS_UNKNOWABLE, history: HISTORY, events: EVENTS, params: PARAMS });
+  await page.goto(`/inspector/${UNKNOWABLE_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "cannot-compute");
+  await expect(headline(page)).toHaveText("Cannot say — the Cash book is withheld this batch.");
+  await expect(dek(page)).toContainText("never “no position”");
+  await expect(chip(page, "Lookup")).toContainText("withheld · Cash");
+  await expect(page.locator("main")).not.toContainText("No Cash or Aave position");
+  await expect(page.locator("main")).not.toContainText("$0");
+});
+
+test("the contract fixture: Cash liquidatable beside a legacy position — never summed, the legacy card present and labeled", async ({ page }) => {
+  await mockInspector(page, { address: ADDRESS_FOUND, history: HISTORY, events: EVENTS, params: PARAMS });
   await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  // Computed from the SAME fixture bytes the route mock serves, through the
-  // unit-tested pure layer (newestPlottedLabel).
-  const engine = HISTORY_QUALIFIED.engines[0];
-  if (engine === undefined) throw new Error("fixture invariant: one engine series expected");
-  const series = buildHistorySeries(engine, knownBatchAxis(HISTORY_QUALIFIED));
-  const newest = newestPlottedLabel(series);
-  if (newest === null) throw new Error("fixture invariant: the series plots a point");
-
-  // Fixture invariants the law leans on: TWO finite points with DISTINCT
-  // values, and the newest witnessed batch NOT the last finite one — an
-  // oldest-finite scan mutant prints the OTHER figure and fails below.
-  const finiteDisplays = series.entries
-    .filter((entry) => entry.value !== null)
-    .map((entry) => entry.display);
-  expect(finiteDisplays.length).toBeGreaterThanOrEqual(2);
-  expect(new Set(finiteDisplays).size).toBeGreaterThanOrEqual(2);
-  expect(newest.atNewestBatch).toBe(false);
-  expect(newest.entry.display).toBe(finiteDisplays[finiteDisplays.length - 1]);
-  // The qualified arm is the plain display string PLUS the batch qualifier —
-  // one source, never a retyped value.
-  expect(newest.directLabel).toBe(
-    `${newest.entry.display} (batch ${String(newest.entry.batchId)})`,
-  );
-
-  const frame = page.getByTestId("history-frame-aave_v3_etherfi");
-  await expect(frame.getByTestId("sparkline-newest-value")).toHaveText(newest.directLabel);
-
-  // The meta line tells the SAME story from its side: its newest readout is
-  // the refused batch's own register — the whole line computed from the same
-  // bytes through the pure copy layer.
-  await expect(page.getByTestId("history-meta-aave_v3_etherfi")).toHaveText(
-    historyMetaLine(tallyHistory(series), series.newest, engine.engine, HISTORY_QUALIFIED.limit),
-  );
-  await expect(page.getByTestId("history-meta-aave_v3_etherfi")).toContainText(
-    "newest: REFUSED · G1",
-  );
+  await expect(headline(page)).toHaveText("Liquidatable now — $4,620 against a $4,200 cap.");
+  await expect(page.getByTestId("inspector-legacy")).toBeVisible();
+  await expect(page.getByTestId("inspector-legacy")).toContainText("Legacy · Aave v3 market position");
+  await page.getByTestId("inspector-legacy").locator("summary").click();
+  await expect(page.getByTestId("inspector-legacy")).toContainText(/1\.08/);
+  // 4,620 (Cash, 6 dec) + 6,000 (legacy, 8 dec) must never appear as one figure
+  await expect(page.locator("body")).not.toContainText("$10,620");
+  // the stale legacy price rides the legacy card, not the Cash verdict
+  await expect(page.getByTestId("inspector-legacy")).toContainText("stale price");
+  await expect(page.getByTestId("inspector-history-legacy")).toBeVisible();
 });
 
-test("W-OBS-B: a flat-at-1.0 series renders value and reference labels with disjoint boxes", async ({
-  page,
-}) => {
-  await mockApi(page, ADDRESS_FOUND, HISTORY_FLAT);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const engine = HISTORY_FLAT.engines[0];
-  if (engine === undefined) throw new Error("fixture invariant: one engine series expected");
-  const series = buildHistorySeries(engine, knownBatchAxis(HISTORY_FLAT));
-  const newest = newestPlottedLabel(series);
-  if (newest === null) throw new Error("fixture invariant: the flat series plots a point");
-  expect(newest.atNewestBatch).toBe(true); // the plain arm: display, no qualifier
-
-  const frame = page.getByTestId("history-frame-aave_v3_etherfi");
-  await expect(frame).toBeVisible();
-
-  // Both labels render with their own strings: the newest value (computed
-  // from the bytes) and the 1.0 reference disclosure.
-  await expect(frame.getByTestId("sparkline-newest-value")).toHaveText(newest.directLabel);
-  const referenceLabel = frame.getByTestId("sparkline-reference").locator("text");
-  await expect(referenceLabel).toHaveText("1.0");
-
-  // The collision law, measured in the BROWSER: the two labels' rendered
-  // boxes (getBBox) must not intersect — the deterministic displacement rule
-  // moved the value label a full row off the reference label. The
-  // no-displacement mutant parks both on the same row and fails here.
-  const boxes = await frame.evaluate((node) => {
-    const value = node.querySelector('[data-testid="sparkline-newest-value"]');
-    const ref = node.querySelector('[data-testid="sparkline-reference"] text');
-    if (!(value instanceof SVGGraphicsElement) || !(ref instanceof SVGGraphicsElement)) {
-      throw new Error("both labels must render as SVG text");
-    }
-    const v = value.getBBox();
-    const r = ref.getBBox();
-    return {
-      value: { x: v.x, y: v.y, width: v.width, height: v.height },
-      reference: { x: r.x, y: r.y, width: r.width, height: r.height },
-    };
-  });
-  const disjoint =
-    boxes.value.x + boxes.value.width <= boxes.reference.x ||
-    boxes.reference.x + boxes.reference.width <= boxes.value.x ||
-    boxes.value.y + boxes.value.height <= boxes.reference.y ||
-    boxes.reference.y + boxes.reference.height <= boxes.value.y;
-  expect(disjoint, `label boxes must not overlap: ${JSON.stringify(boxes)}`).toBe(true);
-});
-
-test("drawer: opens from a number, locks body scroll, Escape closes and restores", async ({
-  page,
-}) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  await page.getByRole("button", { name: "explain health factor" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  const drawer = page.getByTestId("evidence-drawer");
-  await expect(drawer).toContainText("OPERATIONAL");
-  await expect(drawer).toContainText("hf_wad < 1e18");
-  await expect(page.locator("body")).toHaveCSS("overflow", "hidden");
-
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.locator("body")).toHaveCSS("overflow", "visible");
-});
-
-test("activity: a null block_time falls back to the block number, never an invented time", async ({
-  page,
-}) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  await expect(
-    page.getByTestId("activity-time").filter({ hasText: "block 154,796,490" }),
-  ).toBeVisible();
-  // The custodied header time renders as itself on the other row.
-  await expect(
-    page.getByTestId("activity-time").filter({ hasText: "2026-07-29T09:57:11Z" }),
-  ).toBeVisible();
-});
-
-test("landing: an invalid address is an inline refusal and never navigates", async ({ page }) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto("/inspector");
-
-  await page.getByLabel("address to inspect").fill("0xNOT-AN-ADDRESS");
-  await page.getByRole("button", { name: "Inspect" }).click();
-  // Next's route announcer is also role=alert; filter to the refusal itself.
-  await expect(page.getByRole("alert").filter({ hasText: "REFUSED" })).toContainText(
-    "not an address",
-  );
-  await expect(page).toHaveURL(/\/inspector$/);
-
-  await page.getByLabel("address to inspect").fill(FOUND_ADDR);
-  await page.getByRole("button", { name: "Inspect" }).click();
-  await expect(page).toHaveURL(new RegExp(`/inspector/${FOUND_ADDR}$`));
-  await expect(
-    page.getByTestId("inspector-outcome").filter({ hasText: "outcome · found" }),
-  ).toBeVisible();
-});
-
-test("an invalid [addr] path segment is refused inline — nothing is looked up", async ({ page }) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto("/inspector/0xdeadbeef");
-  await expect(page.getByTestId("address-refusal")).toBeVisible();
-  await expect(page.getByTestId("address-refusal")).toContainText("REFUSED");
-  await expect(page.getByTestId("inspector-outcome")).toHaveCount(0);
-});
-
-test("r74 — the activity takeaway disclaims the untimed tail on the rendered page", async ({
-  page,
-}) => {
-  // The committed EVENTS fixture carries a null block_time row: the sentence
-  // must split its claim — timed rows newest first, the tail disclaimed —
-  // composed from the same counts the rows themselves render.
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-  const timed = EVENTS.events.filter((event) => event.block_time !== null).length;
-  const untimed = EVENTS.events.length - timed;
-  if (untimed === 0) throw new Error("fixture invariant: an untimed row expected");
-  const takeaway = page.getByTestId("activity-takeaway");
-  await expect(takeaway).toContainText(
-    `${String(timed)} with custodied header time, newest first; ${String(untimed)} untimed ` +
-      `row(s) follow, in an order that is not chronology`,
-  );
-  await expect(takeaway).not.toContainText("loaded for this account, newest first");
-});
-
-// ---------------------------------------------------------------------------
-// W-3L INS-B — the position card's three layers on the rendered page.
-// ---------------------------------------------------------------------------
-
-test("INS-B: each engine's takeaway speaks its own comparator, and never the other's", async ({
-  page,
-}) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-  const aave = page.getByTestId("position-takeaway-aave_v3_etherfi");
-  await expect(aave).toContainText("HF");
-  await expect(aave).toContainText("collateral against");
-  await expect(aave).not.toContainText("maxBorrowLT");
-  const dm = page.getByTestId("position-takeaway-debt_manager");
-  await expect(dm).toContainText("(strict)");
-  await expect(dm).toContainText("maxBorrowLT");
-  await expect(dm).not.toContainText("HF");
-});
-
-test("INS-B: the lawful formula folds behind its named law; the REFUSED substitution never folds", async ({
-  page,
-}) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-  // Lawful arm: the pre is inside a fold naming the engine's law.
-  const aaveCard = page.getByTestId("position-aave_v3_etherfi");
-  await expect(aaveCard.getByTestId("formula-block")).not.toBeVisible();
-  await expect(aaveCard.getByTestId("formula-fold-aave_v3_etherfi").locator("summary")).toContainText(
-    "law: the Aave rev-3 wadDiv composite",
-  );
-  await aaveCard.getByTestId("formula-fold-aave_v3_etherfi").locator("summary").click();
-  await expect(aaveCard.getByTestId("formula-block")).toBeVisible();
-
-  // REFUSED arm (documented single-purpose mutation of the committed body):
-  // the substitution renders in the ALWAYS-OPEN register — no fold exists.
-  const refused = structuredClone(ADDRESS_FOUND);
-  const target = refused.positions.find((p) => p.engine === "aave_v3_etherfi");
-  if (target === undefined) throw new Error("fixture lost its aave position");
-  target.status = "refused";
-  target.refusal = {
-    code: "G1",
-    detail: "price input missing at compute time",
-    note: "documented single-purpose mutation of the committed body",
+test("a stale Cash price input turns the Prices chip and the Trust item amber", async ({ page }) => {
+  const position = DEMO_ADDRESS_NEAR.positions[0];
+  if (position === undefined) throw new Error("demo position");
+  const stale = {
+    ...DEMO_ADDRESS_NEAR,
+    positions: [
+      {
+        ...position,
+        price_inputs: position.price_inputs.map((i, k) => (k === 0 ? { ...i, age_seconds: 210, verdict: "stale" as const, fresh: false } : i)),
+        as_of: { ...position.as_of, stale_price_inputs: true },
+      },
+    ],
   };
-  await mockApi(page, refused);
-  await page.reload();
-  const refusedCard = page.getByTestId("position-aave_v3_etherfi");
-  await expect(refusedCard.getByTestId("formula-block")).toBeVisible();
-  await expect(refusedCard.getByTestId("formula-block")).toContainText("REFUSED · G1");
-  await expect(refusedCard.getByTestId("formula-fold-aave_v3_etherfi")).toHaveCount(0);
-  await expect(refusedCard.getByTestId("position-takeaway-aave_v3_etherfi")).toContainText(
-    "REFUSED (G1) · no verdict is served",
-  );
+  await mockInspector(page, { address: stale });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  await expect(chip(page, "Prices")).toContainText("3m");
+  await expect(chip(page, "Prices")).toHaveClass(/chipWarn/);
+  await expect(page.getByTestId("inspector-trust-prices")).toHaveAttribute("data-state", "warn");
+  await expect(page.getByTestId("inspector-trust-prices")).toContainText("weETH 210s old · budget 180s");
+  await expect(page.getByTestId("inspector-backing")).toContainText("stale");
 });
 
-test("INS-B: the proof card leads with the LIVE-vs-PROOF disclaimer; safe rows are counted-forensic", async ({
-  page,
-}) => {
-  await mockApi(page, ADDRESS_FOUND);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-  const aaveCard = page.getByTestId("position-aave_v3_etherfi");
-  // The takeaway is visible with NO click — the sentence the Proof Center
-  // split depends on.
-  await expect(aaveCard.getByTestId("proof-takeaway")).toBeVisible();
-  await expect(aaveCard.getByTestId("proof-takeaway")).toContainText(
-    "LIVE · WATERMARKED, not PROOF · EXACT @ PIN",
-  );
-  // Safe provenance (marks, batch, none-unacked reorg) is behind the counted
-  // fold; the fixture carries no hazard, so nothing crit renders outside.
-  const fold = aaveCard.getByTestId("proof-forensics");
-  await expect(fold.locator("summary")).toContainText("proof row(s)");
-  await expect(aaveCard.getByText("none unacked")).not.toBeVisible();
-  await fold.locator("summary").click();
-  await expect(aaveCard.getByText("none unacked")).toBeVisible();
-  await expect(aaveCard.getByText("Balances mark")).toBeVisible();
+test("503: the lookup could not be completed — neither a position nor 'no position'", async ({ page }) => {
+  await mockInspector(page, { address: BOOK_ERROR_UNAVAILABLE, addressStatus: 503 });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "unavailable");
+  await expect(headline(page)).toHaveText("The lookup could not be completed.");
+  // the wire's message, sentence-cased by the headline module (tests/unit/inspector-headline.spec.ts pins the same string)
+  await expect(dek(page)).toContainText("No servable batch: the service refuses to answer from nothing (503)");
+  await expect(dek(page)).toContainText("an error is not an answer");
+  await expect(page.locator("main")).not.toContainText("No Cash or Aave position");
+  await expect(page.locator("main")).not.toContainText("$0");
 });
 
-// ---------------------------------------------------------------------------
-// r77 — PROOF-CARD HAZARD PLACEMENT, mutation-backed (the r73 lesson on the
-// new card). Each documented single-purpose mutation of the committed body
-// asserts, with proof-forensics still CLOSED: the hazard is VISIBLE, it is
-// NOT a descendant of the fold, its safe twin is ABSENT from the fold's
-// attached DOM, and the counted summary recounts the remaining safe rows.
-// ---------------------------------------------------------------------------
-
-test("r77 — a never-swept DM renders its ∅ OUTSIDE the closed proof fold", async ({ page }) => {
-  const mutated = structuredClone(ADDRESS_FOUND);
-  const dm = mutated.positions.find((p) => p.engine === "debt_manager");
-  if (dm === undefined) throw new Error("fixture lost its DM position");
-  dm.as_of.sweep_block = 0;
-  await mockApi(page, mutated);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const card = page.getByTestId("position-debt_manager");
-  const fold = card.getByTestId("proof-forensics");
-  await expect(card.getByText("∅ never swept")).toBeVisible();
-  await expect(fold.getByText("∅ never swept")).toHaveCount(0);
-  await expect(fold.getByText("Sweep mark")).toHaveCount(0);
-  // 4 base + safe reorg (fixture: none unacked) + no swept row = 5.
-  await expect(fold.locator("summary")).toHaveText("5 proof row(s)");
+test("an invalid path segment is refused inline — nothing is looked up", async ({ page }) => {
+  let addressRequests = 0;
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, DEMO_META));
+  await page.route("**/v1/address/**", (route) => {
+    addressRequests += 1;
+    return route.abort();
+  });
+  await page.goto("/inspector/not-an-address");
+  await expect(surface(page)).toHaveAttribute("data-state", "invalid");
+  await expect(headline(page)).toHaveText("Not an address.");
+  await expect(dek(page)).toHaveText("An address is 0x followed by 40 hex characters — nothing else is looked up.");
+  await expect(page.getByTestId("inspector-kpi-debt")).toHaveCount(0);
+  expect(addressRequests).toBe(0);
 });
 
-test("r77 — a missing engine watermark renders OUTSIDE the closed proof fold", async ({
-  page,
-}) => {
-  const mutated = structuredClone(ADDRESS_FOUND);
-  mutated.batch.watermarks = mutated.batch.watermarks.filter(
-    (stamp) => stamp.engine !== "aave_v3_etherfi",
-  );
-  await mockApi(page, mutated);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
-
-  const card = page.getByTestId("position-aave_v3_etherfi");
-  const fold = card.getByTestId("proof-forensics");
-  await expect(card.getByText("no watermark for this engine")).toBeVisible();
-  await expect(fold.getByText("no watermark for this engine")).toHaveCount(0);
-  await expect(fold.getByText("Reorg epochs")).toHaveCount(0);
-  // 4 base + aave n/a-sweeper row + no safe-reorg row = 5.
-  await expect(fold.locator("summary")).toHaveText("5 proof row(s)");
+test("the landing refuses a non-address inline and never navigates; a real one routes and is remembered", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.goto("/inspector");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Is this address at risk?");
+  const input = page.getByTestId("inspector-address-input");
+  await input.fill("0x123");
+  await input.press("Enter");
+  await expect(page.getByTestId("inspector-address-refused")).toBeVisible();
+  await expect(page).toHaveURL(/\/inspector$/);
+  await input.fill(DEMO_NEAR_ADDR);
+  await input.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/inspector/${DEMO_NEAR_ADDR}$`));
+  await expect(surface(page)).toHaveAttribute("data-state", "near");
+  await page.goto("/inspector");
+  await expect(page.getByTestId("inspector-recent")).toContainText("0x7a3f…c21e");
 });
 
-test("r77 — unacked epochs render OUTSIDE the closed proof fold", async ({ page }) => {
-  const mutated = structuredClone(ADDRESS_FOUND);
-  const stamp = mutated.batch.watermarks.find((w) => w.engine === "aave_v3_etherfi");
-  if (stamp === undefined) throw new Error("fixture lost its aave watermark");
-  stamp.max_epoch_at_compute = stamp.acked_epoch + 3;
-  await mockApi(page, mutated);
-  await page.goto(`/inspector/${FOUND_ADDR}`);
+test("activity: six rows, a null block_time falls back to the block number, the untimed tail is disclaimed", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  const table = page.getByTestId("inspector-activity");
+  await expect(table.locator("tbody tr")).toHaveCount(6);
+  await expect(table).toContainText("Borrow");
+  await expect(table).toContainText("Collateral enabled");
+  await expect(table.locator("tbody tr").last()).toContainText("block 155,315,000");
+  await expect(page.getByTestId("inspector-activity-takeaway")).toContainText("5 with custodied header time, newest first; 1 untimed row(s) follow");
+  await expect(page.getByTestId("inspector-activity-more")).toHaveCount(0);
+});
 
-  const card = page.getByTestId("position-aave_v3_etherfi");
-  const fold = card.getByTestId("proof-forensics");
-  await expect(card.getByText("3 unacked")).toBeVisible();
-  await expect(fold.getByText("3 unacked")).toHaveCount(0);
-  await expect(fold.getByText("none unacked")).toHaveCount(0);
-  // 4 base + aave n/a-sweeper row + no safe-reorg row = 5.
-  await expect(fold.locator("summary")).toHaveText("5 proof row(s)");
+test("stress: the committed scenarios inline — two flips, one projection", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  const table = page.getByTestId("inspector-stress-table");
+  await expect(table.locator("tbody tr")).toHaveCount(3);
+  await expect(table.locator("tbody tr").nth(0)).toContainText("ETH -30 percent");
+  await expect(table.locator("tbody tr").nth(0)).toContainText("Yes");
+  await expect(table.locator("tbody tr").nth(2)).toContainText("PROJECTION");
+  await expect(table.locator("tbody tr").nth(2)).toContainText("30d");
+  await expect(page.getByTestId("inspector-stress")).toHaveAttribute("id", "stress");
+});
+
+test("history: a differing vantage is stated; the drawer opens with the formula substituted", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR, history: { ...DEMO_HISTORY_NEAR, batch: { ...DEMO_HISTORY_NEAR.batch, id: DEMO_HISTORY_NEAR.batch.id - 1 } } });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  await expect(page.getByTestId("inspector-history")).toContainText("history as of batch 18,250, position as of batch 18,251");
+  await page.getByTestId("inspector-drawer").click();
+  const body = page.getByTestId("inspector-drawer-body");
+  await expect(body).toContainText("Room = cap − debt = $5,012 − $4,822 = $190.50");
+  await expect(body).toContainText("PriceProvider v2 (priceproviderv2)");
+  await expect(body).toContainText("borrow_apy");
+  await expect(body).toContainText("4,822.000000");
+  await page.keyboard.press("Escape");
+  await expect(body).toBeHidden();
+});
+
+test("resume: a failed background repair never replaces the rendered position", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "near");
+  await page.unroute("**/v1/address/*");
+  await page.route("**/v1/address/*", (route) => route.abort());
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  await page.waitForTimeout(500);
+  await expect(surface(page)).toHaveAttribute("data-state", "near");
+  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("$4,822");
+});
+
+test("first viewport at 1440×900 holds the toolbar, the verdict, the tiles and the top of the grid; 390 has no horizontal scroll", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "near");
+  const top = await page.getByTestId("inspector-backing").evaluate((el) => el.getBoundingClientRect().top);
+  expect(top).toBeLessThan(900);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
 });
