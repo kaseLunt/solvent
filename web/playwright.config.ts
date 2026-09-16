@@ -12,6 +12,8 @@ const PORT = 3111;
 
 export default defineConfig({
   testDir: "./tests",
+  // Screenshot pins (spec 2026-09-15 §7): baselines are named by test file, not by platform.
+  snapshotPathTemplate: "{testDir}/{testFileDir}/{testFileName}-snapshots/{arg}{ext}",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
