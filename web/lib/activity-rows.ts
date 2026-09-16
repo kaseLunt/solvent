@@ -50,13 +50,16 @@ export interface ActivityScale {
 const RAW = "(raw units)";
 
 /**
- * A payload amount in its asset's own decimals. A null value is "—" (not
- * established); a carried value with no licensed scale prints raw and says
- * so — never a dash for an established figure, never a throw on a bad scale.
+ * A payload amount in its asset's own decimals. Three distinct statements,
+ * never blurred: a null value is "—" (not established); a value that is not
+ * a wire decimal is "unreadable" (the repo's word for a malformed wire scalar
+ * — its bytes are never printed as a figure); a readable value with no
+ * licensed scale prints raw and says so. Never a throw on a bad scale.
  */
 function payloadAmount(value: string | null, decimals: number | null): string {
   if (value === null) return "—";
-  if (!isWireDecimal(value) || !isWireScale(decimals)) return `${value} ${RAW}`;
+  if (!isWireDecimal(value)) return "unreadable";
+  if (!isWireScale(decimals)) return `${value} ${RAW}`;
   return humanAmount(BigInt(value), decimals);
 }
 

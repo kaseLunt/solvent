@@ -47,6 +47,7 @@ test("fix round 1: the wire's own scale places the decimal and raw units are nam
   expect(detailOf({ ...first, liquidation: { ...liq, seized: [] } })).toMatch(/seized — \(no seizure legs carried\)$/);
   expect(detailOf({ ...first, liquidation: { ...liq, debt_decimals: null } })).toContain("repaid 2500000000 (raw units)");
   expect(detailOf({ ...first, liquidation: { ...liq, debt_repaid: null } })).toContain("repaid —");
+  expect(detailOf({ ...first, liquidation: { ...liq, debt_repaid: "1.5" } })).toContain("repaid unreadable");
   const dm = detailOf({ ...first, engine: "debt_manager" });
   expect(dm).toContain("repaid 2,500 USD; seized");
   expect(dm).not.toContain("USDC");
