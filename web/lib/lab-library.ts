@@ -19,10 +19,17 @@ export type ScenariosResponse = Schemas["ScenariosResponse"];
 export type ScenarioDefinition = Schemas["ScenarioDefinition"];
 export type EngineRefusal = Schemas["EngineRefusal"];
 
+/** The last computed result an id holds through a re-run, with its settle clocks: a failed re-run stands beside it, never in its place. */
+export interface HeldResult {
+  readonly response: LabRunBook;
+  readonly at: number;
+  readonly atMonotonicMs: number;
+}
+
 export type RunRecord =
-  | { readonly phase: "running"; readonly startedAt: number }
+  | { readonly phase: "running"; readonly startedAt: number; readonly held: HeldResult | null }
   // `at` is the wall clock and `atMonotonicMs` the monotonic clock at settle: the pair a later re-selection anchors the result's age on.
-  | { readonly phase: "settled"; readonly outcome: RunBookOutcome; readonly at: number; readonly atMonotonicMs: number };
+  | { readonly phase: "settled"; readonly outcome: RunBookOutcome; readonly at: number; readonly atMonotonicMs: number; readonly held: HeldResult | null };
 
 export type SetRecord =
   | { readonly phase: "running"; readonly ids: readonly string[]; readonly startedAt: number }
@@ -67,9 +74,15 @@ export function outcomeLine(record: RunRecord | undefined, definition: ScenarioD
   if (record === undefined) return { key: "not-run", text: "Not run yet", tone: "dim" };
   if (record.phase === "running") return { key: "running", text: "Running…", tone: "dim" };
   const o = record.outcome;
+  if (o.kind === "ok") return cashOutcome(o.response, definition);
+  // A failed re-run leaves the held result's word: the page keeps those figures, its banner names the failure.
+  if (record.held !== null) return cashOutcome(record.held.response, definition);
   if (o.kind === "failed") return failed(`Failed ${String(o.status)}`);
-  if (o.kind !== "ok") return failed(FAILURE_WORD[o.kind]);
-  const r = readEngine(o.response, CASH, definition);
+  return failed(FAILURE_WORD[o.kind]);
+}
+
+function cashOutcome(response: LabRunBook, definition: ScenarioDefinition): LibraryOutcome {
+  const r = readEngine(response, CASH, definition);
   switch (r.kind) {
     case "not-covered":
       return { key: "not-covered", text: "Not modelled for Cash", tone: "dim" };

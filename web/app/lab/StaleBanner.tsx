@@ -1,13 +1,35 @@
 import kit from "@/components/kit/kit.module.css";
+import type { LabHeadline } from "@/lib/lab-headline";
+import type { Banner } from "@/lib/lab-view";
 import { groupInt, joinAnd } from "@/lib/prose";
 import styles from "./lab.module.css";
 
-/** A result for a previous input or a superseded batch keeps its figures; the banner says so and offers the re-run (plan R13). */
-export function StaleBanner({ kind, skew, batchId, onRerun, rerunDisabled }: { kind: "stale-input" | "superseded"; skew: readonly string[]; batchId: number | null; onRerun: () => void; rerunDisabled: boolean }) {
+/**
+ * A result for a previous input, a superseded batch, or a re-run that failed keeps its figures;
+ * the banner says which and offers the re-run (plan R13; a result is never silently replaced).
+ */
+export function StaleBanner({
+  kind,
+  skew,
+  batchId,
+  failure,
+  onRerun,
+  rerunDisabled,
+}: {
+  kind: Exclude<Banner, null>;
+  skew: readonly string[];
+  batchId: number | null;
+  failure: LabHeadline | null;
+  onRerun: () => void;
+  rerunDisabled: boolean;
+}) {
+  const batch = batchId === null ? "?" : groupInt(batchId);
   const text =
     kind === "superseded"
-      ? `Batch ${batchId === null ? "?" : groupInt(batchId)} has been superseded: a newer complete batch exists. This result stands for the batch it names.`
-      : `Results for a previous input: the listing's ${joinAnd(skew)} changed since this run. This result stands for the definition it was computed under.`;
+      ? `Batch ${batch} has been superseded: a newer complete batch exists. This result stands for the batch it names.`
+      : kind === "rerun-failed"
+        ? `Run again failed — ${failure === null ? "the service gave no reason" : `${failure.emphasis}${failure.rest === "" ? "" : ` ${failure.rest}`} ${failure.dek}`} The result below stands for batch ${batch}.`
+        : `Results for a previous input: the listing's ${joinAnd(skew)} changed since this run. This result stands for the definition it was computed under.`;
   return (
     <div className={styles.banner} data-testid="lab-banner" data-kind={kind} role="status">
       <span>{text}</span>

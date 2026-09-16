@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Phase } from "./address-lookup";
 import { getSolventClient, solventBaseUrl } from "./api";
-import type { RunRecord, ScenariosResponse, SetRecord } from "./lab-library";
+import type { HeldResult, RunRecord, ScenariosResponse, SetRecord } from "./lab-library";
 import { monotonicNowMs } from "./freshness";
 import { describeLookupError } from "./lookup-error";
 import { runBookScenario, type RunBookOutcome } from "./runbook";
@@ -25,15 +25,22 @@ export interface LabReading {
 export const canDispatch = (runs: ReadonlyMap<string, RunRecord>, id: string): boolean => runs.get(id)?.phase !== "running";
 export const canDispatchSet = (set: SetRecord | null): boolean => set === null || set.phase !== "running";
 
+/** A computed result is never replaced by the run that follows it: it is held until a newer result stands. */
+function heldOf(prev: RunRecord | undefined): HeldResult | null {
+  if (prev === undefined) return null;
+  if (prev.phase === "settled" && prev.outcome.kind === "ok") return { response: prev.outcome.response, at: prev.at, atMonotonicMs: prev.atMonotonicMs };
+  return prev.held;
+}
+
 export function withRunning(runs: ReadonlyMap<string, RunRecord>, id: string, now: number): Map<string, RunRecord> {
   const next = new Map(runs);
-  next.set(id, { phase: "running", startedAt: now });
+  next.set(id, { phase: "running", startedAt: now, held: heldOf(runs.get(id)) });
   return next;
 }
 
 export function withSettled(runs: ReadonlyMap<string, RunRecord>, id: string, outcome: RunBookOutcome, now: number, monotonicNow: number): Map<string, RunRecord> {
   const next = new Map(runs);
-  next.set(id, { phase: "settled", outcome, at: now, atMonotonicMs: monotonicNow });
+  next.set(id, { phase: "settled", outcome, at: now, atMonotonicMs: monotonicNow, held: outcome.kind === "ok" ? null : heldOf(runs.get(id)) });
   return next;
 }
 

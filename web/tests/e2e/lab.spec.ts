@@ -406,7 +406,7 @@ test("the fetch failures each name themselves: 404 not served, 503 no batch with
   await expect(headline(page)).toHaveText("The service answered 500.");
 });
 
-test("a re-run that fails replaces the result it had: nothing retained wears the new request's answer", async ({ page }) => {
+test("a re-run that fails never replaces the result it had: the held figures stand under a banner naming the failure", async ({ page }) => {
   const counts = await mockLab(page);
   await page.goto("/lab");
   await runIt(page);
@@ -416,14 +416,20 @@ test("a re-run that fails replaces the result it had: nothing retained wears the
     route.request().method() === "OPTIONS" ? preflight(route) : json(route, fixture("error-not-found.json"), 404, POST_CORS),
   );
   await page.getByTestId("lab-run").click();
-  await expect(surface(page)).toHaveAttribute("data-state", "not-served");
-  await expect(headline(page)).toHaveText("Book-wide stress is not served by this deployment.");
-  await expect(tile(page, "newly")).toContainText("—");
-  await expect(tile(page, "newly")).not.toContainText("118");
-  await expect(row(page, "eth_minus_30")).toContainText("Not served");
-  await expect(row(page, "eth_minus_30")).not.toContainText("+$1.2M");
-  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
-  await expect(page.getByTestId("lab-movers")).toHaveCount(0);
+  const banner = page.getByTestId("lab-banner");
+  await expect(banner).toHaveAttribute("data-kind", "rerun-failed");
+  await expect(banner).toContainText("Run again failed — Book-wide stress is not served by this deployment.");
+  await expect(banner).toContainText("The result below stands for batch 18,251.");
+  await expect(page.getByTestId("lab-banner-rerun")).toBeEnabled();
+  // The result it had, to the figure: state, headline, tiles, grid, movers and the library's word.
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  await expect(surface(page)).toHaveAttribute("data-banner", "rerun-failed");
+  await expect(headline(page)).toContainText("$1.2M more Cash debt becomes liquidatable");
+  await expect(tile(page, "newly")).toContainText("118");
+  await expect(row(page, "eth_minus_30")).toContainText("+$1.2M");
+  await expect(row(page, "eth_minus_30")).not.toContainText("Not served");
+  await expect(page.getByTestId("lab-heatmap")).toBeVisible();
+  await expect(page.getByTestId("lab-movers")).toBeVisible();
   expect(counts.runs()).toBe(1);
 });
 

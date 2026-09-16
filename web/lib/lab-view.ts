@@ -27,7 +27,7 @@ import { definitionSkew, libraryRows, type LibraryRow, type RunRecord, type Scen
 import type { LabReading } from "./lab-reading";
 import { groupInt, joinAnd } from "./prose";
 import type { ResultIdentity } from "./resultIdentity";
-import type { LabRunBook } from "./runbook";
+import type { LabRunBook, RunBookOutcome } from "./runbook";
 
 export { readEngine } from "./lab-engine";
 export type { EngineReading, EngineResult } from "./lab-engine";
@@ -56,11 +56,13 @@ export type BookState =
   | "busy"
   | "unreachable"
   | "failed";
-export type Banner = "stale-input" | "superseded" | null;
+export type Banner = "stale-input" | "superseded" | "rerun-failed" | null;
 
 export interface BookWorkspace {
   readonly state: BookState;
   readonly banner: Banner;
+  /** The failure a re-run met while a computed result is held below it; the banner names it. */
+  readonly rerunFailure: LabHeadline | null;
   readonly kicker: string;
   readonly headline: LabHeadline;
   readonly chips: LabChip[];
@@ -97,6 +99,7 @@ export interface LabView {
 const emptyBook = (state: BookState, headline: LabHeadline, definition: ScenarioDefinition | null = null, chips: LabChip[] = []): BookWorkspace => ({
   state,
   banner: null,
+  rerunFailure: null,
   kicker: definition === null ? "Scenarios · Cash book" : `${definition.label} · Cash book`,
   headline,
   chips,
@@ -140,7 +143,7 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
     enginesChip(run, cash),
     { label: "Config", value: run.scenario_config_version, tone: skew.includes("config version") ? "warn" : undefined },
   ];
-  const base = { kicker, chips, identity, receivedAt, definition: def, run, cash, legacy, skew };
+  const base = { kicker, chips, identity, receivedAt, definition: def, run, cash, legacy, skew, rerunFailure: null };
   // Precedence: a version skew is its own state before any reading is consulted; on a
   // result, a superseded batch outranks a stale input as the banner, and a banner sits
   // on the result state rather than replacing it.
@@ -180,18 +183,27 @@ function bookOf(listing: ScenariosResponse, def: ScenarioDefinition, record: Run
   if (record.phase === "running") return emptyBook("running", runningHeadline(def.label), def, definitionChips(def, listing.scenario_config_version));
   const o = record.outcome;
   if (o.kind === "ok") return resultBook(def, listing.scenario_config_version, o.response, { wallMs: record.at, monotonicMs: record.atMonotonicMs });
-  const chips = definitionChips(def, listing.scenario_config_version);
+  const failure = failureOf(o);
+  if (record.held !== null) {
+    // A result already computed is never replaced by a failed re-run: it stands for the batch it names, the failure named beside it.
+    const held = resultBook(def, listing.scenario_config_version, record.held.response, { wallMs: record.held.at, monotonicMs: record.held.atMonotonicMs });
+    return { ...held, banner: "rerun-failed", rerunFailure: failure.headline };
+  }
+  return emptyBook(failure.state, failure.headline, def, definitionChips(def, listing.scenario_config_version));
+}
+
+function failureOf(o: Exclude<RunBookOutcome, { kind: "ok" }>): { state: BookState; headline: LabHeadline } {
   switch (o.kind) {
     case "not-served":
-      return emptyBook("not-served", failureHeadline("not-served", {}), def, chips);
+      return { state: "not-served", headline: failureHeadline("not-served", {}) };
     case "no-batch":
-      return emptyBook("no-batch", failureHeadline("no-batch", { message: o.message, retryAfterSeconds: o.retryAfterSeconds }), def, chips);
+      return { state: "no-batch", headline: failureHeadline("no-batch", { message: o.message, retryAfterSeconds: o.retryAfterSeconds }) };
     case "rate-limited":
-      return emptyBook("rate-limited", failureHeadline("rate-limited", { retryAfterSeconds: o.retryAfterSeconds }), def, chips);
+      return { state: "rate-limited", headline: failureHeadline("rate-limited", { retryAfterSeconds: o.retryAfterSeconds }) };
     case "unreachable":
-      return emptyBook("unreachable", failureHeadline("unreachable", { message: o.message }), def, chips);
+      return { state: "unreachable", headline: failureHeadline("unreachable", { message: o.message }) };
     case "failed":
-      return emptyBook("failed", failureHeadline("failed", { status: o.status, message: o.message }), def, chips);
+      return { state: "failed", headline: failureHeadline("failed", { status: o.status, message: o.message }) };
   }
 }
 

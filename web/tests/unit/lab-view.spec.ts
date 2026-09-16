@@ -5,13 +5,14 @@ import { expect, test } from "@playwright/test";
 import type { LabReading } from "../../lib/lab-reading";
 import type { RunRecord, SetRecord } from "../../lib/lab-library";
 import { deriveLabView, readEngine } from "../../lib/lab-view";
+import { failureHeadline } from "../../lib/lab-headline";
 import { SCENARIOS } from "../fixtures/lab-book";
 import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, transitionsOf, type Engine } from "./helpers/run-book-engine";
 
 function reading(overrides: Partial<LabReading>): LabReading {
   return { listing: { phase: "ready", value: SCENARIOS }, runs: new Map(), set: null, run: () => {}, runSet: () => {}, reloadListing: () => {}, ...overrides };
 }
-const settled = (id: string, outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): Map<string, RunRecord> => new Map([[id, { phase: "settled", outcome, at: 1, atMonotonicMs: 1 }]]);
+const settled = (id: string, outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): Map<string, RunRecord> => new Map([[id, { phase: "settled", outcome, at: 1, atMonotonicMs: 1, held: null }]]);
 const ui = (selectedId: string | null = "eth_minus_30", checked: string[] = []) => ({ selectedId, checked: new Set(checked) });
 
 /** The demo's Cash engine: the plan's R16 figures on the plan's movement table. */
@@ -67,7 +68,7 @@ test("not run: the definition, the dashed tone, no chips beyond identity, no eng
 });
 
 test("running", () => {
-  const v = deriveLabView(reading({ runs: new Map([["eth_minus_30", { phase: "running", startedAt: 1 }]]) }), ui());
+  const v = deriveLabView(reading({ runs: new Map([["eth_minus_30", { phase: "running", startedAt: 1, held: null }]]) }), ui());
   expect(v.book.state).toBe("running");
   expect(v.book.headline.emphasis).toBe("Running ETH -30 percent…");
 });
@@ -188,4 +189,23 @@ test("readEngine reads by id, refuses by name, and never manufactures a figure",
   const net = readEngine(runBookOf([demoCash({ newly_eligible_accounts: -3 })], DEFINITION_ETH), "debt_manager", DEFINITION_ETH);
   if (net.kind !== "result") throw new Error("a signed net must read");
   expect(net.result.newly).toBe(-3);
+});
+
+test("a failed re-run never replaces a computed result: the held figures stand under a banner naming the failure", () => {
+  const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
+  const held = { response: run, at: 1, atMonotonicMs: 1 };
+  const failure = { kind: "unreachable", message: "the API did not answer" } as const;
+  const runs = new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: failure, at: 2, atMonotonicMs: 2, held }]]);
+  const v = deriveLabView(reading({ runs }), ui());
+  expect(v.book.state).toBe("result");
+  expect(v.book.banner).toBe("rerun-failed");
+  expect(v.book.headline.emphasis).toBe("$1.2M more Cash debt becomes liquidatable,");
+  expect(v.book.rerunFailure).toEqual(failureHeadline("unreachable", { message: "the API did not answer" }));
+  expect(v.book.receivedAt).toEqual({ wallMs: 1, monotonicMs: 1 });
+  expect(v.book.run).toBe(run);
+  // With nothing held, the failure is the state, as before.
+  const first = deriveLabView(reading({ runs: settled("eth_minus_30", failure) }), ui());
+  expect(first.book.state).toBe("unreachable");
+  expect(first.book.banner).toBeNull();
+  expect(first.book.rerunFailure).toBeNull();
 });

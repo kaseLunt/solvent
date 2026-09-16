@@ -6,7 +6,7 @@ import { cashEngineOf, cashRefusalOf, definitionSkew, libraryRows, outcomeLine, 
 import { SCENARIOS } from "../fixtures/lab-book";
 import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, transitionsOf } from "./helpers/run-book-engine";
 
-const settled = (outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): RunRecord => ({ phase: "settled", outcome, at: 1, atMonotonicMs: 1 });
+const settled = (outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): RunRecord => ({ phase: "settled", outcome, at: 1, atMonotonicMs: 1, held: null });
 
 test("rows come from the listing verbatim, in wire order, engines as human names, selection and checks carried", () => {
   const rows = libraryRows(SCENARIOS, new Map(), "ethfi_minus_50", new Set(["eth_minus_30"]));
@@ -26,7 +26,7 @@ test("rows come from the listing verbatim, in wire order, engines as human names
 test("outcome lines: running, a Cash result in the Book's tiers, no band change, band change only, withheld, not modelled, every failure word", () => {
   const def = DEFINITION_ETH;
   expect(outcomeLine(undefined, def)).toEqual({ key: "not-run", text: "Not run yet", tone: "dim" });
-  expect(outcomeLine({ phase: "running", startedAt: 0 }, def)).toEqual({ key: "running", text: "Running…", tone: "dim" });
+  expect(outcomeLine({ phase: "running", startedAt: 0, held: null }, def)).toEqual({ key: "running", text: "Running…", tone: "dim" });
   const demo = runBookOf([cashEngine(DEMO_CASH_TABLE, { newly_eligible_accounts: 118, eligible_debt_delta_usd: "1280000000000" })]);
   expect(outcomeLine(settled({ kind: "ok", response: demo }), def)).toEqual({ key: "result", text: "+$1.2M liquidatable · 118 accounts", tone: "crit" });
   const still = runBookOf([cashEngine({ 2: { 2: 3 }, 7: { 7: 4 } })]);
