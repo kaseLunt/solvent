@@ -20,9 +20,7 @@
 //                so it no longer contradicts the outside-collateral-covers
 //                hover sitting beneath it.
 
-import { expect, test, type Page, type Route } from "@playwright/test";
-import { BOOK, POSITIONS_AAVE_PAGE_1, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
-import { FEED_POSTURE_SNAPSHOT } from "../fixtures/feed";
+import { expect, test, type Page } from "@playwright/test";
 import {
   ADDRESS_FOUND,
   EVENTS,
@@ -32,28 +30,6 @@ import {
 } from "../fixtures/inspector";
 
 const CORS = { "access-control-allow-origin": "*" };
-
-function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
-  return route.fulfill({
-    status,
-    headers: CORS,
-    contentType: "application/json",
-    body: JSON.stringify(body),
-  });
-}
-
-async function muteStream(page: Page): Promise<void> {
-  await page.route("**/v1/stream**", (route) => route.abort());
-}
-
-async function openBookWith(page: Page, positions: unknown, book: unknown = BOOK): Promise<void> {
-  await page.route("**/v1/book", (route) => fulfillJson(route, book));
-  await page.route("**/v1/positions*", (route) => {
-    const engine = new URL(route.request().url()).searchParams.get("engine");
-    return fulfillJson(route, engine === "debt_manager" ? POSITIONS_DM_PAGE_1 : positions);
-  });
-  await page.goto("/book?engine=aave_v3_etherfi");
-}
 
 async function mockInspector(page: Page, address: unknown, history: unknown = HISTORY) {
   await page.route("**/v1/stream*", (route) => route.abort());
@@ -126,154 +102,4 @@ test("(1) the DM bonus is NOT par-based — its premium is the wire value itself
   await expect(params).toContainText("(premium 3500000000000000000 · 100e18 scale)");
   // And the DM's raw is never dressed as a multiplier.
   await expect(params).not.toContainText("multiplier");
-});
-
-// ---------------------------------------------------------------------------
-// (2) MEDIUM — the age is anchored, and the ribbon's threshold ENGAGES.
-// ---------------------------------------------------------------------------
-
-test("(2) the Book's age ADVANCES across the hour while the page sits open", async ({ page }) => {
-  // Playwright's clock fakes `performance` — the same monotonic source the
-  // anchor reads. Installed BEFORE navigation, per the harness's own guidance.
-  await page.clock.install();
-  await muteStream(page);
-
-  // DERIVED /v1/book: the batch is 3550s old — 59m, fifty seconds inside the
-  // hour. No other byte changes.
-  const nearHour = structuredClone(BOOK);
-  nearHour.batch.age_seconds = 3550;
-  await openBookWith(page, POSITIONS_AAVE_PAGE_1, nearHour);
-
-  const line = page.getByTestId("book-freshness");
-  await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 59m ago");
-
-  // One tick of a tab left open, and the sentence has MOVED — the timestamp
-  // has not.
-  await page.clock.fastForward(60_000);
-  await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 1h 0m ago");
-  await expect(page.getByTestId("book-stamp-freshness")).toHaveText(
-    "#1 · computed 2026-07-29T10:00:00Z · 1h 0m ago",
-  );
-
-  // Ten more minutes, still climbing — it never re-freezes.
-  await page.clock.fastForward(10 * 60_000);
-  await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 1h 10m ago");
-});
-
-test("(2) THE RIBBON ENGAGES: the stale-batch suffix appears on the crossing", async ({ page }) => {
-  await page.clock.install();
-
-  // DERIVED stream snapshot: the posture batch is 3550s old — fifty seconds
-  // inside the ribbon's 1h threshold, so the suffix is correctly SILENT at
-  // receipt. No other byte changes.
-  const nearHour = structuredClone(FEED_POSTURE_SNAPSHOT);
-  if (nearHour.batch === null || nearHour.batch === undefined) {
-    throw new Error("fixture shape drifted");
-  }
-  nearHour.batch.age_seconds = 3550;
-  await page.route("**/v1/stream**", (route) =>
-    route.fulfill({
-      status: 200,
-      headers: { ...CORS, "content-type": "text/event-stream" },
-      body: `event: snapshot\ndata: ${JSON.stringify(nearHour)}\n\n`,
-    }),
-  );
-  await openBookWith(page, POSITIONS_AAVE_PAGE_1);
-
-  const header = page.getByRole("banner");
-  // WAVE R7 (round-15 finding 4) CHANGED WHAT THIS BADGE IS ALLOWED TO SAY, and
-  // this assertion moved with it. `route.fulfill` delivers the snapshot and then
-  // ENDS the response body — which is a server hanging up. The client raises
-  // "the server closed the stream" and parks on its reconnect backoff (the fake
-  // clock keeps that timer parked). The ribbon USED to paint `LIVE ·
-  // WATERMARKED` over exactly that, because holding a batch was the whole
-  // qualification for the green chip; painting LIVE over a closed connection is
-  // the defect R7 fixes. It now names the connection it actually has — and the
-  // BATCH AGE, which is this test's real subject, renders beside it unchanged.
-  await expect(header.getByText("STREAM RECONNECTING")).toBeVisible();
-  await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
-  // Phase 0 fix 5 INVERTED THIS PIN DELIBERATELY: the snapshot chip is ALWAYS
-  // visible, so a sub-hour age is STATED exactly rather than withheld until a
-  // threshold crossing (the cross-page brief: "Always show the age").
-  // p1a-4: 3550s is past the price ceiling — the chip wears the STALE tier.
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 59m · STALE");
-
-  // The batch really does become an hour old while the tab is open, and the
-  // appbar now says so — the defect was that it never could.
-  await page.clock.fastForward(60_000);
-  await expect(page.getByTestId("ribbon-snapshot")).toHaveText("SNAPSHOT 1h 0m · STALE");
-  // TWO SUBJECTS, TWO STATEMENTS, both still true and both still rendered: the
-  // stream's own posture, and the age of the batch it last delivered. Losing
-  // the connection does not cost the reader the fact that their data is old —
-  // which is the disclosure this whole wave exists to keep on screen.
-  await expect(header.getByText("STREAM RECONNECTING")).toBeVisible();
-});
-
-// ---------------------------------------------------------------------------
-// (3) MEDIUM — the rendered legend, over an outside-collateral-covers row.
-// ---------------------------------------------------------------------------
-
-/**
- * DERIVED /v1/positions page 1: the aave row's `liq_distance` becomes the
- * `never` kind carrying the solver's "collateral outside the factor already
- * covers the debt at threshold" reason — the exact wire shape
- * internal/risk/liqprice.go publishes. No other byte changes.
- */
-function aavePageWithOutsideCovers() {
-  const page1 = structuredClone(POSITIONS_AAVE_PAGE_1);
-  const row = page1.positions[0];
-  if (row === undefined) throw new Error("fixture shape drifted");
-  row.liq_distance = {
-    kind: "never",
-    scale_factor_num: null,
-    scale_factor_den: null,
-    factor_asset: null,
-    reason: "collateral outside the factor already covers the debt at threshold",
-  } as (typeof row)["liq_distance"];
-  page1.next_cursor = null;
-  return page1;
-}
-
-test("(3) the legend states REACHABILITY, and stops contradicting the covers hover", async ({
-  page,
-}) => {
-  await muteStream(page);
-  await openBookWith(page, aavePageWithOutsideCovers());
-
-  // The rendered legend, verbatim.
-  //
-  // WAVE R4 (round-11 MEDIUM) INVERTED THE TAIL OF THIS PIN. The REACHABILITY
-  // clause this test was written for is unchanged and still correct; what
-  // followed it — "interest or a parameter change can still cross" — asserted
-  // a live non-price path over EVERY row, including the no-debt arm where no
-  // boundary exists at all. The legend now states only the scope of the solve
-  // and hands each row's reason to its own hover, which is precisely where
-  // this test then reads it.
-  await expect(page.getByTestId("no-price-path-legend")).toHaveText(
-    "no price path = no downward move along the committed price axis reaches liquidation for " +
-      "this account. Non-price paths are not evaluated here; each cell's hover names its " +
-      "reason. The HF column stays the verdict.",
-  );
-
-  // THE DEFECT, named: for THIS row the shocked collateral does move — it is
-  // simply covered. A legend claiming nothing moves it was false on the page
-  // it was rendered on.
-  await expect(page.getByTestId("no-price-path-legend")).not.toContainText(
-    "moves this account's collateral",
-  );
-
-  // The hover is reason-specific and UNCHANGED — the legend now agrees with
-  // it. W-HR-A moved the hover onto the Headroom cell (the price-path column
-  // is struck); the sentence it carries is byte-identical, after the band's
-  // own meaning.
-  const cell = page
-    .getByRole("table", { name: "positions for aave_v3_etherfi" })
-    .getByTestId("headroom-value");
-  await expect(cell).toHaveAttribute(
-    "title",
-    "5–10% of borrowing capacity left before liquidation Collateral outside the shocked asset already covers the debt at the " +
-      "liquidation threshold, so no fall of the shocked asset alone reaches the boundary; " +
-      "interest or parameter changes still can. Wire: 'collateral outside the factor already " +
-      "covers the debt at threshold'.",
-  );
 });

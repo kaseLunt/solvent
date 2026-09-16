@@ -4083,3 +4083,279 @@ Commissioned forward (owner-ratified): RESPONSE-BOUNDARY VALIDATION AT INGESTION
 Standing owner-adjudication items: A2 post-parse fractional rounding (recorded boundary); retryAfter
 typeof-number twins; server-side solver-error prices:null serialization (API defect, outside program scope).
 Suites at seal: p1b shape 1647/10/0; CI-mirror shape 1645+/0/0; client-ts 355/0. Typecheck/lint/stylelint clean.
+
+
+## 2026-09-15 · Plan 1 (kit · Overview · Book) — pin retirement ledger
+
+Authority: docs/specs/2026-09-15-ui-product-register-design.md §7. The Book surface was rebuilt;
+its page-local modules (app/book/*.ts) and the pins describing the old surface are retired.
+Semantic invariants re-expressed in tests/e2e/book.spec.ts: refused never zero · null never zero ·
+engine withheld whole · 503 no-batch · 409 walk restart · dek computed from the response ·
+never summed · batch identity rendered. Not carried into Plan 1 (recorded, not lost): the
+"All N accounts" explorer link and the Collateral-mix section (no per-asset collateral on /v1/book).
+
+The old app header (AppHeader · PostureRibbon · header.module.css) went with it: the tier→tone
+invariant is re-expressed in tests/unit/live-pill.spec.ts ("age tone follows the ratified tiers; an
+unknown age is dim, never a tier color" · "stream words") and the honest pill in
+tests/e2e/shell.spec.ts ("<path> renders <label> inside the shell": data-word Reconnecting|Not
+connected with no API behind it). The freshness clock laws the old Book's age line and the old
+ribbon rendered stay pinned at the lib layer (tests/unit/freshness*.spec.ts · stale-since.spec.ts ·
+result-identity.spec.ts). Method: every e2e spec touching /book was inventoried, then the whole
+suite was run against HEAD's production build BEFORE any deletion — 138 failed / 323 passed /
+10 skipped — and the 138 were partitioned by the decision rule: 135 pinned the retired Book or
+header; 3 did not (see "Left red, not retired" below).
+
+### Inventory (before deleting anything)
+
+| file | tests | touching /book or book-* ids | decision |
+|---|---|---|---|
+| tests/e2e/book-charts.spec.ts | 17 | 14 (§16–§18 Book charts) | trim: 14 retired; 3 "Lab …" caption tests stay (they goto /lab) |
+| tests/e2e/book-table.spec.ts | 10 | 10 | delete whole |
+| tests/e2e/chart-spec-v4.spec.ts | 40 | 27 (risk map, Book histogram) | trim: 27 retired; 13 frontier/run-book/cross tests on /lab stay |
+| tests/e2e/w3l-slots.spec.ts | 21 | 12 (Book slot order) | trim: 12 retired; 9 Lab slot tests stay |
+| tests/e2e/state-matrix.spec.ts | 1 driver × 53 cells | 15 cells (11 book × …, 4 shell × live:… on /book) | trim: 15 cells retired; 38 cells stay |
+| tests/e2e/p0-fixes.spec.ts | 18 | 3 (p0-4 histogram, p0-5 snapshot chip) | trim |
+| tests/e2e/p1a-fixes.spec.ts | 28 | 13 (p1a-4 ×7, p1a-9 F1/F2/F4 ×6) | trim; p1a-1 width/token pins pass on the new shell and stay; p1a-6 styleguide and F3 feed stay |
+| tests/e2e/p1b-fixes.spec.ts | 24 | 6 (p1b-0, p1b-13, p1b-14 ×2, p1b-15 ×2) | trim |
+| tests/e2e/r1-fixes.spec.ts | 25 | 10 ((1)×3, (7), (9)×2, (3), (8)×2, (6) nav) | trim; "(6) not one numbered eyebrow …" passes on every new surface and stays |
+| tests/e2e/r3-fixes.spec.ts | 6 | 3 ((2)×2, (3)) | trim |
+| tests/e2e/r4-fixes.spec.ts | 6 | 5 ((1)×3, (2)×2) | trim; "(1) the Inspector reconciles its OWN lookup" stays |
+| tests/e2e/r5-fixes.spec.ts | 5 | 5 | delete whole |
+| tests/e2e/r6-fixes.spec.ts | 5 | 4 | trim; "(2) the Inspector: same law" stays |
+| tests/e2e/r7-fixes.spec.ts | 6 | 6 | delete whole |
+| tests/e2e/r8-fixes.spec.ts | 4 | 2 ((1)×2) | trim; (2)×2 Lab anchor tests stay |
+| tests/e2e/lab, r12–r17, runbook-bsplit, runbook-transition, shell | — | book-result / book-engine / book-running ids only | out of scope: those are the Lab run-book panel's ids on /lab, not the Book page |
+| web/app/book/ | 25 files | 18 unreferenced by the new BookSurface | delete 18; keep page.tsx BookSurface.tsx book.module.css NeedsAttention.tsx StressPreview.tsx BookLegacy.tsx BookMethodology.tsx |
+| tests/unit importing app/book | 8 | book-charts-copy, book-dek, book-row, book-table, dust, headroom-pareto, stress-increments, risk-bins | delete 8; book-sort-vocabulary (lib/positions), flip-ranking (app/lab), book-fixture-fidelity (fixtures only) STAY |
+
+### Retired e2e pins — one line per test
+
+tests/e2e/book-charts.spec.ts (14 of 17; the 3 "Lab …" tests stay, file header rewritten)
+- book-charts.spec.ts · "reading lines render per panel from the served /v1/book values" — retired: copy/DOM of the retired Book histogram reading lines
+- book-charts.spec.ts · "book stat block: slot order is STATE, ANSWER, cards, METHOD (DOM order)" — retired: DOM of the retired BookStatRows
+- book-charts.spec.ts · "MUTATE the fixture and the reading lines change — computed, not hardcoded" — retired: copy/DOM of the retired reading lines; the computed-from-the-response law moved to book.spec.ts "demo scale: money-first headline, the dust toggle restates the count, bands sum to the computed population" (and tests/unit/book-headline.spec.ts)
+- book-charts.spec.ts · "waterfall: percent labels, unshocked census, exact micro-strings, verbatim copy" — retired: copy/DOM of the retired BookWaterfall (its successor, StressPreview, is pinned in tests/unit/stress-preview.spec.ts)
+- book-charts.spec.ts · "waterfall slot order: STATE (held-flat count) before the bars, METHOD and FORENSICS after" — retired: DOM of the retired BookWaterfall
+- book-charts.spec.ts · "at_risk_note is ABSENT from the Book waterfall panel — and SURVIVES in the Developers raw register" — retired: copy/DOM of the retired BookWaterfall (the Developers half was the contrast term)
+- book-charts.spec.ts · "held flat (Book): the counted-disclosure pattern, raw units by design" — retired: copy/DOM of the retired BookWaterfall
+- book-charts.spec.ts · "the full-book walk AUTO-STARTS on mount — no button, and the partial page-scatter is gone" — retired: DOM of the retired risk-map walk; the walk-on-mount is exercised by book.spec.ts "committed fixture: the verdict, its identity, six tiles, the attention table, the legacy section"
+- book-charts.spec.ts · "the auto walk: live progress, completed header, and ONE drawing (the DensityMap)" — retired: DOM of the retired DensityMap and its progress line
+- book-charts.spec.ts · "409 mid-walk: the BookPositions notice grammar VERBATIM, restart from page one" — retired: invariant moved to book.spec.ts "a 409 during the walk restarts it on the reloaded book" (the notice grammar itself is retired copy)
+- book-charts.spec.ts · "OUTPACED: a book that re-materializes faster than one walk gives up OUT LOUD — never a spliced vector" — retired: copy/DOM of the retired walk's give-up notice; the single-409 restart is in book.spec.ts "a 409 during the walk restarts it on the reloaded book"; the repeated-409 (outpaced) arm is not re-pinned — recorded below
+- book-charts.spec.ts · "409 mid-walk with a SLOW fresh page: the stale progress dies AT ONCE, not on arrival" — retired: DOM of the retired walk progress; 409 restart per book.spec.ts "a 409 during the walk restarts it on the reloaded book"; the stale-progress timing arm is not re-pinned — recorded below
+- book-charts.spec.ts · "the map's on-book count is BATCH-PAIRED — the table advancing past the map never blends two counts" — retired: DOM of the retired map/table pair; the new Book has one walk and one rendered batch identity, book.spec.ts "committed fixture: the verdict, its identity, six tiles, the attention table, the legacy section"
+- book-charts.spec.ts · "an engine switch mid-walk restarts the walk — a vector never splices two books" — retired: control of the retired surface (the new Book is Cash-first with no engine switch) — recorded below
+
+tests/e2e/book-table.spec.ts (all 10)
+- book-table.spec.ts · "default dust <$1: min_value composed from the engine's decimals; disclosure exact at exhaustion; show reveals" — retired: invariant moved to book.spec.ts "demo scale: money-first headline, the dust toggle restates the count, bands sum to the computed population" (the min_value disclosure copy is retired)
+- book-table.spec.ts · "empty filtered walk: hidden rows are named as hidden, not absent — dust off reveals them" — retired: invariant moved to book.spec.ts "demo scale: money-first headline, the dust toggle restates the count, bands sum to the computed population"
+- book-table.spec.ts · "header sort cycle: canonical → exact reverse → canonical; column switch resets; every change is a new walk" — retired: DOM/controls of the retired positions table (the attention table has a fixed ordering) — recorded below
+- book-table.spec.ts · "the Headroom column ranks by the wire's OWN `headroom` key on BOTH engines (1.5.0)" — retired: DOM of the retired positions table's sort; the sort vocabulary law stays in tests/unit/book-sort-vocabulary.spec.ts (lib/positions)
+- book-table.spec.ts · "refused first: sort=status via the ONE standalone chip — indicators clear, headers exit it" — retired: DOM of the retired sort chip; refused rows stay counted, not hidden, per book.spec.ts "committed fixture: the verdict, its identity, six tiles, the attention table, the legacy section"
+- book-table.spec.ts · "deep links round-trip: non-defaults kept, illegal combos normalized before ANY request, defaults omitted" — retired: URL controls of the retired positions table; normalizeBookQuery stays pinned in tests/unit/book-sort-vocabulary.spec.ts
+- book-table.spec.ts · "the sentinel never auto-loads across an error; retry stays the one honest continuation" — retired: invariant moved to book.spec.ts "a transport failure mid-walk is stated with a retry that re-walks"
+- book-table.spec.ts · "windowing bounds the DOM: 1,000 loaded rows render as a slice, footer always visible" — retired: DOM of the retired virtualized table (the attention table is bounded by materiality, not windowing) — recorded below
+- book-table.spec.ts · "batch mismatch: the hidden count refuses to blend two batches; the surface re-fetches /v1/book once" — retired: invariant moved to book.spec.ts "a 409 during the walk restarts it on the reloaded book"
+- book-table.spec.ts · "the risk map wears ONE axis vocabulary: debt (usd, log), $-prefixed — and there is no partial register left to fork it" — retired: DOM of the retired risk map
+
+tests/e2e/chart-spec-v4.spec.ts (27 of 40; the 13 frontier / run-book / cross tests on /lab stay, file header rewritten)
+- chart-spec-v4.spec.ts · "AC-6/AC-7/AC-8: the lane, its ONE label, and the $1 tick at exactly left + 48 + 14" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "AC-6: an all-sub-$1 book draws NO lane, NO break glyph and NO `<$1` label" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "AC-9/AC-11: sub-$1 bins live inside the lane, at least 1.5px wide, order preserved" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "W-CH-B: adjacent sub-$1 bins share the lane's own scale and never overlap" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "AC-12: the SVG renders 1:1 from the measured width, with no scale factor" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "AC-13/AC-14: the ramp is 0.30/0.48/0.66/0.85 and every cell clears 3:1" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "AC-15: the seven marginal bars share ONE scale, and a zero band draws no ink" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "W-CH-B / AC-15: a marginal bar's RENDERED width is its true share at an extreme ratio" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "W-CH-C / AC-15: a band under one-millionth of the peak keeps its dot and its ledger row" — retired: geometry of the retired DensityMap / RiskMapLedger
+- chart-spec-v4.spec.ts · "AC-16: no currency text floats inside the risk-map SVG except the axis ticks" — retired: DOM of the retired DensityMap
+- chart-spec-v4.spec.ts · "AC-17: the legend names the four RANGES, not four exact counts" — retired: copy of the retired risk-map legend
+- chart-spec-v4.spec.ts · "AC-18: two crit rows one unit apart dodge into lanes 8px apart, both titled" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "AC-20: 20 colliding crit rows take 20 lanes; the strip GROWS to 8 + 20*8" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "W-VR/AC-23: NO drawn callouts, NO leader ink, NO overflow note — all 12 exposures ranked in FORENSICS" — retired: DOM of the retired DensityMap forensics
+- chart-spec-v4.spec.ts · "AC-24/AC-25: the LEDGER lists every nonempty bin, and no number lives only in a title" — retired: DOM of the retired RiskMapLedger
+- chart-spec-v4.spec.ts · "AC-26/AC-28: the coverage line renders with ZERO refusals and outside every <details>" — retired: DOM of the retired risk map; refusals never hidden per book.spec.ts "the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero"
+- chart-spec-v4.spec.ts · "AC-28: a refusal is NEVER a descendant of the FORENSICS region" — retired: DOM of the retired risk map; refusals never hidden per book.spec.ts "the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero"
+- chart-spec-v4.spec.ts · "AC-29: DOM order is STATE, ANSWER, SVG, LEDGER, METHOD, FORENSICS" — retired: DOM of the retired BookRiskMap
+- chart-spec-v4.spec.ts · "AC-30: aria-describedby is the METHOD line only; aria-details is FORENSICS; `Exact data` moves focus" — retired: DOM of the retired BookRiskMap
+- chart-spec-v4.spec.ts · "AC-31/AC-32: ONE tab stop, ArrowRight moves the selection, Enter opens the detail with no request" — retired: interaction of the retired DensityMap
+- chart-spec-v4.spec.ts · "AC-33 + W-VR: the source-filter copy states the CONJUNCTION, with its unit, in STATE order" — retired: copy of the retired risk map STATE line
+- chart-spec-v4.spec.ts · "AC-10: one rect per bin, and the LEDGER agrees with the grid" — retired: geometry of the retired DensityMap
+- chart-spec-v4.spec.ts · "AC-52: no user-visible text says `HF histogram` or `health-factor histogram`" — retired: copy of the retired BookHistogram
+- chart-spec-v4.spec.ts · "AC-53: bars are a share of the NAMED denominator on a 0–100% axis" — retired: geometry of the retired BookHistogram (the run-book twin "W-CH-B / AC-53: the run-book distributions carry the same true-share law" stays)
+- chart-spec-v4.spec.ts · "W-CH-B / AC-53: a 1-in-10,001 bucket draws its TRUE share on the Book histogram" — retired: geometry of the retired BookHistogram
+- chart-spec-v4.spec.ts · "AC-54: the risk map and the risk-band distributions render 12px at both breakpoints" — retired: typography of the retired DensityMap / BookHistogram (the frontier and run-book AC-54 twins stay)
+- chart-spec-v4.spec.ts · "AC-55: the risk map renders no reference to a token that does not exist" — retired: stylesheet pin of the retired DensityMap
+
+tests/e2e/w3l-slots.spec.ts (12 of 21; the 9 Lab slot tests stay)
+- w3l-slots.spec.ts · "BookStatRows: STATE, ANSWER, cards, METHOD in DOM order" — retired: DOM of the retired BookStatRows
+- w3l-slots.spec.ts · "BookStatRows hazard: the refusal breakdown and the split never collapse" — retired: DOM of the retired BookStatRows; refusals never collapsed per book.spec.ts "the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero"
+- w3l-slots.spec.ts · "BookHistogram: STATE, ANSWER, VISUAL, METHOD, FORENSICS in DOM order" — retired: DOM of the retired BookHistogram
+- w3l-slots.spec.ts · "BookHistogram hazards: the coverage counts stay outside the disclosure" — retired: DOM of the retired BookHistogram
+- w3l-slots.spec.ts · "BookWaterfall: STATE before the bars, ANSWER, METHOD, FORENSICS after" — retired: DOM of the retired BookWaterfall
+- w3l-slots.spec.ts · "BookWaterfall hazards: held-flat COUNT, MONOTONICITY VIOLATION and EXCLUDED ENGINES all stay open, above the bars" — retired: DOM of the retired BookWaterfall; held-flat / monotonicity disclosure laws for its successor are in tests/unit/stress-preview.spec.ts
+- w3l-slots.spec.ts · "BookBadDebt: ANSWER and METHOD above the table, neither collapsible" — retired: DOM of the retired BookBadDebt
+- w3l-slots.spec.ts · "BookPositions: STATE, controls, ANSWER, METHOD, table in DOM order" — retired: DOM of the retired BookPositions
+- w3l-slots.spec.ts · "BookPositions hazards: the warn band, the legends, and the degraded SUPERSESSION and REFUSAL registers all stay open" — retired: DOM of the retired BookPositions; supersession → book.spec.ts "a 409 during the walk restarts it on the reloaded book", refusal → book.spec.ts "the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero"
+- w3l-slots.spec.ts · "BookPositions: the ordering-in-force strip is its own line, never a chip and never collapsed" — retired: copy/DOM of the retired sort acknowledgement strip
+- w3l-slots.spec.ts · "LAW-5: the price-path marker renders the FIXTURE's own asset and distance" — retired: DOM of the retired positions table's price-path marker (liq-distance rendering law stays in tests/unit/liq-distance.spec.ts) — recorded below
+- w3l-slots.spec.ts · "Stampline: refusal-class pins stay inline, neutral pins collapse behind a COUNT" — retired: DOM of the retired Book stampline (the Stampline component itself stays for Inspector/Lab/History/Verification)
+
+tests/e2e/state-matrix.spec.ts (15 of 53 cells; the driver and the other 38 cells stay)
+- state-matrix.spec.ts · "book × loading" — retired: DOM of the retired loading register (book-loading)
+- state-matrix.spec.ts · "book × ok" — retired: invariant moved to book.spec.ts "committed fixture: the verdict, its identity, six tiles, the attention table, the legacy section"
+- state-matrix.spec.ts · "book × refused:engine-withheld" — retired: invariant moved to book.spec.ts "the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero"
+- state-matrix.spec.ts · "book × error:503-no-batch" — retired: invariant moved to book.spec.ts "no servable batch (503): the load-failure headline names the reason"
+- state-matrix.spec.ts · "book × error:429" — retired: copy/DOM of the retired 429 register; the new load-failure headline is pinned on the 503 arm only — recorded below
+- state-matrix.spec.ts · "book × error:500" — retired: copy/DOM of the retired 500 register — recorded below
+- state-matrix.spec.ts · "book × error:500-book-with-positions-computed-zero" — retired: copy/DOM of the retired fetch-failure strip; computed zero vs refused is owned by book.spec.ts "the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero"
+- state-matrix.spec.ts · "book × degraded:batch-superseded-409" — retired: invariant moved to book.spec.ts "a 409 during the walk restarts it on the reloaded book"
+- state-matrix.spec.ts · "book × refused:never-swept-collateral" — retired: DOM of the retired positions table's refused cell; refused rows counted, not hidden, per book.spec.ts "committed fixture: the verdict, its identity, six tiles, the attention table, the legacy section"
+- state-matrix.spec.ts · "book × degraded:superseded-still-served" — retired: DOM of the retired supersession register; batch identity rendered per book.spec.ts "committed fixture: the verdict, its identity, six tiles, the attention table, the legacy section"
+- state-matrix.spec.ts · "book × responsive:mobile" — retired: DOM of the retired surface at 390px; the new Book's mobile overflow is not re-pinned — recorded below (and see "Left red")
+- state-matrix.spec.ts · "shell × live:sse-down" — retired: STREAM … text of the retired header; honest pill in shell.spec.ts "<path> renders <label> inside the shell", words in tests/unit/live-pill.spec.ts "stream words"
+- state-matrix.spec.ts · "shell × live:sse-snapshot" — retired: STREAM … text and SNAPSHOT chip of the retired header; tier→tone in tests/unit/live-pill.spec.ts "age tone follows the ratified tiers; an unknown age is dim, never a tier color"; the pill-goes-Live-on-a-base-frame arm is not re-pinned in e2e — recorded below
+- state-matrix.spec.ts · "shell × live:sse-unavailable-stale-last-good" — retired: ribbon-stale-since of the retired header; the stale-since law stays in tests/unit/stale-since.spec.ts
+- state-matrix.spec.ts · "shell × live:sse-recovered" — retired: STREAM … text of the retired header; live-pill.spec.ts "stream words"; the recovery arm is not re-pinned in e2e — recorded below
+
+tests/e2e/p0-fixes.spec.ts (3 of 18)
+- p0-fixes.spec.ts · "p0-4 · Book histogram panels humanize the comparator token" — retired: copy/DOM of the retired BookHistogram; the comparator-label law stays in tests/unit/comparator-label.spec.ts
+- p0-fixes.spec.ts · "p0-5 · a FRESH batch still shows its age beside the connected chip" — retired: SNAPSHOT chip of the retired header; age words in tests/unit/live-pill.spec.ts and tests/unit/freshness.spec.ts
+- p0-fixes.spec.ts · "p0-5 · an old batch reads in hours+minutes, not a coarse suffix" — retired: SNAPSHOT chip of the retired header; age words in tests/unit/live-pill.spec.ts and tests/unit/freshness.spec.ts
+
+tests/e2e/p1a-fixes.spec.ts (13 of 28; p1a-1 ×4, p1a-6 ×9 and p1a-9 F3 ×2 stay; section headers rewritten)
+- p1a-fixes.spec.ts · "p1a-4 · each truth is its own chip — and LIVE · WATERMARKED is retired" — retired: DOM of the retired appbar chips; honest pill in shell.spec.ts "<path> renders <label> inside the shell"
+- p1a-fixes.spec.ts · "p1a-4 · tier styling is computed from the ratified bounds — quiet, warn, crit outline, crit fill" — retired: colors of the retired SNAPSHOT chip; tier→tone in tests/unit/live-pill.spec.ts "age tone follows the ratified tiers; an unknown age is dim, never a tier color"
+- p1a-fixes.spec.ts · "p1a-4 · raw watermark heights live in the Data status popover — not in the bar" — retired: DOM of the retired Data-status popover — recorded below
+- p1a-fixes.spec.ts · "p1a-4 · partial coverage WARNS and NAMES the withheld engine" — retired: DOM of the retired COVERAGE chip — recorded below
+- p1a-fixes.spec.ts · "p1a-4 · an UNBINDABLE refusal withholds the coverage chip entirely — never an invented count" — retired: DOM of the retired COVERAGE chip — recorded below
+- p1a-fixes.spec.ts · "p1a-4 · SUPERSEDED is a chip in the warn register" — retired: DOM of the retired appbar chips
+- p1a-fixes.spec.ts · "p1a-4 · a genuinely open stream is STREAM CONNECTED — an accent chip, never green, never LIVE" — retired: STREAM chip of the retired header; never-a-fake-Live in shell.spec.ts "<path> renders <label> inside the shell", words in tests/unit/live-pill.spec.ts "stream words"
+- p1a-fixes.spec.ts · "p1a-9 · F1: COVERAGE counts risk books — 2/2 on a five-stamp production-shaped batch, never 5/5" — retired: DOM of the retired COVERAGE chip — recorded below
+- p1a-fixes.spec.ts · "p1a-9 · F1: a withheld book on the five-stamp batch is 1/2 — warn register, named" — retired: DOM of the retired COVERAGE chip — recorded below
+- p1a-fixes.spec.ts · "p1a-9 · F1: a frame WITHOUT the aggregates roster withholds the coverage chip entirely" — retired: DOM of the retired COVERAGE chip — recorded below
+- p1a-fixes.spec.ts · "p1a-9 · F2: while /v1/meta is PENDING the snapshot chip renders the age UNSTAINED — no tier word, no tier color" — retired: SNAPSHOT chip of the retired header; the unknown-age-is-dim law in tests/unit/live-pill.spec.ts "age tone follows the ratified tiers; an unknown age is dim, never a tier color"
+- p1a-fixes.spec.ts · "p1a-9 · F4: NO SERVABLE BATCH renders BESIDE the stream chip — a hang-up reads STREAM RECONNECTING" — retired: STREAM chip of the retired header; shell.spec.ts "<path> renders <label> inside the shell" (Reconnecting|Not connected)
+- p1a-fixes.spec.ts · "p1a-9 · F4: NO SERVABLE BATCH over a genuinely OPEN stream reads STREAM CONNECTED — accent, never green" — retired: STREAM chip of the retired header; tests/unit/live-pill.spec.ts "stream words"
+
+tests/e2e/p1b-fixes.spec.ts (6 of 24)
+- p1b-fixes.spec.ts · "p1b-0 · a render throw shows the refusal register, not the generic error page" — retired: its throw site was the retired BookStatRows (renderEngineAmount on total_debt ""); replayed 2026-09-15 on the new Book: no throw, the honest headline renders, no generic error page — the route boundary (app/error.tsx · RouteRefusal) keeps no e2e pin from /v1/book — recorded below
+- p1b-fixes.spec.ts · "p1b-13 · a /v1/book usd_decimals token that parses to -0 refuses the ROUTE — never a mis-scaled dollar figure" — retired: read site was the retired BookBadDebt; the -0 scale law stays in tests/unit/wire-guard.spec.ts; replayed: the mis-scaled 239,603,961 is absent on the new Book
+- p1b-fixes.spec.ts · "p1b-14 · a bucket-count token that parses to -0 refuses the PANEL by name — no hidden account, route live" — retired: DOM of the retired BookHistogram (hist-malformed); the -0 population law stays in tests/unit/wire-guard.spec.ts
+- p1b-fixes.spec.ts · "p1b-14 · an aggregate computed_positions token that parses to -0 refuses the ROUTE — the sweep's readWirePopulation arm" — retired: read site was the retired useFullBookWalk; the -0 population law stays in tests/unit/wire-guard.spec.ts; replayed: the new BookLegacy renders the token verbatim as "-0 computed" — a reopened render site, flagged for Task 13 / Plan 4 (see concerns)
+- p1b-fixes.spec.ts · "p1b-15 · a sweep failed-tally token that parses to -0 renders the unreadable register — never the dim arm" — retired: DOM of the retired header's Data-status popover
+- p1b-fixes.spec.ts · "p1b-15 · a waterfall first-index token that parses to -0 refuses the ROUTE — never the unshocked rung" — retired: read site was the retired waterfallView; the -0 index law stays in tests/unit/wire-guard.spec.ts; replayed: no "unshocked" rung on the new Book
+
+tests/e2e/r1-fixes.spec.ts (10 of 25)
+- r1-fixes.spec.ts · "(1) the wire's own reason survives the DEMOTION to the Headroom cell's hover, verbatim" — retired: DOM of the retired positions table (liq-distance law stays in tests/unit/liq-distance.spec.ts)
+- r1-fixes.spec.ts · "(1) an ABSENT reason still refuses to rule out interest and parameters" — retired: copy of the retired positions table hover
+- r1-fixes.spec.ts · "(1) the legend is RENDERED (not hover-only) and the column header carries its scope" — retired: DOM of the retired positions table legend
+- r1-fixes.spec.ts · "(7) every numeric column header is right-aligned, matching its cells" — retired: DOM of the retired positions table
+- r1-fixes.spec.ts · "(9) the dek is COMPUTED from /v1/book — mutate the response, the sentence changes" — retired: invariant moved to book.spec.ts "demo scale: money-first headline, the dust toggle restates the count, bands sum to the computed population" (and tests/unit/book-headline.spec.ts)
+- r1-fixes.spec.ts · "(9) a withheld engine's side is UNKNOWN in the dek — never a zero" — retired: invariant moved to book.spec.ts "the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero"
+- r1-fixes.spec.ts · "(3) the Book head AND its stampline carry the batch's own age" — retired: DOM of the retired Book stampline; batch identity per book.spec.ts "committed fixture: the verdict, its identity, six tiles, the attention table, the legacy section"
+- r1-fixes.spec.ts · "(8) order: map ABOVE table; positions ABOVE histogram; census ABOVE waterfall" — retired: section order of the retired surface
+- r1-fixes.spec.ts · "(8) the census is retitled to what it states" — retired: copy of the retired BookBadDebt heading
+- r1-fixes.spec.ts · "(6) the nav's two registers sit adjacent, divided — not across a void" — retired: DOM of the retired AppHeader nav (it looked up a "Proof" link; the shell's tab is "Verification"); the eight-tab nav is pinned in shell.spec.ts "<path> renders <label> inside the shell"
+
+tests/e2e/r3-fixes.spec.ts (3 of 6)
+- r3-fixes.spec.ts · "(2) the Book's age ADVANCES across the hour while the page sits open" — retired: DOM of the retired book-freshness line; the anchored-age law stays in tests/unit/freshness.spec.ts and freshness-receipt.spec.ts
+- r3-fixes.spec.ts · "(2) THE RIBBON ENGAGES: the stale-batch suffix appears on the crossing" — retired: SNAPSHOT chip of the retired header; tiers in tests/unit/freshness-tiers.spec.ts and live-pill.spec.ts
+- r3-fixes.spec.ts · "(3) the legend states REACHABILITY, and stops contradicting the covers hover" — retired: copy/DOM of the retired positions table legend
+
+tests/e2e/r4-fixes.spec.ts (5 of 6)
+- r4-fixes.spec.ts · "(1) THE ROUND-11 DEFECT: a sleep that freezes performance.now no longer freezes the age" — retired: DOM of the retired book-freshness line; the resume law stays in tests/unit/freshness-resume.spec.ts (the Inspector twin in this file stays)
+- r4-fixes.spec.ts · "(1) THE RIBBON ENGAGES POST-RESUME: a slept-through threshold is still crossed" — retired: SNAPSHOT chip of the retired header
+- r4-fixes.spec.ts · "(1) NEVER DECREASES: a wall clock stepped BACKWARDS cannot rewind the rendered age" — retired: DOM of the retired book-freshness line; the never-decreases law stays in tests/unit/freshness-resume.spec.ts and freshness-blind-resume.spec.ts
+- r4-fixes.spec.ts · "(2) THE ROUND-11 DEFECT: the legend and the NO-DEBT hover no longer contradict" — retired: copy/DOM of the retired positions table legend
+- r4-fixes.spec.ts · "(2) the reason-neutral legend still sits honestly over the COVERS arm" — retired: copy/DOM of the retired positions table legend
+
+tests/e2e/r5-fixes.spec.ts (all 5)
+- r5-fixes.spec.ts · "(1) THE ROUND-12 DEFECT: a NEW receipt at the SAME age_seconds re-anchors" — retired: DOM of the retired book-freshness line; the receipt law stays in tests/unit/freshness-receipt.spec.ts
+- r5-fixes.spec.ts · "(1) the SAME receipt re-delivered does NOT re-anchor — the age never snaps back" — retired: DOM of the retired book-freshness line; tests/unit/freshness-receipt.spec.ts
+- r5-fixes.spec.ts · "(2) THE ROUND-12 DEFECT: a paused monotonic clock AND a backward wall step still reconcile" — retired: DOM of the retired book-freshness line; tests/unit/freshness-blind-resume.spec.ts
+- r5-fixes.spec.ts · "(2) hidden→visible reconciles on sub-threshold deltas; a BARE focus does not" — retired: DOM of the retired book-freshness line; tests/unit/freshness-resume.spec.ts
+- r5-fixes.spec.ts · "(2) the full lifecycle burst under TWO blind clocks is still ONE re-fetch" — retired: DOM of the retired book-freshness line; tests/unit/freshness-resume-evidence.spec.ts
+
+tests/e2e/r6-fixes.spec.ts (4 of 5; "(2) the Inspector: same law, its own envelope" stays)
+- r6-fixes.spec.ts · "(1) THE ROUND-13 RIBBON DEFECT: an idle stream + two blind clocks no longer reads as fresh" — retired: SNAPSHOT chip of the retired header; the blind-resume law stays in tests/unit/freshness-blind-resume.spec.ts
+- r6-fixes.spec.ts · "(1) THE RIBBON'S REPAIR IS BOUNDED: one reconnect per step, then it stops and says so" — retired: SNAPSHOT chip of the retired header; the bounded-repair law stays in tests/unit/freshness-blind-resume.spec.ts
+- r6-fixes.spec.ts · "(2) THE ROUND-13 BOOK DEFECT: a FAILED repair under blind clocks is disclosed, not absorbed" — retired: DOM of the retired book-freshness line; tests/unit/freshness-blind-resume.spec.ts
+- r6-fixes.spec.ts · "A CLOCK-CERTIFIED RESUME NEVER SHOWS THE UNKNOWN REGISTER" — retired: DOM of the retired book-freshness line and SNAPSHOT chip; tests/unit/freshness-resume-evidence.spec.ts
+
+tests/e2e/r7-fixes.spec.ts (all 6)
+- r7-fixes.spec.ts · "(1) AN HONORED liq_distance LINK: the ordering the link names is the ordering served, and the page SAYS SO" — retired: sort-remap acknowledgement of the retired positions table; the sort vocabulary law stays in tests/unit/book-sort-vocabulary.spec.ts
+- r7-fixes.spec.ts · "(1) the honored ordering survives an ENGINE toggle — a book switch is not a sort control" — retired: sort-remap acknowledgement of the retired positions table; tests/unit/book-sort-vocabulary.spec.ts
+- r7-fixes.spec.ts · "(3) THE STALENESS DURATION CLIMBS: a latched wire integer is no longer frozen on screen" — retired: ribbon-stale-since of the retired header; the stale-since law stays in tests/unit/stale-since.spec.ts
+- r7-fixes.spec.ts · "(3) A BLIND RESUME OVER AN UNAVAILABLE FRAME: the duration goes UNKNOWN, and a reconnect repairs it" — retired: ribbon-stale-since of the retired header; tests/unit/stale-since.spec.ts
+- r7-fixes.spec.ts · "(4) A HUNG RECONNECT NEVER LEAVES LIVE PAINTED — and the base frame is what restores it" — retired: STREAM chip of the retired header; never-a-fake-Live in shell.spec.ts "<path> renders <label> inside the shell"; words in tests/unit/live-pill.spec.ts "stream words" and stream-posture.spec.ts
+- r7-fixes.spec.ts · "(4) A SERVER THAT HANGS UP TAKES LIVE WITH IT — and nothing else" — retired: STREAM chip of the retired header; shell.spec.ts "<path> renders <label> inside the shell"
+
+tests/e2e/r8-fixes.spec.ts (2 of 4; the (2) Lab anchor tests stay)
+- r8-fixes.spec.ts · "(1) A LEGACY ?sort=hf&dir=desc LINK: the direction survives, and the page SAYS what it applied" — retired: sort-remap acknowledgement of the retired positions table; tests/unit/book-sort-vocabulary.spec.ts
+- r8-fixes.spec.ts · "(1) an ENGINE toggle to the DM REMAPS the honored hf ranking — the API refuses that pair" — retired: sort-remap acknowledgement of the retired positions table; tests/unit/book-sort-vocabulary.spec.ts
+
+### Left red, not retired (pre-existing at HEAD bbc0f00, outside this task's scope)
+
+Three e2e tests failed on the pre-deletion run and still fail; none pins the retired Book or
+header, so they were NOT deleted:
+- tests/e2e/state-matrix.spec.ts · "inspector × responsive:mobile" — document scrollWidth 619 at
+  a 390px viewport. Cause (measured): the kit nav `nav.kit-module__nav` is 603px wide (eight
+  tabs, `display: flex` with no wrap/scroll — web/components/kit/kit.module.css `.nav`). The
+  Inspector content itself fits.
+- tests/e2e/chart-spec-v4.spec.ts · "AC-54: the loss frontier renders 12px at both breakpoints"
+  and "AC-54: the run-book distributions render 12px at both breakpoints" — the same 619px
+  document width at the 360px NARROW breakpoint on /lab (their `expectRenderedTypography`
+  refuses a page that scrolls sideways).
+Eight unit tests in tests/unit/fixture-clock-law.spec.ts fail at HEAD too: the enumerator forbids
+subdirectories under tests/fixtures and the demo dataset (tests/fixtures/demo/, landed in
+1ada8ba / 5202ff9 / bbc0f00) states ages its own stamps do not support ("nothing in the fixtures
+tree was skipped as noise" · demo/book.demo.json · demo/meta.demo.json ·
+demo/positions-dm-demo-page-1.json · demo/positions-dm-demo-page-2.json · "no fixture carries a
+trio the census does not name" · "the total is pinned" · "every batch-bearing body resolves at
+least one trio"). Nothing under tests/fixtures was touched by this task.
+
+### Components: deleted, and kept for Plan 4 (convergence)
+
+- deleted · web/components/AppHeader.tsx — no importer (layout.tsx renders kit/AppShell)
+- deleted · web/components/PostureRibbon.tsx — only importer was AppHeader
+- deleted · web/components/header.module.css — only importer was AppHeader (ThemeToggle already reads kit/kit.module.css)
+- deleted · web/components/charts/DensityMap.tsx and RiskMapLedger.tsx — beyond the brief's list: their only importer was the retired BookRiskMap and both import app/book/riskBins, so deleting riskBins without them fails typecheck
+- kept · web/components/Ribbon.tsx — imported by app/proof/ProofSurface.tsx and app/styleguide/page.tsx
+- kept · web/components/Stampline.tsx — imported by inspector/[addr]/InspectorSurface, lab/LabBatchStamp, observatory/ObservatorySurface, proof/ProofSurface, styleguide (page + DrawerDemo)
+- kept · web/components/StatCard.tsx — imported by lab/LabBookPanel, lab/LabRealization, observatory/ObservatorySurface, styleguide/page
+- kept · web/components/ribbon.module.css — imported by DegradationBanner and Ribbon
+- kept · web/components/charts/WaterfallSteps.tsx and charts.module.css — imported by the styleguide and the remaining charts
+- prose only · app/lab/labReadingLines.ts, labRunBookLines.ts, LabRunBookDetail.tsx cite `app/book/readingLines.ts` / `BookHistogram.tsx` in comments as provenance; no import — reword at convergence
+
+### Unit specs
+
+Before: 69 files. Deleted 8 (book-charts-copy, book-dek, book-row, book-table, dust,
+headroom-pareto, stress-increments, risk-bins — each imported a deleted app/book module).
+After: 61 = 69 − 8 (no lib spec lost). Kept although listed as candidates: book-sort-vocabulary
+(lib/positions only), flip-ranking (app/lab/flipRanking), book-fixture-fidelity (fixtures only).
+Plan 1's new specs present: human-usd, materiality, cash-rows, book-headline, stress-preview,
+refusal-phrasebook, live-pill, cash-summary, demo-fixture-weld.
+
+### Recorded, not carried into Plan 1
+
+- the "All N accounts" explorer link
+- the Collateral-mix section (no per-asset collateral on /v1/book)
+- the repeated-409 ("outpaced") and stale-progress-timing arms of the walk (single 409 restart and transport-failure retry are pinned)
+- the engine switch (the Book is Cash-first; the legacy market is a collapsed section)
+- the positions table's sort controls, deep-link round-trip and DOM windowing (fixed attention ordering; materiality bounds the table)
+- the price-path (LAW-5) marker on rows
+- the 429 and 500 arms of the Book's load failure (503 is pinned)
+- the appbar COVERAGE chip and the Data-status popover (no successor in AppShell)
+- the live pill's snapshot / recovered arms in e2e (unit-pinned words and tones only)
+- the Book's own responsive:mobile cell
+- an e2e pin of the route-refusal boundary (app/error.tsx · RouteRefusal) reachable from /v1/book
+
+### Verification (2026-09-15, web/, production build)
+
+- `npm run typecheck` — clean (exit 0) · `npm run lint` — clean, 0 warnings · `npm run lint:css` — clean · `npm run build` — clean
+- unit (`npx playwright test --project=unit`): **1043 passed, 8 failed** — the 8 are fixture-clock-law × tests/fixtures/demo, pre-existing at HEAD (above); unit spec files 69 → 61 (= 69 − 8 deleted)
+- e2e BEFORE deletion (HEAD bbc0f00 build): 138 failed / 323 passed / 10 skipped
+- e2e AFTER (`npx playwright test --project=e2e`): **3 failed / 323 passed / 10 skipped** — 471 − 135 retired = 336; the 3 are the kit-nav overflow tests above, pre-existing at HEAD
+- Gate verdict: not all-green for two pre-existing causes outside this task (kit nav at ≤390px; demo fixtures vs the clock-law census). Cleanup staged, commit withheld pending the owner's call (Task 14 report).
+
