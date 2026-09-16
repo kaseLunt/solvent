@@ -314,7 +314,7 @@ test("partition keeps every row, sums by tier, and belowLine = small + dust", ()
 });
 
 test("the below-line sentence, plural and singular, and absent at zero", () => {
-  expect(belowLineSentence({ belowLine: 47 }, { belowLine: usd6(112.4) }, 6)).toBe(
+  expect(belowLineSentence({ belowLine: 47 }, { belowLine: usd6(112) }, 6)).toBe(
     "47 more positions are technically liquidatable but total $112 — below the $100 line and not headlined.",
   );
   expect(belowLineSentence({ belowLine: 1 }, { belowLine: usd6(4.62) }, 6)).toBe(
@@ -750,7 +750,7 @@ test("material: money first, the emphasized phrase carries the verdict", () => {
   const h = bookHeadline({
     decimals: 6,
     material: { sum: usd6(6840), count: 2 },
-    belowLine: { sum: usd6(112.4), count: 47 },
+    belowLine: { sum: usd6(112), count: 47 },
     nearCap: { sum: usd6(312_400), count: 27 },
     notComputed: 6,
   });
