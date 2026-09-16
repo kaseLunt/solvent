@@ -31,3 +31,16 @@ test("humanAmount groups the whole part and trims the fraction to four meaningfu
   expect(humanAmount(-150000000n, 6)).toBe("−150");
   expect(humanAmount(5n, 0)).toBe("5");
 });
+
+test("a nonzero amount never prints as 0, maxFraction is clamped, and the $10 price boundary holds", () => {
+  expect(humanAmount(1n, 18)).toBe("<0.0001");
+  expect(humanAmount(99990000000000n, 18)).toBe("<0.0001");
+  expect(humanAmount(-1n, 18)).toBe("−<0.0001");
+  expect(humanAmount(5n, 2, 0)).toBe("<1");
+  expect(humanAmount(1234n, 2, 1)).toBe("12.3");
+  expect(humanAmount(1234n, 2, 6)).toBe("12.34");
+  expect(humanAmount(1234n, 2, -1)).toBe("12");
+  expect(humanPrice(10000000n, 6)).toBe("$10.00");
+  expect(humanPrice(9999900n, 6)).toBe("$9.9999");
+  expect(humanUsdFull(-5n, 6)).toBe("−<$0.01");
+});

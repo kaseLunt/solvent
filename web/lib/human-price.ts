@@ -33,12 +33,23 @@ export function humanUsdFull(value: bigint, decimals: number): string {
   return rem === 0n ? `$${dollars.toString()}` : `$${dollars.toString()}.${rem.toString().padStart(2, "0")}`;
 }
 
-/** A token amount in its own decimals, grouped, fraction trimmed to `maxFraction` digits. */
+/** The smallest amount `places` fraction digits can show, behind `<`: "<0.0001" for four, "<1" for none. */
+function belowPrecision(places: number): string {
+  return places === 0 ? "<1" : `<0.${"0".repeat(places - 1)}1`;
+}
+
+/**
+ * A token amount in its own decimals, grouped, fraction trimmed to `maxFraction` digits.
+ * A nonzero amount whose digits all truncate away reads `<0.0001`, never `0` — the `<$0.01` law.
+ */
 export function humanAmount(value: bigint, decimals: number, maxFraction = 4): string {
   if (value < 0n) return `${MINUS}${humanAmount(-value, decimals, maxFraction)}`;
+  const places = Math.max(0, maxFraction);
   const div = 10n ** BigInt(decimals);
-  const whole = group(value / div);
+  const units = value / div;
+  const whole = group(units);
   if (decimals === 0) return whole;
-  const fraction = (value % div).toString().padStart(decimals, "0").slice(0, maxFraction).replace(/0+$/, "");
-  return fraction === "" ? whole : `${whole}.${fraction}`;
+  const fraction = (value % div).toString().padStart(decimals, "0").slice(0, places).replace(/0+$/, "");
+  if (fraction !== "") return `${whole}.${fraction}`;
+  return units === 0n && value !== 0n ? belowPrecision(places) : whole;
 }

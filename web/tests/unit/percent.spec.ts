@@ -24,3 +24,8 @@ test("percentOf and fallPercent compose the two", () => {
   expect(fallPercent(5n, 4n)).toBeNull(); // a rise is not a fall
   expect(fallPercent(1n, 0n)).toBeNull();
 });
+
+test("fallPercent refuses a negative fall, and tenths that truncate to zero print 0% (BigInt has no −0)", () => {
+  expect(fallPercent(-5n, 100n)).toBeNull();
+  expect(formatTenths(percentTenths(-1n, 3000n) ?? 0n)).toBe("0%");
+});

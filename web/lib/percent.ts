@@ -3,7 +3,7 @@
 // arithmetic; this module owns the plain "share of" and "fall from" cases.
 import { MINUS } from "./human-usd";
 
-/** ⌊1000 · num / den⌉ toward zero, as tenths of a percent. Null when den ≤ 0. */
+/** ⌊1000 · num / den⌋ toward zero, as tenths of a percent. Null when den ≤ 0. */
 export function percentTenths(num: bigint, den: bigint): bigint | null {
   if (den <= 0n) return null;
   return (1000n * num) / den;
@@ -23,8 +23,8 @@ export function percentOf(num: bigint, den: bigint): string | null {
   return tenths === null ? null : formatTenths(tenths);
 }
 
-/** The fall from `from` down to `to`, as a percent of `from`. Null when nothing fell or `from` ≤ 0. */
+/** The fall from `from` down to `to`, as a percent of `from`. Null for a rise, a negative `to`, or `from` ≤ 0. */
 export function fallPercent(to: bigint, from: bigint): string | null {
-  if (from <= 0n || to > from) return null;
+  if (from <= 0n || to < 0n || to > from) return null;
   return formatTenths((1000n * (from - to)) / from);
 }
