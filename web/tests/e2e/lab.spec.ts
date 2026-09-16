@@ -121,6 +121,11 @@ const firstScenario = (): (typeof DEMO_SCENARIOS)["scenarios"][number] => {
   if (s === undefined) throw new Error("the demo listing is empty");
   return s;
 };
+/** The drawer's flag suffix for an applied shock, from the wire's own booleans: absent when none is set. */
+const shockFlags = (s: (typeof DEMO_RUN_BOOK_ETH)["applied_shocks"][number]): string => {
+  const words = [s.snapped ? "snapped" : null, s.base_snapped ? "base snapped" : null, s.cap_bound ? "cap bound" : null].filter((w): w is string => w !== null);
+  return words.length === 0 ? "" : ` · ${words.join(" · ")}`;
+};
 
 test("cold load: the library from the listing, the first scenario's definition, nothing dispatched, tiles in the not-run register", async ({ page }) => {
   const counts = await mockLab(page);
@@ -501,6 +506,19 @@ test("the drawer: path assumption, applied shocks, held flat, out of model, the 
   if (outOfModel === undefined) throw new Error("the demo run names nothing out of model");
   await expect(body).toContainText(outOfModel);
   await expect(page.getByTestId("lab-drawer-transitions-note")).toHaveText(cashEngine().hf_transitions.note);
+  // The applied shocks, each as the drawer prints it — asset (chain, source): the exact before → after wire
+  // strings × num/den, and the snap flags only when the wire set them (none is set on the demo run).
+  const shocks = body.locator("h3:has-text('Applied shocks') + ul > li");
+  await expect(shocks).toHaveText(
+    DEMO_RUN_BOOK_ETH.applied_shocks.map(
+      (s) => `${s.asset} (chain ${String(s.chain_id)}, ${s.source}): ${s.before} → ${s.after} × ${s.factor_num}/${s.factor_den}${shockFlags(s)}`,
+    ),
+  );
+  await expect(shocks).toHaveCount(DEMO_RUN_BOOK_ETH.applied_shocks.length);
+  // The held-flat inputs, each with its asset, chain, source and the exact held value.
+  const held = body.locator("h3:has-text('Held flat') + ul > li");
+  await expect(held).toHaveText(DEMO_RUN_BOOK_ETH.held_flat.map((h) => `${h.asset} (chain ${String(h.chain_id)}, ${h.source}) at ${h.value}`));
+  await expect(held).toHaveCount(DEMO_RUN_BOOK_ETH.held_flat.length);
   await page.keyboard.press("Escape");
   await expect(body).toBeHidden();
 });
@@ -586,4 +604,31 @@ test("the first viewport at 1440×900 holds the library head, the verdict, the t
   await page.setViewportSize({ width: 390, height: 800 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test("not covered: a scenario that models only the legacy market does not model the Cash book — the engines named, the tiles refuse, the legacy result its own, and nothing says withheld", async ({ page }) => {
+  // The demo listing covers Cash on every scenario; the run-book body is eth_minus_30's own, so no definition skews.
+  const legacyOnly = { ...DEMO_SCENARIOS, scenarios: DEMO_SCENARIOS.scenarios.map((s) => (s.id === "eth_minus_30" ? { ...s, engines: ["aave_v3_etherfi"] } : s)) };
+  await mockLab(page, { scenarios: legacyOnly });
+  await page.goto("/lab?scenario=eth_minus_30");
+  await expect(surface(page)).toHaveAttribute("data-state", "not-covered");
+  await expect(surface(page)).not.toHaveAttribute("data-banner", /.+/);
+  await expect(headline(page)).toHaveText("ETH -30 percent does not model the Cash book.");
+  await expect(dek(page)).toHaveText("It models the Aave v3 market (legacy). The legacy result is below.");
+  await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "not-covered");
+  await expect(row(page, "eth_minus_30")).toContainText("Not modelled for Cash");
+  await expect(row(page, "eth_minus_30")).toContainText("Aave v3 market (legacy)");
+  for (const key of ["newly", "debt", "baddebt", "moved"]) {
+    await expect(tile(page, key)).toContainText("—");
+    await expect(tile(page, key)).toContainText("not modelled");
+    await expect(tile(page, key)).toHaveAttribute("data-tone", "refused");
+    await expect(tile(page, key)).not.toContainText("0");
+  }
+  await expect(page.getByTestId("lab-transitions-finding")).toHaveText("This scenario does not model Cash.");
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expect(page.getByTestId("lab-movers")).toHaveCount(0);
+  await expect(page.getByTestId("lab-legacy")).toBeVisible();
+  await expect(page.getByTestId("lab-legacy-kpi-newly")).toContainText("14");
+  // The retired law: not covered never looks like withheld.
+  await expect(page.locator("main")).not.toContainText(/withheld/i);
 });
