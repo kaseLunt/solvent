@@ -60,3 +60,63 @@ test("a flip is before not-liquidatable → after liquidatable; an unknowable si
   expect(u.rows[0]?.flips).toBeNull();
   expect(u.rows[0]?.after?.verdict).toBe("unknowable");
 });
+
+test("fix round 1: a withheld Cash book under found is withheld and names its engine; duplicate results are contradictory; inapplicable rows never flip; empty horizons are no projection; the market-realization axis is carried", () => {
+  type Body = components["schemas"]["StressResponse"];
+  const scenario = STRESS_DM.scenarios[0];
+  const result = scenario?.results[0];
+  if (scenario === undefined || result === undefined || result.before === null || result.after === null || result.projection === null) {
+    throw new Error("fixture shape");
+  }
+
+  // `found: true` stays (an Aave position exists) while the Cash engine is withheld.
+  const cashWithheld: Body = { ...STRESS_DM, lookup_complete: false, withheld_engines: [{ engine: "debt_manager", code: "SWEEP_NEVER", detail: "", note: "" }] };
+  const w = stressReading(lookup(cashWithheld), STRESS_DM.address);
+  expect(w.kind).toBe("withheld");
+  if (w.kind === "withheld") expect(w.cause).toContain("Cash — collateral sweep never ran");
+
+  const rowsOf = (body: Body) => {
+    const r = stressReading(lookup(body), STRESS_DM.address);
+    if (r.kind !== "rows") throw new Error(r.kind);
+    return r.rows;
+  };
+
+  const twice = rowsOf({ ...STRESS_DM, scenarios: [{ ...scenario, results: [result, result] }] });
+  expect(twice[0]).toMatchObject({ applicable: false, reason: "two results for this account — contradictory", before: null, after: null, flips: null });
+
+  // Both sides present and shaped like a flip, but the engine says the result is not applicable.
+  const inapplicable = rowsOf({
+    ...STRESS_DM,
+    scenarios: [{ ...scenario, results: [{ ...result, applicable: false, before: { ...result.before, liquidatable: false }, after: { ...result.after, liquidatable: true } }] }],
+  });
+  expect(inapplicable[0]?.before).not.toBeNull();
+  expect(inapplicable[0]?.after).not.toBeNull();
+  expect(inapplicable[0]?.flips).toBeNull();
+
+  const noHorizons = rowsOf({ ...STRESS_DM, scenarios: [{ ...scenario, results: [{ ...result, projection: { ...result.projection, horizons: [] } }] }] });
+  expect(noHorizons[0]?.projection).toBeNull();
+  expect(noHorizons[0]?.projectionNote).toBe(result.projection.note);
+
+  const realized = rowsOf({
+    ...STRESS_DM,
+    scenarios: [
+      {
+        ...scenario,
+        results: [
+          {
+            ...result,
+            market_realization: {
+              hfs_unchanged: false,
+              execution_shortfall_usd: "1200000",
+              bad_debt_at_liquidation_usd: "0",
+              usd_decimals: 6,
+              seizure_model: "pro-rata-over-counted-collateral",
+              note: "",
+            },
+          },
+        ],
+      },
+    ],
+  });
+  expect(realized[0]?.marketRealization).toEqual({ shortfall: 1200000n, badDebt: 0n, decimals: 6 });
+});

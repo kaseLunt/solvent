@@ -31,6 +31,31 @@ test("amounts come from the feed's own vocabulary; a record-only event prints a 
   expect(recordOnly?.amount).toBe("—");
 });
 
+test("fix round 1: the wire's own scale places the decimal and raw units are named; empty seizures and unscaled repayments are stated; the Cash repaid unit is USD; short hashes and raw types pass verbatim", () => {
+  type Event = (typeof EVENTS.events)[number];
+  const scaled = activityRows(EVENTS.events, { valueDecimalsByEngine: { debt_manager: 6 } });
+  expect(scaled[1]?.amount).toMatch(/^1,199\.403/);
+  expect(scaled[1]?.rawUnits).toBe(false);
+  const unscaled = activityRows(EVENTS.events);
+  expect(unscaled[1]?.rawUnits).toBe(true);
+  expect(unscaled[1]?.unitChip).not.toBeNull();
+
+  const first = EVENTS.events[0];
+  if (first === undefined || first.liquidation === null) throw new Error("fixture");
+  const liq = first.liquidation;
+  const detailOf = (event: Event): string => activityRows([event])[0]?.detail ?? "";
+  expect(detailOf({ ...first, liquidation: { ...liq, seized: [] } })).toMatch(/seized — \(no seizure legs carried\)$/);
+  expect(detailOf({ ...first, liquidation: { ...liq, debt_decimals: null } })).toContain("repaid 2500000000 (raw units)");
+  expect(detailOf({ ...first, liquidation: { ...liq, debt_repaid: null } })).toContain("repaid —");
+  const dm = detailOf({ ...first, engine: "debt_manager" });
+  expect(dm).toContain("repaid 2,500 USD; seized");
+  expect(dm).not.toContain("USDC");
+
+  expect(activityRows([{ ...first, tx_hash: "0xabc" }])[0]?.tx.short).toBe("0xabc");
+  expect(unscaled[0]?.actionTitle).toBe(first.raw_type);
+  expect(unscaled[1]?.actionTitle).toBe(EVENTS.events[1]?.raw_type);
+});
+
 test("action labels are human; an unknown wire word prints verbatim", () => {
   expect(actionLabel("collateral_enabled")).toBe("Collateral enabled");
   expect(actionLabel("deficit_created")).toBe("Deficit created");
