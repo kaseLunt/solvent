@@ -268,12 +268,22 @@ test("resume: a failed background repair never replaces the rendered position", 
   await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
   await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
   await expect(surface(page)).toHaveAttribute("data-state", "near");
+  // The repair must be ATTEMPTED and must FAIL: the lookup route now counts
+  // and aborts. A pin that never sees the request would pass against a page
+  // that ignores the resume entirely. (`*` never crosses `/`, so /history and
+  // /stress keep their own routes.)
+  let addressRequests = 0;
   await page.unroute("**/v1/address/*");
-  await page.route("**/v1/address/*", (route) => route.abort());
+  await page.route("**/v1/address/*", (route) => {
+    addressRequests += 1;
+    return route.abort();
+  });
+  // A bfcache restore is definitive resume evidence by itself
+  // (lib/freshness.ts resumeEvidenceOf) — no clock step is needed.
   await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
   });
-  await page.waitForTimeout(500);
+  await expect.poll(() => addressRequests).toBe(1);
   await expect(surface(page)).toHaveAttribute("data-state", "near");
   await expect(page.getByTestId("inspector-kpi-debt")).toContainText("$4,822");
 });

@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { truncateAddress } from "../../lib/format";
+import { DEMO_META } from "../fixtures/demo";
 import { ADDRESS_FOUND, EVENTS, HISTORY, PARAMS } from "../fixtures/inspector";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 
@@ -362,6 +363,9 @@ async function mockInspectorFor(page: Page, address: string) {
   // like the others so the inline stress card answers for the mover.
   const stress = JSON.parse(fixture("stress-dm.json")) as { address: string };
   await page.route("**/v1/stream*", (route) => route.abort());
+  // The shell reads /v1/meta on every page (lib/meta.tsx); served so the deep
+  // link leaves no request to whatever listens on :8080.
+  await page.route("**/v1/meta*", (route) => route.fulfill({ json: DEMO_META, headers: CORS }));
   await page.route("**/v1/evidence*", (route) =>
     route.fulfill({ json: EVIDENCE_MANIFEST, headers: CORS }),
   );

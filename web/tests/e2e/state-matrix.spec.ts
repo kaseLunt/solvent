@@ -25,6 +25,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { DEMO_META } from "../fixtures/demo";
 import {
   ADDRESS_FOUND,
   ADDRESS_NOT_FOUND,
@@ -100,6 +101,9 @@ const STRESS_AAVE = JSON.parse(labFixture("stress-aave.json")) as {
 const STRESS_UNKNOWABLE = JSON.parse(labFixture("stress-unknowable.json")) as { address: string };
 
 async function mockInspector(page: Page, address: unknown, history: unknown = HISTORY): Promise<void> {
+  // The shell reads /v1/meta on every page (lib/meta.tsx); served here so no
+  // Inspector cell leaves a request to whatever listens on :8080.
+  await page.route("**/v1/meta*", (route) => fulfillJson(route, DEMO_META));
   await page.route("**/v1/evidence*", (route) => fulfillJson(route, EVIDENCE_MANIFEST));
   await page.route("**/v1/params*", (route) => fulfillJson(route, PARAMS));
   await page.route("**/v1/events*", (route) => fulfillJson(route, EVENTS));

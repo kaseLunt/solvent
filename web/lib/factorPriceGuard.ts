@@ -11,7 +11,7 @@
 // no throw for any boundary to catch).
 //
 // `classifyFactorPrice` is the ONE law consulted BEFORE any entry property is
-// read — by the card's boundary row (InspectorPositionCard) AND by the
+// read — by the boundary derivation (`boundaryOf`, inspector-position.ts) AND by the
 // evidence drawer's per-entry map (evidence.ts). `price_decimals` is REQUIRED
 // here precisely because a missing scale would NOT throw downstream: the
 // no-throw path is the raw-render path, and a classifier that admitted it

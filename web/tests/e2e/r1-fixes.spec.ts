@@ -16,12 +16,15 @@
 //   (7)  numeric column HEADERS are right-aligned over their cells;
 //   (8)  section order: map above table, positions above histogram, census
 //        above waterfall;
-//   (9)  the Book dek is COMPUTED from /v1/book.
+//   (9)  the Book dek is COMPUTED from /v1/book;
+//   (10) the adjudicated intros render on Lab, Observatory, Feed, Proof and
+//        Developers (the Inspector arm of this item retired under Plan 2).
 //
-// Items (2), (3), (10), (11) and (12) — the old Inspector's badge, freshness
-// line, landing intro, HF-history vocabulary and DM card — were RETIRED with
-// the Inspector rebuild (2026-09-15): the laws now live in the unit specs
-// inspector-position / inspector-view and in tests/e2e/inspector.spec.ts.
+// Items (2), (3), (11), (12) and the Inspector arm of (10) — the old
+// Inspector's badge, freshness line, HF-history vocabulary, DM card and
+// landing intro — were RETIRED with the Inspector rebuild (2026-09-15): the
+// laws now live in the unit specs inspector-position / inspector-view /
+// history-copy and in tests/e2e/inspector.spec.ts.
 // Ledger: .superpowers/sdd/progress-ui-overhaul.md, "Plan 2 (Inspector) — retirements".
 
 import { expect, test, type Page, type Route } from "@playwright/test";
@@ -204,4 +207,49 @@ test("(6) Proof's H1 is the surface's own name", async ({ page }) => {
   await muteStream(page);
   await page.goto("/proof");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Proof");
+});
+
+test("(10) the adjudicated intros render — Lab, Observatory, Feed, Proof, Developers (the Inspector arm retired under Plan 2)", async ({
+  page,
+}) => {
+  // Re-homed from the retired "(10) the adjudicated intros render, and the
+  // endpoint lines are demoted": the five non-Inspector paragraphs, verbatim.
+  // The Inspector landing's intro is R9's and is pinned by the contract spec.
+  await muteStream(page);
+
+  // W-SD-A CHANGED THIS SENTENCE: whole book comes FIRST in the intro because
+  // whole book is the default register the surface now opens in.
+  await page.goto("/lab");
+  await expect(page.locator("main")).toContainText(
+    "What would break this book: the committed stress scenarios, fixed and versioned shocks " +
+      "with no sliders, run against the whole book or against one address.",
+  );
+
+  await page.goto("/observatory");
+  await expect(page.locator("main")).toContainText(
+    "How each engine's book has moved, hour by hour, in a record that outlives batch " +
+      "retention. An hour with no complete batch renders as a hole, which is never smoothed " +
+      "over and never drawn as a zero; one engine per view, never combined onto one axis.",
+  );
+
+  await page.goto("/feed");
+  await expect(page.locator("main")).toContainText(
+    "Chain actions as recorded: borrows, repays, supplies, withdrawals, liquidations. The " +
+      "live strip shows the stream's posture now; the list below pages through durable " +
+      "history. The two never blend.",
+  );
+
+  await page.goto("/proof");
+  await expect(page.locator("main")).toContainText(
+    "What this deployment is, exactly: the pinned proof of its last reconcile and the identity " +
+      "of the batch it serves now. Nothing here is measured on request: every field is carried " +
+      "by the build or persisted by a batch.",
+  );
+
+  await page.goto("/developers");
+  await expect(page.locator("main")).toContainText(
+    "The committed API contract, rendered from its own examples: read-only JSON, no auth, " +
+      "every money value a decimal string. If a handler disagrees with this page, that is a " +
+      "failure, not documentation lag.",
+  );
 });
