@@ -182,6 +182,9 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   const roomToneBefore: TileTone = before.status === "liquidatable" ? "crit" : before.status === "near" ? "warn" : "neutral";
   const side = selected.after;
   const after = readable(side);
+  // The after room carries its status's tone as the before pair does: crit beside Liquidatable, warn beside Near cap.
+  const statusAfter = afterStatus(side);
+  const roomToneAfter: TileTone = statusAfter.tone === "crit" ? "crit" : statusAfter.tone === "warn" ? "warn" : "neutral";
   const tiles: AddressTiles = {
     debtBefore: refusedBefore ? REFUSED_TILE : money(before.debt),
     capBefore: refusedBefore ? REFUSED_TILE : money(before.cap),
@@ -189,8 +192,8 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
     statusBefore: STATUS_WORD[before.status],
     debtAfter: after === null ? REFUSED_TILE : money(after.debt),
     capAfter: after === null ? REFUSED_TILE : money(after.cap),
-    roomAfter: after === null || side === null ? REFUSED_TILE : roomTile(after.room, decimals, side.verdict === "liquidatable" ? "crit" : "neutral"),
-    statusAfter: afterStatus(side),
+    roomAfter: after === null ? REFUSED_TILE : roomTile(after.room, decimals, roomToneAfter),
+    statusAfter,
   };
   return { state: "rows", address, rows, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, decimals, cause: null };
 }

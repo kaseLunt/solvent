@@ -120,8 +120,9 @@ test("rows: the demo near account under its three scenarios, the selection, the 
   const proj = addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "dm_rate_horizon_plus_200bps" });
   expect(proj.selected?.projection).not.toBeNull();
   expect(proj.headline).toEqual({ emphasis: `0x7a3f…c21e stays inside its cap through 90d under ${PROJECTION_LABEL}.`, rest: "", tone: "ok", dek: PROJECTION_DEK });
-  // Its after is the spot, which the Inspector reads as near cap: the after status follows the band.
+  // Its after is the spot, which the Inspector reads as near cap: the after status follows the band, and the room beside it carries the same tone.
   expect(proj.tiles?.statusAfter).toEqual({ value: "Near cap", tone: "warn" });
+  expect(proj.tiles?.roomAfter).toEqual({ value: "$190.50", tone: "warn" });
 });
 
 test("a projection's horizons decide: a liquidatable horizon is named in the warn tone, an unknowable one is a refusal naming it", () => {
