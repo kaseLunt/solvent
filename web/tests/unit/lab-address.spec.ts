@@ -7,7 +7,7 @@ import type { AddressReading } from "../../lib/address-lookup";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { deriveInspectorView } from "../../lib/inspector-view";
 import { addressWorkspace } from "../../lib/lab-address";
-import { DEMO_ADDRESS_NEAR, DEMO_NEAR_ADDR, DEMO_STRESS_NEAR } from "../fixtures/demo";
+import { DEMO_ADDRESS_NEAR, DEMO_ADDRESS_REFUSED, DEMO_NEAR_ADDR, DEMO_REFUSED_ADDR, DEMO_STRESS_NEAR } from "../fixtures/demo";
 import { ADDRESS_NOT_FOUND, NOT_FOUND_ADDR } from "../fixtures/inspector";
 
 function reading(overrides: Partial<AddressReading>): AddressReading {
@@ -25,7 +25,23 @@ function reading(overrides: Partial<AddressReading>): AddressReading {
   };
 }
 const view = (overrides: Partial<AddressReading>) => deriveInspectorView(reading(overrides), TIER_FALLBACK);
-const near = () => view({ lookup: { phase: "ready", value: lookup(DEMO_ADDRESS_NEAR) }, stress: { phase: "ready", value: lookup(DEMO_STRESS_NEAR) } });
+type StressBody = typeof DEMO_STRESS_NEAR;
+type StressResult = StressBody["scenarios"][number]["results"][number];
+const nearWith = (stress: StressBody) => view({ lookup: { phase: "ready", value: lookup(DEMO_ADDRESS_NEAR) }, stress: { phase: "ready", value: lookup(stress) } });
+const near = () => nearWith(DEMO_STRESS_NEAR);
+/** The demo stress body with one scenario's results rewritten. */
+function withResult(id: string, edit: (r: StressResult) => StressResult): StressBody {
+  return { ...DEMO_STRESS_NEAR, scenarios: DEMO_STRESS_NEAR.scenarios.map((s) => (s.id === id ? { ...s, results: s.results.map(edit) } : s)) };
+}
+/** The projection row with one horizon's wire verdict replaced; null is the wire's "no verdict for the horizon". */
+const projected = (index: number, becomes: boolean | null): StressBody =>
+  withResult("dm_rate_horizon_plus_200bps", (r) =>
+    !r.projection ? r : { ...r, projection: { ...r.projection, horizons: r.projection.horizons.map((h, i) => (i === index ? { ...h, becomes_liquidatable: becomes } : h)) } },
+  );
+const PROJECTION_LABEL = "Debt Manager borrow APY +200bps (PROJECTION)";
+const PROJECTION_DEK = "Room today $190.50; 30d: +$7.92 interest; 90d: +$23.77 interest.";
+const REFUSED = { value: "—", tone: "refused" };
+const NOT_COMPUTED = { value: "Not computed", tone: "refused" };
 
 test("idle and invalid: no address is a prompt, a bad address is a refusal; nothing is looked up", () => {
   const idle = addressWorkspace({ address: "", view: null, selectedId: null });
@@ -100,8 +116,78 @@ test("rows: the demo near account under its three scenarios, the selection, the 
   // A selection the address does not carry falls back to the first row; a null selection too.
   expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "ghost" }).selected?.id).toBe("eth_minus_30");
   expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: null }).selected?.id).toBe("eth_minus_30");
-  // The projection row: no flip within its horizons reads as staying inside the cap, in its own words.
+  // The projection row is judged by its horizons, not by its after (the spot): no horizon flips, so the account holds through the longest.
   const proj = addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "dm_rate_horizon_plus_200bps" });
   expect(proj.selected?.projection).not.toBeNull();
-  expect(["ok", "warn", "crit"]).toContain(proj.headline.tone);
+  expect(proj.headline).toEqual({ emphasis: `0x7a3f…c21e stays inside its cap through 90d under ${PROJECTION_LABEL}.`, rest: "", tone: "ok", dek: PROJECTION_DEK });
+  // Its after is the spot, which the Inspector reads as near cap: the after status follows the band.
+  expect(proj.tiles?.statusAfter).toEqual({ value: "Near cap", tone: "warn" });
+});
+
+test("a projection's horizons decide: a liquidatable horizon is named in the warn tone, an unknowable one is a refusal naming it", () => {
+  const within = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(projected(1, true)), selectedId: "dm_rate_horizon_plus_200bps" });
+  expect(within.headline).toEqual({ emphasis: `0x7a3f…c21e becomes liquidatable within 90d under ${PROJECTION_LABEL}.`, rest: "", tone: "warn", dek: PROJECTION_DEK });
+  const unknown = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(projected(0, null)), selectedId: "dm_rate_horizon_plus_200bps" });
+  expect(unknown.headline).toEqual({
+    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    rest: "",
+    tone: "refused",
+    dek: `${PROJECTION_DEK} The 30d horizon carries no verdict.`,
+  });
+});
+
+test("a refused Cash position prints no before figure; a negative wire figure prints nothing on its side", () => {
+  const r = addressWorkspace({
+    address: DEMO_REFUSED_ADDR,
+    view: view({ address: DEMO_REFUSED_ADDR, lookup: { phase: "ready", value: lookup(DEMO_ADDRESS_REFUSED) }, stress: { phase: "ready", value: lookup(DEMO_STRESS_NEAR) } }),
+    selectedId: null,
+  });
+  expect(r.state).toBe("rows");
+  const t = r.tiles;
+  if (t === null) throw new Error("a refused position beside rows still has tiles");
+  expect(t.debtBefore).toEqual(REFUSED);
+  expect(t.capBefore).toEqual(REFUSED);
+  expect(t.roomBefore).toEqual(REFUSED);
+  expect(t.statusBefore).toEqual(NOT_COMPUTED);
+  for (const tile of Object.values(t)) expect(tile.value).not.toContain("$");
+  expect(r.headline).toEqual({ emphasis: "ETH -30 percent does not apply to 0x4444…4404.", rest: "", tone: "refused", dek: "Not evaluated for this account." });
+  const negative = addressWorkspace({
+    address: DEMO_NEAR_ADDR,
+    view: nearWith(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, debt_usd: "-4822000000" } }))),
+    selectedId: "eth_minus_30",
+  });
+  expect(negative.tiles?.debtBefore).toEqual({ value: "$4,822", tone: "neutral" });
+  expect(negative.tiles?.debtAfter).toEqual(REFUSED);
+  expect(negative.tiles?.capAfter).toEqual(REFUSED);
+  expect(negative.tiles?.roomAfter).toEqual(REFUSED);
+  expect(negative.tiles?.statusAfter).toEqual(NOT_COMPUTED);
+  expect(negative.headline.dek).toBe("Room today $190.50; after the shock, not computed.");
+});
+
+test("rows beside no readable position: an unreadable scale and a missing Cash position each say so, never the scenarios' sentence", () => {
+  const unreadable = { ...DEMO_ADDRESS_NEAR, positions: DEMO_ADDRESS_NEAR.positions.map((p) => ({ ...p, value_decimals: 1.5 })) };
+  const scale = addressWorkspace({
+    address: DEMO_NEAR_ADDR,
+    view: view({ lookup: { phase: "ready", value: lookup(unreadable) }, stress: { phase: "ready", value: lookup(DEMO_STRESS_NEAR) } }),
+    selectedId: "eth_minus_30",
+  });
+  expect(scale.state).toBe("rows");
+  expect(scale.selected?.id).toBe("eth_minus_30");
+  expect(scale.tiles).toBeNull();
+  expect(scale.decimals).toBeNull();
+  expect(scale.headline).toEqual({ emphasis: "The Cash position's scale could not be read.", rest: "", tone: "refused", dek: "No figure prints at an unreadable scale." });
+  const short = `${NOT_FOUND_ADDR.slice(0, 6)}…${NOT_FOUND_ADDR.slice(-4)}`;
+  const missing = addressWorkspace({
+    address: NOT_FOUND_ADDR,
+    view: view({ address: NOT_FOUND_ADDR, lookup: { phase: "ready", value: lookup(ADDRESS_NOT_FOUND) }, stress: { phase: "ready", value: lookup({ ...DEMO_STRESS_NEAR, address: NOT_FOUND_ADDR }) } }),
+    selectedId: null,
+  });
+  expect(missing.state).toBe("rows");
+  expect(missing.tiles).toBeNull();
+  expect(missing.headline).toEqual({
+    emphasis: `No Cash position for ${short} to stress.`,
+    rest: "",
+    tone: "refused",
+    dek: "The stress response carries scenarios, but the lookup found no Cash position — the two answers disagree.",
+  });
 });

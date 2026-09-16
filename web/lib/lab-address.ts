@@ -1,8 +1,9 @@
 // The one-address workspace. It is the Inspector's reading — its stress rows,
 // its decimals, its Cash position as today — arranged under the selected
 // scenario. No second stress reader exists; the Inspector's laws hold here.
-import type { StressRow, StressSide } from "./address-stress";
+import { horizonLabel, type StressHorizon, type StressRow, type StressSide } from "./address-stress";
 import { truncateAddress } from "./format";
+import { headroomBand } from "./headroom";
 import { humanUsdFull } from "./human-price";
 import type { CashStatus } from "./inspector-position";
 import type { InspectorView } from "./inspector-view";
@@ -39,6 +40,7 @@ export interface AddressWorkspace {
 
 const refused = (emphasis: string, dek: string): LabHeadline => ({ emphasis, rest: "", tone: "refused", dek });
 const REFUSED_TILE: AddressTile = { value: "—", tone: "refused" };
+const NOT_COMPUTED: AddressTile = { value: "Not computed", tone: "refused" };
 
 function sentence(text: string): string {
   const t = text.trim();
@@ -58,27 +60,82 @@ const STATUS_WORD: Record<CashStatus, AddressTile> = {
   unknowable: { value: "Not computed", tone: "refused" },
 };
 
+// The Inspector's near bands (its position reader keeps the same set): a
+// breached band beside a non-liquidatable verdict says near, never healthy —
+// the verdict governs the status word and the room shows the contradiction.
+const NEAR_BANDS: ReadonlySet<number> = new Set([0, 1, 2, 3]);
+
+/**
+ * A side's figures are read only when its debt and cap are both present and
+ * non-negative — the Inspector's rule for a position. A negative wire decimal
+ * is a legal string and not a figure: nothing prints from it, the room included.
+ */
+function readable(side: StressSide | null): { readonly debt: bigint; readonly cap: bigint; readonly room: bigint } | null {
+  if (side === null || side.debt === null || side.cap === null || side.debt < 0n || side.cap < 0n) return null;
+  return { debt: side.debt, cap: side.cap, room: side.cap - side.debt };
+}
+
+/**
+ * The after side's status word in the Inspector's register: the verdict
+ * governs; a non-liquidatable side is "Near cap" inside the near bands and
+ * "Healthy" outside them; an unknowable verdict, or figures that cannot be
+ * read, is "Not computed" — never a verdict word on an unknown.
+ */
 function afterStatus(side: StressSide | null): AddressTile {
-  if (side === null || side.verdict === "unknowable") return { value: "Not computed", tone: "refused" };
-  return side.verdict === "liquidatable" ? { value: "Liquidatable", tone: "crit" } : { value: "Healthy", tone: "ok" };
+  const figures = readable(side);
+  if (side === null || figures === null || side.verdict === "unknowable") return NOT_COMPUTED;
+  if (side.verdict === "liquidatable") return { value: "Liquidatable", tone: "crit" };
+  const band = headroomBand(figures.cap, figures.debt);
+  return band !== null && NEAR_BANDS.has(band) ? { value: "Near cap", tone: "warn" } : { value: "Healthy", tone: "ok" };
 }
 
-function roomTile(room: bigint | null, decimals: number, tone: TileTone): AddressTile {
-  if (room === null) return REFUSED_TILE;
-  if (room < 0n) return { value: `over cap by ${humanUsdFull(-room, decimals)}`, tone: "crit" };
-  return { value: humanUsdFull(room, decimals), tone };
+/** Negative room is worded "over cap by" a positive figure in the crit tone: a minus sign on a dollar figure never prints as room. */
+function roomTile(room: bigint, decimals: number, tone: TileTone): AddressTile {
+  return { value: roomWords(room, decimals), tone: room < 0n ? "crit" : tone };
 }
 
-function roomWords(room: bigint | null, decimals: number): string {
-  if (room === null) return "not computed";
+function roomWords(room: bigint, decimals: number): string {
   return room < 0n ? `over cap by ${humanUsdFull(-room, decimals)}` : humanUsdFull(room, decimals);
 }
 
+function sideRoomWords(side: StressSide | null, decimals: number): string {
+  const figures = readable(side);
+  return figures === null ? "not computed" : roomWords(figures.room, decimals);
+}
+
+/**
+ * A projection is judged by its horizons, never by its `after` — that is the
+ * spot, unchanged by construction. An unknowable horizon is a refusal that
+ * names the horizon; a liquidatable one names the first horizon it happens
+ * within, in the Inspector's warn tone; otherwise the account holds through
+ * the longest horizon. The dek is each horizon's extra interest, delta-only;
+ * a missing or negative delta is "not computed".
+ */
+function projectionHeadline(short: string, label: string, horizons: readonly StressHorizon[], today: string, decimals: number): LabHeadline {
+  const cannot = `Cannot say whether ${short} becomes liquidatable under ${label}.`;
+  const longest = horizons.reduce<StressHorizon | null>((a, h) => (a === null || h.seconds > a.seconds ? h : a), null);
+  if (longest === null) return refused(cannot, `Room today ${today}. The projection carries no horizon.`);
+  const interest = horizons.map(
+    (h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null || h.extraInterest < 0n ? "not computed" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`,
+  );
+  const dek = `Room today ${today}; ${interest.join("; ")}.`;
+  const unknowable = horizons.find((h) => h.verdict === "unknowable");
+  if (unknowable !== undefined) return refused(cannot, `${dek} The ${horizonLabel(unknowable.seconds)} horizon carries no verdict.`);
+  const within = horizons.find((h) => h.verdict === "liquidatable");
+  if (within !== undefined) return { emphasis: `${short} becomes liquidatable within ${horizonLabel(within.seconds)} under ${label}.`, rest: "", tone: "warn", dek };
+  return { emphasis: `${short} stays inside its cap through ${horizonLabel(longest.seconds)} under ${label}.`, rest: "", tone: "ok", dek };
+}
+
+/**
+ * The selected row's sentence. Not applicable is the engine's own reason; a
+ * projection reads its horizons; a spot shock reads the reader's flip. Room
+ * words come only from a readable side.
+ */
 function rowHeadline(short: string, row: StressRow, decimals: number): LabHeadline {
   if (!row.applicable) return refused(`${row.label} does not apply to ${short}.`, sentence(row.reason ?? "the engine gave no reason"));
-  const before = row.before === null ? "not computed" : roomWords(row.before.room, decimals);
-  const after = row.after === null ? "not computed" : roomWords(row.after.room, decimals);
-  const dek = `Room today ${before}; after the shock, ${after}.`;
+  const today = sideRoomWords(row.before, decimals);
+  if (row.projection !== null) return projectionHeadline(short, row.label, row.projection, today, decimals);
+  const dek = `Room today ${today}; after the shock, ${sideRoomWords(row.after, decimals)}.`;
   if (row.flips === null) return refused(`Cannot say whether ${short} becomes liquidatable under ${row.label}.`, `${dek} One side of the comparison is withheld or unknowable.`);
   if (row.flips) return { emphasis: `${short} becomes liquidatable under ${row.label}.`, rest: "", tone: "crit", dek };
   if (row.after?.verdict === "liquidatable") return { emphasis: `${short} is liquidatable today and stays so under ${row.label}.`, rest: "", tone: "crit", dek };
@@ -110,22 +167,30 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   const rows = stress.rows;
   const selected = rows.find((r) => r.id === selectedId) ?? rows[0] ?? null;
   const decimals = view.decimals !== null && isWireScale(view.decimals) ? view.decimals : null;
-  if (selected === null || decimals === null || view.cash === null) {
-    return { state: "rows", address, rows, selected, headline: refused(`No scenario applies to ${short}.`, "The stress response carried no scenario for this account."), tiles: null, batchId, decimals, cause: null };
-  }
-  const money = (v: bigint | null): AddressTile => (v === null ? REFUSED_TILE : { value: humanUsdFull(v, decimals), tone: "neutral" });
+  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, selected, headline, tiles: null, batchId, decimals, cause: null });
+  if (selected === null) return bare(refused(`No scenario applies to ${short}.`, "The stress response carried no scenario for this account."));
+  // Rows beside no Cash position are two responses disagreeing; a position at a scale the guard refused prints no figure.
+  // Neither is the scenarios' doing, so neither borrows their sentence. The position is asked before its scale: no
+  // position has no scale, and the disagreement is the truer sentence.
+  if (view.cash === null) return bare(refused(`No Cash position for ${short} to stress.`, "The stress response carries scenarios, but the lookup found no Cash position — the two answers disagree."));
+  if (decimals === null) return bare(refused("The Cash position's scale could not be read.", "No figure prints at an unreadable scale."));
+  const money = (v: bigint | null): AddressTile => (v === null || v < 0n ? REFUSED_TILE : { value: humanUsdFull(v, decimals), tone: "neutral" });
   const before = view.cash;
+  // The before tiles are refused exactly where the Inspector refuses its own: a refused or unknowable position keeps
+  // its status word and prints no figure — a persisted debt beside "Not computed" would read as a computed one.
+  const refusedBefore = view.refusedTiles;
   const roomToneBefore: TileTone = before.status === "liquidatable" ? "crit" : before.status === "near" ? "warn" : "neutral";
-  const after = selected.after;
+  const side = selected.after;
+  const after = readable(side);
   const tiles: AddressTiles = {
-    debtBefore: money(before.debt),
-    capBefore: money(before.cap),
-    roomBefore: roomTile(before.room, decimals, roomToneBefore),
+    debtBefore: refusedBefore ? REFUSED_TILE : money(before.debt),
+    capBefore: refusedBefore ? REFUSED_TILE : money(before.cap),
+    roomBefore: refusedBefore || before.room === null ? REFUSED_TILE : roomTile(before.room, decimals, roomToneBefore),
     statusBefore: STATUS_WORD[before.status],
-    debtAfter: money(after?.debt ?? null),
-    capAfter: money(after?.cap ?? null),
-    roomAfter: after === null ? REFUSED_TILE : roomTile(after.room, decimals, after.verdict === "liquidatable" ? "crit" : "neutral"),
-    statusAfter: afterStatus(after),
+    debtAfter: after === null ? REFUSED_TILE : money(after.debt),
+    capAfter: after === null ? REFUSED_TILE : money(after.cap),
+    roomAfter: after === null || side === null ? REFUSED_TILE : roomTile(after.room, decimals, side.verdict === "liquidatable" ? "crit" : "neutral"),
+    statusAfter: afterStatus(side),
   };
   return { state: "rows", address, rows, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, decimals, cause: null };
 }
