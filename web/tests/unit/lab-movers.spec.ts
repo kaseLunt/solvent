@@ -133,4 +133,20 @@ test("unreadable fields are named and never printed as numbers; an unreadable sc
   const badScale = moversTable(cashEngine({ 3: { 0: 1 } }, { usd_decimals: 1.5, movers: [mover("0x00000000000000000000000000000000000d0001", "2", "1", "5", true)], movers_total: 1, movers_note: "" }));
   expect(badScale.rows).toEqual([]);
   expect(badScale.unreadable).toEqual(["usd_decimals"]);
+  expect(moversCaption(badScale)).toBe("not readable: unreadable scale");
+});
+
+test("a ratio pair with one side null names the null side and prints unreadable; a null pair is a dash", () => {
+  const engine = cashEngine(
+    { 3: { 0: 1 } },
+    {
+      movers: [{ ...mover("0x00000000000000000000000000000000000d0005", "1300000000", "1000000000", "50000000", true), hf_before_den: null, hf_after_num: null, hf_after_den: null }],
+      movers_total: 1,
+      movers_note: "",
+    },
+  );
+  const t = moversTable(engine);
+  expect(t.rows[0]?.roomBefore).toBe("unreadable");
+  expect(t.rows[0]?.roomAfter).toBe("—");
+  expect(t.unreadable).toEqual(["movers[0].hf_before_den"]);
 });

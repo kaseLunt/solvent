@@ -52,7 +52,10 @@ export function roomFromRatio(num: bigint, den: bigint): string {
 }
 
 function ratio(num: string | null, den: string | null, at: string, unreadable: string[]): string {
-  if (num === null || den === null) return "—";
+  // A side with no debt is null on both sides together. A pair with one side
+  // null is a statement the wire cannot mean, so the null side is named as
+  // unreadable like any other value that fails the guard.
+  if (num === null && den === null) return "—";
   const n = isWireDecimal(num);
   const d = isWireDecimal(den);
   if (!n) unreadable.push(`${at}_num`);
@@ -114,6 +117,9 @@ export function moversTable(engine: MoverEngine): MoversTable {
 }
 
 export function moversCaption(t: MoversTable): string {
+  // A table refused for its scale states no count: "0 accounts" would be a
+  // claim about the book, and the truth is that the scale could not be read.
+  if (t.unreadable.includes("usd_decimals")) return "not readable: unreadable scale";
   const noun = (n: number) => `${groupInt(n)} account${n === 1 ? "" : "s"} moved`;
   if (t.total === null) return `showing ${noun(t.shown)} · total not stated`;
   return `showing ${groupInt(t.shown)} of ${noun(t.total)}`;
