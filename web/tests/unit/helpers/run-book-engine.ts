@@ -2,7 +2,8 @@
 // `table[from][to] = rows` becomes the ten-lane transitions; every margin,
 // histogram count and total is SUMMED from it so the fixtures cannot disagree
 // with themselves. Debts are rows × a unit, so sums are exact.
-import type { components } from "@solvent/client";
+import { refineProjection, type components } from "@solvent/client";
+import type { LabRunBook } from "../../../lib/runbook";
 
 type Schemas = components["schemas"];
 export type Engine = Schemas["RunBookEngine"];
@@ -161,3 +162,72 @@ export const DEMO_CASH_TABLE: MoveTable = {
   7: { 5: 60, 6: 320, 7: 424 },
   9: { 9: 6 },
 };
+
+// ---------------------------------------------------------------------------
+// A whole run-book around the engines above, as the Lab HOLDS it: the wire
+// envelope with every engine's projection sealed by the same law
+// `lib/runbook.ts` applies on receipt, so a pin's record is exactly what the
+// fetch layer would have stored.
+// ---------------------------------------------------------------------------
+export type RunBook = LabRunBook;
+export type Definition = Schemas["ScenarioDefinition"];
+
+export const DEFINITION_ETH: Definition = {
+  id: "eth_minus_30",
+  version: "v1",
+  label: "ETH -30 percent",
+  description: "All ETH-linked collateral marked down 30 percent.",
+  path_assumption: "instantaneous mark at the shocked level; single-step",
+  engines: ["aave_v3_etherfi", "debt_manager"],
+  shocks: [{ axis: "eth_usd", factor_num: 70, factor_den: 100 }],
+  out_of_model: ["liquidation bonuses", "gas"],
+};
+
+const BATCH: Schemas["Batch"] = {
+  id: 18251,
+  computed_at: "2026-08-08T20:22:08Z",
+  age_seconds: 42,
+  producer: "riskd",
+  status: "complete",
+  position_count: 9964,
+  refused_count: 6,
+  refused_engines: [],
+  flagged_count: 30,
+  watermarks: [],
+  supersession: { superseded: false, legs: [], note: "" },
+};
+
+/** The book's coverage claim, summed from the batch so the two cannot disagree: nothing excluded, nothing withheld. */
+const COVERAGE: Schemas["BookCoverage"] = {
+  batch_positions: BATCH.position_count,
+  in_book: BATCH.position_count - BATCH.refused_count,
+  refused_in_batch: BATCH.refused_count,
+  excluded_by_this_layer: 0,
+  excluded: [],
+  withheld_engines: [],
+  stress_coverage_is_full: true,
+  note: "helper: in_book is the batch's positions less its refused rows",
+};
+
+/** A wire-true run-book around the given engines, sealed as the Lab holds it. `batch` overrides let a pin state supersession. */
+export function runBookOf(engines: readonly Engine[], def: Definition = DEFINITION_ETH, overrides: Partial<RunBook> = {}): RunBook {
+  return {
+    served_at: "2026-08-08T20:22:50Z",
+    batch: BATCH,
+    scenario_config_version: "v1",
+    scenario_id: def.id,
+    scenario_version: def.version,
+    label: def.label,
+    description: def.description,
+    path_assumption: def.path_assumption,
+    shocks: def.shocks,
+    out_of_model: def.out_of_model,
+    applied_shocks: [],
+    held_flat: [],
+    engines: engines.map((e) => ({ ...e, projection: e.projection === null ? null : refineProjection(e.projection) })),
+    excluded_engines: [],
+    coverage: COVERAGE,
+    notes: [],
+    ...overrides,
+  };
+}
