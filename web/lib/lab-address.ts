@@ -76,14 +76,23 @@ function readable(side: StressSide | null): { readonly debt: bigint; readonly ca
 }
 
 /**
+ * A side is computable when its verdict is known and its figures are a
+ * position — the one condition the tiles, the dek and the headline share, so
+ * a side the tiles refuse yields no figure and no verdict word anywhere.
+ */
+function computable(side: StressSide | null): ReturnType<typeof readable> {
+  return side !== null && side.verdict !== "unknowable" ? readable(side) : null;
+}
+
+/**
  * The after side's status word in the Inspector's register: the verdict
  * governs; a non-liquidatable side is "Near cap" inside the near bands and
  * "Healthy" outside them; an unknowable verdict, or figures that cannot be
  * read, is "Not computed" — never a verdict word on an unknown.
  */
 function afterStatus(side: StressSide | null): AddressTile {
-  const figures = readable(side);
-  if (side === null || figures === null || side.verdict === "unknowable") return NOT_COMPUTED;
+  const figures = computable(side);
+  if (side === null || figures === null) return NOT_COMPUTED;
   if (side.verdict === "liquidatable") return { value: "Liquidatable", tone: "crit" };
   const band = headroomBand(figures.cap, figures.debt);
   return band !== null && NEAR_BANDS.has(band) ? { value: "Near cap", tone: "warn" } : { value: "Healthy", tone: "ok" };
@@ -100,7 +109,7 @@ function roomWords(room: bigint, decimals: number): string {
 
 /** A side's room words: "not computed" for a missing, unreadable or unknowable side — the tiles' own word — never a figure beside it. */
 function sideRoomWords(side: StressSide | null, decimals: number): string {
-  const figures = side !== null && side.verdict !== "unknowable" ? readable(side) : null;
+  const figures = computable(side);
   return figures === null ? "not computed" : roomWords(figures.room, decimals);
 }
 
@@ -128,25 +137,23 @@ function projectionHeadline(short: string, label: string, horizons: readonly Str
 }
 
 /**
- * The selected row's sentence. Not applicable is the engine's own reason; a
- * projection reads its horizons; a spot shock reads the reader's flip. Room
- * words come only from a readable side.
- */
-/**
- * The selected row's sentence. Not applicable is the engine's own reason; a
- * projection reads its horizons; a spot shock reads the reader's flip — but
- * only over sides whose figures are a position: a side the tiles refuse yields
- * no verdict word here either, whatever the wire's boolean says of it.
+ * The selected row's sentence. Not applicable is the engine's own reason. A
+ * side the tiles refuse — unreadable figures or an unknowable verdict — yields
+ * no verdict word in any row kind, whatever the wire's booleans or horizons
+ * say of it: that gate is asked before a projection reads its horizons or a
+ * spot shock reads the reader's flip.
  */
 function rowHeadline(short: string, row: StressRow, decimals: number): LabHeadline {
   if (!row.applicable) return refused(`${row.label} does not apply to ${short}.`, sentence(row.reason ?? "the engine gave no reason"));
   const today = sideRoomWords(row.before, decimals);
-  if (row.projection !== null) return projectionHeadline(short, row.label, row.projection, today, decimals);
   const dek = `Room today ${today}; after the shock, ${sideRoomWords(row.after, decimals)}.`;
   const cannot = `Cannot say whether ${short} becomes liquidatable under ${row.label}.`;
-  if ((row.before !== null && readable(row.before) === null) || (row.after !== null && readable(row.after) === null)) {
-    return refused(cannot, `${dek} The shocked figures are not a position.`);
+  const sides = [row.before, row.after].filter((s): s is StressSide => s !== null);
+  if (sides.some((s) => computable(s) === null)) {
+    const cause = sides.some((s) => readable(s) === null) ? "The shocked figures are not a position." : "One side of the comparison is withheld or unknowable.";
+    return refused(cannot, `${dek} ${cause}`);
   }
+  if (row.projection !== null) return projectionHeadline(short, row.label, row.projection, today, decimals);
   if (row.flips === null) return refused(cannot, `${dek} One side of the comparison is withheld or unknowable.`);
   if (row.flips) return { emphasis: `${short} becomes liquidatable under ${row.label}.`, rest: "", tone: "crit", dek };
   if (row.after?.verdict === "liquidatable") return { emphasis: `${short} is liquidatable today and stays so under ${row.label}.`, rest: "", tone: "crit", dek };
@@ -197,9 +204,9 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   const refusedBefore = view.refusedTiles;
   const roomToneBefore: TileTone = before.status === "liquidatable" ? "crit" : before.status === "near" ? "warn" : "neutral";
   const side = selected.after;
-  // An unknowable after verdict refuses its figures as the Inspector refuses an unknowable position's: a debt beside
+  // An uncomputable after side refuses its figures as the Inspector refuses an unknowable position's: a debt beside
   // "Not computed" would read as a computed one.
-  const after = side !== null && side.verdict !== "unknowable" ? readable(side) : null;
+  const after = computable(side);
   // The after room carries its status's tone as the before pair does: crit beside Liquidatable, warn beside Near cap.
   const statusAfter = afterStatus(side);
   const roomToneAfter: TileTone = statusAfter.tone === "crit" ? "crit" : statusAfter.tone === "warn" ? "warn" : "neutral";

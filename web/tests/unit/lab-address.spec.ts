@@ -194,6 +194,30 @@ test("an unknowable after verdict refuses its figures beside Not computed, and t
   expect(u.headline.dek).not.toContain("over cap by");
 });
 
+test("a projection over an uncomputable spot yields no verdict word: the horizons are not consulted", () => {
+  const spot = (patch: Partial<NonNullable<StressResult["after"]>>) =>
+    nearWith(withResult("dm_rate_horizon_plus_200bps", (x) => (!x.after ? x : { ...x, after: { ...x.after, ...patch } })));
+  const negative = addressWorkspace({ address: DEMO_NEAR_ADDR, view: spot({ debt_usd: "-4822000000" }), selectedId: "dm_rate_horizon_plus_200bps" });
+  expect(negative.selected?.projection).not.toBeNull();
+  expect(negative.headline).toEqual({
+    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    rest: "",
+    tone: "refused",
+    dek: "Room today $190.50; after the shock, not computed. The shocked figures are not a position.",
+  });
+  expect(negative.tiles?.statusAfter).toEqual(NOT_COMPUTED);
+  expect(negative.tiles?.roomAfter).toEqual(REFUSED);
+  // The same gate for an unknowable spot verdict, in its own words.
+  const unknown = addressWorkspace({ address: DEMO_NEAR_ADDR, view: spot({ liquidatable: null }), selectedId: "dm_rate_horizon_plus_200bps" });
+  expect(unknown.headline).toEqual({
+    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    rest: "",
+    tone: "refused",
+    dek: "Room today $190.50; after the shock, not computed. One side of the comparison is withheld or unknowable.",
+  });
+  expect(unknown.tiles?.statusAfter).toEqual(NOT_COMPUTED);
+});
+
 test("rows beside a withheld Cash book are a cannot-say, never a negative", () => {
   const readdressed = {
     ...DEMO_STRESS_NEAR,
