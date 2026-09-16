@@ -122,6 +122,7 @@
 /* ---- responsive (spec §6): stack below 900px, never drop table columns ---- */
 @media (max-width: 900px) {
   .hd { height: auto; flex-wrap: wrap; gap: 8px; padding: 10px 16px; }
+  .nav, .status { flex-wrap: wrap; }
   .body { padding: 20px 16px; }
   .kpis, .kpis5, .kpis4 { grid-template-columns: repeat(2, 1fr); }
   .grid, .gridRail { grid-template-columns: 1fr; }

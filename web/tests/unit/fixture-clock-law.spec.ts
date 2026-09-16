@@ -247,11 +247,16 @@ const CENSUS: Record<string, number> = {
   "book-engine-refused.json": 3,
   "book-monotonicity-violation.json": 3,
   "book.json": 3,
+  "demo/book.demo.json": 3,
+  "demo/meta.demo.json": 5,
+  "demo/positions-dm-demo-page-1.json": 2,
+  "demo/positions-dm-demo-page-2.json": 2,
   // THREE since p1a-9: batch age over computed_at, the debt_manager
   // watermark's sweep over max_updated_at, AND the same sweep stamp on the
   // debt_manager row of the new `engines` aggregate roster (the schema's
   // stamp-travels-on-the-row law; generate-feed.mjs pins the same 3).
   "feed-posture-snapshot.json": 3,
+  "meta.json": 5,
   "observatory-series-dm.json": 2,
   "positions-aave-page-1.json": 2,
   "positions-aave-page-2.json": 2,
@@ -285,7 +290,9 @@ const CENSUS: Record<string, number> = {
 
 /** 24 files × 2 trios + the three book bodies × 3 + the posture snapshot's 3
  * (p1a-9). Stated separately so a census edit cannot move it silently. */
-const CENSUS_TOTAL = 60;
+// + meta.json (5, the /v1/meta byte copy) + the demo dataset (3 + 5 + 2 + 2),
+// plan 2026-09-15 Task 11: 60 + 5 + 12 = 77.
+const CENSUS_TOTAL = 77;
 
 // --- the generators' own pins, read out of their source ---------------------
 //
@@ -489,7 +496,9 @@ test.describe("every committed fixture states only ages its own stamps support",
     // fails, a directory appeared that nobody decided about — decide, rather
     // than let the walk quietly stop covering it.
     expect(corpus.skipped).toEqual([]);
-    expect(corpus.directories).toEqual([]);
+    // `demo/` is the realistic-scale dataset (spec 2026-09-15 §8), decided
+    // 2026-09-15: its bodies are walked like every other fixture.
+    expect(corpus.directories).toEqual(["demo"]);
   });
 
   test("the enumerator descends", async () => {
@@ -603,7 +612,8 @@ test.describe("the clock census", () => {
     // bodies; the busy refusal carries no batch); `observatory-series-dm.json`
     // is the clock-bearing file that carries no batch, which is why the walk is
     // over the directory rather than over the batch-bearing subset.
-    expect(fixtureFiles.filter((name) => isBatchBearing(readFixture(name)))).toHaveLength(27);
+    // + meta.json and the four demo bodies (plan 2026-09-15 Task 11): 27 + 5 = 32.
+    expect(fixtureFiles.filter((name) => isBatchBearing(readFixture(name)))).toHaveLength(32);
   });
 });
 

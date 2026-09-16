@@ -12,6 +12,7 @@ import { humanUsd } from "@/lib/human-usd";
 import { useMetaConstants } from "@/lib/meta";
 import { plainCause } from "@/lib/refusal-phrasebook";
 import { stressPreview } from "@/lib/stress-preview";
+import { readWirePopulation } from "@/lib/wireGuard";
 import { BookLegacy } from "./BookLegacy";
 import { BookMethodology } from "./BookMethodology";
 import { NeedsAttention } from "./NeedsAttention";
@@ -40,11 +41,17 @@ export function BookSurface() {
   const cash = reading.cash;
   const decimals = cash.engine?.value_decimals ?? 6;
   const loaded = reading.phase === "ok";
+  // Wire populations are classified before render (p1b law): a -0 or a fraction refuses the route.
+  const pop = (value: number | undefined, field: string): number =>
+    value === undefined ? 0 : readWirePopulation(value, `engines[debt_manager].${field}`);
+  const positions = pop(cash.engine?.positions, "positions");
+  const computedPositions = pop(cash.engine?.computed_positions, "computed_positions");
+  const refusedPositions = pop(cash.engine?.refused_positions, "refused_positions");
   const summary = loaded
     ? summarizeCash({
         rows: cash.rows,
         decimals,
-        refusedPositions: cash.engine?.refused_positions ?? 0,
+        refusedPositions,
         walkComplete: cash.walkComplete,
         refusedWhole: cash.refusedWhole,
       })
@@ -69,7 +76,7 @@ export function BookSurface() {
           },
           {
             label: "Coverage",
-            value: `${(cash.engine?.computed_positions ?? 0).toLocaleString("en-US")} / ${(cash.engine?.positions ?? 0).toLocaleString("en-US")} computed`,
+            value: `${computedPositions.toLocaleString("en-US")} / ${positions.toLocaleString("en-US")} computed`,
           },
           { label: "Current", value: "not projected" },
         ];
@@ -86,6 +93,10 @@ export function BookSurface() {
   const refusalKey = cash.engine?.refusals[0]?.key;
   const badDebt = cash.badDebt;
   const badDebtValue = badDebt?.current_bad_debt_usd == null ? null : BigInt(badDebt.current_bad_debt_usd);
+  const insolvent =
+    badDebt === null || badDebt.insolvent_positions === null
+      ? null
+      : readWirePopulation(badDebt.insolvent_positions, "bad_debt[debt_manager].insolvent_positions");
   const preview =
     reading.book === null || reading.book.waterfall === null ? null : stressPreview(reading.book.waterfall, "debt_manager");
   const walkFailure =
@@ -117,7 +128,7 @@ export function BookSurface() {
       />
       <SectionHead
         title="Cash"
-        qualifier={`Debt Manager engine · OP Mainnet · ${(cash.engine?.positions ?? 0).toLocaleString("en-US")} borrowing accounts`}
+        qualifier={`Debt Manager engine · OP Mainnet · ${positions.toLocaleString("en-US")} borrowing accounts`}
         link={{ href: "#legacy", label: "Legacy Aave v3 market ↓" }}
       />
       <div className={kit.kpis}>
@@ -160,13 +171,13 @@ export function BookSurface() {
           testId="book-kpi-baddebt"
           label="Standing bad debt"
           value={badDebt === null || badDebtValue === null ? "—" : humanUsd(badDebtValue, badDebt.usd_decimals)}
-          sub={badDebt === null ? "" : badDebt.insolvent_positions === null ? "accounts unknown" : plural(badDebt.insolvent_positions, "account")}
+          sub={badDebt === null ? "" : insolvent === null ? "accounts unknown" : plural(insolvent, "account")}
           tone={refusedTiles ? "refused" : badDebtValue !== null && badDebtValue > 0n ? "warn" : "neutral"}
         />
         <KpiTile
           testId="book-kpi-notcomputed"
           label="Not computed"
-          value={cash.engine === null ? "—" : String(cash.engine.refused_positions)}
+          value={cash.engine === null ? "—" : String(refusedPositions)}
           sub={refusalKey === undefined ? "nothing refused" : plainCause(refusalKey)}
           tone="refused"
         />
@@ -208,7 +219,7 @@ export function BookSurface() {
             finding={
               badDebt === null || badDebtValue === null
                 ? "Not reported."
-                : `${humanUsd(badDebtValue, badDebt.usd_decimals)} of debt is no longer covered by collateral, across ${badDebt.insolvent_positions === null ? "an unknown number of accounts" : plural(badDebt.insolvent_positions, "account")}.`
+                : `${humanUsd(badDebtValue, badDebt.usd_decimals)} of debt is no longer covered by collateral, across ${insolvent === null ? "an unknown number of accounts" : plural(insolvent, "account")}.`
             }
           >
             <p className={styles.note}>

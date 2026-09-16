@@ -5,6 +5,7 @@ import { Drawer } from "@/components/Drawer";
 import type { BookResponse } from "@/lib/cash-book";
 import { MATERIAL_LINE_USD, SMALL_LINE_USD } from "@/lib/materiality";
 import { plainCause } from "@/lib/refusal-phrasebook";
+import { readWirePopulation } from "@/lib/wireGuard";
 import styles from "./book.module.css";
 
 export interface BookMethodologyProps {
@@ -57,8 +58,9 @@ export function BookMethodology({ open, onClose, book }: BookMethodologyProps) {
           <p>
             Batch <code>{String(book.batch.id)}</code> computed <code>{book.batch.computed_at}</code> by{" "}
             <code>{book.batch.producer}</code>; served <code>{book.served_at}</code>. Coverage:{" "}
-            {String(book.coverage.in_book)} of {String(book.coverage.batch_positions)} positions on the wire,{" "}
-            {String(book.coverage.refused_in_batch)} refused.
+            {String(readWirePopulation(book.coverage.in_book, "coverage.in_book"))} of{" "}
+            {String(readWirePopulation(book.coverage.batch_positions, "coverage.batch_positions"))} positions on the wire,{" "}
+            {String(readWirePopulation(book.coverage.refused_in_batch, "coverage.refused_in_batch"))} refused.
           </p>
         )}
         <p>

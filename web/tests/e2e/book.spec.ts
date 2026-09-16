@@ -165,6 +165,22 @@ test("a transport failure mid-walk is stated with a retry that re-walks", async 
   expect(positionsRequests).toBe(2);
 });
 
+test("a -0 population on /v1/book refuses the route — never a printed zero", async ({ page }) => {
+  // JSON admits the literal -0; JSON.stringify would erase it, so the body is
+  // spliced as text. The legacy engine's computed_positions is the target.
+  const body = JSON.stringify(BOOK).replace(/"computed_positions":1\b/, '"computed_positions":-0');
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/book", (route) =>
+    route.fulfill({ status: 200, headers: CORS, contentType: "application/json", body }),
+  );
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.goto("/book");
+  await expect(page.getByTestId("route-refusal")).toBeVisible();
+  await expect(page.getByTestId("route-refusal")).toContainText("computed_positions");
+  await expect(page.locator("body")).not.toContainText("-0 computed");
+});
+
 test("first viewport at 1440×900 holds the verdict, the tiles and the top of the grid", async ({ page }) => {
   await mockDemo(page);
   await page.setViewportSize({ width: 1440, height: 900 });

@@ -14,6 +14,7 @@ import { isAddress } from "@/lib/format";
 import { humanUsd } from "@/lib/human-usd";
 import { fetchEvidence } from "@/lib/proof-data";
 import { stressPreview } from "@/lib/stress-preview";
+import { readWirePopulation } from "@/lib/wireGuard";
 import {
   FOOTER_NOTE,
   FOOTER_STACK,
@@ -54,12 +55,18 @@ export function OverviewSurface() {
 
   const cash = reading.cash;
   const decimals = cash.engine?.value_decimals ?? 6;
+  // Wire populations are classified before render (p1b law).
+  const pop = (value: number | undefined, field: string): number =>
+    value === undefined ? 0 : readWirePopulation(value, `engines[debt_manager].${field}`);
+  const positions = pop(cash.engine?.positions, "positions");
+  const computedPositions = pop(cash.engine?.computed_positions, "computed_positions");
+  const refusedPositions = pop(cash.engine?.refused_positions, "refused_positions");
   const summary =
     reading.phase === "ok"
       ? summarizeCash({
           rows: cash.rows,
           decimals,
-          refusedPositions: cash.engine?.refused_positions ?? 0,
+          refusedPositions,
           walkComplete: cash.walkComplete,
           refusedWhole: cash.refusedWhole,
         })
@@ -79,7 +86,7 @@ export function OverviewSurface() {
           { label: "Snapshot", value: ageText ?? "age unknown", tone: ageText === null ? "refused" : "ok" },
           {
             label: "Coverage",
-            value: `${(cash.engine?.computed_positions ?? 0).toLocaleString("en-US")} / ${(cash.engine?.positions ?? 0).toLocaleString("en-US")} computed`,
+            value: `${computedPositions.toLocaleString("en-US")} / ${positions.toLocaleString("en-US")} computed`,
           },
         ];
   const preview =
@@ -178,7 +185,7 @@ export function OverviewSurface() {
           </div>
           <div>
             <div className={styles.liveStatL}>Accounts</div>
-            <div className={styles.liveStatV}>{cash.engine === null ? "—" : cash.engine.positions.toLocaleString("en-US")}</div>
+            <div className={styles.liveStatV}>{cash.engine === null ? "—" : positions.toLocaleString("en-US")}</div>
           </div>
         </div>
       </section>
@@ -222,7 +229,7 @@ export function OverviewSurface() {
         <h2>How it works</h2>
         <Link href="/proof">Architecture &amp; verification →</Link>
       </div>
-      <Pipeline meta={meta} evidence={evidence} book={reading.book} cashAccounts={cash.engine?.positions ?? null} />
+      <Pipeline meta={meta} evidence={evidence} book={reading.book} cashAccounts={cash.engine === null ? null : positions} />
       <div className={styles.foot}>
         <span>{FOOTER_STACK}</span>
         <span>

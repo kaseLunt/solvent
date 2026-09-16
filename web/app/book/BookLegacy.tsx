@@ -2,6 +2,7 @@ import { BandBars, KpiTile, type Band } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import type { BadDebtEngine, BookEngine, HistogramEngine } from "@/lib/cash-book";
 import { humanUsd } from "@/lib/human-usd";
+import { readWirePopulation } from "@/lib/wireGuard";
 import styles from "./book.module.css";
 
 export interface BookLegacyProps {
@@ -14,6 +15,11 @@ export interface BookLegacyProps {
 export function BookLegacy({ engine, badDebt, histogram }: BookLegacyProps) {
   if (engine === null) return null;
   const d = engine.value_decimals;
+  // Every population is a wire integer: classified before render, never coerced (p1b law).
+  const positions = readWirePopulation(engine.positions, "engines[legacy].positions");
+  const computedPositions = readWirePopulation(engine.computed_positions, "engines[legacy].computed_positions");
+  const liquidatablePositions = readWirePopulation(engine.liquidatable_positions, "engines[legacy].liquidatable_positions");
+  const refusedPositions = readWirePopulation(engine.refused_positions, "engines[legacy].refused_positions");
   const bands: Band[] = (histogram?.buckets ?? []).map((b, i) => ({
     id: b.label,
     label: b.label,
@@ -25,8 +31,8 @@ export function BookLegacy({ engine, badDebt, histogram }: BookLegacyProps) {
   return (
     <details className={styles.legacy} data-testid="book-legacy" id="legacy">
       <summary>
-        Legacy · Aave v3 market — {engine.positions.toLocaleString("en-US")} positions · {debt} ·{" "}
-        {String(engine.liquidatable_positions)} liquidatable · {String(engine.refused_positions)} refused
+        Legacy · Aave v3 market — {positions.toLocaleString("en-US")} positions · {debt} ·{" "}
+        {String(liquidatablePositions)} liquidatable · {String(refusedPositions)} refused
       </summary>
       <p className={styles.note}>
         The ether.fi Aave v3 market is being wound down. Its figures are shown for completeness and are never
@@ -35,8 +41,8 @@ export function BookLegacy({ engine, badDebt, histogram }: BookLegacyProps) {
       <div className={`${kit.kpis} ${kit.kpis4}`}>
         <KpiTile
           label="Positions"
-          value={engine.positions.toLocaleString("en-US")}
-          sub={`${engine.computed_positions.toLocaleString("en-US")} computed`}
+          value={positions.toLocaleString("en-US")}
+          sub={`${computedPositions.toLocaleString("en-US")} computed`}
         />
         <KpiTile
           label="Debt"
@@ -45,15 +51,15 @@ export function BookLegacy({ engine, badDebt, histogram }: BookLegacyProps) {
         />
         <KpiTile
           label="Liquidatable"
-          value={String(engine.liquidatable_positions)}
+          value={String(liquidatablePositions)}
           sub={
             badDebt?.eligible_debt_usd == null
               ? "Σ withheld"
               : `${humanUsd(BigInt(badDebt.eligible_debt_usd), badDebt.usd_decimals)} eligible debt`
           }
-          tone={engine.liquidatable_positions > 0 ? "crit" : "neutral"}
+          tone={liquidatablePositions > 0 ? "crit" : "neutral"}
         />
-        <KpiTile label="Not computed" value={String(engine.refused_positions)} tone="refused" />
+        <KpiTile label="Not computed" value={String(refusedPositions)} tone="refused" />
       </div>
       {bands.length > 0 && (
         <>

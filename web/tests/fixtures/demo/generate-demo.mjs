@@ -32,6 +32,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ageSeconds, checkClocks, STAMP_KEYS } from "../clock-law.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, "..");
@@ -41,6 +42,45 @@ const BATCH_ID = 18251;
 const COMPUTED_AT = "2026-08-08T20:22:08Z";
 const SERVED_AT = "2026-08-08T20:22:50Z";
 const AGE_SECONDS = 42;
+// THE CLOCK LAW (tests/fixtures/clock-law.mjs, pinned by tests/unit/fixture-clock-law.spec.ts):
+// a body may choose its INSTANTS freely and may never choose its AGES. The
+// template envelopes carry July instants; every July stamp is shifted forward
+// by the same delta so relative timing survives, then every stated age is
+// re-derived from SERVED_AT, and the law is run before a byte is written.
+const TEMPLATE_SERVED_AT = "2026-07-29T10:00:05Z";
+const SHIFT_MS = Date.parse(SERVED_AT) - Date.parse(TEMPLATE_SERVED_AT);
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+const shiftStamps = (node) => {
+  if (Array.isArray(node)) return node.map(shiftStamps);
+  if (node !== null && typeof node === "object") {
+    return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, shiftStamps(v)]));
+  }
+  if (typeof node === "string" && ISO.test(node) && Date.parse(node) < Date.parse("2026-08-01T00:00:00Z")) {
+    return new Date(Date.parse(node) + SHIFT_MS).toISOString().replace(/\.000Z$/, "Z");
+  }
+  return node;
+};
+const repairAges = (node, servedAt) => {
+  if (Array.isArray(node)) {
+    node.forEach((v) => repairAges(v, servedAt));
+    return;
+  }
+  if (node === null || typeof node !== "object") return;
+  if (typeof node.age_seconds === "number") {
+    const stamp = STAMP_KEYS.map((k) => node[k]).find((v) => typeof v === "string");
+    if (stamp !== undefined) node.age_seconds = Number(ageSeconds(stamp, servedAt));
+  }
+  for (const v of Object.values(node)) repairAges(v, servedAt);
+};
+const writeChecked = (name, body) => {
+  const shifted = shiftStamps(body);
+  shifted.served_at = SERVED_AT;
+  if (shifted.batch) shifted.batch.computed_at = COMPUTED_AT;
+  repairAges(shifted, SERVED_AT);
+  const report = checkClocks(shifted);
+  if (report.failures.length > 0) throw new Error(`${name} violates the clock law:\n${report.failures.join("\n")}`);
+  writeFileSync(path.join(here, name), JSON.stringify(shifted, null, 2));
+};
 const USD = (dollars) => BigInt(Math.round(dollars * 1e6)); // Cash value_decimals = 6
 const WAD = 10n ** 18n;
 // Real riskd watermark heights, applied by engine to every batch block and the live vector.
@@ -153,8 +193,8 @@ const batchIdentity = { id: BATCH_ID, computed_at: COMPUTED_AT, age_seconds: AGE
 const batchFor = (template) => ({ ...template, ...batchIdentity, watermarks: atHeights(template.watermarks) });
 const batch = batchFor(page1.batch);
 const envelope = (positions, nextCursor) => ({ ...page1, served_at: SERVED_AT, batch, sort: "headroom", limit: 1000, total_positions: rows.length, positions, next_cursor: nextCursor });
-writeFileSync(path.join(here, "positions-dm-demo-page-1.json"), JSON.stringify(envelope(rows.slice(0, 1000), "demo-cursor-2"), null, 2));
-writeFileSync(path.join(here, "positions-dm-demo-page-2.json"), JSON.stringify(envelope(rows.slice(1000), null), null, 2));
+writeChecked("positions-dm-demo-page-1.json", envelope(rows.slice(0, 1000), "demo-cursor-2"));
+writeChecked("positions-dm-demo-page-2.json", envelope(rows.slice(1000), null));
 
 // ---- book (envelope from the committed book.json; aggregates from the rows) ----
 const book = read("book.json");
@@ -218,7 +258,7 @@ book.waterfall.points = book.waterfall.points.map((point, i) => ({
   }),
 }));
 book.coverage = { ...book.coverage, batch_positions: 9964, in_book: 9964 - refusedCount, refused_in_batch: refusedCount };
-writeFileSync(path.join(here, "book.demo.json"), JSON.stringify(book, null, 2));
+writeChecked("book.demo.json", book);
 
 // ---- meta (envelope from the committed meta.json; batch identity, real heights, sweep counters from the rows) ----
 meta.served_at = SERVED_AT;
@@ -232,5 +272,5 @@ meta.sweeps = meta.sweeps.map((s) =>
     : s,
 );
 meta.sweep_never_refusals_in_batch = refusedCount;
-writeFileSync(path.join(here, "meta.demo.json"), JSON.stringify(meta, null, 2));
+writeChecked("meta.demo.json", meta);
 console.log(`wrote demo dataset: ${String(rows.length)} Cash rows · ${String(liquidatable.length)} liquidatable · Σ debt ${totalDebt.toString()} (6-dec)`);
