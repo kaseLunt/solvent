@@ -256,6 +256,9 @@ export function useAnchoredAgeSeconds(
     };
 
     const tick = setInterval(reconcile, AGE_TICK_MS);
+    // A receipt anchored on past clocks is already older than its wire number: reconcile at once,
+    // off the render path, rather than at the first tick.
+    const immediate = receivedAtMs === null ? null : setTimeout(reconcile, 0);
 
     // --- the bounded repair of a blind resume (Wave R6) --------------------
     //
@@ -386,6 +389,7 @@ export function useAnchoredAgeSeconds(
     return () => {
       cancelled = true;
       clearInterval(tick);
+      if (immediate !== null) clearTimeout(immediate);
       if (retryTimer !== null) clearTimeout(retryTimer);
       for (const type of LIFECYCLE_EVENTS) {
         lifecycleTarget(type).removeEventListener(type, onLifecycleSignal);

@@ -304,14 +304,26 @@ test("rows beside no readable position: an unreadable scale and a missing Cash p
   });
 });
 
-test("rowOutcome: the library word is the row's own verdict — flips, cannot-say, the engine's reason, or not on this address", () => {
-  const rows = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(DEMO_STRESS_NEAR), selectedId: "eth_minus_30" }).rows;
-  const eth = rows.find((r) => r.id === "eth_minus_30");
-  expect(eth?.flips).toBe(true);
+test("rowOutcome: the library word is the row's own verdict — the same judgement the headline speaks from", () => {
+  const near = (body: StressBody) => addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(body), selectedId: "eth_minus_30" }).rows;
+  const rows = near(DEMO_STRESS_NEAR);
+  const eth = rows.find((r) => r.id === "eth_minus_30")!;
+  const dm = rows.find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
+  expect(eth.flips).toBe(true);
   expect(rowOutcome(eth)).toEqual({ key: "result", text: "Becomes liquidatable", tone: "crit" });
-  expect(rowOutcome({ ...eth!, flips: false })).toEqual({ key: "result", text: "Stays inside its cap", tone: "ok" });
-  expect(rowOutcome({ ...eth!, flips: null })).toEqual({ key: "withheld", text: "Cannot say", tone: "refused" });
-  expect(rowOutcome({ ...eth!, applicable: false, reason: "no Cash position" })).toEqual({ key: "not-covered", text: "Not applicable: no Cash position", tone: "dim" });
-  expect(rowOutcome({ ...eth!, applicable: false, reason: null })).toEqual({ key: "not-covered", text: "Not applicable: the engine gave no reason", tone: "dim" });
+  // A projection speaks through its horizons: inside through the longest, or liquidatable within the first that flips.
+  expect(rowOutcome(dm)).toEqual({ key: "result", text: "Stays inside its cap through 90d", tone: "ok" });
+  const flipsAt30d = near(projected(0, true)).find((r) => r.id === "dm_rate_horizon_plus_200bps");
+  expect(rowOutcome(flipsAt30d)).toEqual({ key: "result", text: "Becomes liquidatable within 30d", tone: "warn" });
+  // A side the tiles refuse yields no verdict word, whatever the wire's booleans say.
+  const unreadable = near(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, debt_usd: "-4822000000" } }))).find((r) => r.id === "eth_minus_30")!;
+  expect(unreadable.flips).toBe(true);
+  expect(rowOutcome(unreadable)).toEqual({ key: "withheld", text: "Cannot say", tone: "refused" });
+  expect(rowOutcome({ ...eth, flips: null })).toEqual({ key: "withheld", text: "Cannot say", tone: "refused" });
+  // A spot row that does not flip: inside when it is not liquidatable today, "today and after" when it already is.
+  expect(rowOutcome({ ...eth, flips: false, after: eth.before })).toEqual({ key: "result", text: "Stays inside its cap", tone: "ok" });
+  expect(rowOutcome({ ...eth, flips: false })).toEqual({ key: "result", text: "Liquidatable today and after", tone: "crit" });
+  expect(rowOutcome({ ...eth, applicable: false, reason: "no Cash position" })).toEqual({ key: "not-covered", text: "Not applicable: no Cash position", tone: "dim" });
+  expect(rowOutcome({ ...eth, applicable: false, reason: null })).toEqual({ key: "not-covered", text: "Not applicable: the engine gave no reason", tone: "dim" });
   expect(rowOutcome(undefined)).toEqual({ key: "not-covered", text: "Not on this address", tone: "dim" });
 });

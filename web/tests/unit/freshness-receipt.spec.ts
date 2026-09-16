@@ -105,3 +105,9 @@ test("A NEW RECEIPT MAY LEGITIMATELY SHOW A SMALLER AGE — the floor is per-rec
     Date.now = realDate;
   }
 });
+
+test("a receipt anchored on past clocks already carries the interval since those clocks — the wire age plus the elapsed time, at once", () => {
+  const anchor = anchorWireAge(42, 1_000, 5_000_000);
+  expect(anchoredAgeSeconds(anchor, 1_000 + 360_000, 5_000_000 + 360_000)).toBe(402);
+  expect(anchoredAgeSeconds(anchor, 1_000, 5_000_000)).toBe(42);
+});

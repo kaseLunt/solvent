@@ -115,26 +115,42 @@ function sideRoomWords(side: StressSide | null, decimals: number): string {
 }
 
 /**
- * A projection is judged by its horizons, never by its `after` — that is the
- * spot, unchanged by construction. An unknowable horizon is a refusal that
- * names the horizon; a liquidatable one names the first horizon it happens
- * within, in the Inspector's warn tone; otherwise the account holds through
- * the longest horizon. The dek is each horizon's extra interest, delta-only;
- * a missing or negative delta is "not computed".
+ * One row's verdict, decided once: the gate over both sides, then the projection's horizons,
+ * then the spot flip. The headline and the library word both speak from it, so the two can
+ * never disagree about the same row. A projection is judged by its horizons, never by its
+ * `after` — that is the spot, unchanged by construction: an unknowable horizon is a refusal
+ * that names the horizon; a liquidatable one names the first horizon it happens within, in
+ * the Inspector's warn tone; otherwise the account holds through the longest horizon.
  */
-function projectionHeadline(short: string, label: string, horizons: readonly StressHorizon[], today: string, decimals: number): LabHeadline {
-  const cannot = `Cannot say whether ${short} becomes liquidatable under ${label}.`;
-  const longest = horizons.reduce<StressHorizon | null>((a, h) => (a === null || h.seconds > a.seconds ? h : a), null);
-  if (longest === null) return refused(cannot, `Room today ${today}. The projection carries no horizon.`);
-  const interest = horizons.map(
-    (h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null || h.extraInterest < 0n ? "not computed" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`,
-  );
-  const dek = `Room today ${today}; ${interest.join("; ")}.`;
-  const unknowable = horizons.find((h) => h.verdict === "unknowable");
-  if (unknowable !== undefined) return refused(cannot, `${dek} The ${horizonLabel(unknowable.seconds)} horizon carries no verdict.`);
-  const within = horizons.find((h) => h.verdict === "liquidatable");
-  if (within !== undefined) return { emphasis: `${short} becomes liquidatable within ${horizonLabel(within.seconds)} under ${label}.`, rest: "", tone: "warn", dek };
-  return { emphasis: `${short} stays inside its cap through ${horizonLabel(longest.seconds)} under ${label}.`, rest: "", tone: "ok", dek };
+export type RowVerdict =
+  | { readonly kind: "not-applicable"; readonly reason: string }
+  | { readonly kind: "cannot-say"; readonly cause: "not-a-position" | "withheld" | "no-horizon" }
+  | { readonly kind: "cannot-say"; readonly cause: "horizon-unknowable"; readonly horizon: StressHorizon }
+  | { readonly kind: "liquidatable"; readonly within: StressHorizon | null; readonly already: boolean }
+  | { readonly kind: "inside"; readonly through: StressHorizon | null };
+
+export function rowVerdict(row: StressRow): RowVerdict {
+  if (!row.applicable) return { kind: "not-applicable", reason: row.reason ?? "the engine gave no reason" };
+  // A side the tiles refuse — missing, unreadable or unknowable — yields no verdict word in any row kind. The gate
+  // asks both sides as they are, a missing side included, before either arm may speak.
+  const sides = [row.before, row.after];
+  if (sides.some((s) => computable(s) === null)) {
+    // Figures that are present but not a position are the truer cause; a missing or unknowable side is withheld.
+    return { kind: "cannot-say", cause: sides.some((s) => s !== null && readable(s) === null) ? "not-a-position" : "withheld" };
+  }
+  if (row.projection !== null) {
+    const longest = row.projection.reduce<StressHorizon | null>((a, h) => (a === null || h.seconds > a.seconds ? h : a), null);
+    if (longest === null) return { kind: "cannot-say", cause: "no-horizon" };
+    const unknowable = row.projection.find((h) => h.verdict === "unknowable");
+    if (unknowable !== undefined) return { kind: "cannot-say", cause: "horizon-unknowable", horizon: unknowable };
+    const within = row.projection.find((h) => h.verdict === "liquidatable");
+    if (within !== undefined) return { kind: "liquidatable", within, already: false };
+    return { kind: "inside", through: longest };
+  }
+  if (row.flips === null) return { kind: "cannot-say", cause: "withheld" };
+  if (row.flips) return { kind: "liquidatable", within: null, already: false };
+  if (row.after?.verdict === "liquidatable") return { kind: "liquidatable", within: null, already: true };
+  return { kind: "inside", through: null };
 }
 
 /**
@@ -145,27 +161,39 @@ function projectionHeadline(short: string, label: string, horizons: readonly Str
  * spot shock reads the reader's flip.
  */
 function rowHeadline(short: string, row: StressRow, decimals: number): LabHeadline {
-  if (!row.applicable) return refused(`${row.label} does not apply to ${short}.`, sentence(row.reason ?? "the engine gave no reason"));
+  const verdict = rowVerdict(row);
+  if (verdict.kind === "not-applicable") return refused(`${row.label} does not apply to ${short}.`, sentence(verdict.reason));
   // A projection has no shock: its refusal speaks of the projection and its projected figures; a spot row of its shock.
   const projected = row.projection !== null;
   const today = sideRoomWords(row.before, decimals);
-  const dek = `Room today ${today}; ${projected ? "under the projection" : "after the shock"}, ${sideRoomWords(row.after, decimals)}.`;
   const cannot = `Cannot say whether ${short} becomes liquidatable under ${row.label}.`;
-  // A side the tiles refuse — missing, unreadable or unknowable — yields no verdict word in any row kind. The gate
-  // asks both sides as they are, a missing side included, before either arm may speak.
-  const sides = [row.before, row.after];
-  if (sides.some((s) => computable(s) === null)) {
-    // Figures that are present but not a position are the truer cause; a missing or unknowable side is withheld.
-    const cause = sides.some((s) => s !== null && readable(s) === null)
-      ? `The ${projected ? "projected" : "shocked"} figures are not a position.`
-      : "One side of the comparison is withheld or unknowable.";
-    return refused(cannot, `${dek} ${cause}`);
+  // The comparison dek sets the two sides beside each other; the projection dek lists each horizon's interest.
+  const compared = `Room today ${today}; ${projected ? "under the projection" : "after the shock"}, ${sideRoomWords(row.after, decimals)}.`;
+  const interest = (row.projection ?? []).map(
+    (h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null || h.extraInterest < 0n ? "not computed" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`,
+  );
+  const horizonsDek = `Room today ${today}; ${interest.join("; ")}.`;
+  switch (verdict.kind) {
+    case "cannot-say":
+      switch (verdict.cause) {
+        case "not-a-position":
+          return refused(cannot, `${compared} The ${projected ? "projected" : "shocked"} figures are not a position.`);
+        case "withheld":
+          return refused(cannot, `${compared} One side of the comparison is withheld or unknowable.`);
+        case "no-horizon":
+          return refused(cannot, `Room today ${today}. The projection carries no horizon.`);
+        case "horizon-unknowable":
+          return refused(cannot, `${horizonsDek} The ${horizonLabel(verdict.horizon.seconds)} horizon carries no verdict.`);
+      }
+      break;
+    case "liquidatable":
+      if (verdict.within !== null) return { emphasis: `${short} becomes liquidatable within ${horizonLabel(verdict.within.seconds)} under ${row.label}.`, rest: "", tone: "warn", dek: horizonsDek };
+      if (verdict.already) return { emphasis: `${short} is liquidatable today and stays so under ${row.label}.`, rest: "", tone: "crit", dek: compared };
+      return { emphasis: `${short} becomes liquidatable under ${row.label}.`, rest: "", tone: "crit", dek: compared };
+    case "inside":
+      if (verdict.through !== null) return { emphasis: `${short} stays inside its cap through ${horizonLabel(verdict.through.seconds)} under ${row.label}.`, rest: "", tone: "ok", dek: horizonsDek };
+      return { emphasis: `${short} stays inside its cap under ${row.label}.`, rest: "", tone: "ok", dek: compared };
   }
-  if (row.projection !== null) return projectionHeadline(short, row.label, row.projection, today, decimals);
-  if (row.flips === null) return refused(cannot, `${dek} One side of the comparison is withheld or unknowable.`);
-  if (row.flips) return { emphasis: `${short} becomes liquidatable under ${row.label}.`, rest: "", tone: "crit", dek };
-  if (row.after?.verdict === "liquidatable") return { emphasis: `${short} is liquidatable today and stays so under ${row.label}.`, rest: "", tone: "crit", dek };
-  return { emphasis: `${short} stays inside its cap under ${row.label}.`, rest: "", tone: "ok", dek };
 }
 
 export function addressWorkspace(input: { address: string; view: InspectorView | null; selectedId: string | null }): AddressWorkspace {
@@ -239,7 +267,16 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
  */
 export function rowOutcome(row: StressRow | undefined): LibraryOutcome {
   if (row === undefined) return { key: "not-covered", text: "Not on this address", tone: "dim" };
-  if (!row.applicable) return { key: "not-covered", text: `Not applicable: ${row.reason ?? "the engine gave no reason"}`, tone: "dim" };
-  if (row.flips === null) return { key: "withheld", text: "Cannot say", tone: "refused" };
-  return row.flips ? { key: "result", text: "Becomes liquidatable", tone: "crit" } : { key: "result", text: "Stays inside its cap", tone: "ok" };
+  const verdict = rowVerdict(row);
+  switch (verdict.kind) {
+    case "not-applicable":
+      return { key: "not-covered", text: `Not applicable: ${verdict.reason}`, tone: "dim" };
+    case "cannot-say":
+      return { key: "withheld", text: "Cannot say", tone: "refused" };
+    case "liquidatable":
+      if (verdict.within !== null) return { key: "result", text: `Becomes liquidatable within ${horizonLabel(verdict.within.seconds)}`, tone: "warn" };
+      return { key: "result", text: verdict.already ? "Liquidatable today and after" : "Becomes liquidatable", tone: "crit" };
+    case "inside":
+      return { key: "result", text: verdict.through === null ? "Stays inside its cap" : `Stays inside its cap through ${horizonLabel(verdict.through.seconds)}`, tone: "ok" };
+  }
 }
