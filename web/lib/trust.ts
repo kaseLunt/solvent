@@ -158,22 +158,31 @@ function provenanceItem(position: RefinedPosition): TrustItem {
   if (position.price_inputs.length === 0) return { id: "provenance", label, detail: "no price inputs", state: "dim" };
   const reads = position.price_inputs.map((input) => ({ symbol: symbolFor(position, input.asset), word: input.provenance }));
   const offDirect = reads.filter((r) => r.word !== ORACLE_DIRECT);
-  if (offDirect.length === 0) return { id: "provenance", label, detail: ORACLE_DIRECT, state: "ok" };
+  // The wire word never stands as prose, even when it is the good one: it rides the title.
+  if (offDirect.length === 0) return { id: "provenance", label, detail: "the engine's own inputs", state: "ok", title: ORACLE_DIRECT };
 
+  // Off-direct words this module does not know are named per input; an empty word is not a word.
   const caveats = offDirect.filter((r) => PROVENANCE_CAVEATS.has(r.word));
+  const others = offDirect.filter((r) => !PROVENANCE_CAVEATS.has(r.word));
+  const otherWords = [...new Set(others.map((r) => r.word))].filter((w) => w.length > 0);
+  const otherClauses = others.map((r) => `${r.symbol} provenance ${r.word.length === 0 ? "not stated" : "not recognised"}`);
   if (caveats.length > 0) {
     const groups = groupBy(caveats, (r) => r.word);
     const clauses = groups.map((g) => {
       const many = g.items.length > 1;
       return `${andList(g.items.map((r) => r.symbol))} ${plural(g.items.length, "price")} ${many ? "are" : "is"} ${PROVENANCE_CAVEATS.get(g.key) ?? g.key}`;
     });
-    return { id: "provenance", label: clauses.join("; "), detail: "not oracle-direct", state: "warn", title: groups.map((g) => g.key).join("; ") };
+    // A caveat on one input never hides an unrecognised word on another: every off-direct input is named.
+    return {
+      id: "provenance",
+      label: clauses.join("; "),
+      detail: ["not oracle-direct", ...otherClauses].join("; "),
+      state: "warn",
+      title: [...groups.map((g) => g.key), ...otherWords].join("; "),
+    };
   }
-
-  // Off-direct words this module does not know: what the wire did not affirm is dim, and an empty word is not a word.
-  const words = [...new Set(offDirect.map((r) => r.word))].filter((w) => w.length > 0);
-  if (words.length === 0) return { id: "provenance", label, detail: "provenance not stated", state: "dim" };
-  return { id: "provenance", label, detail: "provenance not recognised", state: "dim", title: words.join("; ") };
+  if (otherWords.length === 0) return { id: "provenance", label, detail: "provenance not stated", state: "dim" };
+  return { id: "provenance", label, detail: "provenance not recognised", state: "dim", title: otherWords.join("; ") };
 }
 
 function reconcileItem(reconcile: ReconcileSummary | null): TrustItem {

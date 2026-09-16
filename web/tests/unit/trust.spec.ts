@@ -26,7 +26,7 @@ test("five items, in the mockup's order; the happy account is all green except t
   expect(t.prices).toMatchObject({ label: "Prices fresh", detail: "35s · within 180s", state: "ok" });
   // the fixture's sweep stamp: 1 of 3 rows failed, generation 4 — a book-wide caveat, so warn
   expect(t.sweep).toMatchObject({ label: "Collateral sweep", detail: "1 of 3 rows failed · gen 4", state: "warn" });
-  expect(t.provenance).toMatchObject({ label: "Price provenance", detail: "engine-exact", state: "ok" });
+  expect(t.provenance).toMatchObject({ label: "Price provenance", detail: "the engine's own inputs", state: "ok", title: "engine-exact" });
   expect(t.reconcile).toMatchObject({ label: "Book reconciles to chain", detail: "29/29 Cash rows exact · committed receipt", state: "ok" });
 });
 
@@ -99,6 +99,8 @@ test("prices: the oldest input keeps its own budget; unmeasured ages are dim; ev
     detail: "weETH 210s old · budget 180s; ETHFI 300s old · budget 180s",
   });
   expect(() => trustChecklist({ position: near({ price_inputs: [{ ...weeth, age_seconds: Number.NaN as never }, ethfi] }), batchId: 1, sweep, reconcile })).toThrow();
+  expect(prices([{ ...weeth, verdict: "reorg-unacked", fresh: false }, ethfi])).toMatchObject({ state: "refused", detail: "weETH price behind an unacknowledged reorg", title: "reorg-unacked" });
+  expect(prices([{ ...weeth, verdict: "stale", age_seconds: null, fresh: false }, ethfi]).detail).toContain("age unknown");
 });
 
 test("sweep: the account's clock outranks a missing stamp; an empty, contradictory or open stamp is never ok", () => {
@@ -123,6 +125,14 @@ test("provenance: every off-direct word speaks plainly; several inputs are liste
   const unstated = provenance([{ ...weeth, provenance: "" }, { ...ethfi, provenance: "" }]);
   expect(unstated).toMatchObject({ state: "dim", label: "Price provenance", detail: "provenance not stated" });
   expect(unstated.title).toBeUndefined();
+  // a caveat on weETH never hides ETHFI's unrecognised word: both inputs are named, both wire words ride the title
+  expect(provenance([{ ...weeth, provenance: "adapter-output" }, { ...ethfi, provenance: "replayed" }])).toMatchObject({
+    state: "warn",
+    label: "weETH price is adapter output",
+    detail: "not oracle-direct; ETHFI provenance not recognised",
+    title: "adapter-output; replayed",
+  });
+  expect(provenance([])).toMatchObject({ state: "dim", detail: "no price inputs" });
 });
 
 test("computed: a refusal without a code is spoken without inventing one", () => {
@@ -140,4 +150,9 @@ test("reconcile: a drifted weld, a nonzero exit or an empty weld is never ok", (
   expect(receipt(cashWeld({ rows_exact: 28 }))).toMatchObject({ state: "warn", detail: "1 Cash row drifted", title: reconcile.artifact_path });
   expect(receipt({ ...reconcile, exit_code: 1, result: "pass" })).toMatchObject({ state: "warn", detail: "0 drifted rows · did not pass", title: "result: pass · exit 1" });
   expect(receipt(cashWeld({ rows_compared: 0, rows_exact: 0 }))).toMatchObject({ state: "dim", detail: "no Cash rows in the receipt" });
+  expect(receipt(cashWeld({ rows_compared: 29, rows_exact: 30 }))).toMatchObject({ state: "warn", detail: "30 exact of 29 Cash rows · contradictory receipt" });
+  // a passing receipt that still counts drift warns on the count alone, with no "did not pass" suffix
+  expect(receipt({ ...reconcile, result: "pass", exit_code: 0, gated_drift: 2 })).toMatchObject({ state: "warn", detail: "2 drifted rows" });
+  expect(receipt({ ...reconcile, welds: [], gated_exact: 86, gated_rows: 87 })).toMatchObject({ state: "warn", detail: "1 row drifted" });
+  expect(receipt({ ...reconcile, welds: [], gated_rows: 0, gated_exact: 0 })).toMatchObject({ state: "dim", detail: "no rows in the receipt" });
 });
