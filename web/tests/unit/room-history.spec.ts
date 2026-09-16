@@ -99,10 +99,20 @@ test("review round: a zero cap is a point past the cap, out-of-contract ids thro
   const neg = roomSeries(engine([point(1, "5012500000", "-1")]));
   expect(neg.points[0]?.kind).toBe("unpublished");
   expect(neg.titles[0]).toContain("negative debt");
+  // A negative cap is refused by name too.
+  const negCap = roomSeries(engine([point(1, "-1")]));
+  expect(negCap.points[0]?.kind).toBe("unpublished");
+  expect(negCap.titles[0]).toContain("negative cap on the wire");
   // The wire's own infinite shape: num and den are null when there is no debt.
   const inf = roomSeries(engine([point(1, null, "0", { health_factor: { wad: null, num: null, den: null, infinite: true, note: "" } })]));
   expect(inf.points[0]?.kind).toBe("computed");
   expect(inf.points[0]?.display).toBe("100%");
+  expect(inf.titles[0]).toContain("@ block 155,323,001");
+  // 0/0 is an undefined ratio (only reachable with an out-of-contract infinite: false): unknown, not past the cap, and it breaks the run.
+  const undef = roomSeries(engine([point(1, "5012500000"), point(2, "0", "0")]));
+  expect(undef.points[1]?.kind).toBe("unpublished");
+  expect(undef.titles[1]).toContain("no cap and no debt");
+  expect(nearCapStreak(undef)).toEqual({ batches: 0, spanSeconds: null, newestKind: "unpublished" });
   // Out of contract: a batch that appears twice among the points, and a caller id that is not a population.
   expect(() => roomSeries(engine([point(7, "5012500000"), point(7, null)]))).toThrow();
   expect(() => roomSeries(engine([point(1, "5012500000")]), [1.5 as never])).toThrow();

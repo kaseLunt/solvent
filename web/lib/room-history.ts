@@ -88,9 +88,10 @@ function pointFor(point: AddressHistoryPoint): RoomPoint {
   if (den < 0n) return gap(batchId, point.computed_at, "unpublished", "negative debt on the wire", "—");
   if (num < 0n) return gap(batchId, point.computed_at, "unpublished", "negative cap on the wire", "—");
   if (num === 0n) {
-    // A published zero cap: known, and past the cap when any debt is left. A percent of zero has no geometry.
-    const what = den > 0n ? "debt with no counted collateral — past the cap" : "no cap and no debt";
-    return gap(batchId, point.computed_at, "zero-cap", `zero cap · ${what}${atBlock()}`, "0 cap");
+    // 0/0 is not a ratio (only reachable with an out-of-contract infinite: false) — an unknown, never a point past the cap.
+    if (den === 0n) return gap(batchId, point.computed_at, "unpublished", "no cap and no debt · undefined ratio", "—");
+    // A published zero cap with debt left: known, and past the cap. A percent of zero has no geometry.
+    return gap(batchId, point.computed_at, "zero-cap", `zero cap · debt with no counted collateral — past the cap${atBlock()}`, "0 cap");
   }
   const tenths = headroomTenths(num, den);
   // Unreachable after the guards above (num > 0, den >= 0); kept for type honesty.
