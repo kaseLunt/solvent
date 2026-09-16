@@ -128,3 +128,21 @@
   .grid, .gridRail { grid-template-columns: 1fr; }
   .tbl { display: block; overflow-x: auto; }
 }
+/* .k-search — the Inspector toolbar (mockup pages-console.html:122-124) */
+.search { display: flex; gap: 10px; margin-top: 4px; align-items: center; flex-wrap: wrap; }
+.searchIn { flex: 1; min-width: 320px; height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); display: flex; align-items: center; gap: 12px; padding: 0 14px; font-family: var(--mono); font-size: var(--type-mono); color: var(--ink); }
+.searchIn input { flex: 1; min-width: 0; background: none; border: 0; outline: none; font: inherit; color: inherit; }
+.searchIn input::placeholder { color: var(--ink-3); }
+.searchIn:focus-within { border-color: var(--accent); }
+.searchInvalid, .searchInvalid:focus-within { border-color: var(--crit); }
+.searchHint { margin-left: auto; color: var(--ink-3); font-family: var(--sans); font-size: var(--type-small); white-space: nowrap; }
+.searchRefused { flex-basis: 100%; color: var(--crit-text); font-size: var(--type-small); margin: 0; }
+/* .k-check — the Trust checklist (mockup pages-console.html:115-119) */
+.check { list-style: none; margin: 12px 0 0; padding: 0; font-size: var(--type-body); }
+.check li { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--chip-bg); align-items: baseline; color: var(--ink); }
+.checkI { color: var(--ok-text); font-weight: var(--w-semibold); width: 14px; flex: none; }
+.checkWarn { color: var(--warn-text); }
+.checkRefused { color: var(--crit-text); }
+.checkDim { color: var(--ink-3); }
+.checkSmall { color: var(--ink-3); margin-left: auto; white-space: nowrap; font-size: var(--type-small); }
+@media (max-width: 720px) { .searchIn { min-width: 0; flex-basis: 100%; } .checkSmall { white-space: normal; text-align: right; } }

@@ -7,3 +7,6 @@ export { SectionHead, type SectionHeadProps } from "./SectionHead";
 export { SmallToggle, type SmallToggleProps } from "./SmallToggle";
 export { StatusPill, type StatusPillProps } from "./StatusPill";
 export { VerdictHeader, type VerdictHeaderProps } from "./VerdictHeader";
+export { AddressField, ADDRESS_REFUSED_COPY, type AddressFieldProps } from "./AddressField";
+export { TrustChecklist, type TrustCheckItem } from "./TrustChecklist";
+export { Sparkline, type SparklineProps } from "../charts/Sparkline";
