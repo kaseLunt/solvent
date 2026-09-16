@@ -49,6 +49,7 @@ The spec is the authority; where §5.3 is silent, these rulings settle it. Each 
 - **R12 · Activity is a real table:** When (custodied block time, else the block number — never an invented time) · Action · Asset · Amount (engine accounting unit via `feedAmount`, unit on hover) · Tx (explorer link by chain id). The untimed-tail sentence (`activityTakeaway`) moves verbatim into `lib/activity-rows.ts`. The table is mounted with `key={addr}` so one address's rows can never sit under another's head.
 - **R13 · `EvidenceDrawer` stays for the pages that use it** (Lab, Proof). The Inspector's "Inputs · Calculation · Provenance" is a new `InspectorDrawer` on `components/Drawer.tsx`, the way `BookMethodology` is built.
 - **R14 · Retired e2e pins that expressed a semantic law are re-expressed, not dropped.** The mapping is enumerated in Task 12 (which old test → which new unit/e2e pin, or "retired, law now lives in `lib/…` unit spec").
+- **R15 · "% used" is the printed complement of room.** Room is `headroomTenths(cap, debt)` (floored tenths, the Book's law); used is `1000 − roomTenths`, formatted. Truncating both independently prints "96.1% used" beside "3.8% room" for the mockup's account (4,822 of 5,012.50 = 96.1995…), and a reader adds them to 99.9. One figure is derived, the other is its complement, so the pair always sums to 100.0 and the liquidatable arm reads "107.8% used" beside "−7.8% room". A position with a zero cap has no room percent and prints "—" for both; it is still computed and still liquidatable.
 
 ## File Structure
 
@@ -412,9 +413,9 @@ import { expect, test } from "@playwright/test";
 import { fallPercent, formatTenths, percentOf, percentTenths } from "../../lib/percent";
 
 test("percentTenths truncates toward zero and refuses a non-positive denominator", () => {
-  expect(percentTenths(4822000000n, 5012500000n)).toBe(962n); // 96.20…
+  expect(percentTenths(4822000000n, 5012500000n)).toBe(961n); // 96.1995… truncates to 96.1
   expect(percentTenths(190500000n, 5012500000n)).toBe(38n); // 3.80…
-  expect(percentTenths(-1n, 3n)).toBe(0n);
+  expect(percentTenths(-1n, 3n)).toBe(-333n); // toward zero — floor would give −334
   expect(percentTenths(1n, 0n)).toBeNull();
   expect(percentTenths(1n, -5n)).toBeNull();
 });
@@ -592,8 +593,8 @@ git commit -m "feat(web): exact percent, unit-price and token-amount strings for
 export const CASH = "debt_manager";
 export const LEGACY = "aave_v3_etherfi";
 export type CashStatus = "liquidatable" | "near" | "healthy" | "refused" | "unknowable";
-export interface CashPosition { account; decimals; debt: bigint|null; cap: bigint|null; collateral: bigint|null; room: bigint|null; roomPercent: string|null; roomTenths: bigint|null; usedPercent: string|null; band: number|null; verdict: "liquidatable"|"not-liquidatable"|"unknowable"; status: CashStatus; refusal: {code; detail: string|null}|null; computed: boolean }
-export type ComputedCash = CashPosition & { debt: bigint; cap: bigint; room: bigint; roomPercent: string; usedPercent: string; computed: true; status: "liquidatable"|"near"|"healthy" };
+export interface CashPosition { account; decimals; debt: bigint|null; cap: bigint|null; collateral: bigint|null; room: bigint|null; roomPercent: string|null; roomTenths: bigint|null; usedPercent: string|null /* R15: formatTenths(1000 − roomTenths) */; band: number|null; verdict: "liquidatable"|"not-liquidatable"|"unknowable"; status: CashStatus; refusal: {code; detail: string|null}|null; computed: boolean }
+export type ComputedCash = CashPosition & { debt: bigint; cap: bigint; room: bigint; computed: true; status: "liquidatable"|"near"|"healthy" }; // percents stay nullable (zero cap)
 export function readCashPosition(position: RefinedPosition): CashPosition;
 export function isComputedCash(p: CashPosition): p is ComputedCash;
 export interface CollateralLeg { asset; symbol; amount: string|null; price: string|null; priceVerdict: PriceInput["verdict"]|null; value: bigint|null; contribution: bigint|null; ltv: string|null; counted: RefinedLeg["collateral_use"] }
@@ -705,9 +706,17 @@ test("readCashPosition: the engine's verdict decides liquidatable; healthy is ro
   expect(liq.status).toBe("liquidatable");
   expect(liq.room).toBe(-387500000n);
   expect(liq.roomPercent).toBe("−7.8%");
+  expect(liq.usedPercent).toBe("107.8%"); // R15: the complement of room, never an independent truncation (107.7)
   const healthy = readCashPosition(near({ borrowings: "2100000000" }));
   expect(healthy.status).toBe("healthy");
   expect(healthy.roomPercent).toBe("58.1%");
+  expect(healthy.usedPercent).toBe("41.9%");
+  // a zero cap has no room percent and is still computed and liquidatable
+  const zeroCap = readCashPosition(near({ max_borrow_lt: "0", liquidation_verdict: "liquidatable" }));
+  expect(zeroCap.status).toBe("liquidatable");
+  expect(zeroCap.roomPercent).toBeNull();
+  expect(zeroCap.usedPercent).toBeNull();
+  expect(isComputedCash(zeroCap)).toBe(true);
   // debt == cap is healthy by the strict rule, and sits in the near band
   const equal = readCashPosition(near({ borrowings: "5012500000" }));
   expect(equal.status).toBe("near");
@@ -862,7 +871,7 @@ import { humanAge } from "./freshness";
 import { headroomBand, headroomPercent, headroomTenths } from "./headroom";
 import { humanAmount, humanPrice } from "./human-price";
 import { noPricePathTitle } from "./liq-distance";
-import { fallPercent, percentOf } from "./percent";
+import { fallPercent, formatTenths, percentOf } from "./percent";
 import { isWireDecimal } from "./wireGuard";
 
 export const CASH = "debt_manager";
@@ -887,12 +896,11 @@ export interface CashPosition {
   readonly computed: boolean;
 }
 
+/** A computed Cash position with a verdict. Percents stay nullable: a zero cap has no room percent and is still liquidatable. */
 export type ComputedCash = CashPosition & {
   readonly debt: bigint;
   readonly cap: bigint;
   readonly room: bigint;
-  readonly roomPercent: string;
-  readonly usedPercent: string;
   readonly computed: true;
   readonly status: "liquidatable" | "near" | "healthy";
 };
@@ -922,13 +930,15 @@ export function readCashPosition(position: RefinedPosition): CashPosition {
         : band !== null && NEAR_BANDS.has(band)
           ? "near"
           : "healthy";
+  const roomTenths = headroomTenths(cap, debt);
   return {
     ...base,
     cap,
     room: cap - debt,
     roomPercent: headroomPercent(cap, debt),
-    roomTenths: headroomTenths(cap, debt),
-    usedPercent: percentOf(debt, cap),
+    roomTenths,
+    // R15: "used" is the printed complement of room, so the two always sum to 100.0 in print.
+    usedPercent: roomTenths === null ? null : formatTenths(1000n - roomTenths),
     band,
     status,
     computed: true,
@@ -936,7 +946,7 @@ export function readCashPosition(position: RefinedPosition): CashPosition {
 }
 
 export function isComputedCash(p: CashPosition): p is ComputedCash {
-  return p.computed && p.debt !== null && p.cap !== null && p.room !== null && p.roomPercent !== null && p.usedPercent !== null && p.status !== "refused" && p.status !== "unknowable";
+  return p.computed && p.debt !== null && p.cap !== null && p.room !== null && p.status !== "refused" && p.status !== "unknowable";
 }
 
 export function symbolFor(position: RefinedPosition, asset: string): string {
@@ -1654,13 +1664,13 @@ test("near cap — spec §3.5, with the fall, the extra debt, and the streak sen
 test("liquidatable — spec §3.5", () => {
   const h = cashHeadline(computed({ borrowings: "5400000000", liquidation_verdict: "liquidatable" }), NONE);
   expect(h).toMatchObject({ variant: "liquidatable", tone: "crit", emphasis: "Liquidatable now — $5,400 against a $5,012 cap.", rest: "" });
-  expect(h.dek).toBe("Borrowing $5,400 against a $5,012 cap — 107.7% used. $387.50 over the line: the strict rule is debt > cap.");
+  expect(h.dek).toBe("Borrowing $5,400 against a $5,012 cap — 107.8% used. $387.50 over the line: the strict rule is debt > cap.");
 });
 
 test("healthy — spec §3.5", () => {
   const h = cashHeadline(computed({ borrowings: "2100000000" }), NONE);
   expect(h).toMatchObject({ variant: "healthy", tone: "ok", emphasis: "58.1% of its borrow cap unused.", rest: "Not close to liquidation." });
-  expect(h.dek).toBe("Borrowing $2,100 against a $5,012 cap — 41.8% used. Collateral value would have to fall 58.1% before this account reaches its cap.");
+  expect(h.dek).toBe("Borrowing $2,100 against a $5,012 cap — 41.9% used. Collateral value would have to fall 58.1% before this account reaches its cap.");
 });
 
 test("a floor note rides every Cash dek", () => {
@@ -1786,7 +1796,7 @@ export function engineList(names: readonly string[]): string {
 
 export function cashHeadline(p: ComputedCash, extras: { streak: Streak | null; floor: string | null }): InspectorHeadline {
   const money = (v: bigint): string => humanUsdFull(v, p.decimals);
-  const base = `Borrowing ${money(p.debt)} against a ${money(p.cap)} cap — ${p.usedPercent} used.`;
+  const base = `Borrowing ${money(p.debt)} against a ${money(p.cap)} cap — ${p.usedPercent ?? "—"} used.`;
   const floor = extras.floor === null ? "" : ` ${extras.floor}`;
   if (p.status === "liquidatable") {
     return {
@@ -1808,15 +1818,16 @@ export function cashHeadline(p: ComputedCash, extras: { streak: Streak | null; f
       tone: "warn",
       emphasis: `Within ${money(p.room)} of its borrow cap.`,
       rest: "Not liquidatable yet.",
-      dek: `${base} A ${p.roomPercent} fall in collateral value, or ${money(p.room)} more debt, makes this account liquidatable.${streak}${floor}`,
+      dek: `${base} A ${p.roomPercent ?? "—"} fall in collateral value, or ${money(p.room)} more debt, makes this account liquidatable.${streak}${floor}`,
     };
   }
+  // near and healthy imply a positive cap (a band exists), so roomPercent is non-null here; the fallback is type honesty only.
   return {
     variant: "healthy",
     tone: "ok",
-    emphasis: `${p.roomPercent} of its borrow cap unused.`,
+    emphasis: `${p.roomPercent ?? "—"} of its borrow cap unused.`,
     rest: "Not close to liquidation.",
-    dek: `${base} Collateral value would have to fall ${p.roomPercent} before this account reaches its cap.${floor}`,
+    dek: `${base} Collateral value would have to fall ${p.roomPercent ?? "—"} before this account reaches its cap.${floor}`,
   };
 }
 
