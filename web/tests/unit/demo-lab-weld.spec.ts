@@ -6,8 +6,9 @@
 import { expect, test } from "@playwright/test";
 import { laneReading } from "../../lib/lab-transitions";
 import { compareRows } from "../../lib/lab-compare";
-import { DEMO_BATCH_ID, DEMO_BOOK, DEMO_POSITIONS_DM_PAGE_1, DEMO_RUN_BOOK_ETH, DEMO_RUN_BOOK_SET, DEMO_SCENARIOS } from "../fixtures/demo";
-import { SCENARIOS } from "../fixtures/lab-book";
+import { DEMO_BATCH_ID, DEMO_BOOK, DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2, DEMO_RUN_BOOK_ETH, DEMO_RUN_BOOK_SET, DEMO_SCENARIOS } from "../fixtures/demo";
+import { RUN_BOOK_WEETH_BATCH_1, SCENARIOS } from "../fixtures/lab-book";
+import { DEFINITION_ETH } from "./helpers/run-book-engine";
 
 const cash = () => DEMO_RUN_BOOK_ETH.engines.find((e) => e.engine === "debt_manager")!;
 const legacy = () => DEMO_RUN_BOOK_ETH.engines.find((e) => e.engine === "aave_v3_etherfi")!;
@@ -88,11 +89,15 @@ test("the Cash lanes are the Book's histogram and the plan's movement table; eve
   expect(r.view.nearCrossed).toBe(27);
 });
 
-test("the movers are the demo pages' own accounts that cross under ×0.7, ranked nearest the cap after, 20 of 118", () => {
+test("the movers are the demo pages' own accounts that cross under ×0.7, ascending by the ratio after (furthest past the cap first), 20 of 118", () => {
   const c = cash();
   expect(c.movers).toHaveLength(20);
   expect(c.movers_total).toBe(118);
-  const rows = new Map(DEMO_POSITIONS_DM_PAGE_1.positions.map((p) => [p.account.toLowerCase(), p]));
+  // The note states the order the rows below are checked in, and the truncation.
+  expect(c.movers_note).toContain("ranked here by the exact ratio AFTER the shock, ascending: the account furthest past the cap first");
+  expect(c.movers_note).toContain("`movers` carries the 20 furthest past the cap; the other 98 are not on this page.");
+  // The two pages are the whole Cash book; a mover may come from either.
+  const rows = new Map([...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => [p.account.toLowerCase(), p]));
   let previous = 0n;
   for (const m of c.movers) {
     const row = rows.get(m.account.toLowerCase());
@@ -105,10 +110,45 @@ test("the movers are the demo pages' own accounts that cross under ×0.7, ranked
     expect(BigInt(m.hf_after_num!) < BigInt(m.hf_after_den!)).toBe(true);
     expect(m.became_eligible).toBe(true);
     expect(m.debt_usd).toBe(String(row!.total_debt));
-    // ranked by the ratio after, ascending (nearest the cap first): num_after/den_after non-decreasing
+    // ascending by the ratio after (row 1 is the account furthest past the cap): num_after/den_after non-decreasing
     const ratio = (BigInt(m.hf_after_num!) * 1_000_000n) / BigInt(m.hf_after_den!);
     expect(ratio >= previous).toBe(true);
     previous = ratio;
+  }
+});
+
+test("the weETH realization is the depeg rule over the Book's figures, and the rule reproduces the contract's own weETH example", () => {
+  // The rule: the market is 5 percent under the oracle, so the seized collateral
+  // (pro rata) realises 5 percent less than its oracle value; the bad debt at
+  // liquidation is the eligible debt less the collateral realised at 95 percent,
+  // never less than the bad debt already on the book.
+  const rule = (before: { collateral_at_risk_usd: string; eligible_debt_usd: string; bad_debt_usd: string }) => {
+    const car = BigInt(before.collateral_at_risk_usd);
+    const shortfall = (car * 500n) / 10_000n;
+    const uncovered = BigInt(before.eligible_debt_usd) - (car - shortfall);
+    const current = BigInt(before.bad_debt_usd);
+    return [shortfall.toString(), (uncovered > current ? uncovered : current).toString()];
+  };
+  const block = (m: { execution_shortfall_usd: string; bad_debt_at_liquidation_usd: string } | null) => [m!.execution_shortfall_usd, m!.bad_debt_at_liquidation_usd];
+  // The contract's own example, both engines: the rule IS the server's arithmetic.
+  for (const e of RUN_BOOK_WEETH_BATCH_1.engines) expect(rule(e.before), e.engine).toEqual(block(e.market_realization));
+  expect(block(RUN_BOOK_WEETH_BATCH_1.engines.find((e) => e.engine === "debt_manager")!.market_realization)).toEqual(["200000000", "820000000"]);
+  // The demo: the same rule over the run-book's before sides (which ARE the Book's, pinned above), on both covered engines.
+  const weeth = DEMO_RUN_BOOK_SET.results.find((r) => r.scenario_id === "weeth_market_depeg_oracles_held")!;
+  for (const engine of [cash(), legacy()]) {
+    const row = weeth.engines.find((e) => e.engine === engine.engine)!;
+    expect(block(row.market_realization), engine.engine).toEqual(rule(engine.before));
+    expect(row.market_realization!.hfs_unchanged).toBe(true);
+    expect(row.market_realization!.usd_decimals).toBe(engine.usd_decimals);
+    expect(row.eligible_debt_delta_usd).toBe("0");
+  }
+  expect(block(weeth.engines.find((e) => e.engine === "debt_manager")!.market_realization)).toEqual(["838426962", "239603961"]);
+});
+
+test("the helper's DEFINITION_ETH is the demo listing's eth_minus_30, field for field", () => {
+  const listed = DEMO_SCENARIOS.scenarios.find((s) => s.id === "eth_minus_30")!;
+  for (const field of ["id", "version", "label", "description", "path_assumption", "engines", "shocks", "out_of_model"] as const) {
+    expect(DEFINITION_ETH[field], field).toEqual(listed[field]);
   }
 });
 

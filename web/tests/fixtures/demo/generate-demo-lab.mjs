@@ -26,11 +26,16 @@
 //     example's shape with the table's margins as counts, and the Book's
 //     histogram must state those same edges and counts; the movers are the demo
 //     pages' own computed, non-liquidatable rows that cross under ×0.7
-//     (num×7 < den×10), ranked by the exact ratio after, nearest the cap first,
-//     20 of them, and `movers_total` is the Book's newly-eligible count (the
-//     pages are a 1,000-row sample whose crossing census is not the Book's) —
-//     the movers_note is the example's with the ranking rule and the truncation
-//     restated; the legacy engine's before side is the Book's Aave card,
+//     (num×7 < den×10), ranked by the exact ratio after, ascending — the
+//     account furthest past the cap first — 20 of them, and `movers_total` is
+//     the Book's newly-eligible count: the two positions pages are the WHOLE
+//     1,412-row Cash book and bucket to the Book's histogram exactly (asserted
+//     before anything is read from them), but the Book's transition table, not
+//     a naive re-shock of the rows, is the law for the crossings — a reader who
+//     re-shocks every row by ×0.7 by hand finds 207 (asserted, so this sentence
+//     cannot go stale), most of them from lane 1.25–1.50, where the table moves
+//     18; the movers_note is the example's with the ranking rule and the
+//     truncation restated; the legacy engine's before side is the Book's Aave card,
 //     bad-debt entry and histogram and its after side steps each bucket one
 //     lane down with 14 crossing (a design assumption, as the demo waterfall's
 //     Aave arm is), its two deltas the contract example's own; the legacy
@@ -62,8 +67,11 @@
 //         of the collateral at risk (seized pro rata, realised 5 percent under
 //         the oracle), the bad debt at liquidation is the eligible debt less the
 //         seized collateral realised at 95 percent, never less than the bad debt
-//         already on the book; the block's seizure model and sentence are the
-//         contract's (../run-book.weeth_market_depeg_oracles_held.json);
+//         already on the book; the rule is proven against the contract's own
+//         weETH example (../run-book.weeth_market_depeg_oracles_held.json: it
+//         must reproduce that body's every block, 200000000 / 820000000 on its
+//         Cash engine) before it is applied, and the block's seizure model and
+//         sentence are that example's;
 //       the rate step: no HF movement; a delta-only projection over the Cash
 //         book's whole debt at the Inspector demo's horizons, observation block
 //         and sentence (stress-demo-near.json), floor(debt × bps × t / year) —
@@ -87,6 +95,7 @@ const must = (value, what) => value ?? fail(`${what} is missing`);
 
 const book = read("book.demo.json");
 const page1 = read("positions-dm-demo-page-1.json");
+const page2 = read("positions-dm-demo-page-2.json");
 const stressDemo = read("stress-demo-near.json");
 const scenarios = readFixture("scenarios.json");
 const runBookTemplate = readFixture("run-book.eth_minus_30.json");
@@ -209,6 +218,34 @@ function weldHistogram(engine, hist, t) {
   if (hist.refused_count !== t.from_rows[UNMEASURED]) fail(`the ${engine} table's not-measured lane must be the Book's refused_count`);
 }
 
+/** The two positions pages ARE the whole Cash book: one row per position, bucketed exactly as the Book's histogram, tallies included. */
+const PAGES = [...page1.positions, ...page2.positions];
+function weldPages(card, hist) {
+  if (PAGES.length !== card.positions || page1.total_positions !== card.positions || page2.next_cursor !== null) fail("the positions pages are not the whole Cash book");
+  const WAD = 10n ** 18n;
+  const counts = hist.buckets.map(() => 0);
+  let infinite = 0;
+  let refused = 0;
+  for (const r of PAGES) {
+    if (r.status !== "computed") {
+      refused += 1;
+      continue;
+    }
+    if (r.health_factor.infinite) {
+      infinite += 1;
+      continue;
+    }
+    const n = BigInt(r.health_factor.num);
+    const d = BigInt(r.health_factor.den);
+    const lane = hist.buckets.findIndex((b) => (b.lower_wad === null || n * WAD >= BigInt(b.lower_wad) * d) && (b.upper_wad === null || n * WAD < BigInt(b.upper_wad) * d));
+    if (lane < 0) fail(`a page row's ratio ${n.toString()}/${d.toString()} falls in no bucket`);
+    counts[lane] += 1;
+  }
+  if (!same(counts, hist.buckets.map((b) => b.count)) || infinite !== hist.infinite_count || refused !== hist.refused_count) fail("the positions pages do not bucket to the Book's histogram");
+}
+/** What a reader re-shocking every page row by ×0.7 by hand finds crossing; stated in the header, so pinned here. */
+const NAIVE_CROSSINGS = 207;
+
 /** The Book's engine card IS the table's row census. */
 function weldCard(engine, card, t) {
   if (card.positions !== t.total_rows) fail(`${engine}: the card holds ${String(card.positions)} positions and the table ${String(t.total_rows)} rows`);
@@ -270,13 +307,16 @@ function cashEngine() {
     hf_histogram: histogramFromRows(template.after.hf_histogram, hist, t.to_rows),
     collateral_by_asset: template.after.collateral_by_asset,
   };
-  // Movers: the demo pages' computed, non-liquidatable rows that cross under ×0.7, nearest the cap after first.
-  const crossing = page1.positions
-    .filter((p) => p.status === "computed" && p.liquidatable === false && p.health_factor.num !== null && p.health_factor.den !== null)
+  // Movers: the whole book's computed, non-liquidatable rows that cross under
+  // ×0.7, ascending by the ratio after — the account furthest past the cap first.
+  // The table above, not this re-shock, is the law for how many cross.
+  weldPages(card, hist);
+  const crossing = PAGES.filter((p) => p.status === "computed" && p.liquidatable === false && p.health_factor.num !== null && p.health_factor.den !== null)
     .filter((p) => BigInt(p.health_factor.num) * 7n < BigInt(p.health_factor.den) * 10n)
     .map((p) => ({ p, ratio: (BigInt(p.health_factor.num) * 7_000_000n) / (BigInt(p.health_factor.den) * 10n) }))
     .sort((a, b) => (a.ratio < b.ratio ? -1 : a.ratio > b.ratio ? 1 : a.p.account.localeCompare(b.p.account)));
-  if (crossing.length < MOVERS_CARRIED) fail(`only ${String(crossing.length)} rows of page 1 cross under ×0.7; read page 2 as well rather than padding`);
+  if (crossing.length !== NAIVE_CROSSINGS) fail(`${String(crossing.length)} page rows cross under a naive ×0.7 and the header states ${String(NAIVE_CROSSINGS)}; restate it`);
+  if (crossing.length < MOVERS_CARRIED) fail(`only ${String(crossing.length)} rows cross under ×0.7; never pad the list`);
   const movers = crossing.slice(0, MOVERS_CARRIED).map(({ p }) => ({
     account: p.account,
     engine: CASH,
@@ -291,13 +331,14 @@ function cashEngine() {
     debt_usd: String(p.total_debt),
   }));
   // The example's movers_note states a debt ranking and a complete list; this
-  // demo ranks by the ratio after and carries 20 of the Book's newly eligible.
+  // demo ranks by the ratio after, ascending, and carries 20 of the Book's
+  // newly eligible — the 20 furthest past the cap.
   const ranking = "ranked by their debt in this engine's 6-decimal USD, largest first";
   const carries = /`movers` carries all \d+ of them\.$/;
   if (!template.movers_note.includes(ranking) || !carries.test(template.movers_note)) fail("the example's Cash movers_note no longer states the ranking and the carry sentence this generator restates");
   const movers_note = template.movers_note
-    .replace(ranking, "ranked here by the exact ratio AFTER the shock, nearest the cap first")
-    .replace(carries, `\`movers\` carries the ${String(movers.length)} nearest the cap; the other ${String(newly - movers.length)} are not on this page.`);
+    .replace(ranking, "ranked here by the exact ratio AFTER the shock, ascending: the account furthest past the cap first")
+    .replace(carries, `\`movers\` carries the ${String(movers.length)} furthest past the cap; the other ${String(newly - movers.length)} are not on this page.`);
   return {
     engine: CASH,
     usd_decimals: card.value_decimals,
@@ -490,19 +531,40 @@ function reachOf(def, templateResult, marks) {
   }
 }
 
+/**
+ * The weETH depeg's realization rule over one before side: the market is 5
+ * percent under the oracle, so the seized collateral (pro rata) realises 5
+ * percent less than its oracle value, and the bad debt at liquidation is the
+ * eligible debt less the seized collateral realised at 95 percent, never less
+ * than the bad debt already on the book.
+ */
+const DEPEG_BPS = 500n;
+function realizationFigures(before) {
+  const car = BigInt(before.collateral_at_risk_usd);
+  const shortfall = (car * DEPEG_BPS) / 10_000n;
+  const uncovered = BigInt(before.eligible_debt_usd) - (car - shortfall);
+  const current = BigInt(before.bad_debt_usd);
+  return { shortfall, atLiquidation: uncovered > current ? uncovered : current };
+}
+// The rule is the contract's: it must reproduce every realization block of the
+// contract's own weETH example from that body's before sides before it is applied.
+for (const e of weethRunBook.engines) {
+  const contract = must(e.market_realization, `run-book.weeth_market_depeg_oracles_held.json ${e.engine} market_realization`);
+  const figures = realizationFigures(e.before);
+  if (figures.shortfall.toString() !== contract.execution_shortfall_usd || figures.atLiquidation.toString() !== contract.bad_debt_at_liquidation_usd) {
+    fail(`the realization rule does not reproduce the contract's weETH example on ${e.engine} (${contract.execution_shortfall_usd} / ${contract.bad_debt_at_liquidation_usd})`);
+  }
+}
+
 /** The market realization the weETH depeg states on one engine, derived from the Book's own figures under the definition's 5 percent. */
 function realizationOf(def, engine) {
   if (!def.description.includes("5 percent below")) fail("the weETH depeg no longer states its 5 percent; re-derive the realization");
-  const DEPEG_BPS = 500n;
   const contract = must(weethRunBook.engines.find((e) => e.engine === engine.engine)?.market_realization, `run-book.weeth_market_depeg_oracles_held.json ${engine.engine} market_realization`);
-  const car = BigInt(engine.before.collateral_at_risk_usd);
-  const shortfall = (car * DEPEG_BPS) / 10_000n;
-  const uncovered = BigInt(engine.before.eligible_debt_usd) - (car - shortfall);
-  const current = BigInt(engine.before.bad_debt_usd);
+  const figures = realizationFigures(engine.before);
   return {
     hfs_unchanged: true,
-    execution_shortfall_usd: shortfall.toString(),
-    bad_debt_at_liquidation_usd: (uncovered > current ? uncovered : current).toString(),
+    execution_shortfall_usd: figures.shortfall.toString(),
+    bad_debt_at_liquidation_usd: figures.atLiquidation.toString(),
     usd_decimals: engine.usd_decimals,
     seizure_model: contract.seizure_model,
     note: contract.note,

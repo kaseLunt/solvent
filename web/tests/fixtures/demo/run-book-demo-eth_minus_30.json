@@ -1249,7 +1249,7 @@
         }
       ],
       "movers_total": 118,
-      "movers_note": "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose Debt Manager eligibility FLIPPED false -> true under this scenario are movers, ranked here by the exact ratio AFTER the shock, nearest the cap first. The Debt Manager has no health-factor wad, so `hf_before_num/den` and `hf_after_num/den` are the EXACT rational maxBorrowLT/borrowings, a disclosure only. `movers_total` counts flips to eligible ONLY, so it is not `newly_eligible_accounts`, which is a NET count and also subtracts any flip back to healthy. `movers` carries the 20 nearest the cap; the other 98 are not on this page.",
+      "movers_note": "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose Debt Manager eligibility FLIPPED false -> true under this scenario are movers, ranked here by the exact ratio AFTER the shock, ascending: the account furthest past the cap first. The Debt Manager has no health-factor wad, so `hf_before_num/den` and `hf_after_num/den` are the EXACT rational maxBorrowLT/borrowings, a disclosure only. `movers_total` counts flips to eligible ONLY, so it is not `newly_eligible_accounts`, which is a NET count and also subtracts any flip back to healthy. `movers` carries the 20 furthest past the cap; the other 98 are not on this page.",
       "market_realization": null,
       "projection": null,
       "note": "delta-only: after minus before over the positions in the run, in this engine's own 6-decimal unit."
