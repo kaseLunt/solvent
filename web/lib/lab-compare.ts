@@ -7,7 +7,7 @@ import type { components } from "@solvent/client";
 import { MINUS } from "./human-usd";
 import { classifySetRunEngine } from "./lab-classify";
 import { signedUsd } from "./lab-headline";
-import { formatTenths } from "./percent";
+import { formatTenths, percentTenths } from "./percent";
 import { isWireDecimal, isWireScale } from "./wireGuard";
 
 type Schemas = components["schemas"];
@@ -43,10 +43,9 @@ export interface CompareView {
   readonly servedAt: string;
 }
 
-/** Signed tenths of a percent, truncated toward zero; null without a positive denominator. */
+/** Signed tenths of a percent, truncated toward zero; null without a positive denominator. The percent law, applied to a signed delta. */
 export function shareTenths(delta: bigint, denominator: bigint): bigint | null {
-  if (denominator <= 0n) return null;
-  return (delta * 1000n) / denominator;
+  return percentTenths(delta, denominator);
 }
 
 /** The share's words: a zero delta is "0%"; a nonzero delta under a tenth keeps its sign and says so; otherwise the signed tenths. */
@@ -56,25 +55,66 @@ function shareWords(delta: bigint, tenths: bigint): string {
   return tenths < 0n ? formatTenths(tenths) : `+${formatTenths(tenths)}`;
 }
 
+const unique = (names: readonly string[]): string[] => [...new Set(names)];
+const nonNull = (part: string | null): part is string => part !== null;
+
+/**
+ * The wire publishes each result's engines in three parts — `engines[]`,
+ * `withheld_engines` and `unmeasurable_engines[]` — pairwise disjoint and
+ * together exactly `covered_engines`. A result whose parts do not partition
+ * its coverage is contradictory before any engine in it is read; the reason
+ * names every id outside the coverage, every covered id in no part, and every
+ * id in more than one part.
+ */
+function censusBreak(r: SetRunScenarioResult): string | null {
+  const covered = new Set(r.covered_engines);
+  const named = [...r.engines.map((s) => s.engine), ...r.withheld_engines, ...r.unmeasurable_engines.map((a) => a.engine)];
+  const seen = new Set<string>();
+  const overlap: string[] = [];
+  for (const name of named) {
+    if (seen.has(name)) overlap.push(name);
+    seen.add(name);
+  }
+  const extra = unique(named.filter((name) => !covered.has(name)));
+  const missing = unique(r.covered_engines.filter((name) => !seen.has(name)));
+  if (extra.length === 0 && missing.length === 0 && overlap.length === 0) return null;
+  return [
+    "engines, withheld_engines and unmeasurable_engines do not partition covered_engines",
+    extra.length > 0 ? `extra: ${extra.join(", ")}` : null,
+    missing.length > 0 ? `missing: ${missing.join(", ")}` : null,
+    overlap.length > 0 ? `overlap: ${unique(overlap).join(", ")}` : null,
+  ]
+    .filter(nonNull)
+    .join("; ");
+}
+
+/** The three fields the share itself reads. A row wrong only in these is unreadable; a row wrong anywhere else is contradictory. */
+const SHARE_FIELDS: ReadonlySet<string> = new Set(["usd_decimals", "eligible_debt_delta_usd", "total_debt_usd_before"]);
+
 function rowOf(r: SetRunScenarioResult, engine: string): CompareRow {
   const base = { id: r.scenario_id, version: r.scenario_version, label: r.label, deltaUsd: null, decimals: null, shareTenths: null, shareText: "—", deltaText: "—", newly: null };
+  const census = censusBreak(r);
+  if (census !== null) return { ...base, kind: "contradictory", reason: census };
   if (r.withheld_engines.includes(engine)) return { ...base, kind: "withheld", reason: "withheld" };
   const absent = r.unmeasurable_engines.find((a) => a.engine === engine);
   if (absent !== undefined) return { ...base, kind: "unmeasurable", reason: absent.reason };
   const e = r.engines.find((s) => s.engine === engine);
   if (e === undefined) return { ...base, kind: "not-covered", reason: "not modelled" };
-  // The share's own inputs first: a scale or a Decimal the share cannot read is
-  // unreadable, named, before any other field of the row is judged.
-  const unreadable = [
-    isWireScale(e.usd_decimals) ? null : "usd_decimals",
-    isWireDecimal(e.eligible_debt_delta_usd) ? null : "eligible_debt_delta_usd",
-    isWireDecimal(e.total_debt_usd_before) ? null : "total_debt_usd_before",
-  ].filter((f): f is string => f !== null);
-  if (unreadable.length > 0) return { ...base, kind: "unreadable", reason: unreadable.join(", ") };
-  // Then the whole row against its contract: a row the classifier refuses is
-  // contradictory by the names of its fields, never a point.
-  const malformed = classifySetRunEngine(e).malformedFields;
-  if (malformed.length > 0) return { ...base, kind: "contradictory", reason: malformed.join(", ") };
+  // The whole row against its contract, and the share's own three inputs
+  // beside it whatever the classifier's scope: every field the wire got wrong
+  // is named, once. Wrong only in the share's inputs, the row is unreadable;
+  // wrong anywhere else, contradictory. Neither is ever a point.
+  const malformed = unique([
+    ...classifySetRunEngine(e).malformedFields,
+    ...[
+      isWireScale(e.usd_decimals) ? null : "usd_decimals",
+      isWireDecimal(e.eligible_debt_delta_usd) ? null : "eligible_debt_delta_usd",
+      isWireDecimal(e.total_debt_usd_before) ? null : "total_debt_usd_before",
+    ].filter(nonNull),
+  ]);
+  if (malformed.length > 0) {
+    return { ...base, kind: malformed.every((f) => SHARE_FIELDS.has(f)) ? "unreadable" : "contradictory", reason: malformed.join(", ") };
+  }
   const delta = BigInt(e.eligible_debt_delta_usd);
   const share = shareTenths(delta, BigInt(e.total_debt_usd_before));
   const deltaText = signedUsd(delta, e.usd_decimals);
@@ -83,6 +123,9 @@ function rowOf(r: SetRunScenarioResult, engine: string): CompareRow {
   return { ...base, kind: "point", deltaUsd: delta, decimals: e.usd_decimals, shareTenths: share, shareText: shareWords(delta, share), deltaText, reason: null, newly };
 }
 
+/** A point carries its share and its delta; the other kinds carry neither. */
+type Point = CompareRow & { readonly kind: "point"; readonly shareTenths: bigint; readonly deltaUsd: bigint };
+const isPoint = (r: CompareRow): r is Point => r.kind === "point";
 const abs = (t: bigint): bigint => (t < 0n ? -t : t);
 const compareBig = (a: bigint, b: bigint): number => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -90,9 +133,9 @@ export function compareRows(set: RunBookSetResponse, engine: string): CompareVie
   const rows = set.results.map((r) => rowOf(r, engine));
   // |share| descending, then |Δ| descending (a tie under a tenth still ranks by contribution), then wire order (a stable sort).
   const points = rows
-    .filter((r) => r.kind === "point")
-    .sort((a, b) => compareBig(abs(b.shareTenths ?? 0n), abs(a.shareTenths ?? 0n)) || compareBig(abs(b.deltaUsd ?? 0n), abs(a.deltaUsd ?? 0n)));
-  const rest = rows.filter((r) => r.kind !== "point");
+    .filter(isPoint)
+    .sort((a, b) => compareBig(abs(b.shareTenths), abs(a.shareTenths)) || compareBig(abs(b.deltaUsd), abs(a.deltaUsd)));
+  const rest = rows.filter((r) => !isPoint(r));
   return {
     engine,
     rows: [...points, ...rest],

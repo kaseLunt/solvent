@@ -24,6 +24,8 @@ const result = (id: string, label: string, overrides: Partial<SetRunScenarioResu
 });
 const setOf = (results: SetRunScenarioResult[]): RunBookSetResponse => ({ ...BASE, requested_scenario_ids: results.map((r) => r.scenario_id), results });
 
+const CENSUS_BREAK = "engines, withheld_engines and unmeasurable_engines do not partition covered_engines";
+
 test("shareTenths: signed, truncated toward zero, null without a positive denominator", () => {
   expect(shareTenths(1_280_000_000_000n, 27_828_808_216_758n)).toBe(45n);
   expect(shareTenths(-1n, 3000n)).toBe(0n);
@@ -37,9 +39,9 @@ test("points are ranked by |share|, the words carry sign and tier, every non-ans
     result("ethfi_minus_50", "ETHFI -50 percent", { engines: [summary({ eligible_debt_delta_usd: "9800000000", total_debt_usd_before: "27828808216758", flipped_to_eligible: 2 })] }),
     result("eth_minus_30", "ETH -30 percent", { engines: [summary({ eligible_debt_delta_usd: "1280000000000", total_debt_usd_before: "27828808216758", flipped_to_eligible: 118 })] }),
     result("weeth_market_depeg_oracles_held", "weETH market depeg to 0.95 (oracles held)", { engines: [summary({ eligible_debt_delta_usd: "0", total_debt_usd_before: "27828808216758", flipped_to_eligible: 0 })] }),
-    result("held", "Withheld one", { covered_engines: [], withheld_engines: ["debt_manager"] }),
+    result("held", "Withheld one", { withheld_engines: ["debt_manager"] }),
     result("legacy_only", "Legacy only", { covered_engines: ["aave_v3_etherfi"], engines: [summary({ engine: "aave_v3_etherfi", usd_decimals: 8 })] }),
-    result("absent", "Unmeasurable one", { covered_engines: [], unmeasurable_engines: [{ engine: "debt_manager", reason: "no_positions_in_batch", counts: { positions_in_batch: 0, refused_in_batch: 0, unrebuildable: 0 }, note: "n" }] }),
+    result("absent", "Unmeasurable one", { unmeasurable_engines: [{ engine: "debt_manager", reason: "no_positions_in_batch", counts: { positions_in_batch: 0, refused_in_batch: 0, unrebuildable: 0 }, note: "n" }] }),
     result("zero_book", "Empty book", { engines: [summary({ eligible_debt_delta_usd: "5", total_debt_usd_before: "0" })] }),
     result("bad", "Bad wire", { engines: [summary({ eligible_debt_delta_usd: "1e6" })] }),
     result("rate", "Rate step", { engines: [summary({ eligible_debt_delta_usd: "-2000000000", total_debt_usd_before: "27828808216758", flipped_to_eligible: null })] }),
@@ -82,10 +84,50 @@ test("points are ranked by |share|, the words carry sign and tier, every non-ans
   for (const r of v.rows.slice(4)) expect(r.shareTenths).toBeNull();
 });
 
+test("a share over a tenth in the negative keeps the true minus and ranks by its size", () => {
+  const v = compareRows(
+    setOf([
+      result("eth_minus_30", "ETH -30 percent", { engines: [summary({ eligible_debt_delta_usd: "1280000000000", total_debt_usd_before: "27828808216758" })] }),
+      result("unwind", "Debt unwind", { engines: [summary({ eligible_debt_delta_usd: "-4500000000000", total_debt_usd_before: "27828808216758" })] }),
+    ]),
+    "debt_manager",
+  );
+  expect(v.rows.map((r) => r.id)).toEqual(["unwind", "eth_minus_30"]);
+  expect(v.rows[0]?.shareTenths).toBe(-161n);
+  expect(v.rows[0]?.shareText).toBe("−16.1%");
+  expect(v.rows[0]?.deltaText).toBe("−$4.5M");
+});
+
 test("a malformed summary is contradictory, named by the classifier, and never a point", () => {
   const set = setOf([result("x", "X", { engines: [summary({ accounts: -1 })] })]);
   const v = compareRows(set, "debt_manager");
   expect(v.rows[0]?.kind).toBe("contradictory");
   expect(v.rows[0]?.reason).toContain("accounts");
   expect(v.rows[0]?.shareTenths).toBeNull();
+  // A compound fault names every field, in wire order: wrong beyond the share's own inputs, the row is contradictory, not merely unreadable.
+  const both = compareRows(setOf([result("y", "Y", { engines: [summary({ eligible_debt_delta_usd: "1e6", accounts: -1 })] })]), "debt_manager").rows[0]!;
+  expect(both.kind).toBe("contradictory");
+  expect(both.reason).toBe("accounts, eligible_debt_delta_usd");
+  expect(both.shareTenths).toBeNull();
+});
+
+test("a result whose three engine parts do not partition covered_engines is contradictory before any engine is read", () => {
+  // A summary for an engine the coverage does not name would otherwise have been a point.
+  const stray = compareRows(setOf([result("stray", "Stray", { covered_engines: [], engines: [summary({ eligible_debt_delta_usd: "1280000000000", total_debt_usd_before: "27828808216758" })] })]), "debt_manager").rows[0]!;
+  expect(stray.kind).toBe("contradictory");
+  expect(stray.reason).toBe(`${CENSUS_BREAK}; extra: debt_manager`);
+  expect(stray.shareTenths).toBeNull();
+  // A covered engine in no part: the break is the result's, so the row is contradictory from either engine's view — never "not modelled" for the engine it covers.
+  const gapSet = setOf([result("gap", "Gap", { covered_engines: ["debt_manager", "aave_v3_etherfi"], engines: [summary({})] })]);
+  const gap = compareRows(gapSet, "debt_manager").rows[0]!;
+  expect(gap.kind).toBe("contradictory");
+  expect(gap.reason).toBe(`${CENSUS_BREAK}; missing: aave_v3_etherfi`);
+  expect(compareRows(gapSet, "aave_v3_etherfi").rows[0]?.kind).toBe("contradictory");
+  // An engine in two parts.
+  const twice = compareRows(setOf([result("twice", "Twice", { withheld_engines: ["debt_manager"], engines: [summary({})] })]), "debt_manager").rows[0]!;
+  expect(twice.kind).toBe("contradictory");
+  expect(twice.reason).toBe(`${CENSUS_BREAK}; overlap: debt_manager`);
+  // Every clause at once, each id named once.
+  const all = compareRows(setOf([result("all", "All", { covered_engines: ["aave_v3_etherfi"], withheld_engines: ["debt_manager"], engines: [summary({})] })]), "debt_manager").rows[0]!;
+  expect(all.reason).toBe(`${CENSUS_BREAK}; extra: debt_manager; missing: aave_v3_etherfi; overlap: debt_manager`);
 });
