@@ -90,25 +90,42 @@ test("edges that are not the contract's do not merge: the wire's lanes render ve
   expect(v.bands[2]?.label).toBe("1.00 – 1.05");
 });
 
+test("the distribution beside the matrix is its row margin lane for lane: an edge or a count that differs is named, never drawn", () => {
+  const engine = cashEngine({ 2: { 2: 1 } });
+  const h = engine.before.hf_histogram;
+  const withBuckets = (buckets: typeof h.buckets) => laneReading({ ...engine, before: { ...engine.before, hf_histogram: { ...h, buckets } } }, { merge: true });
+  const edgeOnly = h.buckets.map((b, i) => (i === 2 ? { ...b, upper_wad: "1060000000000000000" } : i === 3 ? { ...b, lower_wad: "1060000000000000000" } : b));
+  const edgeReasons = contradictory(withBuckets(edgeOnly));
+  expect(edgeReasons).toContain('lanes[2].upper_wad "1050000000000000000" and the distribution beside it states "1060000000000000000"');
+  expect(edgeReasons).toContain('lanes[3].lower_wad "1050000000000000000" and the distribution beside it states "1060000000000000000"');
+  const countOnly = h.buckets.map((b, i) => (i === 2 ? { ...b, count: b.count + 1 } : b));
+  expect(contradictory(withBuckets(countOnly))).toEqual(["from_rows[2] states 1 and the distribution beside it counts 2 in 1.00 – 1.05"]);
+});
+
 test("every wire contradiction is named, and a contradicted matrix is never a view", () => {
   const base = cashEngine({ 2: { 0: 3, 2: 2 }, 9: { 9: 1 } });
   const t = base.hf_transitions;
   const withT = (patch: Partial<typeof t>) => laneReading({ ...base, hf_transitions: { ...t, ...patch } }, { merge: true });
-  expect(contradictory(withT({ lanes: t.lanes.slice(0, 9) })).join(" ")).toContain("lanes");
+  expect(contradictory(withT({ lanes: t.lanes.slice(0, 9) })).join(" ")).toContain("states 9 lanes");
   expect(contradictory(withT({ from_rows: t.from_rows.slice(0, 9) })).join(" ")).toContain("same length");
   expect(contradictory(withT({ comparator: "hf_wad" })).join(" ")).toContain("comparator");
   expect(contradictory(withT({ wad_scale: "0x10" })).join(" ")).toContain("wad_scale");
+  expect(contradictory(withT({ wad_scale: "1000000" })).join(" ")).toContain("wad_scale states 1000000 and this matrix is read at 1e18");
   expect(contradictory(withT({ total_rows: 7 })).join(" ")).toContain("total_rows");
   expect(contradictory(withT({ to_rows: t.to_rows.map((n, i) => (i === 0 ? n + 1 : n)) })).join(" ")).toContain("to_rows");
   expect(contradictory(withT({ held_rows: 1, lane_changed_rows: 1 })).join(" ")).toContain("held_rows");
   expect(contradictory(withT({ measured_rows: 4 })).join(" ")).toContain("measured_rows");
+  // A cell refused for its debt is still counted in its outflow's sum, so the refusal is the only reason.
   const badCell = t.outflows.map((o) => (o.from === 2 ? { ...o, cells: o.cells.map((c) => (c.to === 0 ? { ...c, debt_before_usd: "1e6" } : c)) } : o));
-  expect(contradictory(withT({ outflows: badCell })).join(" ")).toContain("outflows[2].cells[0].debt_before_usd");
+  expect(contradictory(withT({ outflows: badCell }))).toEqual(['outflows[2].cells[0].debt_before_usd "1e6" is outside the wire Decimal contract']);
   const outOfRange = t.outflows.map((o) => (o.from === 2 ? { ...o, cells: [{ ...o.cells[0]!, to: 12 }, ...o.cells.slice(1)] } : o));
   expect(contradictory(withT({ outflows: outOfRange })).join(" ")).toContain("to 12");
+  // A zero-row cell passes every sum; the occupancy floor is the one gate that refuses it.
+  const zeroRows = t.outflows.map((o) => (o.from === 2 ? { ...o, cells: [...o.cells, { to: 5, rows: 0, debt_before_usd: "0", debt_after_usd: "0" }] } : o));
+  expect(contradictory(withT({ outflows: zeroRows }))).toEqual(["outflows[2].cells[2].rows 0 is not a wire occupancy"]);
   expect(contradictory(laneReading({ ...base, usd_decimals: -1 }, { merge: true })).join(" ")).toContain("usd_decimals");
   const fractional = transitionsOf({ 2: { 2: 1.5 } });
-  expect(contradictory(laneReading({ ...base, hf_transitions: fractional }, { merge: true })).join(" ")).toContain("rows");
+  expect(contradictory(laneReading({ ...base, hf_transitions: fractional }, { merge: true })).join(" ")).toContain("from_rows[2] 1.5");
 });
 
 test("null held/lane-changed tallies are carried as null, not zero, and the view still draws", () => {

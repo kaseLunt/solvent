@@ -7,11 +7,10 @@
 // a merged cell is the sum of the wire's cells, and its label is the true
 // converted bound of the wire's own edge.
 import type { components } from "@solvent/client";
-import { isWireDecimal, isWirePopulation, isWireScale, wireBigInt } from "./wireGuard";
+import { isWireDecimal, isWireOccupancy, isWirePopulation, isWireScale, wireBigInt } from "./wireGuard";
 
 type Schemas = components["schemas"];
 export type RunBookEngine = Schemas["RunBookEngine"];
-export type RunBookTransitions = Schemas["RunBookTransitions"];
 export type TransitionLane = Schemas["RunBookTransitionLane"];
 
 const WAD = 10n ** 18n;
@@ -97,6 +96,14 @@ function addDebt(a: bigint | null, b: bigint | null): bigint | null {
   return a === null || b === null ? null : a + b;
 }
 
+/** Two wire edges agree when both are null, or both read to the same integer. */
+function sameEdge(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return a === b;
+  const x = wireBigInt(a);
+  const y = wireBigInt(b);
+  return x !== null && y !== null && x === y;
+}
+
 interface ReadCell {
   readonly from: number;
   readonly to: number;
@@ -128,7 +135,10 @@ function guards(engine: RunBookEngine): { read: Read | null; reasons: string[] }
   if (t.comparator !== engine.before.hf_histogram.comparator) {
     reasons.push(`the matrix is stated on comparator ${t.comparator} and the distribution beside it on ${engine.before.hf_histogram.comparator}`);
   }
+  // Every edge below is read at 1e18; a matrix stated at another scale would
+  // merge on the wrong bounds or mark the wrong lanes over cap.
   if (!isWireDecimal(t.wad_scale)) reasons.push(`wad_scale ${JSON.stringify(t.wad_scale)} is outside the wire Decimal contract`);
+  else if (wireBigInt(t.wad_scale) !== WAD) reasons.push(`wad_scale states ${t.wad_scale} and this matrix is read at 1e18`);
   t.lanes.forEach((lane, i) => {
     if (lane.index !== i) reasons.push(`lanes[${String(i)}].index is ${String(lane.index)}`);
     if (lane.kind === "bucket") {
@@ -154,6 +164,17 @@ function guards(engine: RunBookEngine): { read: Read | null; reasons: string[] }
   if (t.lane_changed_rows !== null && !isWirePopulation(t.lane_changed_rows)) reasons.push(`lane_changed_rows ${JSON.stringify(t.lane_changed_rows)} is not a wire population`);
   if (reasons.length > 0) return { read: null, reasons };
 
+  // The distribution beside the matrix IS its row margin, lane for lane: the
+  // same edges on every bucket, and the same count in it.
+  buckets.forEach((b, i) => {
+    const lane = t.lanes[i];
+    if (lane === undefined || lane.kind !== "bucket") return;
+    if (b.count !== t.from_rows[i]) {
+      reasons.push(`from_rows[${String(i)}] states ${String(t.from_rows[i])} and the distribution beside it counts ${String(b.count)} in ${b.label}`);
+    }
+    if (!sameEdge(lane.lower_wad, b.lower_wad)) reasons.push(`lanes[${String(i)}].lower_wad ${JSON.stringify(lane.lower_wad)} and the distribution beside it states ${JSON.stringify(b.lower_wad)}`);
+    if (!sameEdge(lane.upper_wad, b.upper_wad)) reasons.push(`lanes[${String(i)}].upper_wad ${JSON.stringify(lane.upper_wad)} and the distribution beside it states ${JSON.stringify(b.upper_wad)}`);
+  });
   const cells: ReadCell[] = [];
   const arrivals = t.to_rows.map(() => 0);
   t.outflows.forEach((o, i) => {
@@ -161,22 +182,26 @@ function guards(engine: RunBookEngine): { read: Read | null; reasons: string[] }
     let sum = 0;
     o.cells.forEach((c, j) => {
       const at = `outflows[${String(i)}].cells[${String(j)}]`;
-      if (!isWirePopulation(c.rows)) {
-        reasons.push(`${at}.rows ${JSON.stringify(c.rows)} is not a wire population`);
+      // An empty cell is absent on the wire, never a row of zeros; a zero here
+      // passes every sum, so this floor is the only gate that refuses it.
+      if (!isWireOccupancy(c.rows)) {
+        reasons.push(`${at}.rows ${JSON.stringify(c.rows)} is not a wire occupancy`);
         return;
       }
+      // The margins are summed before the debts are read, so a cell refused
+      // for its debt is never also reported as missing from its outflow.
+      sum += c.rows;
       if (!Number.isInteger(c.to) || c.to < 0 || c.to >= laneCount) {
         reasons.push(`${at} names lane to ${String(c.to)}, and there are ${String(laneCount)} lanes`);
         return;
       }
+      arrivals[c.to] = (arrivals[c.to] ?? 0) + c.rows;
       const unmeasuredCell = t.lanes[i]?.kind === "unmeasured" && t.lanes[c.to]?.kind === "unmeasured";
       const before = cellDebt(c.debt_before_usd, unmeasuredCell);
       const after = cellDebt(c.debt_after_usd, unmeasuredCell);
       if (!before.ok) reasons.push(`${at}.debt_before_usd ${before.reason}`);
       if (!after.ok) reasons.push(`${at}.debt_after_usd ${after.reason}`);
       if (!before.ok || !after.ok) return;
-      sum += c.rows;
-      arrivals[c.to] = (arrivals[c.to] ?? 0) + c.rows;
       cells.push({ from: i, to: c.to, rows: c.rows, before: before.value, after: after.value });
     });
     if (sum !== t.from_rows[i]) reasons.push(`outflows[${String(i)}] sums to ${String(sum)} rows and from_rows[${String(i)}] states ${String(t.from_rows[i])}`);
