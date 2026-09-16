@@ -1,0 +1,1851 @@
+{
+  "served_at": "2026-08-08T20:22:50Z",
+  "batch": {
+    "id": 18251,
+    "computed_at": "2026-08-08T20:22:08Z",
+    "age_seconds": 42,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 9964,
+    "refused_count": 6,
+    "refused_engines": [],
+    "flagged_count": 30,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25714690,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25714690,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 155323444,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-08-08T20:02:45Z",
+          "age_seconds": 1205,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "address": "0x7a3f19e2c8b4d0a6f1e3b5c7d9a2f4e6b8c0c21e",
+  "limit": 100,
+  "engines": [
+    {
+      "engine": "debt_manager",
+      "value_decimals": 6,
+      "points": [
+        {
+          "batch_id": 18251,
+          "computed_at": "2026-08-08T20:22:08Z",
+          "balances_block": 155323444,
+          "sweep_block": 155323390,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5012500000",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "12462500000",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18250,
+          "computed_at": "2026-08-08T20:21:38Z",
+          "balances_block": 155323429,
+          "sweep_block": 155323375,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5037749551",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "12525277561",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18249,
+          "computed_at": "2026-08-08T20:21:08Z",
+          "balances_block": 155323414,
+          "sweep_block": 155323360,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5063176761",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "12588496834",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18248,
+          "computed_at": "2026-08-08T20:20:38Z",
+          "balances_block": 155323399,
+          "sweep_block": 155323345,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5088755717",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "12652093391",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18247,
+          "computed_at": "2026-08-08T20:20:08Z",
+          "balances_block": 155323384,
+          "sweep_block": 155323330,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5114486451",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "12716067310",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18246,
+          "computed_at": "2026-08-08T20:19:38Z",
+          "balances_block": 155323369,
+          "sweep_block": 155323315,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5140368951",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "12780418563",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18245,
+          "computed_at": "2026-08-08T20:19:08Z",
+          "balances_block": 155323354,
+          "sweep_block": 155323300,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5166403161",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "12845147011",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18244,
+          "computed_at": "2026-08-08T20:18:38Z",
+          "balances_block": 155323339,
+          "sweep_block": 155323285,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5192588975",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "12910252389",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18243,
+          "computed_at": "2026-08-08T20:18:08Z",
+          "balances_block": 155323324,
+          "sweep_block": 155323270,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5218926241",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "12975734319",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18242,
+          "computed_at": "2026-08-08T20:17:38Z",
+          "balances_block": 155323309,
+          "sweep_block": 155323255,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5245414753",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13041592291",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18241,
+          "computed_at": "2026-08-08T20:17:08Z",
+          "balances_block": 155323294,
+          "sweep_block": 155323240,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5272054251",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13107825656",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18240,
+          "computed_at": "2026-08-08T20:16:38Z",
+          "balances_block": 155323279,
+          "sweep_block": 155323225,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5298844420",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13174433632",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18239,
+          "computed_at": "2026-08-08T20:16:08Z",
+          "balances_block": 155323264,
+          "sweep_block": 155323210,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5325784886",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13241415290",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18238,
+          "computed_at": "2026-08-08T20:15:38Z",
+          "balances_block": 155323249,
+          "sweep_block": 155323195,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5352875214",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13308769547",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18237,
+          "computed_at": "2026-08-08T20:15:08Z",
+          "balances_block": 155323234,
+          "sweep_block": 155323180,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5380114906",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13376495165",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18236,
+          "computed_at": "2026-08-08T20:14:38Z",
+          "balances_block": 155323219,
+          "sweep_block": 155323165,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5407503396",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13444590737",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18235,
+          "computed_at": "2026-08-08T20:14:08Z",
+          "balances_block": 155323204,
+          "sweep_block": 155323150,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5441623438",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13529422862",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18234,
+          "computed_at": "2026-08-08T20:13:38Z",
+          "balances_block": 155323189,
+          "sweep_block": 155323135,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5485611487",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13638789657",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18233,
+          "computed_at": "2026-08-08T20:13:08Z",
+          "balances_block": 155323174,
+          "sweep_block": 155323120,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5477940370",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13619717079",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18232,
+          "computed_at": "2026-08-08T20:12:38Z",
+          "balances_block": 155323159,
+          "sweep_block": 155323105,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5498635082",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13671170016",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18231,
+          "computed_at": "2026-08-08T20:12:08Z",
+          "balances_block": 155323144,
+          "sweep_block": 155323090,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5564813883",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13835709330",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18230,
+          "computed_at": "2026-08-08T20:11:38Z",
+          "balances_block": 155323129,
+          "sweep_block": 155323075,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5590628955",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13899892937",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18229,
+          "computed_at": "2026-08-08T20:11:08Z",
+          "balances_block": 155323114,
+          "sweep_block": 155323060,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5580865242",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13875617571",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18228,
+          "computed_at": "2026-08-08T20:10:38Z",
+          "balances_block": 155323099,
+          "sweep_block": 155323045,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5621776807",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "13977335353",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18227,
+          "computed_at": "2026-08-08T20:10:08Z",
+          "balances_block": 155323084,
+          "sweep_block": 155323030,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5686331298",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14137836169",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18226,
+          "computed_at": "2026-08-08T20:09:38Z",
+          "balances_block": 155323069,
+          "sweep_block": 155323015,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5693045409",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14154529358",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18225,
+          "computed_at": "2026-08-08T20:09:08Z",
+          "balances_block": 155323054,
+          "sweep_block": 155323000,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5691364138",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14150349240",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18224,
+          "computed_at": "2026-08-08T20:08:38Z",
+          "balances_block": 155323039,
+          "sweep_block": 155322985,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5750802381",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14298129610",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18223,
+          "computed_at": "2026-08-08T20:08:08Z",
+          "balances_block": 155323024,
+          "sweep_block": 155322970,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5803635471",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14429487692",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18222,
+          "computed_at": "2026-08-08T20:07:38Z",
+          "balances_block": 155323009,
+          "sweep_block": 155322955,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5795699026",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14409755433",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18221,
+          "computed_at": "2026-08-08T20:07:08Z",
+          "balances_block": 155322994,
+          "sweep_block": 155322940,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5811010619",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14447824406",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18220,
+          "computed_at": "2026-08-08T20:06:38Z",
+          "balances_block": 155322979,
+          "sweep_block": 155322925,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5882257609",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14624964678",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18219,
+          "computed_at": "2026-08-08T20:06:08Z",
+          "balances_block": 155322964,
+          "sweep_block": 155322910,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5915748652",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14708232932",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18218,
+          "computed_at": "2026-08-08T20:05:38Z",
+          "balances_block": 155322949,
+          "sweep_block": 155322895,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5902144388",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14674408864",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18217,
+          "computed_at": "2026-08-08T20:05:08Z",
+          "balances_block": 155322934,
+          "sweep_block": 155322880,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "5939624177",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14767594275",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18216,
+          "computed_at": "2026-08-08T20:04:38Z",
+          "balances_block": 155322919,
+          "sweep_block": 155322865,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6012245872",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14948152454",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18215,
+          "computed_at": "2026-08-08T20:04:08Z",
+          "balances_block": 155322904,
+          "sweep_block": 155322850,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6023637411",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14976475059",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18214,
+          "computed_at": "2026-08-08T20:03:38Z",
+          "balances_block": 155322889,
+          "sweep_block": 155322835,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6015706976",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "14956757743",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18213,
+          "computed_at": "2026-08-08T20:03:08Z",
+          "balances_block": 155322874,
+          "sweep_block": 155322820,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6075119088",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15104473143",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18212,
+          "computed_at": "2026-08-08T20:02:38Z",
+          "balances_block": 155322859,
+          "sweep_block": 155322805,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6137447537",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15259439387",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18211,
+          "computed_at": "2026-08-08T20:02:08Z",
+          "balances_block": 155322844,
+          "sweep_block": 155322790,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6130037190",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15241015158",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18210,
+          "computed_at": "2026-08-08T20:01:38Z",
+          "balances_block": 155322829,
+          "sweep_block": 155322775,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6138550058",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15262180568",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18209,
+          "computed_at": "2026-08-08T20:01:08Z",
+          "balances_block": 155322814,
+          "sweep_block": 155322760,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6213819356",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15449321441",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18208,
+          "computed_at": "2026-08-08T20:00:38Z",
+          "balances_block": 155322799,
+          "sweep_block": 155322745,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6256087101",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15554411071",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18207,
+          "computed_at": "2026-08-08T20:00:08Z",
+          "balances_block": 155322784,
+          "sweep_block": 155322730,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6238749611",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15511305142",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18206,
+          "computed_at": "2026-08-08T19:59:38Z",
+          "balances_block": 155322769,
+          "sweep_block": 155322715,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6270970140",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15591414537",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18205,
+          "computed_at": "2026-08-08T19:59:08Z",
+          "balances_block": 155322754,
+          "sweep_block": 155322700,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6351238782",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15790985201",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18204,
+          "computed_at": "2026-08-08T19:58:38Z",
+          "balances_block": 155322739,
+          "sweep_block": 155322685,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6368522520",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15833957487",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18203,
+          "computed_at": "2026-08-08T19:58:08Z",
+          "balances_block": 155322724,
+          "sweep_block": 155322670,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6353608936",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "15796878077",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18200,
+          "computed_at": "2026-08-08T19:56:38Z",
+          "balances_block": 155322679,
+          "sweep_block": 155322625,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6477224631",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16104221838",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18199,
+          "computed_at": "2026-08-08T19:56:08Z",
+          "balances_block": 155322664,
+          "sweep_block": 155322610,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6477389564",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16104631908",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18198,
+          "computed_at": "2026-08-08T19:55:38Z",
+          "balances_block": 155322649,
+          "sweep_block": 155322595,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6555049656",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16297716975",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18197,
+          "computed_at": "2026-08-08T19:55:08Z",
+          "balances_block": 155322634,
+          "sweep_block": 155322580,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6606950044",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16426756094",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18196,
+          "computed_at": "2026-08-08T19:54:38Z",
+          "balances_block": 155322619,
+          "sweep_block": 155322565,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6586119494",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16374965425",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18195,
+          "computed_at": "2026-08-08T19:54:08Z",
+          "balances_block": 155322604,
+          "sweep_block": 155322550,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6610912569",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16436608058",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18194,
+          "computed_at": "2026-08-08T19:53:38Z",
+          "balances_block": 155322589,
+          "sweep_block": 155322535,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6697766025",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16652550441",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18193,
+          "computed_at": "2026-08-08T19:53:08Z",
+          "balances_block": 155322574,
+          "sweep_block": 155322520,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6722059122",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16712949986",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18192,
+          "computed_at": "2026-08-08T19:52:38Z",
+          "balances_block": 155322559,
+          "sweep_block": 155322505,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6699478188",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16656807365",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18191,
+          "computed_at": "2026-08-08T19:52:08Z",
+          "balances_block": 155322544,
+          "sweep_block": 155322490,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6752554973",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16788771341",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18190,
+          "computed_at": "2026-08-08T19:51:38Z",
+          "balances_block": 155322529,
+          "sweep_block": 155322475,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6834095151",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16991503405",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18189,
+          "computed_at": "2026-08-08T19:51:08Z",
+          "balances_block": 155322514,
+          "sweep_block": 155322460,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6830513503",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16982598410",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18188,
+          "computed_at": "2026-08-08T19:50:38Z",
+          "balances_block": 155322499,
+          "sweep_block": 155322445,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6820656743",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "16958091702",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18187,
+          "computed_at": "2026-08-08T19:50:08Z",
+          "balances_block": 155322484,
+          "sweep_block": 155322430,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6898306273",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17151150509",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18186,
+          "computed_at": "2026-08-08T19:49:38Z",
+          "balances_block": 155322469,
+          "sweep_block": 155322415,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6960175718",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17304975538",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18185,
+          "computed_at": "2026-08-08T19:49:08Z",
+          "balances_block": 155322454,
+          "sweep_block": 155322400,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6936173597",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17245299441",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18184,
+          "computed_at": "2026-08-08T19:48:38Z",
+          "balances_block": 155322439,
+          "sweep_block": 155322385,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "6950992264",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17282142860",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18183,
+          "computed_at": "2026-08-08T19:48:08Z",
+          "balances_block": 155322424,
+          "sweep_block": 155322370,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7042439583",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17509506893",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18182,
+          "computed_at": "2026-08-08T19:47:38Z",
+          "balances_block": 155322409,
+          "sweep_block": 155322355,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7074492833",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17589200385",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18181,
+          "computed_at": "2026-08-08T19:47:08Z",
+          "balances_block": 155322394,
+          "sweep_block": 155322340,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7043590483",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17512368357",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18180,
+          "computed_at": "2026-08-08T19:46:38Z",
+          "balances_block": 155322379,
+          "sweep_block": 155322325,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7089101316",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17625521227",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18179,
+          "computed_at": "2026-08-08T19:46:08Z",
+          "balances_block": 155322364,
+          "sweep_block": 155322310,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7178727989",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17848358616",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18178,
+          "computed_at": "2026-08-08T19:45:38Z",
+          "balances_block": 155322349,
+          "sweep_block": 155322295,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7178267509",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17847213731",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18177,
+          "computed_at": "2026-08-08T19:45:08Z",
+          "balances_block": 155322334,
+          "sweep_block": 155322280,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7156563878",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17793252335",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18176,
+          "computed_at": "2026-08-08T19:44:38Z",
+          "balances_block": 155322319,
+          "sweep_block": 155322265,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7230757046",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "17977717643",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18175,
+          "computed_at": "2026-08-08T19:44:08Z",
+          "balances_block": 155322304,
+          "sweep_block": 155322250,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7301932645",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18154680416",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18174,
+          "computed_at": "2026-08-08T19:43:38Z",
+          "balances_block": 155322289,
+          "sweep_block": 155322235,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7274972231",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18087649162",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18173,
+          "computed_at": "2026-08-08T19:43:08Z",
+          "balances_block": 155322274,
+          "sweep_block": 155322220,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7276790644",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18092170254",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18172,
+          "computed_at": "2026-08-08T19:42:38Z",
+          "balances_block": 155322259,
+          "sweep_block": 155322205,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7369441062",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18322525533",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18171,
+          "computed_at": "2026-08-08T19:42:08Z",
+          "balances_block": 155322244,
+          "sweep_block": 155322190,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7409095386",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18421117455",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18170,
+          "computed_at": "2026-08-08T19:41:38Z",
+          "balances_block": 155322229,
+          "sweep_block": 155322175,
+          "status": "refused",
+          "refusal": {
+            "code": "SWEEP_FAILED",
+            "detail": "collateral sweep failed for this account in this batch",
+            "note": ""
+          },
+          "health_factor": null,
+          "liquidatable": null,
+          "total_collateral_base": null,
+          "total_debt_base": null
+        },
+        {
+          "batch_id": 18169,
+          "computed_at": "2026-08-08T19:41:08Z",
+          "balances_block": 155322214,
+          "sweep_block": 155322160,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7402891687",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18405693296",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18168,
+          "computed_at": "2026-08-08T19:40:38Z",
+          "balances_block": 155322199,
+          "sweep_block": 155322145,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7497524087",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18640976345",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18167,
+          "computed_at": "2026-08-08T19:40:08Z",
+          "balances_block": 155322184,
+          "sweep_block": 155322130,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7500119902",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18647430280",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18166,
+          "computed_at": "2026-08-08T19:39:38Z",
+          "balances_block": 155322169,
+          "sweep_block": 155322115,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7464353790",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18558505557",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18165,
+          "computed_at": "2026-08-08T19:39:08Z",
+          "balances_block": 155322154,
+          "sweep_block": 155322100,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7530004754",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18721732518",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18164,
+          "computed_at": "2026-08-08T19:38:38Z",
+          "balances_block": 155322139,
+          "sweep_block": 155322085,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7607787422",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18915122343",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18163,
+          "computed_at": "2026-08-08T19:38:08Z",
+          "balances_block": 155322124,
+          "sweep_block": 155322070,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7577290230",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18839297654",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18162,
+          "computed_at": "2026-08-08T19:37:38Z",
+          "balances_block": 155322109,
+          "sweep_block": 155322055,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7562097383",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "18801523917",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18161,
+          "computed_at": "2026-08-08T19:37:08Z",
+          "balances_block": 155322094,
+          "sweep_block": 155322040,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7649990840",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19020052038",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18160,
+          "computed_at": "2026-08-08T19:36:38Z",
+          "balances_block": 155322079,
+          "sweep_block": 155322025,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7694681146",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19131164844",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18159,
+          "computed_at": "2026-08-08T19:36:08Z",
+          "balances_block": 155322064,
+          "sweep_block": 155322010,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7643617477",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19004206046",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18158,
+          "computed_at": "2026-08-08T19:35:38Z",
+          "balances_block": 155322049,
+          "sweep_block": 155321995,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7659399074",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19043443582",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18157,
+          "computed_at": "2026-08-08T19:35:08Z",
+          "balances_block": 155322034,
+          "sweep_block": 155321980,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7751933273",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19273509908",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18156,
+          "computed_at": "2026-08-08T19:34:38Z",
+          "balances_block": 155322019,
+          "sweep_block": 155321965,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7754256920",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19279287155",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18155,
+          "computed_at": "2026-08-08T19:34:08Z",
+          "balances_block": 155322004,
+          "sweep_block": 155321950,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7699647050",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19143511493",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18154,
+          "computed_at": "2026-08-08T19:33:38Z",
+          "balances_block": 155321989,
+          "sweep_block": 155321935,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7746522369",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19260056862",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18153,
+          "computed_at": "2026-08-08T19:33:08Z",
+          "balances_block": 155321974,
+          "sweep_block": 155321920,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7820519819",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19444035559",
+          "total_debt_base": "4822000000"
+        },
+        {
+          "batch_id": 18152,
+          "computed_at": "2026-08-08T19:32:38Z",
+          "balances_block": 155321959,
+          "sweep_block": 155321905,
+          "status": "computed",
+          "refusal": null,
+          "health_factor": {
+            "wad": null,
+            "num": "7777419355",
+            "den": "4822000000",
+            "infinite": false,
+            "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+          },
+          "liquidatable": false,
+          "total_collateral_base": "19336875553",
+          "total_debt_base": "4822000000"
+        }
+      ],
+      "withheld_batch_ids": [
+        18201,
+        18202
+      ],
+      "note": "one persisted row per batch; a refused batch is a point, not a gap."
+    }
+  ],
+  "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
+  "notes": []
+}

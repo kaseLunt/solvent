@@ -1,0 +1,30 @@
+{
+  "served_at": "2026-08-08T20:22:50Z",
+  "engine": "debt_manager",
+  "asset": null,
+  "params": [
+    {
+      "engine": "debt_manager",
+      "chain_id": 10,
+      "asset": null,
+      "fields": [
+        {
+          "name": "borrow_apy",
+          "value": "50000000000000000",
+          "address": null,
+          "prior": "40000000000000000",
+          "unit": "per-second-1e18"
+        }
+      ],
+      "effective_block": 155300000,
+      "effective_log_index": 3,
+      "source_event": "borrow_apy_set",
+      "tx_hash": "0x000000000000000000000000000000000000000000000000000000242899f103",
+      "block_time": "2026-08-08T17:22:50Z"
+    }
+  ],
+  "next_cursor": null,
+  "notes": [
+    "denominations are the ENGINE's own and are named per field; the Debt Manager's percent scale is 100e18."
+  ]
+}

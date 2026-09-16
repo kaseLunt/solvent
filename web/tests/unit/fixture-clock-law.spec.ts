@@ -247,10 +247,24 @@ const CENSUS: Record<string, number> = {
   "book-engine-refused.json": 3,
   "book-monotonicity-violation.json": 3,
   "book.json": 3,
+  // The Inspector demo dataset (`generate-demo-inspector.mjs`, plan 2 Task 10,
+  // which imports the law and refuses to write a body it fails). Each address
+  // body states FOUR ages: the batch envelope over `computed_at`, the
+  // debt_manager watermark's sweep over `max_updated_at`, and the Cash
+  // position's two price inputs over `source_as_of`. The history and the
+  // stress bodies carry the batch envelope alone — two trios each; the
+  // history's points carry a `computed_at` and no age, so they are stamp-only.
+  // The events and params bodies carry no batch and no age at all.
+  "demo/address-demo-healthy.json": 4,
+  "demo/address-demo-liquidatable.json": 4,
+  "demo/address-demo-near.json": 4,
+  "demo/address-demo-refused.json": 4,
   "demo/book.demo.json": 3,
+  "demo/history-demo-near.json": 2,
   "demo/meta.demo.json": 5,
   "demo/positions-dm-demo-page-1.json": 2,
   "demo/positions-dm-demo-page-2.json": 2,
+  "demo/stress-demo-near.json": 2,
   // THREE since p1a-9: batch age over computed_at, the debt_manager
   // watermark's sweep over max_updated_at, AND the same sweep stamp on the
   // debt_manager row of the new `engines` aggregate roster (the schema's
@@ -292,7 +306,9 @@ const CENSUS: Record<string, number> = {
  * (p1a-9). Stated separately so a census edit cannot move it silently. */
 // + meta.json (5, the /v1/meta byte copy) + the demo dataset (3 + 5 + 2 + 2),
 // plan 2026-09-15 Task 11: 60 + 5 + 12 = 77.
-const CENSUS_TOTAL = 77;
+// + the Inspector demo dataset (4 × 4 address bodies + 2 history + 2 stress),
+// plan 2 Task 10: 77 + 20 = 97.
+const CENSUS_TOTAL = 97;
 
 // --- the generators' own pins, read out of their source ---------------------
 //
@@ -613,7 +629,9 @@ test.describe("the clock census", () => {
     // is the clock-bearing file that carries no batch, which is why the walk is
     // over the directory rather than over the batch-bearing subset.
     // + meta.json and the four demo bodies (plan 2026-09-15 Task 11): 27 + 5 = 32.
-    expect(fixtureFiles.filter((name) => isBatchBearing(readFixture(name)))).toHaveLength(32);
+    // + the six batch-bearing Inspector demo bodies — four address bodies, the
+    // history and the stress (plan 2 Task 10); events and params carry no batch: 32 + 6 = 38.
+    expect(fixtureFiles.filter((name) => isBatchBearing(readFixture(name)))).toHaveLength(38);
   });
 });
 
