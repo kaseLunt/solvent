@@ -8,7 +8,7 @@ import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { deriveInspectorView } from "../../lib/inspector-view";
 import { addressWorkspace } from "../../lib/lab-address";
 import { DEMO_ADDRESS_NEAR, DEMO_ADDRESS_REFUSED, DEMO_NEAR_ADDR, DEMO_REFUSED_ADDR, DEMO_STRESS_NEAR } from "../fixtures/demo";
-import { ADDRESS_NOT_FOUND, NOT_FOUND_ADDR } from "../fixtures/inspector";
+import { ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, NOT_FOUND_ADDR, UNKNOWABLE_ADDR } from "../fixtures/inspector";
 
 function reading(overrides: Partial<AddressReading>): AddressReading {
   return {
@@ -162,7 +162,57 @@ test("a refused Cash position prints no before figure; a negative wire figure pr
   expect(negative.tiles?.capAfter).toEqual(REFUSED);
   expect(negative.tiles?.roomAfter).toEqual(REFUSED);
   expect(negative.tiles?.statusAfter).toEqual(NOT_COMPUTED);
-  expect(negative.headline.dek).toBe("Room today $190.50; after the shock, not computed.");
+  // The reader's flip still reads true from the wire's booleans; the headline refuses it, as the tiles do, because the figures are not a position.
+  expect(negative.headline).toEqual({
+    emphasis: "Cannot say whether 0x7a3f…c21e becomes liquidatable under ETH -30 percent.",
+    rest: "",
+    tone: "refused",
+    dek: "Room today $190.50; after the shock, not computed. The shocked figures are not a position.",
+  });
+});
+
+test("an unknowable after verdict refuses its figures beside Not computed, and the headline is a cannot-say", () => {
+  const u = addressWorkspace({
+    address: DEMO_NEAR_ADDR,
+    view: nearWith(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, liquidatable: null } }))),
+    selectedId: "eth_minus_30",
+  });
+  expect(u.selected?.after?.verdict).toBe("unknowable");
+  expect(u.tiles?.debtBefore).toEqual({ value: "$4,822", tone: "neutral" });
+  expect(u.tiles?.debtAfter).toEqual(REFUSED);
+  expect(u.tiles?.capAfter).toEqual(REFUSED);
+  expect(u.tiles?.roomAfter).toEqual(REFUSED);
+  expect(u.tiles?.statusAfter).toEqual(NOT_COMPUTED);
+  expect(u.headline).toEqual({
+    emphasis: "Cannot say whether 0x7a3f…c21e becomes liquidatable under ETH -30 percent.",
+    rest: "",
+    tone: "refused",
+    dek: "Room today $190.50; after the shock, over cap by $1,069. One side of the comparison is withheld or unknowable.",
+  });
+});
+
+test("rows beside a withheld Cash book are a cannot-say, never a negative", () => {
+  const readdressed = {
+    ...DEMO_STRESS_NEAR,
+    address: UNKNOWABLE_ADDR,
+    scenarios: DEMO_STRESS_NEAR.scenarios.map((s) => ({ ...s, results: s.results.map((r) => ({ ...r, account: UNKNOWABLE_ADDR })) })),
+  };
+  const w = addressWorkspace({
+    address: UNKNOWABLE_ADDR,
+    view: view({ address: UNKNOWABLE_ADDR, lookup: { phase: "ready", value: lookup(ADDRESS_UNKNOWABLE) }, stress: { phase: "ready", value: lookup(readdressed) } }),
+    selectedId: "eth_minus_30",
+  });
+  expect(w.state).toBe("rows");
+  expect(w.rows).toHaveLength(3);
+  expect(w.selected?.applicable).toBe(true);
+  expect(w.tiles).toBeNull();
+  expect(w.headline).toEqual({
+    emphasis: `Cannot say — the Cash book is withheld for ${UNKNOWABLE_ADDR.slice(0, 6)}…${UNKNOWABLE_ADDR.slice(-4)}.`,
+    rest: "",
+    tone: "refused",
+    dek: "The stress response carries scenarios while the lookup's Cash book is withheld — the two answers disagree.",
+  });
+  expect(`${w.headline.emphasis} ${w.headline.dek}`).not.toContain("No Cash position");
 });
 
 test("rows beside no readable position: an unreadable scale and a missing Cash position each say so, never the scenarios' sentence", () => {

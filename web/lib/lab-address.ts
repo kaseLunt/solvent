@@ -131,12 +131,22 @@ function projectionHeadline(short: string, label: string, horizons: readonly Str
  * projection reads its horizons; a spot shock reads the reader's flip. Room
  * words come only from a readable side.
  */
+/**
+ * The selected row's sentence. Not applicable is the engine's own reason; a
+ * projection reads its horizons; a spot shock reads the reader's flip — but
+ * only over sides whose figures are a position: a side the tiles refuse yields
+ * no verdict word here either, whatever the wire's boolean says of it.
+ */
 function rowHeadline(short: string, row: StressRow, decimals: number): LabHeadline {
   if (!row.applicable) return refused(`${row.label} does not apply to ${short}.`, sentence(row.reason ?? "the engine gave no reason"));
   const today = sideRoomWords(row.before, decimals);
   if (row.projection !== null) return projectionHeadline(short, row.label, row.projection, today, decimals);
   const dek = `Room today ${today}; after the shock, ${sideRoomWords(row.after, decimals)}.`;
-  if (row.flips === null) return refused(`Cannot say whether ${short} becomes liquidatable under ${row.label}.`, `${dek} One side of the comparison is withheld or unknowable.`);
+  const cannot = `Cannot say whether ${short} becomes liquidatable under ${row.label}.`;
+  if ((row.before !== null && readable(row.before) === null) || (row.after !== null && readable(row.after) === null)) {
+    return refused(cannot, `${dek} The shocked figures are not a position.`);
+  }
+  if (row.flips === null) return refused(cannot, `${dek} One side of the comparison is withheld or unknowable.`);
   if (row.flips) return { emphasis: `${short} becomes liquidatable under ${row.label}.`, rest: "", tone: "crit", dek };
   if (row.after?.verdict === "liquidatable") return { emphasis: `${short} is liquidatable today and stays so under ${row.label}.`, rest: "", tone: "crit", dek };
   return { emphasis: `${short} stays inside its cap under ${row.label}.`, rest: "", tone: "ok", dek };
@@ -171,7 +181,12 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   if (selected === null) return bare(refused(`No scenario applies to ${short}.`, "The stress response carried no scenario for this account."));
   // Rows beside no Cash position are two responses disagreeing; a position at a scale the guard refused prints no figure.
   // Neither is the scenarios' doing, so neither borrows their sentence. The position is asked before its scale: no
-  // position has no scale, and the disagreement is the truer sentence.
+  // position has no scale, and the disagreement is the truer sentence. A withheld Cash book is asked first of all: the
+  // lookup's answer there is cannot-say, and a withheld book is never "no position" — only a complete not-found or a
+  // legacy-only lookup is.
+  if (view.state === "cannot-compute") {
+    return bare(refused(`Cannot say — the Cash book is withheld for ${short}.`, "The stress response carries scenarios while the lookup's Cash book is withheld — the two answers disagree."));
+  }
   if (view.cash === null) return bare(refused(`No Cash position for ${short} to stress.`, "The stress response carries scenarios, but the lookup found no Cash position — the two answers disagree."));
   if (decimals === null) return bare(refused("The Cash position's scale could not be read.", "No figure prints at an unreadable scale."));
   const money = (v: bigint | null): AddressTile => (v === null || v < 0n ? REFUSED_TILE : { value: humanUsdFull(v, decimals), tone: "neutral" });
@@ -181,7 +196,9 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   const refusedBefore = view.refusedTiles;
   const roomToneBefore: TileTone = before.status === "liquidatable" ? "crit" : before.status === "near" ? "warn" : "neutral";
   const side = selected.after;
-  const after = readable(side);
+  // An unknowable after verdict refuses its figures as the Inspector refuses an unknowable position's: a debt beside
+  // "Not computed" would read as a computed one.
+  const after = side !== null && side.verdict !== "unknowable" ? readable(side) : null;
   // The after room carries its status's tone as the before pair does: crit beside Liquidatable, warn beside Near cap.
   const statusAfter = afterStatus(side);
   const roomToneAfter: TileTone = statusAfter.tone === "crit" ? "crit" : statusAfter.tone === "warn" ? "warn" : "neutral";
