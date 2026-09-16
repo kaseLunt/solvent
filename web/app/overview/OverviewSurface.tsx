@@ -4,17 +4,15 @@ import type { components } from "@solvent/client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
-import { IdentityChips, type IdentityChip } from "@/components/kit";
+import { IdentityChips } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import { useCashBook } from "@/lib/cash-book";
-import { summarizeCash, unavailableHeadline } from "@/lib/cash-summary";
-import { humanAge } from "@/lib/freshness";
+import { deriveCashView } from "@/lib/cash-view";
 import { isAddress } from "@/lib/format";
 import { humanUsd } from "@/lib/human-usd";
+import { useMetaConstants } from "@/lib/meta";
 import { fetchEvidence } from "@/lib/proof-data";
-import { stressPreview } from "@/lib/stress-preview";
-import { readWirePopulation } from "@/lib/wireGuard";
 import {
   FOOTER_NOTE,
   FOOTER_STACK,
@@ -36,6 +34,7 @@ const shortAddress = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;
 /** The front door (spec 2026-09-15 §5.1): the story, the live Cash verdict, three entries, the pipeline. */
 export function OverviewSurface() {
   const reading = useCashBook();
+  const metaConstants = useMetaConstants();
   const router = useRouter();
   const [meta, setMeta] = useState<Schemas["MetaResponse"] | null>(null);
   const [evidence, setEvidence] = useState<Schemas["EvidenceResponse"] | null>(null);
@@ -53,54 +52,22 @@ export function OverviewSurface() {
     };
   }, []);
 
+  const view = deriveCashView(reading, metaConstants.constants);
+  const { summary, decimals, headline } = view;
   const cash = reading.cash;
-  const decimals = cash.engine?.value_decimals ?? 6;
-  // Wire populations are classified before render (p1b law).
-  const pop = (value: number | undefined, field: string): number =>
-    value === undefined ? 0 : readWirePopulation(value, `engines[debt_manager].${field}`);
-  const positions = pop(cash.engine?.positions, "positions");
-  const computedPositions = pop(cash.engine?.computed_positions, "computed_positions");
-  const refusedPositions = pop(cash.engine?.refused_positions, "refused_positions");
-  const summary =
-    reading.phase === "ok"
-      ? summarizeCash({
-          rows: cash.rows,
-          decimals,
-          refusedPositions,
-          walkComplete: cash.walkComplete,
-          refusedWhole: cash.refusedWhole,
-        })
-      : null;
-  const headline =
-    summary !== null
-      ? summary.headline
-      : reading.phase === "loading"
-        ? null
-        : unavailableHeadline(reading.failure?.message ?? "the service did not answer");
-  const ageText = reading.age.unresolved || reading.age.seconds === null ? null : `${humanAge(reading.age.seconds)} ago`;
-  const chips: IdentityChip[] =
-    reading.book === null
-      ? [{ label: "Identity", value: reading.phase === "loading" ? "pending" : "unavailable", tone: "refused" }]
-      : [
-          { label: "Batch", value: reading.book.batch.id.toLocaleString("en-US") },
-          { label: "Snapshot", value: ageText ?? "age unknown", tone: ageText === null ? "refused" : "ok" },
-          {
-            label: "Coverage",
-            value: `${computedPositions.toLocaleString("en-US")} / ${positions.toLocaleString("en-US")} computed`,
-          },
-        ];
-  const preview =
-    reading.book === null || reading.book.waterfall === null ? null : stressPreview(reading.book.waterfall, "debt_manager");
+  const showLoading = reading.phase === "loading";
+  const money = (v: string | null | undefined): string =>
+    view.refusedTiles || v == null ? "—" : humanUsd(BigInt(v), decimals);
   const previewLine =
-    preview !== null && preview.kind === "view"
-      ? (preview.lines.find((l) => l.shock === "ETH −30%")?.text ?? preview.lines[0]?.text ?? "Committed scenarios")
+    view.withheld === null && view.preview !== null && view.preview.kind === "view"
+      ? (view.preview.lines.find((l) => l.shock === "ETH −30%")?.text ?? view.preview.lines[0]?.text ?? "Committed scenarios")
       : "Committed scenarios";
   const nearest = summary?.liquidatable.material[0] ?? summary?.nearCapRows[0] ?? null;
   const nearestLine =
-    nearest === null
+    nearest === null || nearest.room === null
       ? "Try any 0x address"
-      : `Try ${shortAddress(nearest.account)} — ${nearest.room !== null && nearest.room < 0n ? "liquidatable now" : `${humanUsd(nearest.room ?? 0n, decimals)} from its cap`}`;
-  const money = (v: string | null | undefined): string => (v == null ? "—" : humanUsd(BigInt(v), decimals));
+      : `Try ${shortAddress(nearest.account)} — ${nearest.room < 0n ? "liquidatable now" : `${humanUsd(nearest.room, decimals)} from its cap`}`;
+  const bookLine = summary === null ? "Live figures" : `${humanUsd(summary.nearCap.sum, decimals)} within 10% of cap${view.walking ? " · walking" : ""}`;
 
   const inspect = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -153,16 +120,17 @@ export function OverviewSurface() {
       <section
         className={styles.live}
         data-testid="overview-live"
-        data-variant={headline?.variant ?? "loading"}
+        data-variant={showLoading ? "loading" : headline.variant}
         aria-live="polite"
+        aria-busy={view.walking ? "true" : undefined}
       >
         <div>
           <p className={styles.liveKick}>
-            <span className={`${kit.dot} ${reading.phase === "ok" ? kit.dotOk : ""}`} aria-hidden="true" />
-            Cash book · right now
+            <span className={`${kit.dot} ${view.loaded && !view.refusedTiles ? kit.dotOk : ""}`} aria-hidden="true" />
+            Cash book · right now{view.walking ? " · walking" : ""}
           </p>
           <p className={styles.liveH} data-testid="overview-live-headline">
-            {headline === null ? (
+            {showLoading ? (
               "Loading the Cash book…"
             ) : (
               <>
@@ -171,8 +139,8 @@ export function OverviewSurface() {
               </>
             )}
           </p>
-          {headline !== null && <p className={styles.liveS}>{headline.dek}</p>}
-          <IdentityChips chips={chips} testId="overview-live-identity" />
+          {!showLoading && <p className={styles.liveS}>{headline.dek}</p>}
+          <IdentityChips chips={view.chips} testId="overview-live-identity" />
         </div>
         <div className={styles.liveStats}>
           <div>
@@ -185,7 +153,7 @@ export function OverviewSurface() {
           </div>
           <div>
             <div className={styles.liveStatL}>Accounts</div>
-            <div className={styles.liveStatV}>{cash.engine === null ? "—" : positions.toLocaleString("en-US")}</div>
+            <div className={styles.liveStatV}>{view.positions === null ? "—" : view.positions.toLocaleString("en-US")}</div>
           </div>
         </div>
       </section>
@@ -198,9 +166,7 @@ export function OverviewSurface() {
             The whole Cash lending book: what&apos;s liquidatable, what&apos;s close, what backs it, and where the bad
             debt sits.
           </div>
-          <div className={styles.entryS}>
-            {summary === null ? "Live figures" : `${humanUsd(summary.nearCap.sum, decimals)} within 10% of cap`}
-          </div>
+          <div className={styles.entryS}>{bookLine}</div>
         </Link>
         <Link
           href={nearest === null ? "/inspector" : `/inspector/${nearest.account}`}
@@ -229,7 +195,7 @@ export function OverviewSurface() {
         <h2>How it works</h2>
         <Link href="/proof">Architecture &amp; verification →</Link>
       </div>
-      <Pipeline meta={meta} evidence={evidence} book={reading.book} cashAccounts={cash.engine === null ? null : positions} />
+      <Pipeline meta={meta} evidence={evidence} book={reading.book} cashAccounts={view.positions} />
       <div className={styles.foot}>
         <span>{FOOTER_STACK}</span>
         <span>

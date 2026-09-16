@@ -6,7 +6,7 @@ import { KitTable, SmallToggle, StatusPill, type KitRow } from "@/components/kit
 import kit from "@/components/kit/kit.module.css";
 import type { CashRow, SizedCashRow } from "@/lib/cash-rows";
 import type { CashSummary } from "@/lib/cash-summary";
-import { humanUsd, MINUS } from "@/lib/human-usd";
+import { humanUsd } from "@/lib/human-usd";
 import { plainCause } from "@/lib/refusal-phrasebook";
 import styles from "./book.module.css";
 
@@ -30,7 +30,7 @@ function toRow(r: SizedCashRow, status: "liquidatable" | "near"): KitRow {
           {short(r.account)}
         </Link>
       ),
-      room: status === "liquidatable" ? `${MINUS}${humanUsd(room < 0n ? -room : room, r.decimals)}` : (r.roomPercent ?? "—"),
+      room: status === "liquidatable" ? humanUsd(room, r.decimals) : (r.roomPercent ?? "—"),
       debt: humanUsd(r.debt, r.decimals),
       status:
         status === "liquidatable" ? (
@@ -81,7 +81,8 @@ export function NeedsAttention({ summary, rows, walkFailure, onRetry }: NeedsAtt
   const belowLine = [...summary.liquidatable.small, ...summary.liquidatable.dust]
     .sort(byRoom)
     .map((r) => toRow(r, "liquidatable"));
-  const base = [...material, ...near, ...refused].slice(0, Math.max(DEFAULT_ROWS, material.length + refused.length));
+  // Material rows always show; near-cap fills the default rows; refused rows are ALWAYS appended (counted, not hidden).
+  const base = [...material, ...near.slice(0, Math.max(0, DEFAULT_ROWS - material.length)), ...refused];
   const shown = showSmall ? [...base, ...belowLine] : base;
   const n = summary.liquidatable.counts.belowLine;
   return (

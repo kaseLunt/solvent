@@ -45,7 +45,7 @@ export function readCashRow(row: CashWireRow): CashRow {
     row.status === "computed" && refusal === null && debt !== null && cap !== null && borrowings !== null;
   if (!computed || debt === null || cap === null || borrowings === null) {
     return {
-      account: row.account, decimals: row.value_decimals, debt: null, collateral, cap: null, room: null,
+      account: row.account, decimals: row.value_decimals, debt, collateral, cap: null, room: null,
       roomPercent: null, roomTenths: null, band: null, verdict: row.liquidation_verdict, refusal, computed: false,
     };
   }

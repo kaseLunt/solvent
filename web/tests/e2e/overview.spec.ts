@@ -61,6 +61,30 @@ test("with the API unreachable the hero still renders and the strip refuses hone
   await expect(page.locator("body")).not.toContainText("$0 of Cash debt");
 });
 
+test("a withheld Cash engine refuses the strip and the entry cards carry no walk-derived figure", async ({ page }) => {
+  const withheld = {
+    ...BOOK,
+    refused_engines: [
+      { engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "collateral-flag custody is unproven", note: "" },
+    ],
+    engines: BOOK.engines.map((e) =>
+      e.engine === "debt_manager" ? { ...e, refused: true, total_debt: null, total_collateral: null } : e,
+    ),
+  };
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, withheld));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_MANIFEST));
+  await page.goto("/");
+  await expect(page.getByTestId("overview-live")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("overview-live-headline")).toHaveText("The Cash book could not be computed this batch.");
+  await expect(page.getByTestId("overview-entry-book")).toContainText("Live figures");
+  await expect(page.getByTestId("overview-entry-inspector")).toContainText("Try any 0x address");
+  await expect(page.locator("body")).not.toContainText("$0");
+  await expect(page.locator("body")).not.toContainText("liquidatable now");
+});
+
 test("the address field refuses a non-address inline and routes a real one to the Inspector", async ({ page }) => {
   await mockAll(page);
   await page.route("**/v1/address/**", (route) => route.abort());

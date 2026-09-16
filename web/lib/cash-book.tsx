@@ -129,8 +129,10 @@ export function useCashBook(): CashBookReading {
   // rows arrive on page one and the headline can settle before the walk ends.
   // Re-run on a new batch id OR a new walk epoch (`reload()` / the 409 restart).
   const batchId = state.phase === "ok" ? state.book.batch.id : null;
+  // A whole-engine refusal is never walked: there is nothing honest to derive from its rows.
+  const cashWithheld = state.phase === "ok" && state.book.refused_engines.some((r) => r.engine === CASH);
   useEffect(() => {
-    if (batchId === null) return;
+    if (batchId === null || cashWithheld) return;
     walkControllerRef.current?.abort();
     const controller = new AbortController();
     walkControllerRef.current = controller;
@@ -144,6 +146,23 @@ export function useCashBook(): CashBookReading {
       fetchPositionsPage({ engine: CASH, sort: "headroom", dir: "asc", limit: PAGE_LIMIT, cursor, signal: controller.signal }).then(
         (page) => {
           if (controller.signal.aborted) return;
+          if (page.batch.id !== batchId) {
+            // Page one carries no cursor, so a batch minted between /v1/book and
+            // this page never 409s — the page's own batch id is the guard. One
+            // reload per such id; a second mismatch is stated as a failure.
+            if (restartedForRef.current !== page.batch.id) {
+              restartedForRef.current = page.batch.id;
+              void loadBook({ rewalk: true });
+              return;
+            }
+            setWalk((previous) => ({
+              forBatch: batchId,
+              rows: previous.forBatch === batchId ? previous.rows : [],
+              complete: false,
+              failure: { register: "transport", message: `the book moved to batch ${String(page.batch.id)} during the walk` },
+            }));
+            return;
+          }
           const rows = page.positions.map(readCashRow);
           const complete = page.next_cursor === null;
           setWalk((previous) =>
@@ -183,7 +202,7 @@ export function useCashBook(): CashBookReading {
     return () => {
       controller.abort();
     };
-  }, [batchId, walkEpoch, loadBook]);
+  }, [batchId, cashWithheld, walkEpoch, loadBook]);
 
   const reloadOnResume = useCallback(() => loadBook({ keepOnFailure: true }), [loadBook]);
   // Stable, so a consumer may list it in effect deps. A reload always re-walks:

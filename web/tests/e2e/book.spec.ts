@@ -94,6 +94,8 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
     .locator("[data-count]")
     .evaluateAll((els) => els.reduce((n, el) => n + Number(el.getAttribute("data-count")), 0));
   expect(counts).toBe(1406);
+  // Refused rows are counted, not hidden: every one of the 6 sits in the default table, dimmed, with its debt.
+  await expect(page.getByTestId("book-attention").locator("tbody tr.dim, tbody tr[class*='dim']")).toHaveCount(6);
 });
 
 test("the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero", async ({ page }) => {
@@ -115,9 +117,35 @@ test("the Cash engine withheld whole: refused headline, refused tiles, nothing r
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "refused");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be computed this batch.");
-  await expect(page.getByTestId("book-kpi-debt")).toContainText("—");
-  await expect(page.getByTestId("book-kpi-debt")).toHaveAttribute("data-tone", "refused");
-  await expect(page.locator("main")).not.toContainText("$0 of Cash debt");
+  for (const id of ["debt", "liquidatable", "near", "median", "baddebt"]) {
+    await expect(page.getByTestId(`book-kpi-${id}`)).toHaveAttribute("data-tone", "refused");
+    await expect(page.getByTestId(`book-kpi-${id}`)).toContainText("—");
+  }
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("collateral-flag custody unproven");
+  await expect(page.getByTestId("book-bands-card")).toContainText("Not computed.");
+  await expect(page.getByTestId("book-bands")).toHaveCount(0);
+  await expect(page.getByTestId("book-attention")).toHaveCount(0);
+  await expect(page.getByTestId("book-stress-preview")).toContainText("Preview withheld");
+  // No liquidatable pill anywhere, and no "$0" standing in for a figure the engine withheld.
+  await expect(page.locator('main [data-tone="crit"]')).toHaveCount(0);
+  await expect(page.getByTestId("book-bands-card")).not.toContainText("$0");
+  await expect(page.getByTestId("book-kpi-near")).not.toContainText("$0");
+});
+
+test("a positions page from another batch reloads the book once instead of mixing rows", async ({ page }) => {
+  let bookRequests = 0;
+  const moved = { ...POSITIONS_DM_PAGE_1, batch: { ...POSITIONS_DM_PAGE_1.batch, id: POSITIONS_DM_PAGE_1.batch.id + 1 } };
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/book", (route) => {
+    bookRequests += 1;
+    return json(route, bookRequests === 1 ? BOOK : { ...BOOK, batch: { ...BOOK.batch, id: BOOK.batch.id + 1 } });
+  });
+  await page.route("**/v1/positions*", (route) => json(route, moved));
+  await page.goto("/book");
+  await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(2);
+  await expect(page.getByTestId("book-verdict-identity")).toContainText(`Batch ${String(BOOK.batch.id + 1)}`);
+  expect(bookRequests).toBe(2);
 });
 
 test("no servable batch (503): the load-failure headline names the reason", async ({ page }) => {
