@@ -37,7 +37,7 @@
  * every stylesheet the app serves (node_modules and .next never lint).
  */
 
-// The closed --t-* set (canon §03, tokens.css) + the declared --fs-* aliases,
+// The product-register --type-* scale (spec 2026-09-15 §3.4), the closed --t-* set, and the declared --fs-* aliases,
 // verbatim. Longer names precede their prefixes (mono-lg before mono) so the
 // alternation cannot half-match; the trailing `\)$` admits nothing after the
 // name — no comma, no fallback, no second token.
@@ -54,7 +54,7 @@ const config = {
       {
         message: (property, value) =>
           `"${property}: ${value}" — font-size must be exactly one declared type token: ` +
-          `var(--t-*) (legacy var(--fs-*) lawful until Phase 3), no fallback argument. ` +
+          `var(--type-*) (legacy var(--t-*) and var(--fs-*) lawful until their pages are rebuilt), no fallback argument. ` +
           `The 12px floor is structural (canon §03; tokens.css is the vocabulary).`,
       },
     ],

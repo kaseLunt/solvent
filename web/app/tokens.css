@@ -38,6 +38,7 @@
   --ok-text: #27784d; /* 4.54 chip · 4.77 panel-2 */
   --warn-text: #8b6219; /* 4.56 chip · 4.79 panel-2 */
   --crit-text: #ba4136; /* 4.52 chip · 4.75 panel-2 */
+  --chart-fill: #2e7d8c; /* chart bar fill — same teal in both themes; ≥3:1 non-text on both grounds */
   --crit-bg: rgba(194, 68, 56, 0.07);
   --warn-bg: rgba(176, 124, 31, 0.08); /* NEW §04 state fill — refused tags */
   --refused-bg: rgba(138, 151, 156, 0.1);
@@ -71,6 +72,7 @@
   --t-mono-floor: 12px; /* smallest mono — chips' embedded values */
   --t-stat-lg: 28px; /* engine-panel / KPI hero value */
   --t-stat: 21px; /* KPI value */
+
   /* ---- product-register type scale (spec 2026-09-15 §3.4) ----
    * Replaces --t-* for new code; --t-* / --fs-* stay lawful only until the
    * pages that use them are rebuilt. Floor is 12px; nothing below exists. */
@@ -89,7 +91,7 @@
   --w-semibold: 600;
   --w-medium: 500;
 
-  /* ---- LEGACY ALIASES — Phase 3 retires these; new code uses --t-*
+  /* ---- LEGACY ALIASES — retired as pages are rebuilt; new code uses --type-*
    * (stylelint-enforced) ----
    *
    * Every --fs-* re-points onto the closed set, mapped BY ROLE per the canon
@@ -178,6 +180,7 @@
     --ok-text: #63b98a;
     --warn-text: #d0a04a;
     --crit-text: #d96a5d;
+    --chart-fill: #2e7d8c; /* chart bar fill — same teal in both themes; ≥3:1 non-text on both grounds */
     --crit-bg: rgba(217, 106, 93, 0.1);
     --warn-bg: rgba(208, 160, 74, 0.1); /* NEW §04 state fill — refused tags */
     --refused-bg: rgba(95, 113, 120, 0.12);
@@ -206,6 +209,7 @@
   --ok-text: #27784d;
   --warn-text: #8b6219;
   --crit-text: #ba4136;
+  --chart-fill: #2e7d8c; /* chart bar fill — same teal in both themes; ≥3:1 non-text on both grounds */
   --crit-bg: rgba(194, 68, 56, 0.07);
   --warn-bg: rgba(176, 124, 31, 0.08);
   --refused-bg: rgba(138, 151, 156, 0.1);
@@ -232,6 +236,7 @@
   --ok-text: #63b98a;
   --warn-text: #d0a04a;
   --crit-text: #d96a5d;
+  --chart-fill: #2e7d8c; /* chart bar fill — same teal in both themes; ≥3:1 non-text on both grounds */
   --crit-bg: rgba(217, 106, 93, 0.1);
   --warn-bg: rgba(208, 160, 74, 0.1);
   --refused-bg: rgba(95, 113, 120, 0.12);
