@@ -72,7 +72,13 @@
       "engine": "debt_manager",
       "account": "0x9e0d1c2b3a49586776655443322110ffeeddccbb",
       "value_decimals": 6,
-      "health_factor": null,
+      "health_factor": {
+        "wad": null,
+        "num": "5012500000",
+        "den": "2100000000",
+        "infinite": false,
+        "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
+      },
       "total_collateral_base": "12462500000",
       "total_debt_base": "2100000000",
       "weighted_lt_sum": null,

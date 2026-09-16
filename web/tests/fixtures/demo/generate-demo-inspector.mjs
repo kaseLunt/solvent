@@ -9,13 +9,17 @@
 //     4000000000 @ 6 decimals) is read from meta.demo.json;
 //   - scenario definitions are read VERBATIM from ../scenarios.json by id; the
 //     projection note and the lookup note from ../stress-dm.json;
-//   - the ETHFI asset is the committed ethfi_minus_50 scenario's asset;
-//     USDC is the /v1/events example's OP USDC.
+//   - the ETHFI asset is READ from ../scenarios.json — the committed
+//     ethfi_minus_50 scenario's shock asset (the generator throws if it is
+//     absent); USDC is the /v1/events example's OP USDC;
+//   - tx hashes are sha256 over a `solvent-demo:<seed>` string: deterministic,
+//     distinct, well-formed, and never a real transaction.
 // The near account is the mockup's (pages-console.html:224-247): debt $4,822,
 // cap $5,012.50, room $190.50 (3.8 %), two collateral legs, 14 batches under
 // the 10 % line. Every age is derived from its stamp against served_at with
 // the clock law's own ageSeconds(), and every body passes checkClocks() before
 // it is written. Regenerate: `node tests/fixtures/demo/generate-demo-inspector.mjs` (from web/).
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +45,19 @@ if (dm === undefined) throw new Error("book.demo.json must carry the debt_manage
 const weethWitness = meta.prices.find((p) => p.chain_id === 10 && p.symbol === "weETH");
 if (weethWitness === undefined) throw new Error("meta.demo.json must carry the chain-10 weETH witness");
 const LOOKUP_NOTE = stressTemplate.lookup_complete_note;
+/** A committed scenario definition, by id — spread VERBATIM into the stress body. */
+const scenarioDef = (id) => {
+  const d = scenarios.scenarios.find((x) => x.id === id);
+  if (d === undefined) throw new Error(`scenarios.json lacks ${id}`);
+  return d;
+};
+const ethfiShock = scenarioDef("ethfi_minus_50").shocks[0];
+if (ethfiShock === undefined || typeof ethfiShock.asset !== "string") throw new Error("scenarios.json's ethfi_minus_50 must carry its asset on shocks[0]");
+const projectionScenario = stressTemplate.scenarios.find((x) => x.id === "dm_rate_horizon_plus_200bps");
+const PROJECTION_NOTE = projectionScenario?.results?.[0]?.projection?.note;
+if (typeof PROJECTION_NOTE !== "string") throw new Error("stress-dm.json must carry the dm_rate_horizon_plus_200bps projection note");
+const HF_NOTE = "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides.";
+const REFUSAL_NOTE = "a refused row keeps its persisted debt for display; no verdict is served for it.";
 
 const NEAR_ADDR = "0x7a3f19e2c8b4d0a6f1e3b5c7d9a2f4e6b8c0c21e";
 const LIQ_ADDR = "0x5d11c0ffee00000000000000000000000000a1b2";
@@ -48,7 +65,7 @@ const HEALTHY_ADDR = "0x9e0d1c2b3a49586776655443322110ffeeddccbb";
 const REFUSED_ADDR = "0x4444444444444444444444444444444444444404";
 const USDC = { asset: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", symbol: "USDC", decimals: 6 };
 const WEETH = { asset: weethWitness.asset, symbol: "weETH", decimals: 18 };
-const ETHFI = { asset: "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f", symbol: "ETHFI", decimals: 18 };
+const ETHFI = { asset: ethfiShock.asset, symbol: "ETHFI", decimals: 18 };
 
 const PRICE_DECIMALS = weethWitness.decimals; // 6
 const WEETH_PRICE = BigInt(weethWitness.value); // $4,000.00
@@ -58,7 +75,7 @@ const USD = (dollars) => BigInt(Math.round(dollars * 1e6)); // Cash value_decima
 const TOKEN = (units) => BigInt(Math.round(units * 1e6)) * 10n ** 12n; // 18-dec amounts, 6 places of precision
 const ceilDiv = (a, b) => (a + b - 1n) / b;
 const s = (v) => v.toString();
-const hash = (n) => `0x${n.toString(16).padStart(64, "0")}`;
+const hash = (seed) => `0x${createHash("sha256").update(`solvent-demo:${String(seed)}`).digest("hex")}`;
 
 const PRICE_AS_OF = iso(servedMs - 35_000);
 const priceInput = (token, value) => ({
@@ -117,7 +134,8 @@ function cashPosition({ account, weethUnits, ethfiUnits, debt, refused = false }
     engine: "debt_manager",
     account,
     value_decimals: 6,
-    health_factor: null,
+    // The DM rational, disclosed on the position as the Book's rows and this account's history points disclose it.
+    health_factor: refused ? null : { wad: null, num: s(cap), den: s(debtUsd), infinite: false, note: HF_NOTE },
     total_collateral_base: refused ? null : s(collateral),
     total_debt_base: s(debtUsd),
     weighted_lt_sum: null,
@@ -127,7 +145,7 @@ function cashPosition({ account, weethUnits, ethfiUnits, debt, refused = false }
     as_of: {
       balances_block: dm.last_block,
       params_block: 155300000,
-      sweep_block: dm.last_block - 54,
+      sweep_block: refused ? 0 : dm.last_block - 54, // 0: never swept — the refusal below is SWEEP_NEVER
       oldest_price_input: PRICE_AS_OF,
       stale_price_inputs: false,
       note: "each leg additionally carries its OWN rate-index as-of block.",
@@ -137,8 +155,10 @@ function cashPosition({ account, weethUnits, ethfiUnits, debt, refused = false }
     const position = {
       ...base,
       status: "refused",
-      flags: ["sweep_failed"],
-      refusal: { code: "SWEEP_FAILED", detail: "collateral sweep failed for this account in this batch", note: "a refused row keeps its persisted debt for display; no verdict is served for it." },
+      flags: [],
+      // SWEEP_NEVER is the code the engine actually emits for a row it cannot value (internal/riskfeed/assemble.go):
+      // a sweep that fails AFTER a success does not refuse the row — it is served against its last good sweep.
+      refusal: { code: "SWEEP_NEVER", detail: "collateral sweep never ran for this account", note: REFUSAL_NOTE },
       liquidatable: null,
       collateral_value_usd: null,
       max_borrow_lt: null,
@@ -202,6 +222,8 @@ function historyBody(account, near) {
   const BLOCKS_PER_BATCH = 15;
   const withheld = [BATCH.id - 50, BATCH.id - 49];
   const refusedAt = BATCH.id - 81;
+  // An integer wobble of ±0.4 pt (tenths of a percent) over the drift — no float trig on the path to a byte.
+  const wobbleTenths = (k) => ((k * 7919) % 9) - 4;
   const points = [];
   for (let k = 0; k < COUNT; k += 1) {
     const back = COUNT - 1 - k;
@@ -210,7 +232,8 @@ function historyBody(account, near) {
     const balancesBlock = dm.last_block - back * BLOCKS_PER_BATCH;
     const common = { batch_id: id, computed_at: iso(computedMs - back * CADENCE_MS), balances_block: balancesBlock, sweep_block: balancesBlock - 54 };
     if (id === refusedAt) {
-      points.push({ ...common, status: "refused", refusal: { code: "SWEEP_FAILED", detail: "collateral sweep failed for this account in this batch", note: "" }, health_factor: null, liquidatable: null, total_collateral_base: null, total_debt_base: null });
+      // SWEEP_NEVER at that batch: no successful sweep persisted, so the point's sweep_block is 0 (the contract's own wording).
+      points.push({ ...common, sweep_block: 0, status: "refused", refusal: { code: "SWEEP_NEVER", detail: "collateral sweep never ran for this account", note: REFUSAL_NOTE }, health_factor: null, liquidatable: null, total_collateral_base: null, total_debt_base: null });
       continue;
     }
     let cap;
@@ -220,8 +243,7 @@ function historyBody(account, near) {
       collateral = near.collateral;
     } else {
       const t = k / (COUNT - 1);
-      const wobble = k < 84 ? 0.4 * Math.sin(k * 1.7) : 0;
-      const roomPct = 38 - 34.2 * t ** 1.4 + wobble; // k ≥ 86 → under 10 %
+      const roomPct = 38 - 34.2 * t ** 1.4 + (k < 84 ? wobbleTenths(k) / 10 : 0); // k ≥ 86 → under 10 %
       cap = USD(Number(near.debt) / 1e6 / (1 - roomPct / 100));
       collateral = (cap * near.collateral) / near.cap;
     }
@@ -229,7 +251,7 @@ function historyBody(account, near) {
       ...common,
       status: "computed",
       refusal: null,
-      health_factor: { wad: null, num: s(cap), den: s(near.debt), infinite: false, note: "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides." },
+      health_factor: { wad: null, num: s(cap), den: s(near.debt), infinite: false, note: HF_NOTE },
       liquidatable: false,
       total_collateral_base: s(collateral),
       total_debt_base: s(near.debt),
@@ -251,11 +273,13 @@ function historyBody(account, near) {
 }
 
 function eventsBody(account) {
-  const ev = (blocksBack, minutesAgo, type, token, amount, unit, decimals, logIndex) => ({
+  // `block_time` follows the history's own cadence — OP's 2-second blocks, 15 per 30-second batch — so two
+  // distinct blocks never share a stamp; one row is left untimed on purpose (its header not yet custodied).
+  const ev = (blocksBack, timed, type, token, amount, unit, logIndex) => ({
     chain_id: 10,
     engine: "debt_manager",
     block_number: dm.last_block - blocksBack,
-    block_time: minutesAgo === null ? null : iso(servedMs - minutesAgo * 60_000),
+    block_time: timed ? iso(servedMs - blocksBack * 2000) : null,
     tx_hash: hash((dm.last_block - blocksBack) * 1000 + logIndex),
     log_index: logIndex,
     seq: 0,
@@ -266,7 +290,7 @@ function eventsBody(account) {
     symbol: token.symbol,
     amount,
     amount_unit: unit,
-    amount_decimals: decimals,
+    amount_decimals: null, // the contract: null on every row it serves; `opaque` never carries a scale
     liquidation: null,
   });
   return {
@@ -274,12 +298,13 @@ function eventsBody(account) {
     filter: { engine: null, account, types: [], since_block: null },
     limit: 25,
     events: [
-      ev(344, 9, "borrow", USDC, "622000000", "dm_normalized_debt", null, 12),
-      ev(1444, 25, "supply", WEETH, s(TOKEN(0.6)), "opaque", 18, 4),
-      ev(1454, 25, "collateral_enabled", WEETH, null, "none", null, 3),
-      ev(2944, 48, "supply", ETHFI, s(TOKEN(1250)), "opaque", 18, 7),
-      ev(5444, 110, "borrow", USDC, "4200000000", "dm_normalized_debt", null, 2),
-      ev(8444, null, "repay", USDC, "150000000", "dm_normalized_debt", null, 9),
+      ev(344, true, "borrow", USDC, "622000000", "dm_normalized_debt", 12),
+      ev(1444, true, "supply", WEETH, s(TOKEN(0.6)), "opaque", 4),
+      ev(1454, true, "collateral_enabled", WEETH, null, "none", 3),
+      ev(2944, true, "supply", ETHFI, s(TOKEN(1250)), "opaque", 7),
+      ev(5444, true, "borrow", USDC, "4200000000", "dm_normalized_debt", 2),
+      // The SIGNED delta: a repay is negative on the debt side (the contract's ChainEvent.amount).
+      ev(8444, false, "repay", USDC, "-150000000", "dm_normalized_debt", 9),
     ],
     next_cursor: null,
     notes: ["`block_time` is null until the block's header is custodied — never fabricated. Render the block number in the meantime."],
@@ -308,11 +333,6 @@ const paramsBody = () => ({
 });
 
 function stressBody(account, near) {
-  const def = (id) => {
-    const d = scenarios.scenarios.find((x) => x.id === id);
-    if (d === undefined) throw new Error(`scenarios.json lacks ${id}`);
-    return d;
-  };
   const state = (cap, debt, collateral) => ({
     health_factor_wad: null,
     health_factor_num: s(cap),
@@ -351,7 +371,7 @@ function stressBody(account, near) {
     apy_observed_at_block: dm.last_block,
     prices_held_flat: true,
     horizons: [horizon(2_592_000), horizon(7_776_000)],
-    note: stressTemplate.scenarios[0].results[0].projection.note,
+    note: PROJECTION_NOTE,
   };
   return {
     served_at: SERVED_AT,
@@ -363,9 +383,9 @@ function stressBody(account, near) {
     withheld_engines: [],
     lookup_complete_note: LOOKUP_NOTE,
     scenarios: [
-      { ...def("eth_minus_30"), results: [result(shocked(WEETH, 70n, 100n))] },
-      { ...def("ethfi_minus_50"), results: [result(shocked(ETHFI, 50n, 100n))] },
-      { ...def("dm_rate_horizon_plus_200bps"), results: [result({ after: before, applied_shocks: [], held_flat: [], projection })] },
+      { ...scenarioDef("eth_minus_30"), results: [result(shocked(WEETH, 70n, 100n))] },
+      { ...scenarioDef("ethfi_minus_50"), results: [result(shocked(ETHFI, 50n, 100n))] },
+      { ...scenarioDef("dm_rate_horizon_plus_200bps"), results: [result({ after: before, applied_shocks: [], held_flat: [], projection })] },
     ],
     notes: stressTemplate.notes,
   };

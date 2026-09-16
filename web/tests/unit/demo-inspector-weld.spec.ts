@@ -32,7 +32,8 @@ test("every body shares the Book's demo batch identity", () => {
   for (const body of [DEMO_ADDRESS_NEAR, DEMO_ADDRESS_LIQUIDATABLE, DEMO_ADDRESS_HEALTHY, DEMO_ADDRESS_REFUSED, DEMO_HISTORY_NEAR, DEMO_STRESS_NEAR]) {
     expect(body.batch.id).toBe(DEMO_BATCH_ID);
     expect(body.served_at).toBe(DEMO_BOOK.served_at);
-    expect(body.batch.computed_at).toBe(DEMO_BOOK.batch.computed_at);
+    // The WHOLE envelope — computed_at, age_seconds 42, and the debt_manager sweep watermark (1 of 3 rows failed, gen 4).
+    expect(body.batch).toEqual(DEMO_BOOK.batch);
   }
   expect(DEMO_EVENTS_NEAR.served_at).toBe(DEMO_BOOK.served_at);
   expect(DEMO_PARAMS_DM.served_at).toBe(DEMO_BOOK.served_at);
@@ -64,7 +65,7 @@ test("liquidatable, healthy and refused accounts read as their states", () => {
   const refused = readCashPosition(cashOf(DEMO_ADDRESS_REFUSED));
   expect(refused.computed).toBe(false);
   expect(refused.debt).toBe(4100000000n);
-  expect(refused.refusal?.code).toBe("SWEEP_FAILED");
+  expect(refused.refusal?.code).toBe("SWEEP_NEVER");
 });
 
 test("the history's newest point IS the position; 14 batches sit under the 10 % line; one refused point, two withheld batches", () => {
@@ -100,5 +101,10 @@ test("events: six rows for the near account, newest first, exactly one without a
   expect(DEMO_EVENTS_NEAR.events.filter((e) => e.block_time === null)).toHaveLength(1);
   const blocks = DEMO_EVENTS_NEAR.events.map((e) => e.block_number);
   expect([...blocks].sort((a, b) => b - a)).toEqual(blocks);
+  // The repay is the SIGNED delta — negative on the debt side.
+  expect(DEMO_EVENTS_NEAR.events.find((e) => e.type === "repay")?.amount).toBe("-150000000");
+  const hashes = DEMO_EVENTS_NEAR.events.map((e) => e.tx_hash);
+  expect(hashes.every((h) => /^0x[0-9a-f]{64}$/.test(h))).toBe(true);
+  expect(new Set(hashes).size).toBe(hashes.length);
   expect(DEMO_PARAMS_DM.params[0]?.fields[0]?.name).toBe("borrow_apy");
 });

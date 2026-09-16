@@ -19,7 +19,7 @@
       "effective_block": 155300000,
       "effective_log_index": 3,
       "source_event": "borrow_apy_set",
-      "tx_hash": "0x000000000000000000000000000000000000000000000000000000242899f103",
+      "tx_hash": "0xcb4734dfe6c9d2de94fdbbe13fde9473abf64fd7fab39733a90cab131a8dd99f",
       "block_time": "2026-08-08T17:22:50Z"
     }
   ],

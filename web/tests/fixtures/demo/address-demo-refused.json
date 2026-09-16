@@ -150,18 +150,16 @@
       "as_of": {
         "balances_block": 155323444,
         "params_block": 155300000,
-        "sweep_block": 155323390,
+        "sweep_block": 0,
         "oldest_price_input": "2026-08-08T20:22:15Z",
         "stale_price_inputs": false,
         "note": "each leg additionally carries its OWN rate-index as-of block."
       },
       "status": "refused",
-      "flags": [
-        "sweep_failed"
-      ],
+      "flags": [],
       "refusal": {
-        "code": "SWEEP_FAILED",
-        "detail": "collateral sweep failed for this account in this batch",
+        "code": "SWEEP_NEVER",
+        "detail": "collateral sweep never ran for this account",
         "note": "a refused row keeps its persisted debt for display; no verdict is served for it."
       },
       "liquidatable": null,

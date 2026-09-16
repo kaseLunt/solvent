@@ -370,13 +370,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5441623438",
+            "num": "5453480460",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "13529422862",
+          "total_collateral_base": "13558902789",
           "total_debt_base": "4822000000"
         },
         {
@@ -388,13 +388,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5485611487",
+            "num": "5487591188",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "13638789657",
+          "total_collateral_base": "13643711756",
           "total_debt_base": "4822000000"
         },
         {
@@ -406,13 +406,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5477940370",
+            "num": "5465661126",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "13619717079",
+          "total_collateral_base": "13589187388",
           "total_debt_base": "4822000000"
         },
         {
@@ -424,13 +424,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5498635082",
+            "num": "5499649369",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "13671170016",
+          "total_collateral_base": "13673691822",
           "total_debt_base": "4822000000"
         },
         {
@@ -442,13 +442,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5564813883",
+            "num": "5533921935",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "13835709330",
+          "total_collateral_base": "13758903165",
           "total_debt_base": "4822000000"
         },
         {
@@ -460,13 +460,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5590628955",
+            "num": "5568480453",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "13899892937",
+          "total_collateral_base": "13844825465",
           "total_debt_base": "4822000000"
         },
         {
@@ -478,13 +478,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5580865242",
+            "num": "5603326501",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "13875617571",
+          "total_collateral_base": "13931462647",
           "total_debt_base": "4822000000"
         },
         {
@@ -496,13 +496,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5621776807",
+            "num": "5638461599",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "13977335353",
+          "total_collateral_base": "14018818489",
           "total_debt_base": "4822000000"
         },
         {
@@ -514,13 +514,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5686331298",
+            "num": "5673887207",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14137836169",
+          "total_collateral_base": "14106896621",
           "total_debt_base": "4822000000"
         },
         {
@@ -532,13 +532,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5693045409",
+            "num": "5709604717",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14154529358",
+          "total_collateral_base": "14195700505",
           "total_debt_base": "4822000000"
         },
         {
@@ -550,13 +550,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5691364138",
+            "num": "5745615451",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14150349240",
+          "total_collateral_base": "14285233428",
           "total_debt_base": "4822000000"
         },
         {
@@ -568,13 +568,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5750802381",
+            "num": "5720190423",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14298129610",
+          "total_collateral_base": "14222019580",
           "total_debt_base": "4822000000"
         },
         {
@@ -586,13 +586,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5803635471",
+            "num": "5756011483",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14429487692",
+          "total_collateral_base": "14311080919",
           "total_debt_base": "4822000000"
         },
         {
@@ -604,13 +604,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5795699026",
+            "num": "5792118036",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14409755433",
+          "total_collateral_base": "14400852074",
           "total_debt_base": "4822000000"
         },
         {
@@ -622,13 +622,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5811010619",
+            "num": "5828510928",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14447824406",
+          "total_collateral_base": "14491335150",
           "total_debt_base": "4822000000"
         },
         {
@@ -640,13 +640,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5882257609",
+            "num": "5865190908",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14624964678",
+          "total_collateral_base": "14582532008",
           "total_debt_base": "4822000000"
         },
         {
@@ -658,13 +658,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5915748652",
+            "num": "5902158618",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14708232932",
+          "total_collateral_base": "14674444244",
           "total_debt_base": "4822000000"
         },
         {
@@ -676,13 +676,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5902144388",
+            "num": "5939414591",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14674408864",
+          "total_collateral_base": "14767073185",
           "total_debt_base": "4822000000"
         },
         {
@@ -694,13 +694,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "5939624177",
+            "num": "5976959238",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14767594275",
+          "total_collateral_base": "14860419851",
           "total_debt_base": "4822000000"
         },
         {
@@ -712,13 +712,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6012245872",
+            "num": "6014792847",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14948152454",
+          "total_collateral_base": "14954484958",
           "total_debt_base": "4822000000"
         },
         {
@@ -730,13 +730,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6023637411",
+            "num": "5985297054",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14976475059",
+          "total_collateral_base": "14881150032",
           "total_debt_base": "4822000000"
         },
         {
@@ -748,13 +748,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6015706976",
+            "num": "6022852816",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "14956757743",
+          "total_collateral_base": "14974524333",
           "total_debt_base": "4822000000"
         },
         {
@@ -766,13 +766,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6075119088",
+            "num": "6060685735",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15104473143",
+          "total_collateral_base": "15068587725",
           "total_debt_base": "4822000000"
         },
         {
@@ -784,13 +784,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6137447537",
+            "num": "6098795394",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15259439387",
+          "total_collateral_base": "15163339171",
           "total_debt_base": "4822000000"
         },
         {
@@ -802,13 +802,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6130037190",
+            "num": "6137181211",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15241015158",
+          "total_collateral_base": "15258777225",
           "total_debt_base": "4822000000"
         },
         {
@@ -820,13 +820,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6138550058",
+            "num": "6175842424",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15262180568",
+          "total_collateral_base": "15354899991",
           "total_debt_base": "4822000000"
         },
         {
@@ -838,13 +838,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6213819356",
+            "num": "6214778085",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15449321441",
+          "total_collateral_base": "15451705114",
           "total_debt_base": "4822000000"
         },
         {
@@ -856,13 +856,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6256087101",
+            "num": "6253987045",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15554411071",
+          "total_collateral_base": "15549189735",
           "total_debt_base": "4822000000"
         },
         {
@@ -874,13 +874,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6238749611",
+            "num": "6293467945",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15511305142",
+          "total_collateral_base": "15647350476",
           "total_debt_base": "4822000000"
         },
         {
@@ -892,13 +892,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6270970140",
+            "num": "6259231280",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15591414537",
+          "total_collateral_base": "15562228394",
           "total_debt_base": "4822000000"
         },
         {
@@ -910,13 +910,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6351238782",
+            "num": "6298318585",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15790985201",
+          "total_collateral_base": "15659410546",
           "total_debt_base": "4822000000"
         },
         {
@@ -928,13 +928,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6368522520",
+            "num": "6337660319",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15833957487",
+          "total_collateral_base": "15757225281",
           "total_debt_base": "4822000000"
         },
         {
@@ -946,13 +946,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6353608936",
+            "num": "6377254083",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "15796878077",
+          "total_collateral_base": "15855666635",
           "total_debt_base": "4822000000"
         },
         {
@@ -964,13 +964,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6477224631",
+            "num": "6497519392",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16104221838",
+          "total_collateral_base": "16154680383",
           "total_debt_base": "4822000000"
         },
         {
@@ -982,13 +982,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6477389564",
+            "num": "6538091587",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16104631908",
+          "total_collateral_base": "16255554394",
           "total_debt_base": "4822000000"
         },
         {
@@ -1000,13 +1000,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6555049656",
+            "num": "6578899382",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16297716975",
+          "total_collateral_base": "16357014174",
           "total_debt_base": "4822000000"
         },
         {
@@ -1018,13 +1018,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6606950044",
+            "num": "6539142437",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16426756094",
+          "total_collateral_base": "16258167106",
           "total_debt_base": "4822000000"
         },
         {
@@ -1036,13 +1036,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6586119494",
+            "num": "6579403927",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16374965425",
+          "total_collateral_base": "16358268616",
           "total_debt_base": "4822000000"
         },
         {
@@ -1054,13 +1054,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6610912569",
+            "num": "6619875358",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16436608058",
+          "total_collateral_base": "16458892099",
           "total_debt_base": "4822000000"
         },
         {
@@ -1072,13 +1072,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6697766025",
+            "num": "6660551235",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16652550441",
+          "total_collateral_base": "16560023893",
           "total_debt_base": "4822000000"
         },
         {
@@ -1090,13 +1090,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6722059122",
+            "num": "6701425614",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16712949986",
+          "total_collateral_base": "16661649219",
           "total_debt_base": "4822000000"
         },
         {
@@ -1108,13 +1108,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6699478188",
+            "num": "6742492080",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16656807365",
+          "total_collateral_base": "16763752129",
           "total_debt_base": "4822000000"
         },
         {
@@ -1126,13 +1126,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6752554973",
+            "num": "6783743711",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16788771341",
+          "total_collateral_base": "16866315411",
           "total_debt_base": "4822000000"
         },
         {
@@ -1144,13 +1144,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6834095151",
+            "num": "6825173053",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16991503405",
+          "total_collateral_base": "16969320533",
           "total_debt_base": "4822000000"
         },
         {
@@ -1162,13 +1162,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6830513503",
+            "num": "6866772083",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16982598410",
+          "total_collateral_base": "17072747548",
           "total_debt_base": "4822000000"
         },
         {
@@ -1180,13 +1180,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6820656743",
+            "num": "6820584834",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "16958091702",
+          "total_collateral_base": "16957912916",
           "total_debt_base": "4822000000"
         },
         {
@@ -1198,13 +1198,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6898306273",
+            "num": "6861433253",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17151150509",
+          "total_collateral_base": "17059473698",
           "total_debt_base": "4822000000"
         },
         {
@@ -1216,13 +1216,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6960175718",
+            "num": "6902413564",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17304975538",
+          "total_collateral_base": "17161362402",
           "total_debt_base": "4822000000"
         },
         {
@@ -1234,13 +1234,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6936173597",
+            "num": "6943515289",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17245299441",
+          "total_collateral_base": "17263552975",
           "total_debt_base": "4822000000"
         },
         {
@@ -1252,13 +1252,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "6950992264",
+            "num": "6984727196",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17282142860",
+          "total_collateral_base": "17366017492",
           "total_debt_base": "4822000000"
         },
         {
@@ -1270,13 +1270,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7042439583",
+            "num": "7026037243",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17509506893",
+          "total_collateral_base": "17468726013",
           "total_debt_base": "4822000000"
         },
         {
@@ -1288,13 +1288,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7074492833",
+            "num": "7067432523",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17589200385",
+          "total_collateral_base": "17571646447",
           "total_debt_base": "4822000000"
         },
         {
@@ -1306,13 +1306,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7043590483",
+            "num": "7108899201",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17512368357",
+          "total_collateral_base": "17674744397",
           "total_debt_base": "4822000000"
         },
         {
@@ -1324,13 +1324,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7089101316",
+            "num": "7150422443",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17625521227",
+          "total_collateral_base": "17777982981",
           "total_debt_base": "4822000000"
         },
         {
@@ -1342,13 +1342,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7178727989",
+            "num": "7096723819",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17848358616",
+          "total_collateral_base": "17644472936",
           "total_debt_base": "4822000000"
         },
         {
@@ -1360,13 +1360,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7178267509",
+            "num": "7137213788",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17847213731",
+          "total_collateral_base": "17745142510",
           "total_debt_base": "4822000000"
         },
         {
@@ -1378,13 +1378,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7156563878",
+            "num": "7177702672",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17793252335",
+          "total_collateral_base": "17845809386",
           "total_debt_base": "4822000000"
         },
         {
@@ -1396,13 +1396,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7230757046",
+            "num": "7218171308",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "17977717643",
+          "total_collateral_base": "17946425920",
           "total_debt_base": "4822000000"
         },
         {
@@ -1414,13 +1414,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7301932645",
+            "num": "7258599097",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18154680416",
+          "total_collateral_base": "18046940897",
           "total_debt_base": "4822000000"
         },
         {
@@ -1432,13 +1432,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7274972231",
+            "num": "7298963879",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18087649162",
+          "total_collateral_base": "18147299220",
           "total_debt_base": "4822000000"
         },
         {
@@ -1450,13 +1450,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7276790644",
+            "num": "7339241772",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18092170254",
+          "total_collateral_base": "18247441512",
           "total_debt_base": "4822000000"
         },
         {
@@ -1468,13 +1468,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7369441062",
+            "num": "7379407009",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18322525533",
+          "total_collateral_base": "18347303710",
           "total_debt_base": "4822000000"
         },
         {
@@ -1486,25 +1486,25 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7409095386",
+            "num": "7419431724",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18421117455",
+          "total_collateral_base": "18446816530",
           "total_debt_base": "4822000000"
         },
         {
           "batch_id": 18170,
           "computed_at": "2026-08-08T19:41:38Z",
           "balances_block": 155322229,
-          "sweep_block": 155322175,
+          "sweep_block": 0,
           "status": "refused",
           "refusal": {
-            "code": "SWEEP_FAILED",
-            "detail": "collateral sweep failed for this account in this batch",
-            "note": ""
+            "code": "SWEEP_NEVER",
+            "detail": "collateral sweep never ran for this account",
+            "note": "a refused row keeps its persisted debt for display; no verdict is served for it."
           },
           "health_factor": null,
           "liquidatable": null,
@@ -1520,13 +1520,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7402891687",
+            "num": "7395427189",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18405693296",
+          "total_collateral_base": "18387134432",
           "total_debt_base": "4822000000"
         },
         {
@@ -1538,13 +1538,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7497524087",
+            "num": "7433755152",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18640976345",
+          "total_collateral_base": "18482428644",
           "total_debt_base": "4822000000"
         },
         {
@@ -1556,13 +1556,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7500119902",
+            "num": "7471806925",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18647430280",
+          "total_collateral_base": "18577036170",
           "total_debt_base": "4822000000"
         },
         {
@@ -1574,13 +1574,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7464353790",
+            "num": "7509540902",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18558505557",
+          "total_collateral_base": "18670853564",
           "total_debt_base": "4822000000"
         },
         {
@@ -1592,13 +1592,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7530004754",
+            "num": "7546911183",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18721732518",
+          "total_collateral_base": "18763766706",
           "total_debt_base": "4822000000"
         },
         {
@@ -1610,13 +1610,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7607787422",
+            "num": "7583866829",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18915122343",
+          "total_collateral_base": "18855648948",
           "total_debt_base": "4822000000"
         },
         {
@@ -1628,13 +1628,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7577290230",
+            "num": "7620350912",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18839297654",
+          "total_collateral_base": "18946358751",
           "total_debt_base": "4822000000"
         },
         {
@@ -1646,13 +1646,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7562097383",
+            "num": "7656299263",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "18801523917",
+          "total_collateral_base": "19035736571",
           "total_debt_base": "4822000000"
         },
         {
@@ -1664,13 +1664,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7649990840",
+            "num": "7582780218",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19020052038",
+          "total_collateral_base": "18852947325",
           "total_debt_base": "4822000000"
         },
         {
@@ -1682,13 +1682,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7694681146",
+            "num": "7616450707",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19131164844",
+          "total_collateral_base": "18936661732",
           "total_debt_base": "4822000000"
         },
         {
@@ -1700,13 +1700,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7643617477",
+            "num": "7649347317",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19004206046",
+          "total_collateral_base": "19018452057",
           "total_debt_base": "4822000000"
         },
         {
@@ -1718,13 +1718,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7659399074",
+            "num": "7681355260",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19043443582",
+          "total_collateral_base": "19098032903",
           "total_debt_base": "4822000000"
         },
         {
@@ -1736,13 +1736,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7751933273",
+            "num": "7712333153",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19273509908",
+          "total_collateral_base": "19175052751",
           "total_debt_base": "4822000000"
         },
         {
@@ -1754,13 +1754,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7754256920",
+            "num": "7742100007",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19279287155",
+          "total_collateral_base": "19249061613",
           "total_debt_base": "4822000000"
         },
         {
@@ -1772,13 +1772,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7699647050",
+            "num": "7770410771",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19143511493",
+          "total_collateral_base": "19319450221",
           "total_debt_base": "4822000000"
         },
         {
@@ -1790,13 +1790,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7746522369",
+            "num": "7796902758",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19260056862",
+          "total_collateral_base": "19385316832",
           "total_debt_base": "4822000000"
         },
         {
@@ -1808,13 +1808,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7820519819",
+            "num": "7820942724",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19444035559",
+          "total_collateral_base": "19445087022",
           "total_debt_base": "4822000000"
         },
         {
@@ -1826,13 +1826,13 @@
           "refusal": null,
           "health_factor": {
             "wad": null,
-            "num": "7777419355",
+            "num": "7727564103",
             "den": "4822000000",
             "infinite": false,
             "note": "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides."
           },
           "liquidatable": false,
-          "total_collateral_base": "19336875553",
+          "total_collateral_base": "19212921223",
           "total_debt_base": "4822000000"
         }
       ],
