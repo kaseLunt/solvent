@@ -1,0 +1,107 @@
+// One engine of one result is read here, once, under the classifier and the
+// wire guards; the page's workspace and the library's row both consume this
+// reading, so one response can never earn two answers. The reading is by
+// engine id: not covered when the definition does not model the engine,
+// withheld by a listed refusal or by name (no row and no refusal), unreadable
+// when any field the reading would consume is outside the wire contract,
+// contradictory when the lane matrix disagrees with itself, and a result only
+// once every guard has passed — every BigInt sits behind its own named guard.
+import type { components } from "@solvent/client";
+import { engineName } from "./inspector-headline";
+import { CASH } from "./inspector-position";
+import { classifyRunBookEngine } from "./lab-classify";
+import { moversTable, type MoversTable } from "./lab-movers";
+import { laneReading, type HeatmapView } from "./lab-transitions";
+import { plainCause } from "./refusal-phrasebook";
+import type { LabRunBook, LabRunBookEngine, RunBookEngine } from "./runbook";
+import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
+
+type ScenarioDefinition = components["schemas"]["ScenarioDefinition"];
+
+export interface EngineResult {
+  readonly engine: string;
+  readonly decimals: number;
+  /** The wire's SIGNED net: accounts newly liquidatable less any that flipped back to healthy. */
+  readonly newly: number;
+  readonly beforeEligible: number;
+  readonly afterEligible: number;
+  readonly eligibleDebtBefore: bigint;
+  readonly eligibleDebtAfter: bigint;
+  readonly deltaEligibleDebt: bigint;
+  readonly badDebtBefore: bigint;
+  readonly badDebtAfter: bigint;
+  readonly deltaBadDebt: bigint;
+  readonly measured: number;
+  readonly laneChanged: number | null;
+  /** A contradictory matrix never reaches a result, so the heat of a result is always readable. */
+  readonly heat: HeatmapView;
+  readonly movers: MoversTable;
+  readonly realization: RunBookEngine["market_realization"];
+  readonly projection: LabRunBookEngine["projection"];
+  readonly note: string;
+  /** `hf_transitions.note`, verbatim — the wire's own words about its lanes, printed in the drawer. */
+  readonly transitionsNote: string;
+}
+export type EngineReading =
+  | { readonly kind: "result"; readonly result: EngineResult }
+  | { readonly kind: "withheld"; readonly cause: string }
+  | { readonly kind: "not-covered" }
+  | { readonly kind: "contradictory"; readonly reasons: readonly string[] }
+  | { readonly kind: "unreadable"; readonly fields: readonly string[] };
+
+/** One engine's result, read by id under the classifier and the guards. */
+export function readEngine(run: LabRunBook, engine: string, definition: ScenarioDefinition): EngineReading {
+  if (!definition.engines.includes(engine)) return { kind: "not-covered" };
+  const refusal = run.excluded_engines.find((e) => e.engine === engine);
+  if (refusal !== undefined) return { kind: "withheld", cause: `${engineName(engine)} — ${plainCause(refusal.code, refusal.detail)}` };
+  const e = run.engines.find((x) => x.engine === engine);
+  if (e === undefined) return { kind: "withheld", cause: `${engineName(engine)} — the result carries no row for this engine and no refusal` };
+  const malformed = classifyRunBookEngine(e).malformedFields;
+  const fields: string[] = [...malformed];
+  if (!isWireScale(e.usd_decimals)) fields.push("usd_decimals");
+  // `newly_eligible_accounts` is the wire's signed net count: the classifier
+  // guards it as one, and a negative net is an answer, never a malformed field.
+  const pops: [string, number][] = [
+    ["before.eligible_accounts", e.before.eligible_accounts],
+    ["after.eligible_accounts", e.after.eligible_accounts],
+    ["hf_transitions.measured_rows", e.hf_transitions.measured_rows],
+  ];
+  for (const [name, v] of pops) if (!isWirePopulation(v)) fields.push(name);
+  const decs: [string, string][] = [
+    ["before.eligible_debt_usd", e.before.eligible_debt_usd],
+    ["after.eligible_debt_usd", e.after.eligible_debt_usd],
+    ["eligible_debt_delta_usd", e.eligible_debt_delta_usd],
+    ["before.bad_debt_usd", e.before.bad_debt_usd],
+    ["after.bad_debt_usd", e.after.bad_debt_usd],
+    ["bad_debt_delta_usd", e.bad_debt_delta_usd],
+  ];
+  for (const [name, v] of decs) if (!isWireDecimal(v)) fields.push(name);
+  if (e.hf_transitions.lane_changed_rows !== null && !isWirePopulation(e.hf_transitions.lane_changed_rows)) fields.push("hf_transitions.lane_changed_rows");
+  if (fields.length > 0) return { kind: "unreadable", fields: [...new Set(fields)] };
+  const heat = laneReading(e, { merge: engine === CASH });
+  if (heat.kind === "contradictory") return { kind: "contradictory", reasons: heat.reasons };
+  return {
+    kind: "result",
+    result: {
+      engine,
+      decimals: e.usd_decimals,
+      newly: e.newly_eligible_accounts,
+      beforeEligible: e.before.eligible_accounts,
+      afterEligible: e.after.eligible_accounts,
+      eligibleDebtBefore: BigInt(e.before.eligible_debt_usd),
+      eligibleDebtAfter: BigInt(e.after.eligible_debt_usd),
+      deltaEligibleDebt: BigInt(e.eligible_debt_delta_usd),
+      badDebtBefore: BigInt(e.before.bad_debt_usd),
+      badDebtAfter: BigInt(e.after.bad_debt_usd),
+      deltaBadDebt: BigInt(e.bad_debt_delta_usd),
+      measured: e.hf_transitions.measured_rows,
+      laneChanged: e.hf_transitions.lane_changed_rows,
+      heat: heat.view,
+      movers: moversTable(e),
+      realization: e.market_realization,
+      projection: e.projection,
+      note: e.note,
+      transitionsNote: e.hf_transitions.note,
+    },
+  };
+}

@@ -94,14 +94,13 @@ test("the demo result: state, headline, chips, identity, both engine readings, t
   expect(cash.result.deltaEligibleDebt).toBe(1_280_000_000_000n);
   expect(cash.result.deltaBadDebt).toBe(40_780_396_039n);
   expect(cash.result.laneChanged).toBe(941);
-  expect(cash.result.heat.kind).toBe("ok");
+  expect(cash.result.heat.merged).toBe(true);
   expect(cash.result.movers.total).toBe(118);
   const legacy = v.book.legacy;
   if (legacy?.kind !== "result") throw new Error("legacy must read");
   expect(legacy.result.engine).toBe("aave_v3_etherfi");
   expect(legacy.result.decimals).toBe(8);
-  if (legacy.result.heat.kind !== "ok") throw new Error("legacy heat");
-  expect(legacy.result.heat.view.merged).toBe(false);
+  expect(legacy.result.heat.merged).toBe(false);
 });
 
 test("withheld, not covered, contradictory, unreadable — each its own state and headline; the legacy reading is independent", () => {
@@ -185,4 +184,8 @@ test("readEngine reads by id, refuses by name, and never manufactures a figure",
   const bad = readEngine(runBookOf([demoCash({ bad_debt_delta_usd: "-0.5" })], DEFINITION_ETH), "debt_manager", DEFINITION_ETH);
   expect(bad.kind).toBe("unreadable");
   if (bad.kind === "unreadable") expect(bad.fields).toContain("bad_debt_delta_usd");
+  // The net count is signed: accounts that flipped back to healthy can outnumber the newly liquidatable.
+  const net = readEngine(runBookOf([demoCash({ newly_eligible_accounts: -3 })], DEFINITION_ETH), "debt_manager", DEFINITION_ETH);
+  if (net.kind !== "result") throw new Error("a signed net must read");
+  expect(net.result.newly).toBe(-3);
 });

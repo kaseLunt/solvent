@@ -8,12 +8,11 @@
 import type { components } from "@solvent/client";
 import { engineName } from "./inspector-headline";
 import { CASH } from "./inspector-position";
+import { readEngine } from "./lab-engine";
 import { signedUsd } from "./lab-headline";
-import { laneReading, type LaneReading } from "./lab-transitions";
 import { groupInt, joinAnd } from "./prose";
 import type { LabRunBook, LabRunBookEngine, RunBookOutcome } from "./runbook";
 import type { SetRunOutcome } from "./runbookSet";
-import { isWireDecimal, isWirePopulation } from "./wireGuard";
 
 type Schemas = components["schemas"];
 export type ScenariosResponse = Schemas["ScenariosResponse"];
@@ -53,9 +52,6 @@ export const cashEngineOf = (run: LabRunBook): LabRunBookEngine | null => run.en
 /** The Cash engine's refusal in a run, found by engine id — never by position. */
 export const cashRefusalOf = (run: LabRunBook): EngineRefusal | null => run.excluded_engines.find((e) => e.engine === CASH) ?? null;
 
-/** The heat reading is a function of the transitions alone: it takes only the fields it reads, so the sealed projection is never handed across. */
-const heatOf = (cash: LabRunBookEngine): LaneReading => laneReading(cash, { merge: true });
-
 const FAILURE_WORD: Record<Exclude<RunBookOutcome["kind"], "ok" | "failed">, string> = {
   "not-served": "Not served",
   "no-batch": "No batch",
@@ -65,25 +61,32 @@ const FAILURE_WORD: Record<Exclude<RunBookOutcome["kind"], "ok" | "failed">, str
 
 const failed = (text: string): LibraryOutcome => ({ key: "failed", text, tone: "refused" });
 
+/** The row's one word. A settled result is the Cash reading of `lab-engine` — the workspace's own — said in a word, never a second judgement of the same body. */
 export function outcomeLine(record: RunRecord | undefined, definition: ScenarioDefinition): LibraryOutcome {
   if (record === undefined) return { key: "not-run", text: "Not run yet", tone: "dim" };
   if (record.phase === "running") return { key: "running", text: "Running…", tone: "dim" };
   const o = record.outcome;
   if (o.kind === "failed") return failed(`Failed ${String(o.status)}`);
   if (o.kind !== "ok") return failed(FAILURE_WORD[o.kind]);
-  if (!definition.engines.includes(CASH)) return { key: "not-covered", text: "Not modelled for Cash", tone: "dim" };
-  if (cashRefusalOf(o.response) !== null) return { key: "withheld", text: "Withheld", tone: "refused" };
-  const cash = cashEngineOf(o.response);
-  if (cash === null) return { key: "withheld", text: "Withheld", tone: "refused" };
-  if (!isWirePopulation(cash.newly_eligible_accounts) || !isWireDecimal(cash.eligible_debt_delta_usd)) return failed("Unreadable");
-  const heat = heatOf(cash);
-  if (heat.kind === "contradictory") return failed("Contradictory");
-  const newly = cash.newly_eligible_accounts;
-  if (newly > 0) {
-    return { key: "result", text: `${signedUsd(BigInt(cash.eligible_debt_delta_usd), cash.usd_decimals)} liquidatable · ${groupInt(newly)} account${newly === 1 ? "" : "s"}`, tone: "crit" };
+  const r = readEngine(o.response, CASH, definition);
+  switch (r.kind) {
+    case "not-covered":
+      return { key: "not-covered", text: "Not modelled for Cash", tone: "dim" };
+    case "withheld":
+      return { key: "withheld", text: "Withheld", tone: "refused" };
+    case "unreadable":
+      return failed("Unreadable");
+    case "contradictory":
+      return failed("Contradictory");
+    case "result": {
+      const { newly, deltaEligibleDebt, decimals, heat } = r.result;
+      if (newly > 0) {
+        return { key: "result", text: `${signedUsd(deltaEligibleDebt, decimals)} liquidatable · ${groupInt(newly)} account${newly === 1 ? "" : "s"}`, tone: "crit" };
+      }
+      if (heat.bandChanged === 0) return { key: "result", text: "No band change", tone: "ok" };
+      return { key: "result", text: `${groupInt(heat.bandChanged)} change band`, tone: "warn" };
+    }
   }
-  if (heat.view.bandChanged === 0) return { key: "result", text: "No band change", tone: "ok" };
-  return { key: "result", text: `${groupInt(heat.view.bandChanged)} change band`, tone: "warn" };
 }
 
 export function libraryRows(listing: ScenariosResponse | null, records: ReadonlyMap<string, RunRecord>, selectedId: string | null, checked: ReadonlySet<string>): LibraryRow[] {

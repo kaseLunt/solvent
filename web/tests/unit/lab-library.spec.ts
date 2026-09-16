@@ -1,6 +1,7 @@
 // The library's rows: the wire's own labels, one outcome word per run record,
 // the definition-skew law, and the Cash engine/refusal readers.
 import { expect, test } from "@playwright/test";
+import { readEngine } from "../../lib/lab-engine";
 import { cashEngineOf, cashRefusalOf, definitionSkew, libraryRows, outcomeLine, type RunRecord } from "../../lib/lab-library";
 import { SCENARIOS } from "../fixtures/lab-book";
 import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, transitionsOf } from "./helpers/run-book-engine";
@@ -45,6 +46,14 @@ test("outcome lines: running, a Cash result in the Book's tiers, no band change,
   expect(outcomeLine(settled({ kind: "rate-limited", retryAfterSeconds: 3 }), def)).toEqual({ key: "failed", text: "Rate limited", tone: "refused" });
   expect(outcomeLine(settled({ kind: "unreachable", message: "m" }), def)).toEqual({ key: "failed", text: "Unreachable", tone: "refused" });
   expect(outcomeLine(settled({ kind: "failed", status: 502, message: "m" }), def)).toEqual({ key: "failed", text: "Failed 502", tone: "refused" });
+});
+
+test("the row's word is the workspace's reading: a field only the classifier catches reads Unreadable in both", () => {
+  const run = runBookOf([cashEngine(DEMO_CASH_TABLE, { newly_eligible_accounts: 118, eligible_debt_delta_usd: "1280000000000", movers_total: -1 })]);
+  const reading = readEngine(run, "debt_manager", DEFINITION_ETH);
+  expect(reading.kind).toBe("unreadable");
+  if (reading.kind === "unreadable") expect(reading.fields).toEqual(["movers_total"]);
+  expect(outcomeLine(settled({ kind: "ok", response: run }), DEFINITION_ETH)).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
 });
 
 test("definitionSkew names every field the listing no longer agrees with; an unchanged definition names none", () => {
