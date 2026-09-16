@@ -40,7 +40,7 @@ import {
 import { plainCause } from "./refusal-phrasebook";
 import { nearCapStreak, roomSeries, type RoomSeries, type Streak } from "./room-history";
 import { trustChecklist, type TrustItem } from "./trust";
-import { readWirePopulation } from "./wireGuard";
+import { isWireDecimal, readWirePopulation } from "./wireGuard";
 
 export type InspectorState =
   | "loading"
@@ -89,6 +89,30 @@ function empty(state: InspectorState, kicker: string, headline: InspectorHeadlin
 }
 
 const tierTone = (t: FreshnessTier | null): ViewChip["tone"] => (t === null ? "refused" : t === "fresh" ? "ok" : t === "aging" ? "warn" : "crit");
+
+/** The cause when nothing on the wire says more — unreachable beside a read position; kept for type honesty. */
+const NOT_COMPUTED_UNSAID = "the engine did not compute this position";
+
+/**
+ * Why a Cash row is not computed, read from the WIRE. The reader's refused arm
+ * forces `cap: null` on every refused row, so the reader cannot say which figure
+ * is missing — only the wire can.
+ */
+function notComputedCause(cash: CashPosition, wire: RefinedPosition | null): string {
+  // A read position always has its wire row; the type system cannot see that pairing, so the guard is here, not a claim.
+  if (wire === null) return NOT_COMPUTED_UNSAID;
+  if (cash.refusal !== null) return plainCause(cash.refusal.code, cash.refusal.detail ?? undefined);
+  if (wire.status !== "computed") return "the engine refused this row without a code";
+  if (cash.status === "unknowable") return "the engine published no verdict for this account";
+  const cap = isWireDecimal(wire.max_borrow_lt) ? BigInt(wire.max_borrow_lt) : null;
+  const debt = isWireDecimal(wire.borrowings) ? BigInt(wire.borrowings) : null;
+  if (cap === null && debt === null) return "the engine published neither a cap nor a debt for this account";
+  if (cap === null) return "the engine published no cap for this account";
+  if (debt === null) return "the engine published no readable debt for this account";
+  if (cap < 0n || debt < 0n) return "the engine published a negative figure — not a position";
+  // Unreachable: a computed row with a readable, nonnegative cap and debt and a verdict IS computed.
+  return NOT_COMPUTED_UNSAID;
+}
 
 export function deriveInspectorView(reading: AddressReading, constants: TierConstants): InspectorView {
   const short = truncateAddress(reading.address);
@@ -186,18 +210,9 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
     headline = withFloor(otherEngineHeadline(batchId, [...new Set(positions.map((p) => p.engine))]));
   } else if (!isComputedCash(cash)) {
     state = "not-computed";
-    // The cause names what is actually missing, never a cap that is on the wire.
-    const cause =
-      cash.refusal !== null
-        ? plainCause(cash.refusal.code, cash.refusal.detail ?? undefined)
-        : cash.status === "unknowable"
-          ? "the engine published no verdict for this account"
-          : cash.cap === null && cash.debt === null
-            ? "the engine published neither a cap nor a debt for this account"
-            : cash.cap === null
-              ? "the engine published no cap for this account"
-              : "the engine published no readable debt for this account";
-    headline = withFloor(notComputedHeadline(cause, cash.debt === null ? null : humanUsdFull(cash.debt, decimals)));
+    // The cause names what is actually missing on the wire; a negative debt is no "last readable debt".
+    const lastDebt = cash.debt !== null && cash.debt >= 0n ? humanUsdFull(cash.debt, decimals) : null;
+    headline = withFloor(notComputedHeadline(notComputedCause(cash, cashWire), lastDebt));
   } else {
     state = cash.status;
     headline = cashHeadline(cash, { streak, floor });

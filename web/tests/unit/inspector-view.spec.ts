@@ -244,3 +244,16 @@ test("under found: a withheld Cash book is never a Cash negative, every arm says
   expect(emptyFound.headline.dek).toContain("contradicts itself");
   expect(emptyFound.legacy).toBeNull();
 });
+
+test("the not-computed cause reads the wire: a missing debt, a refusal without a code, a negative figure — each named for what it is", () => {
+  const noDebt = deriveInspectorView(reading({ lookup: { phase: "ready", value: found([nearWire({ borrowings: null })]) } }), TIER_FALLBACK);
+  expect(noDebt.state).toBe("not-computed");
+  expect(noDebt.headline.dek).toContain("no readable debt");
+  const noCode = deriveInspectorView(reading({ lookup: { phase: "ready", value: found([nearWire({ status: "refused", refusal: null })]) } }), TIER_FALLBACK);
+  expect(noCode.state).toBe("not-computed");
+  expect(noCode.headline.dek).toContain("refused this row without a code");
+  const negative = deriveInspectorView(reading({ lookup: { phase: "ready", value: found([nearWire({ borrowings: "-1" })]) } }), TIER_FALLBACK);
+  expect(negative.state).toBe("not-computed");
+  expect(negative.headline.dek).toContain("not a position");
+  expect(negative.headline.dek).not.toContain("last readable");
+});
