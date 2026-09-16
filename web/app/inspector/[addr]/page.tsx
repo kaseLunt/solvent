@@ -19,6 +19,6 @@ export async function generateMetadata({ params }: RouteParams): Promise<Metadat
  */
 export default async function InspectorAddressPage({ params }: RouteParams) {
   const { addr } = await params;
-  // A new address is a new surface: no state survives a navigation (plan 2 Task 11).
+  // A new address is a new surface: no state survives a navigation.
   return <InspectorSurface key={addr} addr={addr} />;
 }

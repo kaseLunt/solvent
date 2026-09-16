@@ -4,7 +4,8 @@
 // e2e contract pins them. Money through humanUsdFull (never compacted), percents from the position.
 import { humanAge } from "./freshness";
 import { humanUsdFull } from "./human-price";
-import { LEGACY, type ComputedCash } from "./inspector-position";
+import { CASH, LEGACY, type ComputedCash } from "./inspector-position";
+import { groupInt, joinAnd } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import type { Streak } from "./room-history";
 
@@ -31,8 +32,6 @@ export interface InspectorHeadline {
 /** The same words the kit's AddressField shows; kept here so lib never imports a component. */
 export const INVALID_ADDRESS_COPY = "An address is 0x followed by 40 hex characters — nothing else is looked up.";
 
-const n = (value: number): string => value.toLocaleString("en-US");
-
 /** A fragment as one sentence: capitalised once, ending in exactly one period. An empty fragment is no sentence. */
 const sentence = (fragment: string): string => {
   const t = fragment.trim().replace(/\.$/u, "");
@@ -43,14 +42,9 @@ const sentence = (fragment: string): string => {
 const paragraph = (...sentences: readonly string[]): string => sentences.filter((s) => s.length > 0).join(" ");
 
 export function engineName(wire: string): string {
-  if (wire === "debt_manager") return "Cash";
+  if (wire === CASH) return "Cash";
   if (wire === LEGACY) return "Aave v3 market (legacy)";
   return wire;
-}
-
-export function engineList(names: readonly string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1] ?? ""}`;
 }
 
 export function cashHeadline(p: ComputedCash, extras: { streak: Streak | null; floor: string | null }): InspectorHeadline {
@@ -78,7 +72,8 @@ export function cashHeadline(p: ComputedCash, extras: { streak: Streak | null; f
       tone: "warn",
       emphasis: `Within ${money(p.room)} of its borrow cap.`,
       rest: "Not liquidatable yet.",
-      dek: `${base} A ${p.roomPercent ?? "—"} fall in collateral value, or ${money(p.room)} more debt, makes this account liquidatable.${streak}${floor}`,
+      // Room is floored to tenths and the rule is strict (debt > cap), so this fall or this debt reaches the cap — it does not cross it.
+      dek: `${base} A ${p.roomPercent ?? "—"} fall in collateral value, or ${money(p.room)} more debt, brings this account to its cap.${streak}${floor}`,
     };
   }
   // near and healthy imply a positive cap (a band exists), so roomPercent is non-null here; the fallback is type honesty only.
@@ -95,7 +90,7 @@ export function noPositionHeadline(batchId: number): InspectorHeadline {
   return {
     variant: "no-position",
     tone: "refused",
-    emphasis: `No Cash or Aave position in batch ${n(batchId)}.`,
+    emphasis: `No Cash or Aave position in batch ${groupInt(batchId)}.`,
     rest: "",
     dek: "The lookup was complete: every engine was available to be asked and none withheld its book, so this is a definitive answer for this batch.",
   };
@@ -105,7 +100,7 @@ export function cannotComputeHeadline(withheld: readonly { engine: string; code:
   const names = withheld.map((w) => engineName(w.engine));
   const causes = Array.from(new Set(withheld.map((w) => plainCause(w.code, w.detail)))).join("; ");
   // No engine named is unreachable by the client's invariant; it still reads as a sentence.
-  const books = names.length === 0 ? "the book is" : `the ${engineList(names)} book${names.length === 1 ? " is" : "s are"}`;
+  const books = names.length === 0 ? "the book is" : `the ${joinAnd(names)} book${names.length === 1 ? " is" : "s are"}`;
   return {
     variant: "cannot-compute",
     tone: "refused",
@@ -132,14 +127,14 @@ export function otherEngineHeadline(batchId: number, engines: readonly string[])
   // Legacy is read on this page (its health factor renders below); every other engine is foreign to it.
   const foreign = engines.filter((e) => e !== LEGACY).map(engineName);
   const hasLegacy = foreign.length !== engines.length;
-  const where = `No Cash position in batch ${n(batchId)}`;
+  const where = `No Cash position in batch ${groupInt(batchId)}`;
   if (hasLegacy) {
     const also =
       foreign.length === 0
         ? ""
         : foreign.length === 1
-          ? `A position on ${engineList(foreign)} is not read here.`
-          : `Positions on ${engineList(foreign)} are not read here.`;
+          ? `A position on ${joinAnd(foreign)} is not read here.`
+          : `Positions on ${joinAnd(foreign)} are not read here.`;
     return {
       variant: "other-engine",
       tone: "refused",
@@ -155,7 +150,7 @@ export function otherEngineHeadline(batchId: number, engines: readonly string[])
   return {
     variant: "other-engine",
     tone: "refused",
-    emphasis: `${where}; ${foreign.length === 1 ? "a position exists" : "positions exist"} on ${engineList(foreign)}, which this page does not read.`,
+    emphasis: `${where}; ${foreign.length === 1 ? "a position exists" : "positions exist"} on ${joinAnd(foreign)}, which this page does not read.`,
     rest: "",
     dek: FOREIGN_DEK,
   };

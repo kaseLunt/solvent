@@ -86,13 +86,13 @@ export function InspectorSurface({ addr }: { addr: string }) {
             <BackingTable view={view} onPrices={() => setDrawerOpen(true)} />
             <TrustCard view={view} />
           </div>
-          <HistoryCard view={view} reading={reading} />
+          <HistoryCard view={view} />
           {/* key={addr}: a fresh mount can never hold another address's rows (the surface is keyed too — a double lock).
               Mounted once the lookup has answered, so amounts are scaled by the wire's decimals from the first render
               instead of flipping from "raw units" when the position lands. */}
           {reading.lookup.phase !== "loading" && <ActivityTable key={addr} addr={addr} valid={reading.valid} scale={scale} />}
           {view.legacy !== null && <LegacyCard position={view.legacy} />}
-          {view.cash !== null && <StressTable reading={reading} view={view} />}
+          {view.cash !== null && <StressTable view={view} />}
           <InspectorDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} view={view} reading={reading} />
         </>
       )}

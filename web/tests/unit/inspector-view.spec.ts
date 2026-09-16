@@ -1,14 +1,20 @@
 // web/tests/unit/inspector-view.spec.ts
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
-import { deriveInspectorView } from "../../lib/inspector-view";
+import { deriveInspectorView, historyFinding, stressEmptyText } from "../../lib/inspector-view";
 import { ADDRESS_FOUND, ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, FOUND_ADDR, HISTORY } from "../fixtures/inspector";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 import { near } from "./helpers/cash-position";
 
 type Schemas = components["schemas"];
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const STRESS_DM = JSON.parse(readFileSync(path.join(here, "..", "fixtures", "stress-dm.json"), "utf8")) as Schemas["StressResponse"];
 
 function reading(overrides: Partial<AddressReading>): AddressReading {
   return {
@@ -87,6 +93,11 @@ test("invalid, loading and unavailable render into the frame with an honest iden
   expect(loading.state).toBe("loading");
   expect(loading.refusedTiles).toBe(true);
   expect(loading.chips[0]?.value).toBe("pending");
+  expect(loading.decimals).toBeNull();
+  expect(loading.historyLoad).toEqual({ phase: "loading" });
+  expect(loading.stressLoad).toEqual({ phase: "loading" });
+  expect(loading.legacySeries).toBeNull();
+  expect(loading.stress).toBeNull();
   const failed = deriveInspectorView(reading({ lookup: { phase: "error", message: "rate limited (429), retry after 30s" } }), TIER_FALLBACK);
   expect(failed.state).toBe("unavailable");
   expect(failed.headline.dek).toContain("Rate limited (429), retry after 30s.");
@@ -256,4 +267,133 @@ test("the not-computed cause reads the wire: a missing debt, a refusal without a
   expect(negative.state).toBe("not-computed");
   expect(negative.headline.dek).toContain("not a position");
   expect(negative.headline.dek).not.toContain("last readable");
+});
+
+test("a value scale the wire guard refuses: the refused register names value_decimals, no figure prints at any scale, and nothing throws", () => {
+  for (const value_decimals of [-2, 1.5]) {
+    const view = deriveInspectorView(reading({ lookup: { phase: "ready", value: found([nearWire({ value_decimals })]) } }), TIER_FALLBACK);
+    expect(view.state).toBe("not-computed");
+    expect(view.decimals).toBeNull();
+    expect(view.refusedTiles).toBe(true);
+    expect(view.headline.tone).toBe("refused");
+    expect(view.headline.emphasis).toBe("Cannot say — this account's Cash position was not computed this batch.");
+    expect(view.headline.dek).toBe("The engine published an unreadable value scale (value_decimals) for this account. No verdict is served for it.");
+    expect(view.headline.dek).not.toContain("$");
+    expect(view.cash?.debt).toBeNull();
+    expect(view.boundary).toBeNull();
+  }
+  expect(deriveInspectorView(reading({ lookup: { phase: "ready", value: found([nearWire()]) } }), TIER_FALLBACK).decimals).toBe(6);
+});
+
+test("the view owns the legacy series and the stress reading; an engine listed with zero points was never present, so it gets no chart", () => {
+  const view = deriveInspectorView(
+    reading({
+      lookup: { phase: "ready", value: lookup(ADDRESS_FOUND) },
+      history: { phase: "ready", value: lookup(HISTORY) },
+      stress: { phase: "ready", value: lookup(STRESS_DM) },
+    }),
+    TIER_FALLBACK,
+  );
+  // HISTORY lists only the legacy engine (a computed 1.08 at batch 2, a refused batch 1): its series rides the response's axis
+  expect(view.legacySeries?.entries.map((e) => [e.batchId, e.kind])).toEqual([
+    [1, "refused"],
+    [2, "computed"],
+  ]);
+  expect(view.legacySeries?.newest?.display).toBe("1.08");
+  expect(view.room).toBeNull();
+  expect(view.stress?.kind).toBe("rows");
+  expect(view.historyLoad).toEqual({ phase: "ready" });
+  expect(view.stressLoad).toEqual({ phase: "ready" });
+  // the Cash engine LISTED with zero points and no withheld batch: no room chart, no streak — the sentence says so
+  const cashListedEmpty: Schemas["AddressHistoryResponse"] = {
+    ...HISTORY,
+    engines: [...HISTORY.engines, { engine: "debt_manager", value_decimals: 6, points: [], withheld_batch_ids: [], note: "" }],
+  };
+  const noCash = deriveInspectorView(
+    reading({ lookup: { phase: "ready", value: lookup(ADDRESS_FOUND) }, history: { phase: "ready", value: lookup(cashListedEmpty) } }),
+    TIER_FALLBACK,
+  );
+  expect(noCash.room).toBeNull();
+  expect(noCash.streak).toBeNull();
+  expect(noCash.historyOutcome).toBe("found");
+  expect(historyFinding(noCash)).toBe("No Cash history for this account in the covered window.");
+  expect(noCash.legacySeries).not.toBeNull();
+  // the same gate on the legacy engine
+  const legacyEngine = HISTORY.engines[0];
+  if (legacyEngine === undefined) throw new Error("fixture");
+  const legacyListedEmpty: Schemas["AddressHistoryResponse"] = { ...HISTORY, engines: [{ ...legacyEngine, points: [], withheld_batch_ids: [] }] };
+  const noLegacy = deriveInspectorView(
+    reading({ lookup: { phase: "ready", value: lookup(ADDRESS_FOUND) }, history: { phase: "ready", value: lookup(legacyListedEmpty) } }),
+    TIER_FALLBACK,
+  );
+  expect(noLegacy.legacySeries).toBeNull();
+  // a withheld batch alone is presence: the engine's book was withheld, which is a gap with a title, never "no history"
+  const withheldOnly: Schemas["AddressHistoryResponse"] = { ...HISTORY, engines: [{ ...legacyEngine, points: [], withheld_batch_ids: [2] }] };
+  const held = deriveInspectorView(
+    reading({ lookup: { phase: "ready", value: lookup(ADDRESS_FOUND) }, history: { phase: "ready", value: lookup(withheldOnly) } }),
+    TIER_FALLBACK,
+  );
+  expect(held.legacySeries?.entries.map((e) => e.kind)).toEqual(["withheld"]);
+});
+
+test("historyFinding: one sentence per arm — loading, error, withheld, not found, no Cash history, an unreadable newest batch, a streak, room above the line", () => {
+  const withHistory = (history: AddressReading["history"], batchId = 2) =>
+    deriveInspectorView(
+      reading({ lookup: { phase: "ready", value: found([nearWire()], { batch: { ...ADDRESS_FOUND.batch, id: batchId } }) }, history }),
+      TIER_FALLBACK,
+    );
+  expect(historyFinding(withHistory({ phase: "loading" }))).toBe("Loading history…");
+  expect(historyFinding(withHistory({ phase: "error", message: "rate limited (429), retry after 30s" }))).toBe("History unavailable: rate limited (429), retry after 30s");
+  const withheld: Schemas["AddressHistoryResponse"] = {
+    ...HISTORY,
+    found: null,
+    lookup_complete: false,
+    engines: [],
+    withheld_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }],
+  };
+  expect(historyFinding(withHistory({ phase: "ready", value: lookup(withheld) }))).toBe(
+    "The history is withheld this batch — it cannot be established, and that is never “no history”.",
+  );
+  expect(historyFinding(withHistory({ phase: "ready", value: lookup({ ...HISTORY, found: false, engines: [] }) }))).toBe("No history for this account in the covered window.");
+  expect(historyFinding(withHistory({ phase: "ready", value: lookup(HISTORY) }))).toBe("No Cash history for this account in the covered window.");
+  // the newest batch refused: the streak cannot be read; the vantage clause prints when the history's batch is not the position's
+  const base = dmHistory(FOUND_ADDR, 2);
+  const engine = base.engines[0];
+  if (engine === undefined) throw new Error("fixture");
+  const newestRefused: Schemas["AddressHistoryResponse"] = {
+    ...base,
+    engines: [
+      {
+        ...engine,
+        points: engine.points.map((p, k) =>
+          k === 0 ? { ...p, status: "refused" as const, refusal: { code: "SWEEP_FAILED", detail: "the sweep failed", note: "" }, health_factor: null, liquidatable: null } : p,
+        ),
+      },
+    ],
+  };
+  expect(historyFinding(withHistory({ phase: "ready", value: lookup(newestRefused) }, 3))).toBe(
+    "The newest batch is not computed; the streak cannot be read · history as of batch 2, position as of batch 3 · dashed line: 10% of cap",
+  );
+  expect(historyFinding(withHistory({ phase: "ready", value: lookup(base) }))).toBe("Within 10% of its cap for the last 3 batches · dashed line: 10% of cap");
+  const above: Schemas["AddressHistoryResponse"] = {
+    ...base,
+    engines: [{ ...engine, points: engine.points.map((p) => ({ ...p, health_factor: p.health_factor === null ? null : { ...p.health_factor, num: "6000000000" } })) }],
+  };
+  expect(historyFinding(withHistory({ phase: "ready", value: lookup(above) }))).toBe("Room has stayed above the 10% line in the newest batch · dashed line: 10% of cap");
+});
+
+test("stressEmptyText: loading, error, withheld with its cause, no position, and no scenarios — each its own words", () => {
+  const withStress = (stress: AddressReading["stress"]) => deriveInspectorView(reading({ lookup: { phase: "ready", value: found([nearWire()]) }, stress }), TIER_FALLBACK);
+  expect(stressEmptyText(withStress({ phase: "loading" }))).toBe("Running the committed scenarios…");
+  expect(stressEmptyText(withStress({ phase: "error", message: "rate limited (429), retry after 30s" }))).toBe("Stress unavailable: rate limited (429), retry after 30s");
+  const withheld = withStress({
+    phase: "ready",
+    value: lookup({ ...STRESS_DM, lookup_complete: false, withheld_engines: [{ engine: "debt_manager", code: "SWEEP_NEVER", detail: "", note: "" }] }),
+  });
+  expect(withheld.stress?.kind).toBe("withheld");
+  expect(stressEmptyText(withheld)).toBe("Stress withheld: Cash — collateral sweep never ran.");
+  expect(stressEmptyText(withStress({ phase: "ready", value: lookup({ ...STRESS_DM, found: false, scenarios: [] }) }))).toBe("No position to stress.");
+  const rows = withStress({ phase: "ready", value: lookup({ ...STRESS_DM, scenarios: [] }) });
+  expect(rows.stress).toEqual({ kind: "rows", rows: [] });
+  expect(stressEmptyText(rows)).toBe("No scenarios.");
 });

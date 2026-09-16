@@ -58,7 +58,7 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
   await expect(surface(page)).toHaveAttribute("data-state", "near");
   await expect(headline(page)).toHaveText("Within $190.50 of its borrow cap. Not liquidatable yet.");
-  await expect(dek(page)).toContainText("Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, makes this account liquidatable.");
+  await expect(dek(page)).toContainText("Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, brings this account to its cap.");
   await expect(dek(page)).toContainText("within 10% of its cap for the last 14 batches (≈6m).");
   await expect(page.getByTestId("inspector-verdict-identity")).toContainText("Batch 18,251");
   await expect(chip(page, "Lookup")).toContainText("complete · both engines");
@@ -152,6 +152,12 @@ test("the contract fixture: Cash liquidatable beside a legacy position — never
   await expect(page.getByTestId("inspector-legacy")).toContainText("Legacy · Aave v3 market position");
   await page.getByTestId("inspector-legacy").locator("summary").click();
   await expect(page.getByTestId("inspector-legacy")).toContainText(/1\.08/);
+  // the legacy market is judged by its own health factor: 1.08 on the wad is Healthy, in a non-refused tone — the wire's
+  // null Cash boolean on an Aave row is never read as "not computed"
+  await expect(page.getByTestId("inspector-legacy-status")).toContainText("Healthy");
+  await expect(page.getByTestId("inspector-legacy-status")).toHaveAttribute("data-tone", "ok");
+  await expect(page.getByTestId("inspector-legacy-hf")).toHaveAttribute("data-tone", "neutral");
+  await expect(page.getByTestId("inspector-legacy")).not.toContainText("Not computed");
   // 4,620 (Cash, 6 dec) + 6,000 (legacy, 8 dec) must never appear as one figure
   await expect(page.locator("body")).not.toContainText("$10,620");
   // the stale legacy price rides the legacy card, not the Cash verdict
@@ -256,7 +262,8 @@ test("history: a differing vantage is stated; the drawer opens with the formula 
   await expect(page.getByTestId("inspector-history")).toContainText("history as of batch 18,250, position as of batch 18,251");
   await page.getByTestId("inspector-drawer").click();
   const body = page.getByTestId("inspector-drawer-body");
-  await expect(body).toContainText("Room = cap − debt = $5,012 − $4,822 = $190.50");
+  // every term in the exact register, so the equation balances at the cents (the cap's .50 is not dropped)
+  await expect(body).toContainText("Room = cap − debt = 5,012.500000 − 4,822.000000 = 190.500000");
   await expect(body).toContainText("PriceProvider v2 (priceproviderv2)");
   await expect(body).toContainText("borrow_apy");
   await expect(body).toContainText("4,822.000000");

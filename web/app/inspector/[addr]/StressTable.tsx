@@ -1,8 +1,7 @@
 import { KitTable, SectionHead, StatusPill, type KitRow } from "@/components/kit";
-import type { AddressReading } from "@/lib/address-lookup";
-import { stressReading, type StressRow, type StressSide } from "@/lib/address-stress";
+import { horizonLabel, type StressRow, type StressSide } from "@/lib/address-stress";
 import { humanUsdFull } from "@/lib/human-price";
-import type { InspectorView } from "@/lib/inspector-view";
+import { stressEmptyText, type InspectorView } from "@/lib/inspector-view";
 import { isWireScale } from "@/lib/wireGuard";
 import styles from "../inspector.module.css";
 import { moneyFor } from "./money";
@@ -13,8 +12,6 @@ const COLUMNS = [
   { key: "after", header: "Room after", align: "right" as const },
   { key: "flips", header: "Becomes liquidatable?", align: "right" as const },
 ];
-/** A horizon in days, or hours under a day — never "0d". */
-const days = (seconds: number): string => (seconds < 86_400 ? `${String(Math.max(1, Math.round(seconds / 3_600)))}h` : `${String(Math.round(seconds / 86_400))}d`);
 
 function realization(r: StressRow): string | null {
   const m = r.marketRealization;
@@ -24,13 +21,14 @@ function realization(r: StressRow): string | null {
   return parts.length === 0 ? null : parts.join(" · ");
 }
 
-/** The committed scenarios applied to this account — the wire's own before/after sides; a rate step is a delta-only projection. */
-export function StressTable({ reading, view }: { reading: AddressReading; view: InspectorView }) {
-  const { decimals } = view;
-  const money = moneyFor(decimals);
+/**
+ * The committed scenarios applied to this account — the wire's own before/after sides; a rate step is a delta-only
+ * projection. The view reads the stress lookup and decides the empty words; this file only places the rows.
+ */
+export function StressTable({ view }: { view: InspectorView }) {
+  const money = moneyFor(view.decimals);
   const room = (side: StressSide | null): string => money(side?.room);
-  const stress = reading.stress;
-  const result = stress.phase === "ready" ? stressReading(stress.value, reading.address) : null;
+  const result = view.stress;
   const rows: KitRow[] =
     result === null || result.kind !== "rows"
       ? []
@@ -52,7 +50,7 @@ export function StressTable({ reading, view }: { reading: AddressReading; view: 
               before: room(r.before),
               after:
                 r.projection !== null ? (
-                  r.projection.map((h) => `${days(h.seconds)}: ${h.extraInterest === null ? "—" : `+${money(h.extraInterest)}`} interest`).join(" · ")
+                  r.projection.map((h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null ? "—" : `+${money(h.extraInterest)}`} interest`).join(" · ")
                 ) : extra === null ? (
                   room(r.after)
                 ) : (
@@ -68,23 +66,13 @@ export function StressTable({ reading, view }: { reading: AddressReading; view: 
               ) : r.flips ? (
                 <StatusPill tone="crit">Yes</StatusPill>
               ) : projected ? (
-                flipsAt === undefined ? "No" : <StatusPill tone="warn">Within {days(flipsAt.seconds)}</StatusPill>
+                flipsAt === undefined ? "No" : <StatusPill tone="warn">Within {horizonLabel(flipsAt.seconds)}</StatusPill>
               ) : (
                 "No"
               ),
             },
           };
         });
-  const emptyText =
-    stress.phase === "loading"
-      ? "Running the committed scenarios…"
-      : stress.phase === "error"
-        ? `Stress unavailable: ${stress.message}`
-        : result?.kind === "withheld"
-          ? `Stress withheld: ${result.cause}.`
-          : result?.kind === "no-position"
-            ? "No position to stress."
-            : "No scenarios.";
   return (
     <section id="stress" data-testid="inspector-stress">
       <SectionHead
@@ -92,7 +80,7 @@ export function StressTable({ reading, view }: { reading: AddressReading; view: 
         qualifier="the committed scenarios, applied to this account · shocked figures are projections, not readings"
         link={{ href: "/lab", label: "Open Scenarios →" }}
       />
-      <KitTable testId="inspector-stress-table" columns={COLUMNS} rows={rows} emptyText={emptyText} />
+      <KitTable testId="inspector-stress-table" columns={COLUMNS} rows={rows} emptyText={stressEmptyText(view)} />
       <p className={styles.dim}>Before and after are the engine’s own cap and debt under each shock; a rate step is a delta-only projection with prices held flat.</p>
     </section>
   );

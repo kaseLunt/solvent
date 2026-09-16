@@ -4,10 +4,14 @@ import { humanPrice, humanUsdFull } from "@/lib/human-price";
 import { isWireDecimal, isWireScale } from "@/lib/wireGuard";
 
 /** The word for a figure whose scale the wire did not license (never a thrown render). */
-export const UNREADABLE_SCALE = "unreadable scale";
+const UNREADABLE_SCALE = "unreadable scale";
 
-/** A money formatter for one wire scale: "—" for an absent value, `unreadable scale` for a scale that fails the wire guard. */
-export function moneyFor(decimals: number): (value: bigint | null | undefined) => string {
+/**
+ * A money formatter for one wire scale: "—" for an absent value, and for every value when the scale itself is absent
+ * (the view nulls an unreadable scale, so nothing prints at any scale); `unreadable scale` for a raw scale that fails the wire guard.
+ */
+export function moneyFor(decimals: number | null): (value: bigint | null | undefined) => string {
+  if (decimals === null) return () => "—";
   if (!isWireScale(decimals)) return (value) => (value == null ? "—" : UNREADABLE_SCALE);
   return (value) => (value == null ? "—" : humanUsdFull(value, decimals));
 }

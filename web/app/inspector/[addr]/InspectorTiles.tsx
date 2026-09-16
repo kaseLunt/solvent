@@ -37,7 +37,7 @@ export function InspectorTiles({ view }: { view: InspectorView }) {
   const word = pending ? undefined : refusedWord(view.state);
   // The view withholds a negative "last readable" debt from the dek; the tile follows the same rule.
   const lastReadable = cash !== null && cash.debt !== null && cash.debt >= 0n ? money(cash.debt) : null;
-  const exactDebt = cashWire === null ? null : wireExact(cashWire.borrowings, decimals);
+  const exactDebt = cashWire === null || decimals === null ? null : wireExact(cashWire.borrowings, decimals);
   const roomTone: Tone = cash === null || refusedTiles ? "refused" : cash.status === "liquidatable" ? "crit" : cash.status === "near" ? "warn" : "neutral";
   const legs = view.table?.legs.length ?? 0;
   return (

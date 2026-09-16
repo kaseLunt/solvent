@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import {
   cannotComputeHeadline,
   cashHeadline,
-  engineList,
   engineName,
   INVALID_ADDRESS_COPY,
   INVALID_HEADLINE,
@@ -32,8 +31,10 @@ test("near cap — spec §3.5, with the fall, the extra debt, and the streak sen
   const h = cashHeadline(computed(), { streak: { batches: 14, spanSeconds: 390, newestKind: "computed" }, floor: null });
   expect(h).toMatchObject({ variant: "near", tone: "warn", emphasis: "Within $190.50 of its borrow cap.", rest: "Not liquidatable yet." });
   expect(h.dek).toBe(
-    "Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, makes this account liquidatable. It has been within 10% of its cap for the last 14 batches (≈6m).",
+    "Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, brings this account to its cap. It has been within 10% of its cap for the last 14 batches (≈6m).",
   );
+  // room is floored to tenths and the rule is strict: the sentence reaches the cap and never claims liquidation at it
+  expect(h.dek).not.toContain("liquidatable");
   // one batch is not a streak; no span → no parenthesis
   expect(cashHeadline(computed(), { streak: { batches: 1, spanSeconds: null, newestKind: "computed" }, floor: null }).dek).not.toContain("last");
   expect(cashHeadline(computed(), { streak: { batches: 3, spanSeconds: null, newestKind: "computed" }, floor: null }).dek).toContain("for the last 3 batches.");
@@ -111,12 +112,9 @@ test("not computed, other engine, unavailable, loading, invalid — the honest e
   expect(engineName("debt_manager")).toBe("Cash");
   expect(engineName("aave_v3_etherfi")).toBe("Aave v3 market (legacy)");
   expect(engineName("morpho_blue")).toBe("morpho_blue");
-  expect(engineList(["Cash"])).toBe("Cash");
-  expect(engineList(["Cash", "Aave v3 market (legacy)"])).toBe("Cash and Aave v3 market (legacy)");
-  expect(engineList(["a", "b", "c"])).toBe("a, b and c");
 });
 
-test("fix round 1 — a zero cap, legacy beside foreign engines, one terminal period, a non-positive span, the kit's address copy", () => {
+test("a zero cap, legacy beside foreign engines, one terminal period, a non-positive span, the kit's address copy", () => {
   // a zero cap has no percent: the used clause is omitted, never "— — used"
   expect(cashHeadline(computed({ max_borrow_lt: "0", liquidation_verdict: "liquidatable" }), NONE).dek.startsWith("Borrowing $4,822 against a $0 cap. $4,822 over the line")).toBe(true);
   // legacy beside a foreign engine: the legacy sentence leads; the foreign one is noted in the dek

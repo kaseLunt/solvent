@@ -31,7 +31,7 @@ test("amounts come from the feed's own vocabulary; a record-only event prints a 
   expect(recordOnly?.amount).toBe("—");
 });
 
-test("fix round 1: the wire's own scale places the decimal and raw units are named; empty seizures and unscaled repayments are stated; the Cash repaid unit is USD; short hashes and raw types pass verbatim", () => {
+test("the wire's own scale places the decimal and raw units are named; empty seizures and unscaled repayments are stated; the Cash repaid unit is USD; short hashes and raw types pass verbatim", () => {
   type Event = (typeof EVENTS.events)[number];
   const scaled = activityRows(EVENTS.events, { valueDecimalsByEngine: { debt_manager: 6 } });
   expect(scaled[1]?.amount).toMatch(/^1,199\.403/);
@@ -63,13 +63,12 @@ test("action labels are human; an unknown wire word prints verbatim", () => {
   expect(actionLabel("flash_thing")).toBe("flash_thing");
 });
 
-// Moved verbatim from tests/unit/inspector-lines.spec.ts (that file is retired in Task 12).
 // ---------------------------------------------------------------------------
-// r74 — activityTakeaway: "newest first" may only be claimed over rows that
-// carry a custodied header time; the untimed tail's order is not chronology.
+// activityTakeaway: "newest first" may only be claimed over rows that carry a
+// custodied header time; the untimed tail's order is not chronology.
 // ---------------------------------------------------------------------------
 
-test.describe("r74 — activityTakeaway", () => {
+test.describe("activityTakeaway", () => {
   test("all rows timed: newest-first is honest, and hasMore blocks the totality reading", () => {
     expect(activityTakeaway(3, 0, false)).toBe(
       "3 custodied action(s) loaded for this account, newest first.",

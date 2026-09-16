@@ -110,3 +110,20 @@ export function stressReading(lookup: StressLookup, account: string): StressRead
   if (lookup.withheldEngines.some((w) => w.engine === CASH)) return { kind: "withheld", cause: withheldCause(lookup.withheldEngines) };
   return { kind: "rows", rows: lookup.response.scenarios.map((s) => row(s, account)) };
 }
+
+const MINUTE = 60;
+const HOUR = 3_600;
+const DAY = 86_400;
+
+/**
+ * A projection horizon as a label, in integer arithmetic only — every quotient is an exact division of a
+ * multiple, never a rounded float: whole days ("30d"), a day-plus remainder in hours ("1d 12h"), hours under
+ * a day ("3h"), minutes under an hour ("30m"). Truncation, so a horizon is never printed longer than it is.
+ */
+export function horizonLabel(seconds: number): string {
+  if (seconds < HOUR) return `${String((seconds - (seconds % MINUTE)) / MINUTE)}m`;
+  if (seconds < DAY) return `${String((seconds - (seconds % HOUR)) / HOUR)}h`;
+  const days = (seconds - (seconds % DAY)) / DAY;
+  const restHours = ((seconds % DAY) - (seconds % HOUR)) / HOUR;
+  return restHours === 0 ? `${String(days)}d` : `${String(days)}d ${String(restHours)}h`;
+}

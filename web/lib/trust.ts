@@ -3,7 +3,7 @@
 // each a state and a short detail. Nothing here is a verdict — it is what the
 // reader needs to decide how much to believe the verdict above it.
 //
-// Three laws, held since the review round:
+// Three laws:
 //   - every wire count that is printed or compared (price ages and budgets,
 //     sweep tallies, reconcile tallies) passes `readWirePopulation` first; a
 //     malformed value throws HERE, the same contract `lib/evidence.ts` keeps;
@@ -14,6 +14,7 @@
 import type { PriceInput, RefinedPosition, components } from "@solvent/client";
 import { humanAge } from "./freshness";
 import { CASH, symbolFor } from "./inspector-position";
+import { groupInt, joinAnd } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import { readWirePopulation } from "./wireGuard";
 
@@ -40,7 +41,6 @@ export interface TrustInput {
   readonly reconcile: ReconcileSummary | null;
 }
 
-const n = (value: number): string => value.toLocaleString("en-US");
 const plural = (count: number, noun: string): string => (count === 1 ? noun : `${noun}s`);
 
 /** Plain words for the verdicts that refuse a price; the wire word itself goes in `title`. Total over the enum. */
@@ -72,17 +72,10 @@ function groupBy<T, K extends string>(items: readonly T[], key: (item: T) => K):
   return [...groups.entries()].map(([k, v]) => ({ key: k, items: v }));
 }
 
-/** "weETH" · "weETH and ETHFI" · "weETH, ETHFI and wstETH". */
-function andList(names: readonly string[]): string {
-  const head = names.slice(0, -1);
-  const last = names.slice(-1).join("");
-  return head.length === 0 ? last : `${head.join(", ")} and ${last}`;
-}
-
 function computedItem(position: RefinedPosition, batchId: number): TrustItem {
   const label = "Computed this batch";
   if (position.status === "computed" && position.refusal === null) {
-    return { id: "computed", label, detail: `batch ${n(batchId)}`, state: "ok" };
+    return { id: "computed", label, detail: `batch ${groupInt(batchId)}`, state: "ok" };
   }
   const refusal = position.refusal;
   // A refused position with no refusal object: say so, and never invent a code for the wire-word slot.
@@ -147,10 +140,10 @@ function sweepItem(position: RefinedPosition, sweep: SweepStamp | null): TrustIt
   const generation = readWirePopulation(sweep.generation, "sweep.generation");
   const age = sweep.age_seconds === null ? null : readWirePopulation(sweep.age_seconds, "sweep.age_seconds");
   if (rows === 0) return { id: "sweep", label, detail: "sweep stamp empty", state: "dim" };
-  if (failed > rows) return { id: "sweep", label, detail: `${n(failed)} failed of ${n(rows)} rows · contradictory stamp`, state: "warn" };
-  if (failed > 0) return { id: "sweep", label, detail: `${n(failed)} of ${n(rows)} rows failed · gen ${n(generation)}`, state: "warn" };
-  if (sweep.generation_open) return { id: "sweep", label, detail: `gen ${n(generation)} open · sweep in progress`, state: "warn" };
-  return { id: "sweep", label, detail: `gen ${n(generation)}${age === null ? "" : ` · ${humanAge(age)} ago`}`, state: "ok" };
+  if (failed > rows) return { id: "sweep", label, detail: `${groupInt(failed)} failed of ${groupInt(rows)} rows · contradictory stamp`, state: "warn" };
+  if (failed > 0) return { id: "sweep", label, detail: `${groupInt(failed)} of ${groupInt(rows)} rows failed · gen ${groupInt(generation)}`, state: "warn" };
+  if (sweep.generation_open) return { id: "sweep", label, detail: `gen ${groupInt(generation)} open · sweep in progress`, state: "warn" };
+  return { id: "sweep", label, detail: `gen ${groupInt(generation)}${age === null ? "" : ` · ${humanAge(age)} ago`}`, state: "ok" };
 }
 
 function provenanceItem(position: RefinedPosition): TrustItem {
@@ -170,13 +163,14 @@ function provenanceItem(position: RefinedPosition): TrustItem {
     const groups = groupBy(caveats, (r) => r.word);
     const clauses = groups.map((g) => {
       const many = g.items.length > 1;
-      return `${andList(g.items.map((r) => r.symbol))} ${plural(g.items.length, "price")} ${many ? "are" : "is"} ${PROVENANCE_CAVEATS.get(g.key) ?? g.key}`;
+      return `${joinAnd(g.items.map((r) => r.symbol))} ${plural(g.items.length, "price")} ${many ? "are" : "is"} ${PROVENANCE_CAVEATS.get(g.key) ?? g.key}`;
     });
-    // A caveat on one input never hides an unrecognised word on another: every off-direct input is named.
+    // The label keeps the row's fixed identity; the caveat is the detail. A caveat on one input never hides an
+    // unrecognised word on another: every off-direct input is named.
     return {
       id: "provenance",
-      label: clauses.join("; "),
-      detail: ["not oracle-direct", ...otherClauses].join("; "),
+      label,
+      detail: [`${clauses.join("; ")} · not oracle-direct`, ...otherClauses].join("; "),
       state: "warn",
       title: [...groups.map((g) => g.key), ...otherWords].join("; "),
     };
@@ -192,7 +186,7 @@ function reconcileItem(reconcile: ReconcileSummary | null): TrustItem {
   const exitCode = readWirePopulation(reconcile.exit_code, "reconcile.exit_code");
   const passed = reconcile.result === "pass" && exitCode === 0;
   if (!passed || drift > 0) {
-    const detail = `${n(drift)} drifted ${plural(drift, "row")}${passed ? "" : " · did not pass"}`;
+    const detail = `${groupInt(drift)} drifted ${plural(drift, "row")}${passed ? "" : " · did not pass"}`;
     return { id: "reconcile", label, detail, state: "warn", title: `result: ${reconcile.result} · exit ${String(exitCode)}` };
   }
 
@@ -203,12 +197,12 @@ function reconcileItem(reconcile: ReconcileSummary | null): TrustItem {
   const exact = weld === undefined ? readWirePopulation(reconcile.gated_exact, "reconcile.gated_exact") : readWirePopulation(weld.rows_exact, "reconcile.welds[debt_manager].rows_exact");
   const title = reconcile.artifact_path;
   if (compared === 0) return { id: "reconcile", label, detail: `no ${cash}rows in the receipt`, state: "dim" };
-  if (exact > compared) return { id: "reconcile", label, detail: `${n(exact)} exact of ${n(compared)} ${cash}rows · contradictory receipt`, state: "warn", title };
+  if (exact > compared) return { id: "reconcile", label, detail: `${groupInt(exact)} exact of ${groupInt(compared)} ${cash}rows · contradictory receipt`, state: "warn", title };
   if (exact !== compared) {
     const drifted = compared - exact;
-    return { id: "reconcile", label, detail: `${n(drifted)} ${cash}${plural(drifted, "row")} drifted`, state: "warn", title };
+    return { id: "reconcile", label, detail: `${groupInt(drifted)} ${cash}${plural(drifted, "row")} drifted`, state: "warn", title };
   }
-  return { id: "reconcile", label, detail: `${n(exact)}/${n(compared)} ${cash}rows exact · committed receipt`, state: "ok", title };
+  return { id: "reconcile", label, detail: `${groupInt(exact)}/${groupInt(compared)} ${cash}rows exact · committed receipt`, state: "ok", title };
 }
 
 export function trustChecklist({ position, batchId, sweep, reconcile }: TrustInput): TrustItem[] {

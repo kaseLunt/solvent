@@ -3,6 +3,7 @@ import {
   boundaryOf,
   collateralTable,
   isComputedCash,
+  oldestPriceAge,
   pricesChip,
   readCashPosition,
   sourceDisplay,
@@ -141,7 +142,7 @@ test("boundaryOf: absent, breached, no-price-path and unreadable arms", () => {
     expect(n.sentence).toBe("No downward move of weETH alone reaches the boundary.");
     expect(n.title).toContain("position holds no counted collateral in the factor");
   }
-  // p1b-4: a null entry and a deleted price_decimals are classified before any read
+  // a null entry and a deleted price_decimals are classified before any read
   const nullEntry = near({ liquidation_price: { ...p.liquidation_price, prices: [null as never] } });
   expect(boundaryOf(nullEntry, readCashPosition(nullEntry)).kind).toBe("unreadable");
   const first = p.liquidation_price.prices[0];
@@ -152,10 +153,10 @@ test("boundaryOf: absent, breached, no-price-path and unreadable arms", () => {
   const u = boundaryOf(unscaled, readCashPosition(unscaled));
   expect(u.kind).toBe("unreadable");
   if (u.kind === "unreadable") expect(u.fields).toContain("prices[0].price_decimals");
-  // p0-8: a served entry without a boundary price is "absent", not a health claim
+  // a served entry without a boundary price is "absent", not a health claim
   const noFloor = near({ liquidation_price: { ...p.liquidation_price, prices: [{ ...first, lowest_healthy_price: null }] } });
   expect(boundaryOf(noFloor, readCashPosition(noFloor)).kind).toBe("absent");
-  // p0-9: the observed prices:null serialization folds into the absent arm
+  // the observed prices:null serialization folds into the absent arm
   const nullPrices = near({ liquidation_price: { ...p.liquidation_price, prices: null as never } });
   expect(boundaryOf(nullPrices, readCashPosition(nullPrices)).kind).toBe("absent");
 });
@@ -172,7 +173,7 @@ test("pricesChip: source display, oldest age, worst verdict", () => {
   expect(sourceDisplay("redstone-classic")).toBe("redstone-classic");
 });
 
-test("review round: an empty factor list is phrased on its axis, a partial joint solve is refused, contradictions are named, negatives are not positions", () => {
+test("an empty factor list is phrased on its axis, a partial joint solve is refused, contradictions are named, negatives are not positions", () => {
   const p = near();
   if (p.liquidation_price === null) throw new Error("lp");
   const lp = p.liquidation_price;
@@ -237,4 +238,56 @@ test("review round: an empty factor list is phrased on its axis, a partial joint
   if (leg === undefined) throw new Error("leg");
   blank.legs[0] = { ...leg, symbol: "" };
   expect(collateralTable(blank, readCashPosition(blank)).legs[0]?.symbol).toBe("0x5A7f…CBFF");
+});
+
+test("readCashPosition: a value scale the wire guard refuses makes every amount unreadable — null, never a figure at the wrong scale", () => {
+  for (const value_decimals of [-2, 1.5]) {
+    const p = readCashPosition(near({ value_decimals }));
+    expect(p.decimals).toBeNull();
+    expect(p.debt).toBeNull();
+    expect(p.cap).toBeNull();
+    expect(p.collateral).toBeNull();
+    expect(p.room).toBeNull();
+    expect(p.computed).toBe(false);
+    expect(p.status).toBe("refused");
+    expect(p.refusal).toBeNull();
+    expect(isComputedCash(p)).toBe(false);
+  }
+  // a licensed scale reads through, and a refused row at a bad scale keeps no "last readable" debt either
+  expect(readCashPosition(near()).decimals).toBe(6);
+  const refused = readCashPosition(
+    near({ status: "refused", refusal: { code: "SWEEP_FAILED", detail: "sweep failed", note: "" }, liquidation_verdict: "unknowable", borrowings: "4100000000", value_decimals: -2 }),
+  );
+  expect(refused.debt).toBeNull();
+  expect(refused.refusal?.code).toBe("SWEEP_FAILED");
+});
+
+test("collateralTable: a leg or price-input scale the wire guard refuses prints 'unreadable' in that cell, never a mis-scaled figure", () => {
+  const base = near();
+  const leg = base.legs[0];
+  const input = base.price_inputs[0];
+  if (leg === undefined || input === undefined) throw new Error("fixture");
+  const badLeg = near({ legs: [{ ...leg, decimals: -1 }, ...base.legs.slice(1)] });
+  const legs = collateralTable(badLeg, readCashPosition(badLeg)).legs;
+  expect(legs[0]?.amount).toBe("unreadable");
+  expect(legs[0]?.price).toBe("$4,000.00");
+  expect(legs[1]?.amount).toBe("3,250");
+  const badInput = near({ price_inputs: [{ ...input, decimals: 2.5 }, ...base.price_inputs.slice(1)] });
+  const priced = collateralTable(badInput, readCashPosition(badInput)).legs;
+  expect(priced[0]?.price).toBe("unreadable");
+  expect(priced[0]?.amount).toBe("2.1");
+  expect(priced[1]?.price).toBe("$1.2500");
+  // an absent amount is still "—" (null), not the unreadable word: the two statements stay distinct
+  const noAmount = near({ legs: [{ ...leg, amount: null, decimals: -1 }, ...base.legs.slice(1)] });
+  expect(collateralTable(noAmount, readCashPosition(noAmount)).legs[0]?.amount).toBeNull();
+});
+
+test("oldestPriceAge: an age the population guard refuses is no age; with none measured the chip says 'age unknown', never 0s", () => {
+  const [weeth, ethfi] = near().price_inputs;
+  if (weeth === undefined || ethfi === undefined) throw new Error("fixture");
+  expect(oldestPriceAge([{ ...weeth, age_seconds: -5 }, { ...ethfi, age_seconds: 35 }])).toBe(35);
+  expect(oldestPriceAge([{ ...weeth, age_seconds: -5 }, { ...ethfi, age_seconds: null }])).toBeNull();
+  expect(oldestPriceAge([{ ...weeth, age_seconds: 1.5 }])).toBeNull();
+  expect(pricesChip([{ ...weeth, age_seconds: -5 }, { ...ethfi, age_seconds: null }])).toEqual({ label: "Prices", value: "PriceProvider v2 · age unknown", tone: "ok" });
+  expect(pricesChip([{ ...weeth, age_seconds: -5 }]).value).not.toContain("0s");
 });

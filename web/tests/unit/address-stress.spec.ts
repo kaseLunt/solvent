@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
-import { stressReading } from "../../lib/address-stress";
+import { horizonLabel, stressReading } from "../../lib/address-stress";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const load = <T,>(name: string): T => JSON.parse(readFileSync(path.join(here, "..", "fixtures", name), "utf8")) as T;
@@ -61,7 +61,7 @@ test("a flip is before not-liquidatable → after liquidatable; an unknowable si
   expect(u.rows[0]?.after?.verdict).toBe("unknowable");
 });
 
-test("fix round 1: a withheld Cash book under found is withheld and names its engine; duplicate results are contradictory; inapplicable rows never flip; empty horizons are no projection; the market-realization axis is carried", () => {
+test("a withheld Cash book under found is withheld and names its engine; duplicate results are contradictory; inapplicable rows never flip; empty horizons are no projection; the market-realization axis is carried", () => {
   type Body = components["schemas"]["StressResponse"];
   const scenario = STRESS_DM.scenarios[0];
   const result = scenario?.results[0];
@@ -119,4 +119,15 @@ test("fix round 1: a withheld Cash book under found is withheld and names its en
     ],
   });
   expect(realized[0]?.marketRealization).toEqual({ shortfall: 1200000n, badDebt: 0n, decimals: 6 });
+});
+
+test("horizonLabel: integer arithmetic only — hours under a day, whole days, a day-plus remainder in hours, minutes under an hour; truncation, never rounding", () => {
+  expect(horizonLabel(10_800)).toBe("3h");
+  expect(horizonLabel(2_592_000)).toBe("30d");
+  expect(horizonLabel(129_600)).toBe("1d 12h");
+  expect(horizonLabel(1_800)).toBe("30m");
+  // 36 hours is never "2d"; 23h 59m is never "1d"; 90 days is exact
+  expect(horizonLabel(129_600)).not.toBe("2d");
+  expect(horizonLabel(86_340)).toBe("23h");
+  expect(horizonLabel(7_776_000)).toBe("90d");
 });

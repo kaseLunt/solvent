@@ -10,7 +10,8 @@ import { headroomBand, headroomTenths } from "./headroom";
 import { humanAmount, humanPrice } from "./human-price";
 import { noPricePathTitle } from "./liq-distance";
 import { fallPercent, formatTenths, percentOf } from "./percent";
-import { isWireDecimal } from "./wireGuard";
+import { joinAnd } from "./prose";
+import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
 export const CASH = "debt_manager";
 export const LEGACY = "aave_v3_etherfi";
@@ -19,7 +20,8 @@ export type CashStatus = "liquidatable" | "near" | "healthy" | "refused" | "unkn
 
 export interface CashPosition {
   readonly account: string;
-  readonly decimals: number;
+  /** The wire's `value_decimals`, through the scale guard; null when it fails — and then every amount below is null too. */
+  readonly decimals: number | null;
   readonly debt: bigint | null;
   readonly cap: bigint | null;
   readonly collateral: bigint | null;
@@ -36,6 +38,7 @@ export interface CashPosition {
 
 /** A computed Cash position with a verdict. Percents stay nullable: a zero cap has no room percent and is still liquidatable. */
 export type ComputedCash = CashPosition & {
+  readonly decimals: number;
   readonly debt: bigint;
   readonly cap: bigint;
   readonly room: bigint;
@@ -57,10 +60,13 @@ const NEAR_BANDS: ReadonlySet<number> = new Set([0, 1, 2, 3]);
 
 export function readCashPosition(position: RefinedPosition): CashPosition {
   const refusal = position.refusal === null ? null : { code: position.refusal.code, detail: position.refusal.detail ?? null };
-  const debt = wireInt(position.borrowings);
-  const cap = wireInt(position.max_borrow_lt);
-  const collateral = wireInt(position.collateral_value_usd);
-  const base = { account: position.account, decimals: position.value_decimals, debt, collateral, verdict: position.liquidation_verdict, refusal };
+  // A scale the wire guard refuses makes EVERY amount unreadable — the same null shape a malformed decimal takes.
+  // A money figure printed at a scale the renderer cannot license is the worst class of wrong number, so none is read.
+  const decimals = isWireScale(position.value_decimals) ? position.value_decimals : null;
+  const debt = decimals === null ? null : wireInt(position.borrowings);
+  const cap = decimals === null ? null : wireInt(position.max_borrow_lt);
+  const collateral = decimals === null ? null : wireInt(position.collateral_value_usd);
+  const base = { account: position.account, decimals, debt, collateral, verdict: position.liquidation_verdict, refusal };
   // A negative wire decimal is a legal string and not a position: the room helpers refuse it, so the reader does too.
   const computed = position.status === "computed" && refusal === null && debt !== null && cap !== null && debt >= 0n && cap >= 0n;
   if (!computed || debt === null || cap === null) {
@@ -95,7 +101,7 @@ export function readCashPosition(position: RefinedPosition): CashPosition {
 }
 
 export function isComputedCash(p: CashPosition): p is ComputedCash {
-  return p.computed && p.debt !== null && p.cap !== null && p.room !== null && p.status !== "refused" && p.status !== "unknowable";
+  return p.computed && p.decimals !== null && p.debt !== null && p.cap !== null && p.room !== null && p.status !== "refused" && p.status !== "unknowable";
 }
 
 /** The leg's symbol, or the truncated address when the wire carries none (or an empty one). */
@@ -130,6 +136,9 @@ export interface CollateralTable {
   readonly collateralAgrees: boolean | null;
 }
 
+/** The repo's word for a wire figure whose scale was not licensed — its digits are never printed as a number. */
+const UNREADABLE = "unreadable";
+
 function isCollateralLeg(leg: RefinedLeg): boolean {
   return leg.value_usd !== null || leg.max_borrow_contribution !== null || leg.amount !== null;
 }
@@ -141,11 +150,12 @@ export function collateralTable(position: RefinedPosition, cash: CashPosition): 
     const amount = wireInt(leg.amount);
     const input = priceInputFor(position, leg.asset);
     const priceValue = input === null ? null : wireInt(input.value);
+    // A readable amount at a scale the guard refuses prints the word, never a figure at the wrong scale; an absent one prints nothing.
     return {
       asset: leg.asset,
       symbol: leg.symbol || truncateAddress(leg.asset),
-      amount: amount === null ? null : humanAmount(amount, leg.decimals),
-      price: input === null || priceValue === null || input.decimals === null ? null : humanPrice(priceValue, input.decimals),
+      amount: amount === null ? null : isWireScale(leg.decimals) ? humanAmount(amount, leg.decimals) : UNREADABLE,
+      price: input === null || priceValue === null || input.decimals === null ? null : isWireScale(input.decimals) ? humanPrice(priceValue, input.decimals) : UNREADABLE,
       priceVerdict: input?.verdict ?? null,
       value,
       contribution,
@@ -186,9 +196,6 @@ const AXIS_LABEL: Record<string, string> = {
   borrow_apy: "borrow APY",
 };
 
-const list = (words: readonly string[]): string =>
-  words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1] ?? ""}`;
-
 /**
  * R3: the sentence follows the wire's factor-level solve — assets on the axis
  * move together; held assets stay flat. A joint solve is never half-printed:
@@ -204,7 +211,7 @@ export function boundaryOf(position: RefinedPosition, cash: CashPosition): Bound
   const factorSymbols = lp.factor_assets.map((a) => symbolFor(position, a));
   if (lp.never_liquidatable) {
     // The solver serves `factor_assets: []` for "no counted collateral in the factor": the sentence then names the axis, never an empty subject.
-    const subject = factorSymbols.length === 0 ? `on the ${AXIS_LABEL[lp.axis] ?? lp.axis} axis` : `of ${list(factorSymbols)}`;
+    const subject = factorSymbols.length === 0 ? `on the ${AXIS_LABEL[lp.axis] ?? lp.axis} axis` : `of ${joinAnd(factorSymbols)}`;
     return {
       kind: "no-price-path",
       sentence: `No downward move ${subject} alone reaches the boundary.`,
@@ -220,7 +227,7 @@ export function boundaryOf(position: RefinedPosition, cash: CashPosition): Bound
   if (num !== null && den !== null && num > den) {
     return { kind: "contradictory", detail: "the solve places the boundary above the current price while the verdict is not liquidatable" };
   }
-  // The API's solver-error path serializes `prices: null` (observed, p0-9): fold into "absent".
+  // The API's solver-error path serializes `prices: null` (observed on the live service): fold into "absent".
   const served = Array.isArray(lp.prices) ? lp.prices : [];
   if (served.length === 0) return { kind: "absent" };
   const classified = served.map((entry) => classifyFactorPrice(entry));
@@ -235,7 +242,7 @@ export function boundaryOf(position: RefinedPosition, cash: CashPosition): Bound
     if (price === null) missing.push(`prices[${String(i)}].lowest_healthy_price`);
     else floors.push({ asset: c.entry.asset, symbol: symbolFor(position, c.entry.asset), price: humanPrice(price, c.entry.price_decimals) });
   });
-  // p0-8: no floor anywhere is "absent", not a health claim; a floor beside a missing one is a half-served joint solve.
+  // No floor anywhere is "absent", not a health claim; a floor beside a missing one is a half-served joint solve.
   if (floors.length === 0) return { kind: "absent" };
   if (missing.length > 0) return { kind: "unreadable", fields: missing };
   const fall = num === null || den === null ? null : fallPercent(num, den);
@@ -250,11 +257,11 @@ export function boundaryOf(position: RefinedPosition, cash: CashPosition): Bound
     held.push(symbolFor(position, asset));
   }
   const verb = lp.boundary_is_healthy ? "below" : "near";
-  const heldClause = held.length === 0 ? "" : ` — with ${list(held)} flat`;
+  const heldClause = held.length === 0 ? "" : ` — with ${joinAnd(held)} flat`;
   const body =
     floors.length === 1
       ? `Liquidatable if ${floors[0]?.symbol ?? ""} falls ${verb} ${floors[0]?.price ?? ""}${fall === null ? "" : ` — a ${fall} fall`}${heldClause}.`
-      : `Liquidatable if ${list(floors.map((f) => f.symbol))} fall${fall === null ? "" : ` ${fall}`} together — ${floors.map((f) => `${f.symbol} ${verb} ${f.price}`).join(", ")}${heldClause}.`;
+      : `Liquidatable if ${joinAnd(floors.map((f) => f.symbol))} fall${fall === null ? "" : ` ${fall}`} together — ${floors.map((f) => `${f.symbol} ${verb} ${f.price}`).join(", ")}${heldClause}.`;
   return {
     kind: "boundary",
     sentence: `${lp.diagnostic ? "Single-asset diagnostic: " : ""}${body}`,
@@ -273,8 +280,9 @@ export function sourceDisplay(source: string): string {
   return source;
 }
 
+/** The oldest measured age among the inputs. An age the population guard refuses is no age; with none measured there is no oldest — never "0s". */
 export function oldestPriceAge(inputs: readonly PriceInput[]): number | null {
-  const ages = inputs.map((i) => i.age_seconds).filter((a): a is number => a !== null);
+  const ages = inputs.map((i) => i.age_seconds).filter((a): a is number => isWirePopulation(a));
   return ages.length === 0 ? null : Math.max(...ages);
 }
 

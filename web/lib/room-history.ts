@@ -6,14 +6,14 @@
 // title — the line breaks rather than drawing across it. Values are geometry
 // only (the printed figure is the tenths string).
 //
-// Review round 1: a ZERO cap with debt is the engine's own shape for debt left
-// after an empty sweep (internal/risk/dm.go) — the cap WAS published, as zero,
-// and the Book's headroomBand calls it breached. It is its own kind
-// ("zero-cap"), never "unpublished": a percent of a zero cap has no geometry,
-// so it stays a gap on the line, but its title says what is known. Every wire
-// population passes readWirePopulation before it is printed or used, and a
-// batch that appears twice among the points is refused, never silently
-// overwritten — the same WireIntegerError arm the rest of the module uses.
+// A ZERO cap with debt is the engine's own shape for debt left after an empty
+// sweep (internal/risk/dm.go) — the cap WAS published, as zero, and the Book's
+// headroomBand calls it breached. It is its own kind ("zero-cap"), never
+// "unpublished": a percent of a zero cap has no geometry, so it stays a gap on
+// the line, but its title says what is known. Every wire population passes
+// readWirePopulation before it is printed or used, and a batch that appears
+// twice among the points is refused, never silently overwritten — the same
+// WireIntegerError arm the rest of the module uses.
 import { formatBlock } from "./format";
 import { headroomTenths, WARN_HEADROOM_PCT } from "./headroom";
 import type { AddressHistoryEngine, AddressHistoryPoint } from "./inspector-data";

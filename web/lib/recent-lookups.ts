@@ -3,7 +3,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { isAddress } from "./format";
 
-export const RECENT_KEY = "solvent-recent-lookups";
+const RECENT_KEY = "solvent-recent-lookups";
 export const RECENT_MAX = 8;
 
 export function parseRecents(raw: string | null): string[] {

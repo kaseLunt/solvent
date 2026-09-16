@@ -83,7 +83,7 @@ test("nearCapStreak counts the newest run under the 10 % line and spans it from 
   expect(nearCapStreak(roomSeries(engine([])))).toEqual({ batches: 0, spanSeconds: null, newestKind: null });
 });
 
-test("review round: a zero cap is a point past the cap, out-of-contract ids throw, and the streak knows the newest kind", () => {
+test("a zero cap is a point past the cap, out-of-contract ids throw, and the streak knows the newest kind", () => {
   /** The engine's debt-after-empty-sweep shape: a PUBLISHED zero cap with debt left — known, and past the cap. */
   const zeroCap = (batchId: number): AddressHistoryPoint => point(batchId, "0", "4822000000", { liquidatable: true });
   const z = roomSeries(engine([zeroCap(2)]));

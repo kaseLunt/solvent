@@ -9,7 +9,7 @@ import { txExplorerUrl, type ChainEvent, type EventDisplayType } from "./inspect
 import { CASH } from "./inspector-position";
 import { isWireDecimal, isWireScale } from "./wireGuard";
 
-export const ACTION_LABEL: Record<EventDisplayType, string> = {
+const ACTION_LABEL: Record<EventDisplayType, string> = {
   borrow: "Borrow",
   repay: "Repay",
   supply: "Supply",
@@ -102,7 +102,7 @@ export function activityRows(events: readonly ChainEvent[], scale?: ActivityScal
 }
 
 /**
- * The activity section's takeaway (r74): the feed orders CUSTODIED header
+ * The activity section's takeaway: the feed orders CUSTODIED header
  * times newest-first, but null-time rows form a deterministic untimed TAIL
  * whose internal order is explicitly not chronology — so "newest first" may
  * only be claimed over the rows that carry a time. An untimed row read as

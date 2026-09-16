@@ -63,9 +63,10 @@ test("sweep: never swept refuses; a clean stamp is ok with its generation and ag
 test("provenance: adapter output warns with the mockup's words; an unknown word is dim and shown verbatim", () => {
   const base = near();
   const adapter = base.price_inputs.map((i, k) => (k === 0 ? { ...i, provenance: "adapter-output" } : i));
+  // the row keeps its fixed label; the caveat is the detail, so the checklist's label column never reads a sentence
   expect(byId(trustChecklist({ position: near({ price_inputs: adapter }), batchId: 1, sweep, reconcile })).provenance).toMatchObject({
-    label: "weETH price is adapter output",
-    detail: "not oracle-direct",
+    label: "Price provenance",
+    detail: "weETH price is adapter output · not oracle-direct",
     state: "warn",
   });
   const odd = base.price_inputs.map((i) => ({ ...i, provenance: "replayed" }));
@@ -80,7 +81,7 @@ test("reconcile: drift warns with the count; no receipt is dim, never ok", () =>
   expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, reconcile: noWeld })).reconcile).toMatchObject({ state: "ok", detail: "87/87 rows exact · committed receipt" });
 });
 
-// ---- Fix round 1: the review's reproduced inputs, each pinned ----
+// ---- The laws each item holds, one input per arm ----
 
 test("prices: the oldest input keeps its own budget; unmeasured ages are dim; every broken or stale input is named; a malformed age throws", () => {
   const [weeth, ethfi] = twoPrices();
@@ -115,11 +116,22 @@ test("sweep: the account's clock outranks a missing stamp; an empty, contradicto
 test("provenance: every off-direct word speaks plainly; several inputs are listed; an unstated word is dim", () => {
   const [weeth, ethfi] = twoPrices();
   const provenance = (price_inputs: TrustInput["position"]["price_inputs"]) => byId(trustChecklist({ position: near({ price_inputs }), batchId: 1, sweep, reconcile })).provenance;
-  expect(provenance([{ ...weeth, provenance: "uncapped-feed" }, ethfi])).toMatchObject({ state: "warn", label: "weETH price is from an uncapped feed", detail: "not oracle-direct", title: "uncapped-feed" });
-  expect(provenance([{ ...weeth, provenance: "adapter-output" }, { ...ethfi, provenance: "adapter-output" }])).toMatchObject({ state: "warn", label: "weETH and ETHFI prices are adapter output", title: "adapter-output" });
+  expect(provenance([{ ...weeth, provenance: "uncapped-feed" }, ethfi])).toMatchObject({
+    state: "warn",
+    label: "Price provenance",
+    detail: "weETH price is from an uncapped feed · not oracle-direct",
+    title: "uncapped-feed",
+  });
+  expect(provenance([{ ...weeth, provenance: "adapter-output" }, { ...ethfi, provenance: "adapter-output" }])).toMatchObject({
+    state: "warn",
+    label: "Price provenance",
+    detail: "weETH and ETHFI prices are adapter output · not oracle-direct",
+    title: "adapter-output",
+  });
   expect(provenance([{ ...weeth, provenance: "adapter-output" }, { ...ethfi, provenance: "ratio-reference" }])).toMatchObject({
     state: "warn",
-    label: "weETH price is adapter output; ETHFI price is a ratio reference",
+    label: "Price provenance",
+    detail: "weETH price is adapter output; ETHFI price is a ratio reference · not oracle-direct",
     title: "adapter-output; ratio-reference",
   });
   const unstated = provenance([{ ...weeth, provenance: "" }, { ...ethfi, provenance: "" }]);
@@ -128,8 +140,8 @@ test("provenance: every off-direct word speaks plainly; several inputs are liste
   // a caveat on weETH never hides ETHFI's unrecognised word: both inputs are named, both wire words ride the title
   expect(provenance([{ ...weeth, provenance: "adapter-output" }, { ...ethfi, provenance: "replayed" }])).toMatchObject({
     state: "warn",
-    label: "weETH price is adapter output",
-    detail: "not oracle-direct; ETHFI provenance not recognised",
+    label: "Price provenance",
+    detail: "weETH price is adapter output · not oracle-direct; ETHFI provenance not recognised",
     title: "adapter-output; replayed",
   });
   expect(provenance([])).toMatchObject({ state: "dim", detail: "no price inputs" });

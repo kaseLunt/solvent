@@ -8,14 +8,16 @@ import { isComputedCash, sourceDisplay, symbolFor } from "@/lib/inspector-positi
 import type { InspectorView } from "@/lib/inspector-view";
 import { plainCause } from "@/lib/refusal-phrasebook";
 import styles from "../inspector.module.css";
-import { moneyFor, wireExact, wirePrice } from "./money";
+import { wireExact, wirePrice } from "./money";
 
 /** Inputs · Calculation · Provenance — the formula with this account's numbers substituted, every input's source and age, the exact wire values. */
 export function InspectorDrawer({ open, onClose, view, reading }: { open: boolean; onClose: () => void; view: InspectorView; reading: AddressReading }) {
   const p = view.cashWire;
   const cash = view.cash;
-  const money = moneyFor(view.decimals);
   const exact = (v: string | null, decimals: number): string => wireExact(v, decimals);
+  // The formula lines print every term in the exact register so the equations balance at the cents: humanUsdFull drops
+  // the cents above $1,000, and a formula that does not add up explains nothing. No scale, no figure.
+  const exactMoney = (v: bigint | null): string => (v === null || view.decimals === null ? "—" : wireExact(v.toString(), view.decimals));
   const batch = reading.lookup.phase === "ready" ? reading.lookup.value.response.batch : null;
   const servedAt = reading.lookup.phase === "ready" ? reading.lookup.value.response.served_at : null;
   return (
@@ -27,10 +29,11 @@ export function InspectorDrawer({ open, onClose, view, reading }: { open: boolea
           <>
             <h3>Calculation</h3>
             <p>
-              Borrow cap = Σ (collateral value × LTV) = {view.table?.legs.map((l) => `${money(l.value)} × ${l.ltv ?? "—"}`).join(" + ")} = <b>{money(cash.cap)}</b>
+              Borrow cap = Σ (collateral value × LTV) = {view.table?.legs.map((l) => `${exactMoney(l.value)} × ${l.ltv ?? "—"}`).join(" + ")} ={" "}
+              <b>{exactMoney(cash.cap)}</b> (USD, exact)
             </p>
             <p>
-              Room = cap − debt = {money(cash.cap)} − {money(cash.debt)} = <b>{money(cash.room)}</b> ({cash.roomPercent ?? "—"} of cap)
+              Room = cap − debt = {exactMoney(cash.cap)} − {exactMoney(cash.debt)} = <b>{exactMoney(cash.room)}</b> ({cash.roomPercent ?? "—"} of cap)
             </p>
             {isComputedCash(cash) ? (
               <p>
