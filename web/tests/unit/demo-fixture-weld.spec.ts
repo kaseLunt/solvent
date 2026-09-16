@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
 import { liquidatableRows, nearCapRows, readCashRow, sumDebt } from "../../lib/cash-rows";
 import { partitionByMateriality } from "../../lib/materiality";
+import { POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { DEMO_BATCH_ID, DEMO_BOOK, DEMO_META, DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2 } from "../fixtures/demo";
 
 const pages = [DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2];
@@ -26,7 +27,10 @@ test("pages chain and cover the population", () => {
 });
 
 test("every row carries the canonical row's keys", () => {
-  const template = Object.keys(DEMO_POSITIONS_DM_PAGE_1.positions[0] ?? {}).sort();
+  // The CANONICAL row — positions-dm-page-1.json's projected Cash row — not the demo's own first row.
+  const canonical = POSITIONS_DM_PAGE_1.positions[0];
+  if (canonical === undefined) throw new Error("positions-dm-page-1.json must carry the canonical Cash row");
+  const template = Object.keys(canonical).sort();
   for (const row of pages.flatMap((p) => p.positions)) expect(Object.keys(row).sort()).toEqual(template);
 });
 

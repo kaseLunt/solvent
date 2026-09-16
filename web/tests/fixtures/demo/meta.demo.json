@@ -23,7 +23,7 @@
       {
         "engine": "aave_v3_etherfi",
         "chain_id": 1,
-        "last_block": 25635618,
+        "last_block": 25714690,
         "acked_epoch": 0,
         "max_epoch_at_compute": 0,
         "sweep": null
@@ -31,7 +31,7 @@
       {
         "engine": "aave_param",
         "chain_id": 1,
-        "last_block": 25635600,
+        "last_block": 25714690,
         "acked_epoch": 0,
         "max_epoch_at_compute": 0,
         "sweep": null
@@ -47,7 +47,7 @@
       {
         "engine": "debt_manager",
         "chain_id": 10,
-        "last_block": 154796552,
+        "last_block": 155323444,
         "acked_epoch": 0,
         "max_epoch_at_compute": 0,
         "sweep": {
@@ -211,14 +211,14 @@
   "sweeps": [
     {
       "engine": "debt_manager",
-      "rows": 3,
-      "never_swept": 1,
+      "rows": 1412,
+      "never_swept": 6,
       "failed_since_success": 1,
-      "success": 1,
+      "success": 1405,
       "note": "never_swept is collateral of UNKNOWN size, never zero: those accounts are REFUSED rather than valued at zero."
     }
   ],
-  "sweep_never_refusals_in_batch": 1,
+  "sweep_never_refusals_in_batch": 6,
   "heartbeat_provenance": [
     {
       "chain_id": 1,
