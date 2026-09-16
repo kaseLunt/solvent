@@ -72,7 +72,8 @@ function withDebt(rows: readonly CashRow[]): SizedCashRow[] {
 }
 
 export function liquidatableRows(rows: readonly CashRow[]): SizedCashRow[] {
-  return withDebt(rows).filter((r) => r.verdict === "liquidatable");
+  // Classified before counted: a refused row keeps its readable debt for display but never enters a sum.
+  return withDebt(rows).filter((r) => r.computed && r.verdict === "liquidatable");
 }
 
 const NEAR_CAP_BANDS: ReadonlySet<number> = new Set([1, 2, 3]);

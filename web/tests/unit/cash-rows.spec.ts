@@ -73,6 +73,24 @@ test("a refused row reads as not computed with null figures — never zero", () 
   expect(r.refusal).toEqual({ code: "SWEEP_NEVER", detail: "the sweep never ran" });
 });
 
+test("a refused row keeps a readable debt for display but never enters the liquidatable sum", () => {
+  const r = readCashRow(
+    row({
+      account: "0xe",
+      status: "refused",
+      refusal: { code: "SWEEP_NEVER", detail: "", note: "" },
+      health_factor: null,
+      total_debt: "1500000000",
+      liquidation_verdict: "liquidatable",
+    }),
+  );
+  expect(r.computed).toBe(false);
+  expect(r.debt).toBe(1_500_000_000n);
+  expect(liquidatableRows([r])).toEqual([]);
+  expect(nearCapRows([r])).toEqual([]);
+  expect(roomBands([r]).reduce((n, b) => n + b.count, 0)).toBe(0);
+});
+
 test("a malformed wire integer is refused, not coerced", () => {
   // "4.62e9" is what Number() would silently coerce to 4620000000; the wire guard rejects it.
   const r = readCashRow(row({ account: "0xd", total_debt: "4.62e9" }));
