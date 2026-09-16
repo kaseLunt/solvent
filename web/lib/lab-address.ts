@@ -145,12 +145,16 @@ function projectionHeadline(short: string, label: string, horizons: readonly Str
  */
 function rowHeadline(short: string, row: StressRow, decimals: number): LabHeadline {
   if (!row.applicable) return refused(`${row.label} does not apply to ${short}.`, sentence(row.reason ?? "the engine gave no reason"));
+  // A projection has no shock: its refusal speaks of the projection and its projected figures; a spot row of its shock.
+  const projected = row.projection !== null;
   const today = sideRoomWords(row.before, decimals);
-  const dek = `Room today ${today}; after the shock, ${sideRoomWords(row.after, decimals)}.`;
+  const dek = `Room today ${today}; ${projected ? "under the projection" : "after the shock"}, ${sideRoomWords(row.after, decimals)}.`;
   const cannot = `Cannot say whether ${short} becomes liquidatable under ${row.label}.`;
   const sides = [row.before, row.after].filter((s): s is StressSide => s !== null);
   if (sides.some((s) => computable(s) === null)) {
-    const cause = sides.some((s) => readable(s) === null) ? "The shocked figures are not a position." : "One side of the comparison is withheld or unknowable.";
+    const cause = sides.some((s) => readable(s) === null)
+      ? `The ${projected ? "projected" : "shocked"} figures are not a position.`
+      : "One side of the comparison is withheld or unknowable.";
     return refused(cannot, `${dek} ${cause}`);
   }
   if (row.projection !== null) return projectionHeadline(short, row.label, row.projection, today, decimals);

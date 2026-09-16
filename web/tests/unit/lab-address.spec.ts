@@ -203,18 +203,19 @@ test("a projection over an uncomputable spot yields no verdict word: the horizon
     emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
     rest: "",
     tone: "refused",
-    dek: "Room today $190.50; after the shock, not computed. The shocked figures are not a position.",
+    dek: "Room today $190.50; under the projection, not computed. The projected figures are not a position.",
   });
   expect(negative.tiles?.statusAfter).toEqual(NOT_COMPUTED);
   expect(negative.tiles?.roomAfter).toEqual(REFUSED);
-  // The same gate for an unknowable spot verdict, in its own words.
+  // The same gate for an unknowable spot verdict, in its own words — and in projection words, never shock words.
   const unknown = addressWorkspace({ address: DEMO_NEAR_ADDR, view: spot({ liquidatable: null }), selectedId: "dm_rate_horizon_plus_200bps" });
   expect(unknown.headline).toEqual({
     emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
     rest: "",
     tone: "refused",
-    dek: "Room today $190.50; after the shock, not computed. One side of the comparison is withheld or unknowable.",
+    dek: "Room today $190.50; under the projection, not computed. One side of the comparison is withheld or unknowable.",
   });
+  expect(`${negative.headline.dek} ${unknown.headline.dek}`).not.toMatch(/shock/);
   expect(unknown.tiles?.statusAfter).toEqual(NOT_COMPUTED);
 });
 
