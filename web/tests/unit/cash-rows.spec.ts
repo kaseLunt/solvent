@@ -21,7 +21,7 @@ function row(over: Partial<CashWireRow> & { account: string }): CashWireRow {
     liquidation_verdict: "not-liquidatable",
     total_collateral: "12050000000",
     total_debt: "4620000000",
-    liq_distance: { kind: "solved", scale_factor_num: "1", scale_factor_den: "1", factor_asset: "weETH", reason: null },
+    liq_distance: { kind: "distance", scale_factor_num: "1", scale_factor_den: "1", factor_asset: "weETH", reason: null },
     balances_block: 1,
     params_block: 1,
     sweep_block: 1,
