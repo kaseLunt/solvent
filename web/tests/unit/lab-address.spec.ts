@@ -219,6 +219,39 @@ test("a projection over an uncomputable spot yields no verdict word: the horizon
   expect(unknown.tiles?.statusAfter).toEqual(NOT_COMPUTED);
 });
 
+test("a projection beside a missing side yields no verdict word: a side the tiles refuse refuses the headline, missing as much as unreadable or unknowable", () => {
+  const noAfter = addressWorkspace({
+    address: DEMO_NEAR_ADDR,
+    view: nearWith(withResult("dm_rate_horizon_plus_200bps", (x) => ({ ...x, after: null }))),
+    selectedId: "dm_rate_horizon_plus_200bps",
+  });
+  expect(noAfter.selected?.projection).not.toBeNull();
+  expect(noAfter.selected?.after).toBeNull();
+  // The horizons are not consulted: the projected side is absent, and the dek says so in the tiles' own word.
+  expect(noAfter.headline).toEqual({
+    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    rest: "",
+    tone: "refused",
+    dek: "Room today $190.50; under the projection, not computed. One side of the comparison is withheld or unknowable.",
+  });
+  expect(noAfter.tiles?.statusAfter).toEqual(NOT_COMPUTED);
+  expect(noAfter.tiles?.roomAfter).toEqual(REFUSED);
+  // A missing before side is the same refusal: the law reads both sides, as the spot path does.
+  const noBefore = addressWorkspace({
+    address: DEMO_NEAR_ADDR,
+    view: nearWith(withResult("dm_rate_horizon_plus_200bps", (x) => ({ ...x, before: null }))),
+    selectedId: "dm_rate_horizon_plus_200bps",
+  });
+  expect(noBefore.selected?.before).toBeNull();
+  expect(noBefore.headline).toEqual({
+    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    rest: "",
+    tone: "refused",
+    dek: "Room today not computed; under the projection, $190.50. One side of the comparison is withheld or unknowable.",
+  });
+  expect(`${noAfter.headline.dek} ${noBefore.headline.dek}`).not.toMatch(/shock/);
+});
+
 test("rows beside a withheld Cash book are a cannot-say, never a negative", () => {
   const readdressed = {
     ...DEMO_STRESS_NEAR,

@@ -150,9 +150,12 @@ function rowHeadline(short: string, row: StressRow, decimals: number): LabHeadli
   const today = sideRoomWords(row.before, decimals);
   const dek = `Room today ${today}; ${projected ? "under the projection" : "after the shock"}, ${sideRoomWords(row.after, decimals)}.`;
   const cannot = `Cannot say whether ${short} becomes liquidatable under ${row.label}.`;
-  const sides = [row.before, row.after].filter((s): s is StressSide => s !== null);
+  // A side the tiles refuse — missing, unreadable or unknowable — yields no verdict word in any row kind. The gate
+  // asks both sides as they are, a missing side included, before either arm may speak.
+  const sides = [row.before, row.after];
   if (sides.some((s) => computable(s) === null)) {
-    const cause = sides.some((s) => readable(s) === null)
+    // Figures that are present but not a position are the truer cause; a missing or unknowable side is withheld.
+    const cause = sides.some((s) => s !== null && readable(s) === null)
       ? `The ${projected ? "projected" : "shocked"} figures are not a position.`
       : "One side of the comparison is withheld or unknowable.";
     return refused(cannot, `${dek} ${cause}`);
