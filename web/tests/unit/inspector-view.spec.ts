@@ -6,7 +6,7 @@ import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { deriveInspectorView } from "../../lib/inspector-view";
 import { ADDRESS_FOUND, ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, FOUND_ADDR, HISTORY } from "../fixtures/inspector";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
-import { AAVE, DM, near } from "./helpers/cash-position";
+import { near } from "./helpers/cash-position";
 
 type Schemas = components["schemas"];
 
@@ -95,7 +95,11 @@ test("invalid, loading and unavailable render into the frame with an honest iden
 
 test("near cap: state, kicker, headline, chips, table, boundary, trust and the room streak all derive from one reading", () => {
   const view = deriveInspectorView(
-    reading({ lookup: { phase: "ready", value: found([nearWire()]) }, history: { phase: "ready", value: lookup(dmHistory(FOUND_ADDR, 2)) } }),
+    // The lookup (batch 3) is newer than the history's vantage (2) — the same story the last test tells.
+    reading({
+      lookup: { phase: "ready", value: found([nearWire()], { batch: { ...ADDRESS_FOUND.batch, id: 3 } }) },
+      history: { phase: "ready", value: lookup(dmHistory(FOUND_ADDR, 2)) },
+    }),
     TIER_FALLBACK,
   );
   expect(view.state).toBe("near");
@@ -103,7 +107,7 @@ test("near cap: state, kicker, headline, chips, table, boundary, trust and the r
   expect(view.headline.emphasis).toBe("Within $190.50 of its borrow cap.");
   expect(view.headline.dek).toContain("for the last 3 batches (≈2m).");
   expect(view.chips).toEqual([
-    { label: "Batch", value: "1" },
+    { label: "Batch", value: "3" },
     { label: "Snapshot", value: "42s · fresh", tone: "ok" },
     { label: "Lookup", value: "complete · both engines", tone: "ok" },
     { label: "Prices", value: "PriceProvider v2 · 35s", tone: "ok" },
@@ -115,6 +119,9 @@ test("near cap: state, kicker, headline, chips, table, boundary, trust and the r
   expect(view.room?.computedCount).toBe(3);
   expect(view.streak).toEqual({ batches: 3, spanSeconds: 120, newestKind: "computed" });
   expect(view.historyBatchId).toBe(2);
+  expect(view.batchId).toBe(3);
+  expect(view.room?.points.map((p) => p.batchId)).toEqual([0, 1, 2]);
+  expect(view.historyOutcome).toBe("found");
   expect(view.refusedTiles).toBe(false);
   expect(view.legacy).toBeNull();
 });
@@ -192,5 +199,48 @@ test("the room series is keyed to the history's own vantage, never the lookup's 
   expect(view.batchId).toBe(3);
   expect(view.historyBatchId).toBe(2);
   expect(view.room?.points.map((p) => p.batchId)).toEqual([0, 1, 2]);
-  expect(void DM, void AAVE).toBeUndefined();
+});
+
+test("under found: a withheld Cash book is never a Cash negative, every arm says the floor, a verdict-less row has no boundary, an empty found is refused", () => {
+  const cashWithheld = deriveInspectorView(
+    reading({
+      lookup: {
+        phase: "ready",
+        value: found([ADDRESS_FOUND.positions[0]!], {
+          lookup_complete: false,
+          withheld_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }],
+        }),
+      },
+    }),
+    TIER_FALLBACK,
+  );
+  expect(cashWithheld.state).toBe("cannot-compute");
+  expect(cashWithheld.headline.emphasis).toBe("Cannot say — the Cash book is withheld this batch.");
+  expect(cashWithheld.headline.dek).toContain("A legacy Aave v3 position exists");
+  expect(cashWithheld.chips.find((c) => c.label === "Lookup")).toEqual({ label: "Lookup", value: "floor · Cash withheld", tone: "warn" });
+  expect(cashWithheld.legacy).not.toBeNull();
+  expect(cashWithheld.historyOutcome).toBeNull();
+  const refusedUnderFloor = deriveInspectorView(
+    reading({
+      lookup: {
+        phase: "ready",
+        value: found(
+          [nearWire({ status: "refused", refusal: { code: "SWEEP_FAILED", detail: "the sweep failed", note: "" }, liquidatable: null, max_borrow_lt: null, borrowings: "4100000000" })],
+          { lookup_complete: false, withheld_engines: [{ engine: "aave_v3_etherfi", code: "SWEEP_NEVER", detail: "", note: "" }] },
+        ),
+      },
+    }),
+    TIER_FALLBACK,
+  );
+  expect(refusedUnderFloor.state).toBe("not-computed");
+  expect(refusedUnderFloor.floor).toBe("Lookup incomplete: the Aave v3 market (legacy) book is withheld, so more positions may exist.");
+  expect(refusedUnderFloor.headline.dek.endsWith(refusedUnderFloor.floor ?? "")).toBe(true);
+  const verdictless = deriveInspectorView(reading({ lookup: { phase: "ready", value: found([nearWire({ liquidatable: null })]) } }), TIER_FALLBACK);
+  expect(verdictless.state).toBe("not-computed");
+  expect(verdictless.boundary).toBeNull();
+  expect(verdictless.headline.dek).toContain("published no verdict");
+  const emptyFound = deriveInspectorView(reading({ lookup: { phase: "ready", value: found([]) } }), TIER_FALLBACK);
+  expect(emptyFound.state).toBe("unavailable");
+  expect(emptyFound.headline.dek).toContain("contradicts itself");
+  expect(emptyFound.legacy).toBeNull();
 });
