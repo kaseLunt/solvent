@@ -53,8 +53,8 @@ export const cashEngineOf = (run: LabRunBook): LabRunBookEngine | null => run.en
 /** The Cash engine's refusal in a run, found by engine id — never by position. */
 export const cashRefusalOf = (run: LabRunBook): EngineRefusal | null => run.excluded_engines.find((e) => e.engine === CASH) ?? null;
 
-/** The heat reading is a function of the transitions alone: the sealed projection is no part of it and is not handed across. */
-const heatOf = (cash: LabRunBookEngine): LaneReading => laneReading({ ...cash, projection: null }, { merge: true });
+/** The heat reading is a function of the transitions alone: it takes only the fields it reads, so the sealed projection is never handed across. */
+const heatOf = (cash: LabRunBookEngine): LaneReading => laneReading(cash, { merge: true });
 
 const FAILURE_WORD: Record<Exclude<RunBookOutcome["kind"], "ok" | "failed">, string> = {
   "not-served": "Not served",

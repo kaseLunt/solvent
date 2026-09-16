@@ -12,6 +12,12 @@ import { isWireDecimal, isWireOccupancy, isWirePopulation, isWireScale, wireBigI
 type Schemas = components["schemas"];
 export type RunBookEngine = Schemas["RunBookEngine"];
 export type TransitionLane = Schemas["RunBookTransitionLane"];
+/**
+ * The fields the heat reading takes, and only those: the scale, the matrix,
+ * and the distribution beside it. Any engine that carries them — the wire's
+ * or the sealed one the Lab holds — reads; the projection never crosses.
+ */
+export type LaneEngine = Pick<RunBookEngine, "usd_decimals" | "hf_transitions" | "before">;
 
 const WAD = 10n ** 18n;
 
@@ -120,7 +126,7 @@ interface Read {
   readonly cells: readonly ReadCell[];
 }
 
-function guards(engine: RunBookEngine): { read: Read | null; reasons: string[] } {
+function guards(engine: LaneEngine): { read: Read | null; reasons: string[] } {
   const reasons: string[] = [];
   const t = engine.hf_transitions;
   const buckets = engine.before.hf_histogram.buckets;
@@ -269,7 +275,7 @@ function verbatimBands(lanes: readonly TransitionLane[]): RoomBand[] {
 }
 
 /** The heatmap model for one engine. `merge` is true for the Cash engine only (its health factor is a room). */
-export function laneReading(engine: RunBookEngine, options: { merge: boolean }): LaneReading {
+export function laneReading(engine: LaneEngine, options: { merge: boolean }): LaneReading {
   const { read, reasons } = guards(engine);
   if (read === null) return { kind: "contradictory", reasons };
   const merged = options.merge && edgesMatchContract(read.lanes, read.bucketCount);
