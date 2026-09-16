@@ -4396,3 +4396,46 @@ per-asset collateral on the wire). Deferred minors are enumerated in
 - tests/e2e/shell.spec.ts: /inspector H1 → "Is this address at risk?" (ruling R9).
 - tests/unit/inspector-lines.spec.ts: retired with lib/inspector-lines.ts; activityTakeaway and its pins moved verbatim to lib/activity-rows.ts / tests/unit/activity-rows.spec.ts; lookupTakeaway re-expressed in tests/unit/inspector-headline.spec.ts; positionTakeaway / positionMethodLine retired with the position card.
 - Deleted: app/inspector/AddressEntry.tsx, app/inspector/[addr]/{InspectorPositionCard,InspectorHistory,InspectorActivity}.tsx, lib/inspector-lines.ts.
+
+## 2026-09-15 · Plan 2 CLOSES — the Inspector (spec docs/specs/2026-09-15-ui-product-register-design.md §5.3; plan docs/plans/2026-09-15-ui-inspector.md)
+
+Landed d989286..fee9609 (37 commits, all scope-gated on main, every one by pathspec). Suites on the
+closing build (b0934f5; fee9609 is a comment move): unit 1136 / e2e 308 passed, 10 skipped, 0 failed
+(npx playwright test: 1,444); typecheck / lint / lint:css clean; screenshot pins for the Inspector
+(dark/light, 1440×900) landed beside Overview + Book and hold; widths probe: no horizontal scroll at
+390/1366/1440/1920/2560, shell 1280/1280/1280/1520/1680; contrast: Plan 2 adds no raw color, so
+Plan 1's token result carries. Owner approved the Inspector side-by-side with the mockup on
+2026-09-16 10:44 (companion gate, captures from the f440ec9 build).
+
+What it is: /inspector (H1 "Is this address at risk?", AddressField, recent lookups) and
+/inspector/[addr] — one view model (lib/inspector-view.ts, branching only on lookup.outcome) behind a
+verdict header, five tiles, the backing table with the wire's own boundary solve, a Trust checklist
+with the room-over-batches sparkline, History (room % per batch from the Cash ratio; the legacy HF
+series on the shared batch axis only for an engine ever present), Activity as a table in the engine's
+own unit, the legacy card judged by its own health factor, inline stress rows, and a drawer with the
+substituted calculation, inputs and provenance. Every wire decimal, scale and count passes the
+guards before it prints; a refused, withheld, unread or unreadable value never prints as a number,
+a zero, or "no position". Demo dataset generated (generate-demo-inspector.mjs, clock-law checked,
+welded to the Book's near-cap account: $4,822 / $5,012.50 / $190.50 / 3.8 % / boundary $3,818.57).
+
+Reviews: 12 task reviews (fix rounds on 2, 3, 4, 5, 6, 7, 9, 10, 11 ×2, 12; all closed); final
+whole-branch review → 1 Critical (the legacy card read the Cash boolean) + 5 Important + 12 Minor,
+fixed in one round (f440ec9) plus three integrator residual commits (c3ef561 history sentence waits
+on the lookup + sub-minute horizon, b0934f5 Trust spark head follows the history ladder, fee9609
+comment); three scoped re-reviews closed. Codex round (spec §9.5): BLOCKED-owner — Codex CLI is still
+0.144.5 with model gpt-6-astra in ~/.codex/config.toml, the pair that rejected Plan 1's round; both
+rounds (Plan 1's owed one and Plan 2's) run once the CLI is upgraded, on the slim diff
+git diff d989286..HEAD -- web/lib web/app/inspector web/components/kit web/tests/unit ':!web/tests/fixtures/**/*.json'.
+
+Carried forward: Plan 3 (Scenarios) — "Stress this address →" retargets from #stress to
+/lab?address={addr} once the Lab reads the parameter (R7). Plan 4 (convergence) — the activity
+table's raw value_decimals goes through the page's refused register instead of the client's route
+refusal (parked R1); the Overview CTA converges onto AddressField (R8); formatTenths joins the
+group/rescale consolidation beside headroomPercent (M5); the two age registers on the Trust card (M4);
+the kit's lone 720px breakpoint (M10); the plan table's .tsx→.ts and stressReading-signature drift
+(M11); client follow-up: lookup() does not enforce found ⇒ ≥1 position (the view refuses the
+contradiction itself). Deferred minors from the task reviews (notComputedHeadline emphasis for an
+unknowable verdict, ADDRESS_PATTERN accepting 0X, the meta.demo.json weETH witness postdating
+computed_at, the chipWarn class pin without a data-tone, the near-account history/stress bodies under
+the liquidatable/healthy contract arms, the hand-routed state-matrix cells without /v1/meta) are
+enumerated with their rulings in .superpowers/sdd/2026-09-15-ui-inspector/progress.md.
