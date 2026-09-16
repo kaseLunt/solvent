@@ -1,0 +1,62 @@
+import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { lookup, type components } from "@solvent/client";
+import { stressReading } from "../../lib/address-stress";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const load = <T,>(name: string): T => JSON.parse(readFileSync(path.join(here, "..", "fixtures", name), "utf8")) as T;
+const STRESS_DM = load<components["schemas"]["StressResponse"]>("stress-dm.json");
+const STRESS_UNKNOWABLE = load<components["schemas"]["StressResponse"]>("stress-unknowable.json");
+
+test("rows: one per scenario, before/after room from cap and debt, the flip, the projection horizons", () => {
+  const r = stressReading(lookup(STRESS_DM), STRESS_DM.address);
+  if (r.kind !== "rows") throw new Error(r.kind);
+  expect(r.rows.map((x) => x.id)).toEqual(STRESS_DM.scenarios.map((s) => s.id));
+  const rate = r.rows.find((x) => x.id === "dm_rate_horizon_plus_200bps");
+  if (rate === undefined) throw new Error("rate row");
+  expect(rate.applicable).toBe(true);
+  expect(rate.before).toEqual({ debt: 4200000000n, cap: 3200000000n, room: -1000000000n, verdict: "liquidatable" });
+  expect(rate.after?.room).toBe(-1000000000n);
+  expect(rate.flips).toBe(false); // already liquidatable before → not a flip
+  expect(rate.projection?.map((h) => [h.seconds, h.extraInterest, h.verdict])).toEqual([
+    [2592000, 6904109n, "liquidatable"],
+    [7776000, 20712328n, "liquidatable"],
+  ]);
+  const depeg = r.rows.find((x) => x.id === "stable_depeg_0995_in_band");
+  expect(depeg?.projection).toBeNull();
+});
+
+test("a scenario with no result for this account is a non-applicable row with a reason; another account's result is never read", () => {
+  const r = stressReading(lookup(STRESS_DM), "0x0000000000000000000000000000000000000001");
+  if (r.kind !== "rows") throw new Error(r.kind);
+  expect(r.rows.every((x) => !x.applicable && x.before === null && x.after === null)).toBe(true);
+  expect(r.rows[0]?.reason).toBe("not evaluated for this account");
+});
+
+test("a withheld engine is a withheld reading with its plain cause; a definitive negative is no-position", () => {
+  const withheld = stressReading(lookup(STRESS_UNKNOWABLE), STRESS_UNKNOWABLE.address);
+  expect(withheld.kind).toBe("withheld");
+  if (withheld.kind === "withheld") expect(withheld.cause.length).toBeGreaterThan(0);
+  const none = lookup({ ...STRESS_DM, found: false, scenarios: [] });
+  expect(stressReading(none, STRESS_DM.address).kind).toBe("no-position");
+});
+
+test("a flip is before not-liquidatable → after liquidatable; an unknowable side yields null", () => {
+  const scenario = STRESS_DM.scenarios[0];
+  const result = scenario?.results[0];
+  if (scenario === undefined || result === undefined || result.before === null || result.after === null) throw new Error("fixture shape");
+  const flipped = {
+    ...STRESS_DM,
+    scenarios: [{ ...scenario, results: [{ ...result, before: { ...result.before, liquidatable: false, debt_usd: "3000000000" }, after: { ...result.after, liquidatable: true } }] }],
+  };
+  const r = stressReading(lookup(flipped), STRESS_DM.address);
+  if (r.kind !== "rows") throw new Error(r.kind);
+  expect(r.rows[0]?.flips).toBe(true);
+  const unknown = { ...flipped, scenarios: [{ ...scenario, results: [{ ...result, after: { ...result.after, liquidatable: null } }] }] };
+  const u = stressReading(lookup(unknown), STRESS_DM.address);
+  if (u.kind !== "rows") throw new Error(u.kind);
+  expect(u.rows[0]?.flips).toBeNull();
+  expect(u.rows[0]?.after?.verdict).toBe("unknowable");
+});
