@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { PostureProvider } from "@/lib/posture";
 import { MetaConstantsProvider } from "@/lib/meta";
-import { AppHeader } from "@/components/AppHeader";
+import { AppShell } from "@/components/kit/AppShell";
 import { DegradationBanner } from "@/components/DegradationBanner";
 import "./globals.css";
 
@@ -31,7 +31,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           {/* p1a-4: one /v1/meta ask per tab — the tier constants the appbar's
               snapshot chip styles itself by (fallback disclosed on failure). */}
           <MetaConstantsProvider>
-            <AppHeader />
+            <AppShell />
             <DegradationBanner />
             <main className="shell">{children}</main>
           </MetaConstantsProvider>

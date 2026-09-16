@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
-import styles from "./header.module.css";
+import styles from "./kit/kit.module.css";
 
 type ThemeChoice = "system" | "light" | "dark";
 
