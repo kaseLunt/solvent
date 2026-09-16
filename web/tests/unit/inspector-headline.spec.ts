@@ -1,10 +1,14 @@
 // web/tests/unit/inspector-headline.spec.ts
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   cannotComputeHeadline,
   cashHeadline,
   engineList,
   engineName,
+  INVALID_ADDRESS_COPY,
   INVALID_HEADLINE,
   LOADING_HEADLINE,
   noPositionHeadline,
@@ -15,6 +19,8 @@ import {
 import { isComputedCash, readCashPosition } from "../../lib/inspector-position";
 import { near } from "./helpers/cash-position";
 
+const here = path.dirname(fileURLToPath(import.meta.url));
+
 function computed(overrides: Parameters<typeof near>[0] = {}) {
   const p = readCashPosition(near(overrides));
   if (!isComputedCash(p)) throw new Error("helper must be computed");
@@ -23,14 +29,14 @@ function computed(overrides: Parameters<typeof near>[0] = {}) {
 const NONE = { streak: null, floor: null };
 
 test("near cap — spec §3.5, with the fall, the extra debt, and the streak sentence", () => {
-  const h = cashHeadline(computed(), { streak: { batches: 14, spanSeconds: 390 }, floor: null });
+  const h = cashHeadline(computed(), { streak: { batches: 14, spanSeconds: 390, newestKind: "computed" }, floor: null });
   expect(h).toMatchObject({ variant: "near", tone: "warn", emphasis: "Within $190.50 of its borrow cap.", rest: "Not liquidatable yet." });
   expect(h.dek).toBe(
     "Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, makes this account liquidatable. It has been within 10% of its cap for the last 14 batches (≈6m).",
   );
   // one batch is not a streak; no span → no parenthesis
-  expect(cashHeadline(computed(), { streak: { batches: 1, spanSeconds: null }, floor: null }).dek).not.toContain("last");
-  expect(cashHeadline(computed(), { streak: { batches: 3, spanSeconds: null }, floor: null }).dek).toContain("for the last 3 batches.");
+  expect(cashHeadline(computed(), { streak: { batches: 1, spanSeconds: null, newestKind: "computed" }, floor: null }).dek).not.toContain("last");
+  expect(cashHeadline(computed(), { streak: { batches: 3, spanSeconds: null, newestKind: "computed" }, floor: null }).dek).toContain("for the last 3 batches.");
 });
 
 test("liquidatable — spec §3.5", () => {
@@ -108,4 +114,35 @@ test("not computed, other engine, unavailable, loading, invalid — the honest e
   expect(engineList(["Cash"])).toBe("Cash");
   expect(engineList(["Cash", "Aave v3 market (legacy)"])).toBe("Cash and Aave v3 market (legacy)");
   expect(engineList(["a", "b", "c"])).toBe("a, b and c");
+});
+
+test("fix round 1 — a zero cap, legacy beside foreign engines, one terminal period, a non-positive span, the kit's address copy", () => {
+  // a zero cap has no percent: the used clause is omitted, never "— — used"
+  expect(cashHeadline(computed({ max_borrow_lt: "0", liquidation_verdict: "liquidatable" }), NONE).dek.startsWith("Borrowing $4,822 against a $0 cap. $4,822 over the line")).toBe(true);
+  // legacy beside a foreign engine: the legacy sentence leads; the foreign one is noted in the dek
+  expect(otherEngineHeadline(7, ["aave_v3_etherfi", "morpho_blue"])).toMatchObject({
+    emphasis: "No Cash position in batch 7; a legacy Aave v3 position exists.",
+    dek: "The legacy market is judged by its own health factor, below. The two books are never added together. A position on morpho_blue is not read here.",
+  });
+  // several foreign engines: plural agreement, the foreign dek
+  expect(otherEngineHeadline(7, ["morpho_blue", "compound_v3"])).toMatchObject({
+    emphasis: "No Cash position in batch 7; positions exist on morpho_blue and compound_v3, which this page does not read.",
+    dek: "Only the Cash book and the legacy Aave v3 market are read here.",
+  });
+  // two withheld books: the causes joined with "; ", capitalised once
+  expect(
+    cannotComputeHeadline([
+      { engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "" },
+      { engine: "aave_v3_etherfi", code: "SWEEP_NEVER", detail: "" },
+    ]).dek,
+  ).toBe("Collateral-flag custody unproven; collateral sweep never ran. A withheld book is never “no position”: this account may hold a position the service cannot currently read.");
+  // a cause that already ends in a period ends once
+  expect(notComputedHeadline("collateral sweep timed out.", null).dek).toBe("Collateral sweep timed out. No verdict is served for it.");
+  // a zero span is no span: the streak sentence prints without a parenthesis
+  const dek = cashHeadline(computed(), { streak: { batches: 14, spanSeconds: 0, newestKind: "computed" }, floor: null }).dek;
+  expect(dek).toContain("for the last 14 batches.");
+  expect(dek).not.toContain("(≈");
+  // the lib copy is the kit's copy, byte for byte — read as text so the unit runner never imports a component
+  const kit = readFileSync(path.join(here, "..", "..", "components", "kit", "AddressField.tsx"), "utf8");
+  expect(kit).toContain(INVALID_ADDRESS_COPY);
 });
