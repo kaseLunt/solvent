@@ -71,6 +71,23 @@
   --t-mono-floor: 12px; /* smallest mono — chips' embedded values */
   --t-stat-lg: 28px; /* engine-panel / KPI hero value */
   --t-stat: 21px; /* KPI value */
+  /* ---- product-register type scale (spec 2026-09-15 §3.4) ----
+   * Replaces --t-* for new code; --t-* / --fs-* stay lawful only until the
+   * pages that use them are rebuilt. Floor is 12px; nothing below exists. */
+  --type-hero: 44px; /* Overview H1 only */
+  --type-h1: 30px; /* page verdict headline */
+  --type-kpi: 26px; /* KPI tile value */
+  --type-h2: 17px; /* section head */
+  --type-card: 15px; /* card title */
+  --type-dek: 16px; /* verdict dek */
+  --type-body: 14px; /* table cells, card text, nav */
+  --type-label: 13px; /* tile labels, table headers */
+  --type-small: 12.5px; /* chips, sub-labels */
+  --type-floor: 12px; /* axis ticks, pills — ABSOLUTE floor */
+  --type-mono: 13px; /* addresses, exact values */
+  --type-mono-sm: 12.5px; /* small exact values */
+  --w-semibold: 600;
+  --w-medium: 500;
 
   /* ---- LEGACY ALIASES — Phase 3 retires these; new code uses --t-*
    * (stylelint-enforced) ----

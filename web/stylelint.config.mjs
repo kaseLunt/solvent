@@ -42,7 +42,7 @@
 // alternation cannot half-match; the trailing `\)$` admits nothing after the
 // name — no comma, no fallback, no second token.
 const TYPE_TOKEN_PATTERN =
-  /^var\(--(?:t-(?:display|chapter|section|fighead|body|ui|meta|floor|mono-lg|mono-sm|mono-floor|mono|stat-lg|stat)|fs-(?:h1|h2|lede|body|note|table|mono-sm|mono|caption|label|badge|stat|hf))\)$/;
+  /^var\(--(?:type-(?:hero|h1|kpi|h2|card|dek|body|label|small|floor|mono-sm|mono)|t-(?:display|chapter|section|fighead|body|ui|meta|floor|mono-lg|mono-sm|mono-floor|mono|stat-lg|stat)|fs-(?:h1|h2|lede|body|note|table|mono-sm|mono|caption|label|badge|stat|hf))\)$/;
 
 const config = {
   rules: {
