@@ -12,6 +12,9 @@
 //   - a 409 batch_superseded mid-walk reloads the book AT MOST ONCE per
 //     superseding batch id, so a server that keeps superseding cannot be
 //     hammered;
+//   - `reload()` and that restart RE-WALK even when the reloaded book carries
+//     the same batch id (a walk epoch, bumped with the book's own receipt), so
+//     a failed or stalled walk always has a recovery path;
 //   - rows from a walk started for an older batch are never mixed with the
 //     current book — `walk.forBatch === batchId` gates every derived read.
 
@@ -42,7 +45,7 @@ export interface CashBookReading {
   readonly cash: {
     readonly engine: BookEngine | null;
     readonly badDebt: BadDebtEngine | null;
-    readonly refusedWhole: { code: string; detail: string | null } | null;
+    readonly refusedWhole: { code: string; detail: string } | null;
     readonly rows: readonly CashRow[];
     readonly walkComplete: boolean;
     readonly walkFailure: PositionsFailure | null;
@@ -74,13 +77,20 @@ const WALK_IDLE: WalkState = { forBatch: null, rows: [], complete: false, failur
 export function useCashBook(): CashBookReading {
   const [state, setState] = useState<BookState>({ phase: "loading" });
   const [walk, setWalk] = useState<WalkState>(WALK_IDLE);
+  /**
+   * Bumped with a book receipt that must RE-WALK even on an unchanged batch id
+   * (`reload()`, and the 409 restart). The walk effect is keyed on it as well
+   * as on the id, so a failed or stalled walk always has a recovery path.
+   */
+  const [walkEpoch, setWalkEpoch] = useState(0);
   const bookControllerRef = useRef<AbortController | null>(null);
   const walkControllerRef = useRef<AbortController | null>(null);
   /** One automatic restart per superseding batch id, so a server that keeps superseding cannot be hammered. */
   const restartedForRef = useRef<number | null>(null);
 
-  const loadBook = useCallback((options?: { keepOnFailure?: boolean }): Promise<boolean> => {
+  const loadBook = useCallback((options?: { keepOnFailure?: boolean; rewalk?: boolean }): Promise<boolean> => {
     const keepOnFailure = options?.keepOnFailure ?? false;
+    const rewalk = options?.rewalk ?? false;
     bookControllerRef.current?.abort();
     const controller = new AbortController();
     bookControllerRef.current = controller;
@@ -90,6 +100,10 @@ export function useCashBook(): CashBookReading {
         (book) => {
           if (controller.signal.aborted) return false;
           setState({ phase: "ok", book });
+          // Bumped HERE, with the receipt, so a changed id and the epoch land
+          // in one render (one walk, not an aborted one against the old id),
+          // and a re-walk never starts before the book it belongs to exists.
+          if (rewalk) setWalkEpoch((epoch) => epoch + 1);
           return true;
         },
         (cause: unknown) => {
@@ -113,6 +127,7 @@ export function useCashBook(): CashBookReading {
 
   // The walk: every page of the Cash engine, least room first, so liquidatable
   // rows arrive on page one and the headline can settle before the walk ends.
+  // Re-run on a new batch id OR a new walk epoch (`reload()` / the 409 restart).
   const batchId = state.phase === "ok" ? state.book.batch.id : null;
   useEffect(() => {
     if (batchId === null) return;
@@ -142,11 +157,12 @@ export function useCashBook(): CashBookReading {
           if (controller.signal.aborted) return;
           if (cause instanceof BatchSupersededError) {
             // The batch moved under the walk. Reload the book ONCE for this
-            // superseding id; the new book id re-runs this effect from page one.
+            // superseding id; the new book — same id or not — re-runs this
+            // effect from page one (`rewalk` bumps the epoch with its receipt).
             const superseding = cause.currentBatchId;
             if (superseding !== restartedForRef.current) {
               restartedForRef.current = superseding;
-              void loadBook();
+              void loadBook({ rewalk: true });
               return;
             }
           }
@@ -167,9 +183,14 @@ export function useCashBook(): CashBookReading {
     return () => {
       controller.abort();
     };
-  }, [batchId, loadBook]);
+  }, [batchId, walkEpoch, loadBook]);
 
   const reloadOnResume = useCallback(() => loadBook({ keepOnFailure: true }), [loadBook]);
+  // Stable, so a consumer may list it in effect deps. A reload always re-walks:
+  // the book it lands bumps the epoch even when its batch id is unchanged.
+  const reload = useCallback(() => {
+    void loadBook({ rewalk: true });
+  }, [loadBook]);
   const age = useAnchoredAgeSeconds(
     state.phase === "ok"
       ? { ageSeconds: state.book.batch.age_seconds, receiptId: receiptIdentity(state.book.served_at, state.book.batch.id) }
@@ -195,7 +216,7 @@ export function useCashBook(): CashBookReading {
     cash: {
       engine: engineOf(CASH),
       badDebt: badDebtOf(CASH),
-      refusedWhole: refused === null ? null : { code: refused.code ?? "withheld", detail: refused.detail ?? null },
+      refusedWhole: refused === null ? null : { code: refused.code, detail: refused.detail },
       rows: walkForThisBook ? walk.rows : [],
       walkComplete: walkForThisBook && walk.complete,
       walkFailure: walkForThisBook ? walk.failure : null,
@@ -206,8 +227,6 @@ export function useCashBook(): CashBookReading {
       histogram: book?.hf_histogram.engines.find((e) => e.engine === LEGACY) ?? null,
     },
     age,
-    reload: () => {
-      void loadBook();
-    },
+    reload,
   };
 }
