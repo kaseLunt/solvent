@@ -10,6 +10,8 @@ export interface TrustCheckItem {
 }
 
 const GLYPH: Record<TrustCheckItem["state"], string> = { ok: "✓", warn: "!", refused: "×", dim: "·" };
+/** The state in words for assistive tech — the glyph is decorative and colour carries nothing on its own. */
+const STATE_WORD: Record<TrustCheckItem["state"], string> = { ok: "passed", warn: "caution", refused: "failed", dim: "not available" };
 const CLASS: Record<TrustCheckItem["state"], string | undefined> = {
   ok: undefined,
   warn: styles.checkWarn,
@@ -26,6 +28,7 @@ export function TrustChecklist({ items, testId }: { items: readonly TrustCheckIt
           <span className={`${styles.checkI} ${CLASS[item.state] ?? ""}`} aria-hidden="true">
             {GLYPH[item.state]}
           </span>
+          <span className={styles.srOnly}>{STATE_WORD[item.state]}: </span>
           <span>{item.label}</span>
           <small className={styles.checkSmall}>{item.detail}</small>
         </li>

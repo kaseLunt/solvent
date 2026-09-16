@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { isAddress } from "@/lib/format";
 import styles from "./kit.module.css";
 
@@ -21,6 +21,8 @@ export interface AddressFieldProps {
 export function AddressField({ initial = "", onInspect, secondary, hint = "any 0x address", testId }: AddressFieldProps) {
   const [value, setValue] = useState(initial);
   const [refused, setRefused] = useState(false);
+  const hintId = useId();
+  const refusedId = useId();
   const submit = (): void => {
     const trimmed = value.trim();
     if (!isAddress(trimmed)) {
@@ -50,11 +52,14 @@ export function AddressField({ initial = "", onInspect, secondary, hint = "any 0
           placeholder="0x…"
           aria-label="address to inspect"
           aria-invalid={refused ? "true" : undefined}
+          aria-describedby={refused ? `${hintId} ${refusedId}` : hintId}
           spellCheck={false}
           autoComplete="off"
           data-testid={`${testId}-input`}
         />
-        <small className={styles.searchHint}>{hint}</small>
+        <small id={hintId} className={styles.searchHint}>
+          {hint}
+        </small>
       </label>
       <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`} data-testid={`${testId}-inspect`}>
         Inspect
@@ -65,7 +70,7 @@ export function AddressField({ initial = "", onInspect, secondary, hint = "any 0
         </Link>
       )}
       {refused && (
-        <p className={styles.searchRefused} role="alert" data-testid={`${testId}-refused`}>
+        <p id={refusedId} className={styles.searchRefused} role="alert" data-testid={`${testId}-refused`}>
           {ADDRESS_REFUSED_COPY}
         </p>
       )}

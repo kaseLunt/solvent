@@ -29,17 +29,25 @@ function readRaw(): string {
   }
 }
 
+// The `storage` event fires only in OTHER tabs; the writing tab's own mounted
+// lists are told through this set, so a lookup shows up in "recent" at once.
+const listeners = new Set<() => void>();
+
 export function rememberLookup(address: string): void {
   try {
     localStorage.setItem(RECENT_KEY, JSON.stringify(pushRecent(parseRecents(readRaw()), address)));
   } catch {
     // Storage unavailable (private mode) — recents are a convenience only.
+    return;
   }
+  for (const listener of listeners) listener();
 }
 
 function subscribe(callback: () => void): () => void {
+  listeners.add(callback);
   window.addEventListener("storage", callback);
   return () => {
+    listeners.delete(callback);
     window.removeEventListener("storage", callback);
   };
 }
