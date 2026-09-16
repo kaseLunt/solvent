@@ -76,9 +76,45 @@ test("nearCapStreak counts the newest run under the 10 % line and spans it from 
   expect(NEAR_LINE_TENTHS).toBe(100n);
   const s = roomSeries(engine([point(1, "6000000000"), point(2, "5300000000"), point(3, "5200000000"), point(4, "5012500000")]));
   // 2: (5300−4822)/5300 = 9.0 % ✓, 3: 7.2 % ✓, 4: 3.8 % ✓, 1: 19.6 % ✗
-  expect(nearCapStreak(s)).toEqual({ batches: 3, spanSeconds: 120 });
+  expect(nearCapStreak(s)).toEqual({ batches: 3, spanSeconds: 120, newestKind: "computed" });
   const broken = roomSeries(engine([point(2, "5300000000"), point(3, null), point(4, "5012500000")]));
-  expect(nearCapStreak(broken)).toEqual({ batches: 1, spanSeconds: null });
-  expect(nearCapStreak(roomSeries(engine([point(4, "6000000000")])))).toEqual({ batches: 0, spanSeconds: null });
-  expect(nearCapStreak(roomSeries(engine([])))).toEqual({ batches: 0, spanSeconds: null });
+  expect(nearCapStreak(broken)).toEqual({ batches: 1, spanSeconds: null, newestKind: "computed" });
+  expect(nearCapStreak(roomSeries(engine([point(4, "6000000000")])))).toEqual({ batches: 0, spanSeconds: null, newestKind: "computed" });
+  expect(nearCapStreak(roomSeries(engine([])))).toEqual({ batches: 0, spanSeconds: null, newestKind: null });
+});
+
+test("review round: a zero cap is a point past the cap, out-of-contract ids throw, and the streak knows the newest kind", () => {
+  /** The engine's debt-after-empty-sweep shape: a PUBLISHED zero cap with debt left — known, and past the cap. */
+  const zeroCap = (batchId: number): AddressHistoryPoint => point(batchId, "0", "4822000000", { liquidatable: true });
+  const z = roomSeries(engine([zeroCap(2)]));
+  expect(z.points[0]?.kind).toBe("zero-cap");
+  expect(z.points[0]?.display).toBe("0 cap");
+  expect(z.points[0]?.value).toBeNull();
+  expect(z.titles[0]).toContain("past the cap");
+  expect(z.computedCount).toBe(0);
+  // No room at all is under the line, so a zero-cap point COUNTS in the streak.
+  const s = roomSeries(engine([point(1, "6000000000"), zeroCap(2), point(3, "5012500000")]));
+  expect(nearCapStreak(s)).toEqual({ batches: 2, spanSeconds: 60, newestKind: "computed" });
+  // A negative debt is refused by name — never "cap not positive".
+  const neg = roomSeries(engine([point(1, "5012500000", "-1")]));
+  expect(neg.points[0]?.kind).toBe("unpublished");
+  expect(neg.titles[0]).toContain("negative debt");
+  // The wire's own infinite shape: num and den are null when there is no debt.
+  const inf = roomSeries(engine([point(1, null, "0", { health_factor: { wad: null, num: null, den: null, infinite: true, note: "" } })]));
+  expect(inf.points[0]?.kind).toBe("computed");
+  expect(inf.points[0]?.display).toBe("100%");
+  // Out of contract: a batch that appears twice among the points, and a caller id that is not a population.
+  expect(() => roomSeries(engine([point(7, "5012500000"), point(7, null)]))).toThrow();
+  expect(() => roomSeries(engine([point(1, "5012500000")]), [1.5 as never])).toThrow();
+  // Reversed stamps (the newest point stamped earlier than the oldest in the run) have no honest span.
+  const reversed = roomSeries(
+    engine([
+      point(1, "5300000000", "4822000000", { computed_at: "2026-08-08T20:05:00Z" }),
+      point(2, "5012500000", "4822000000", { computed_at: "2026-08-08T20:01:00Z" }),
+    ]),
+  );
+  expect(nearCapStreak(reversed)).toEqual({ batches: 2, spanSeconds: null, newestKind: "computed" });
+  // A trailing withheld batch: the run cannot be read past it, and the streak says which kind stopped it.
+  const trailing = roomSeries(engine([point(1, "5012500000"), point(2, "5012500000")], [3]));
+  expect(nearCapStreak(trailing)).toEqual({ batches: 0, spanSeconds: null, newestKind: "withheld" });
 });
