@@ -448,3 +448,7 @@
   white-space: normal;
   min-width: 164px;
 }
+
+/* DotPlot — Compare scenarios (spec §5.4): one signed dot per scenario on a percent axis. */
+.dotPlotRow text { font-size: var(--type-floor); }
+.dotPlotTrack { stroke: var(--line); stroke-width: 1; }

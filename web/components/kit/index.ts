@@ -10,3 +10,6 @@ export { VerdictHeader, type VerdictHeaderProps } from "./VerdictHeader";
 export { AddressField, ADDRESS_REFUSED_COPY, type AddressFieldProps } from "./AddressField";
 export { TrustChecklist, type TrustCheckItem } from "./TrustChecklist";
 export { Sparkline, type SparklineProps } from "../charts/Sparkline";
+export { ScenarioLibrary, type LibraryItem, type LibraryOutcomeKey, type LibraryOutcomeTone, type ScenarioLibraryProps } from "./ScenarioLibrary";
+export { Heatmap, type HeatBand, type HeatCellView, type HeatMovement, type HeatmapProps } from "./Heatmap";
+export { DotPlot, type DotPlotProps, type DotPlotRow } from "../charts/DotPlot";
