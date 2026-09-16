@@ -176,11 +176,18 @@ export const DEFINITION_ETH: Definition = {
   id: "eth_minus_30",
   version: "v1",
   label: "ETH -30 percent",
-  description: "All ETH-linked collateral marked down 30 percent.",
-  path_assumption: "instantaneous mark at the shocked level; single-step",
+  description: "Factor shock on ETH/USD. Every ETH-linked collateral moves jointly because each one's USD price is composed from ETH/USD by construction; weETH additionally carries its redemption rate, held flat here.",
+  path_assumption: "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
   engines: ["aave_v3_etherfi", "debt_manager"],
   shocks: [{ axis: "eth_usd", factor_num: 70, factor_den: 100 }],
-  out_of_model: ["liquidation bonuses", "gas"],
+  out_of_model: [
+    "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+    "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+    "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+    "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+    "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+    "Aave price caps are checked, not assumed: a down-shock leaves them slack, and any cap that did bind is reported per input",
+  ],
 };
 
 const BATCH: Schemas["Batch"] = {

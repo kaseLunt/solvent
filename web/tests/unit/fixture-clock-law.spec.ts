@@ -264,6 +264,14 @@ const CENSUS: Record<string, number> = {
   "demo/meta.demo.json": 5,
   "demo/positions-dm-demo-page-1.json": 2,
   "demo/positions-dm-demo-page-2.json": 2,
+  // The Scenarios demo dataset (`generate-demo-lab.mjs`, plan 3 Task 10, which
+  // imports the law, refuses to write a body it fails, and pins these same
+  // counts in its `CLOCK_TRIOS`). The run-book and the set run each carry the
+  // Book's batch envelope: two trios — the batch age over `computed_at` and
+  // the debt_manager watermark's sweep over `max_updated_at`. The listing
+  // (`scenarios-demo.json`) carries no batch and no age, so it is not here.
+  "demo/run-book-demo-eth_minus_30.json": 2,
+  "demo/run-book-set-demo.json": 2,
   "demo/stress-demo-near.json": 2,
   // THREE since p1a-9: batch age over computed_at, the debt_manager
   // watermark's sweep over max_updated_at, AND the same sweep stamp on the
@@ -308,7 +316,8 @@ const CENSUS: Record<string, number> = {
 // plan 2026-09-15 Task 11: 60 + 5 + 12 = 77.
 // + the Inspector demo dataset (4 × 4 address bodies + 2 history + 2 stress),
 // plan 2 Task 10: 77 + 20 = 97.
-const CENSUS_TOTAL = 97;
+// + the Scenarios demo dataset (2 run-book + 2 set run), plan 3 Task 10: 97 + 4 = 101.
+const CENSUS_TOTAL = 101;
 
 // --- the generators' own pins, read out of their source ---------------------
 //
@@ -631,7 +640,9 @@ test.describe("the clock census", () => {
     // + meta.json and the four demo bodies (plan 2026-09-15 Task 11): 27 + 5 = 32.
     // + the six batch-bearing Inspector demo bodies — four address bodies, the
     // history and the stress (plan 2 Task 10); events and params carry no batch: 32 + 6 = 38.
-    expect(fixtureFiles.filter((name) => isBatchBearing(readFixture(name)))).toHaveLength(38);
+    // + the two batch-bearing Scenarios demo bodies — the run-book and the set
+    // run (plan 3 Task 10); the listing carries no batch: 38 + 2 = 40.
+    expect(fixtureFiles.filter((name) => isBatchBearing(readFixture(name)))).toHaveLength(40);
   });
 });
 

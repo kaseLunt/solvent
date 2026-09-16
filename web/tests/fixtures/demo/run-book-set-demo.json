@@ -1,0 +1,608 @@
+{
+  "batch": {
+    "id": 18251,
+    "computed_at": "2026-08-08T20:22:08Z",
+    "age_seconds": 42,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 9964,
+    "refused_count": 6,
+    "refused_engines": [],
+    "flagged_count": 30,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25714690,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25714690,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 155323444,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-08-08T20:02:45Z",
+          "age_seconds": 1205,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "coverage": {
+    "batch_positions": 9964,
+    "book_is_measurable": true,
+    "engines": [
+      {
+        "engine": "aave_v3_etherfi",
+        "positions_in_batch": 8552,
+        "measurable": 8552,
+        "refused_in_batch": 0,
+        "unrebuildable": 0,
+        "withheld": false
+      },
+      {
+        "engine": "debt_manager",
+        "positions_in_batch": 1412,
+        "measurable": 1406,
+        "refused_in_batch": 6,
+        "unrebuildable": 0,
+        "withheld": false
+      }
+    ],
+    "excluded": [],
+    "excluded_by_this_layer": 0,
+    "in_book": 9958,
+    "note": "THIS CENSUS IS BOOK-SCOPED, not run-scoped: `in_book` is every position THIS LAYER rebuilt over the WHOLE batch, whatever any scenario's model reaches — which is why it is a different component from /v1/book's `coverage`, whose `in_book` counts one run. Every position row is classified by the POSITIVE predicate of the counter it feeds, into exactly one of three classes, so `batch_positions == in_book + refused_in_batch + excluded_by_this_layer` EXACTLY; a row matching none of them refuses the whole request with a named 500 rather than being served under an equality it breaks. `refused_in_batch` is riskd's own refusals, served per row by /v1/positions and /v1/address/{addr}; `excluded_by_this_layer` is rows this service could not rebuild or verify, listed in `excluded`. Neither is ever reconciled against a run-book histogram's `refused_count`, which counts a WIDER population (both of these plus rebuilt rows carrying no comparator) under a label naming only the third.",
+    "refused_in_batch": 6
+  },
+  "evaluation": {
+    "freshness": "still_newest",
+    "newest_servable_batch_id": 18251,
+    "note": "Batch 18251 was STILL the newest complete servable batch at `probed_at`. That is what was true when this response was built, never a promise about the reader's present.",
+    "probed_at": "2026-08-08T20:22:50Z",
+    "resolved_at": "2026-08-08T20:22:50Z",
+    "scenarios_evaluated": 4
+  },
+  "excluded_engines": [],
+  "notes": [
+    "ONE BATCH: every result here was measured against the single `batch` above, resolved once inside one database snapshot before any arithmetic ran. Cross-scenario comparison is therefore exact by the SHAPE of this response rather than by a client-side check over N independently resolved bodies.",
+    "aggregates are per engine in each engine's OWN unit and decimals; they are never summed, averaged or plotted on one axis across engines. `usd_decimals` on each engine row is that engine's scale.",
+    "deltas are DELTA-ONLY: after minus before, the scenario's own contribution over that scenario's own covered, non-withheld book. The sanctioned denominator is `total_debt_usd_before`; the after side is a different book and a ratio against it answers a question this surface does not ask.",
+    "`out_of_model` is deliberately NOT carried here: it is published verbatim and versioned on GET /v1/scenarios, which a client necessarily already has (that is where these ids came from), and `scenario_id` + `scenario_version` + `scenario_config_version` make the join exact. READING A SHOCKED NUMBER WITHOUT IT IS READING IT WRONG.",
+    "`coverage` is a census of the whole BATCH, not of any one run: it is a different component from /v1/book's `coverage` for exactly that reason. `shock_reach` on each result says whether the declared shock reached a mark at all and, when it did not, WHICH cause held it — a zero delta on this surface always carries a published cause."
+  ],
+  "requested_scenario_ids": [
+    "eth_minus_30",
+    "weeth_market_depeg_oracles_held",
+    "dm_rate_horizon_plus_200bps",
+    "ethfi_minus_50"
+  ],
+  "results": [
+    {
+      "scenario_id": "eth_minus_30",
+      "scenario_version": "v1",
+      "label": "ETH -30 percent",
+      "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+      "shocks": [
+        {
+          "axis": "eth_usd",
+          "factor_num": 70,
+          "factor_den": 100
+        }
+      ],
+      "shock_reach": {
+        "applied_shocks": [
+          {
+            "after": "2800000000",
+            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+            "base_snapped": false,
+            "before": "4000000000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "100",
+            "factor_num": "70",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "280000000000",
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+            "base_snapped": false,
+            "before": "400000000000",
+            "cap_bound": false,
+            "chain_id": 1,
+            "factor_den": "100",
+            "factor_num": "70",
+            "snapped": false,
+            "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"
+          }
+        ],
+        "declared_shocks": 1,
+        "declared_shocks_at_identity": 0,
+        "held_flat_assets": [
+          {
+            "chain_id": 1,
+            "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f"
+          }
+        ],
+        "held_flat_marks": 7,
+        "marks_base_snapped": 0,
+        "marks_cap_bound": 0,
+        "marks_held_by_arithmetic": 0,
+        "marks_held_by_declared_factor": 0,
+        "marks_held_by_transform": 0,
+        "marks_moved": 2,
+        "marks_snapped": 0,
+        "note": "EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (2 of 2). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures.",
+        "reach": "every_mark_moved"
+      },
+      "covered_engines": [
+        "aave_v3_etherfi",
+        "debt_manager"
+      ],
+      "withheld_engines": [],
+      "unmeasurable_engines": [],
+      "engines": [
+        {
+          "accounts": 8552,
+          "after_collateral_at_risk_usd": "6370",
+          "after_eligible_accounts": 60,
+          "bad_debt_delta_usd": "66666666667",
+          "before_bad_debt_usd": "0",
+          "before_collateral_at_risk_usd": "9100",
+          "before_eligible_accounts": 46,
+          "before_eligible_debt_usd": "4600",
+          "eligible_accounts_delta": 14,
+          "eligible_debt_delta_usd": "600000000000",
+          "engine": "aave_v3_etherfi",
+          "flipped_to_eligible": null,
+          "hf_dropped_accounts": 8499,
+          "infinite_accounts": 0,
+          "market_realization": null,
+          "movement_excluded_accounts": 0,
+          "movement_rule": "hf_strictly_dropped",
+          "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 8-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is hf_strictly_dropped: `hf_dropped_accounts` counts accounts whose HEALTH FACTOR STRICTLY DROPPED under this scenario, and it is NOT a count of accounts that became eligible for liquidation. `flipped_to_eligible` is null here because this engine does not speak it. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (8552 minus 0 = 8552), never `accounts`: An account with no debt has an unbounded health factor on either side, so it has no drop to rank and is not counted here — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+          "projection": null,
+          "refused_in_batch_positions": 0,
+          "total_collateral_usd_after": "287000000000000",
+          "total_collateral_usd_before": "410000000000000",
+          "total_debt_usd_after": "190000000000000",
+          "total_debt_usd_before": "190000000000000",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 8
+        },
+        {
+          "accounts": 1406,
+          "after_collateral_at_risk_usd": "3217373639470",
+          "after_eligible_accounts": 167,
+          "bad_debt_delta_usd": "40780396039",
+          "before_bad_debt_usd": "239603961",
+          "before_collateral_at_risk_usd": "16768539245",
+          "before_eligible_accounts": 49,
+          "before_eligible_debt_usd": "6949455788",
+          "eligible_accounts_delta": 118,
+          "eligible_debt_delta_usd": "1280000000000",
+          "engine": "debt_manager",
+          "flipped_to_eligible": 118,
+          "hf_dropped_accounts": null,
+          "infinite_accounts": 0,
+          "market_realization": null,
+          "movement_excluded_accounts": 0,
+          "movement_rule": "eligibility_flipped_false_to_true",
+          "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 6-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is eligibility_flipped_false_to_true: `flipped_to_eligible` counts eligibility flips FALSE to TRUE only, so it is not `eligible_accounts_delta`, which is a NET and also subtracts any flip back to healthy — five accounts flipping in and five flipping out is a net of 0 and is not \"nothing happened\". `hf_dropped_accounts` is null here because the Debt Manager has no health-factor wad. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (1406 minus 0 = 1406), never `accounts`: The eligibility flip is testable for every account this run measured on both sides, so the only accounts excluded from it are before-side rows carrying no after-side state at all — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+          "projection": null,
+          "refused_in_batch_positions": 6,
+          "total_collateral_usd_after": "107220100944032",
+          "total_collateral_usd_before": "153171572777189",
+          "total_debt_usd_after": "27828808216758",
+          "total_debt_usd_before": "27828808216758",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 6
+        }
+      ],
+      "positions_answered": 9958,
+      "positions_withheld": 0,
+      "note": "IDENTITY: this result is scenario eth_minus_30 at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. SHOCK REACH: EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (2 of 2). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures."
+    },
+    {
+      "scenario_id": "weeth_market_depeg_oracles_held",
+      "scenario_version": "v1",
+      "label": "weETH market depeg to 0.95 (oracles held)",
+      "path_assumption": "oracle marks held exactly; market value is a separate axis applied only to realized proceeds",
+      "shocks": [],
+      "shock_reach": {
+        "declared_shocks": 0,
+        "declared_shocks_at_identity": 0,
+        "reach": "no_shocks_declared",
+        "applied_shocks": [],
+        "marks_moved": 0,
+        "marks_held_by_declared_factor": 0,
+        "marks_held_by_transform": 0,
+        "marks_held_by_arithmetic": 0,
+        "marks_snapped": 0,
+        "marks_base_snapped": 0,
+        "marks_cap_bound": 0,
+        "held_flat_marks": 9,
+        "held_flat_assets": [
+          {
+            "chain_id": 1,
+            "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+          },
+          {
+            "chain_id": 1,
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f"
+          }
+        ],
+        "note": "NO SHOCKS DECLARED: this definition asks for no price move at all; its propagation matrix is empty, so every described mark lands in held_flat. The information is in market_realization, which is mandatory on every answered engine of this scenario."
+      },
+      "covered_engines": [
+        "aave_v3_etherfi",
+        "debt_manager"
+      ],
+      "withheld_engines": [],
+      "unmeasurable_engines": [],
+      "engines": [
+        {
+          "accounts": 8552,
+          "after_collateral_at_risk_usd": "9100",
+          "after_eligible_accounts": 46,
+          "bad_debt_delta_usd": "0",
+          "before_bad_debt_usd": "0",
+          "before_collateral_at_risk_usd": "9100",
+          "before_eligible_accounts": 46,
+          "before_eligible_debt_usd": "4600",
+          "eligible_accounts_delta": 0,
+          "eligible_debt_delta_usd": "0",
+          "engine": "aave_v3_etherfi",
+          "flipped_to_eligible": null,
+          "hf_dropped_accounts": 0,
+          "infinite_accounts": 0,
+          "market_realization": {
+            "hfs_unchanged": true,
+            "execution_shortfall_usd": "455",
+            "bad_debt_at_liquidation_usd": "0",
+            "usd_decimals": 8,
+            "seizure_model": "pro-rata-over-counted-collateral",
+            "note": "market value is NOT an oracle mark: this scenario moves NO health factor (`hfs_unchanged` asserts it, computed not promised). The output is the gap the protocol is not seeing, under the disclosed seizure model."
+          },
+          "movement_excluded_accounts": 0,
+          "movement_rule": "hf_strictly_dropped",
+          "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 8-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is hf_strictly_dropped: `hf_dropped_accounts` counts accounts whose HEALTH FACTOR STRICTLY DROPPED under this scenario, and it is NOT a count of accounts that became eligible for liquidation. `flipped_to_eligible` is null here because this engine does not speak it. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (8552 minus 0 = 8552), never `accounts`: An account with no debt has an unbounded health factor on either side, so it has no drop to rank and is not counted here — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+          "projection": null,
+          "refused_in_batch_positions": 0,
+          "total_collateral_usd_after": "410000000000000",
+          "total_collateral_usd_before": "410000000000000",
+          "total_debt_usd_after": "190000000000000",
+          "total_debt_usd_before": "190000000000000",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 8
+        },
+        {
+          "accounts": 1406,
+          "after_collateral_at_risk_usd": "16768539245",
+          "after_eligible_accounts": 49,
+          "bad_debt_delta_usd": "0",
+          "before_bad_debt_usd": "239603961",
+          "before_collateral_at_risk_usd": "16768539245",
+          "before_eligible_accounts": 49,
+          "before_eligible_debt_usd": "6949455788",
+          "eligible_accounts_delta": 0,
+          "eligible_debt_delta_usd": "0",
+          "engine": "debt_manager",
+          "flipped_to_eligible": 0,
+          "hf_dropped_accounts": null,
+          "infinite_accounts": 0,
+          "market_realization": {
+            "hfs_unchanged": true,
+            "execution_shortfall_usd": "838426962",
+            "bad_debt_at_liquidation_usd": "239603961",
+            "usd_decimals": 6,
+            "seizure_model": "pro-rata-over-counted-collateral",
+            "note": "market value is NOT an oracle mark: this scenario moves NO health factor (`hfs_unchanged` asserts it, computed not promised). The output is the gap the protocol is not seeing, under the disclosed seizure model."
+          },
+          "movement_excluded_accounts": 0,
+          "movement_rule": "eligibility_flipped_false_to_true",
+          "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 6-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is eligibility_flipped_false_to_true: `flipped_to_eligible` counts eligibility flips FALSE to TRUE only, so it is not `eligible_accounts_delta`, which is a NET and also subtracts any flip back to healthy — five accounts flipping in and five flipping out is a net of 0 and is not \"nothing happened\". `hf_dropped_accounts` is null here because the Debt Manager has no health-factor wad. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (1406 minus 0 = 1406), never `accounts`: The eligibility flip is testable for every account this run measured on both sides, so the only accounts excluded from it are before-side rows carrying no after-side state at all — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+          "projection": null,
+          "refused_in_batch_positions": 6,
+          "total_collateral_usd_after": "153171572777189",
+          "total_collateral_usd_before": "153171572777189",
+          "total_debt_usd_after": "27828808216758",
+          "total_debt_usd_before": "27828808216758",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 6
+        }
+      ],
+      "positions_answered": 9958,
+      "positions_withheld": 0,
+      "note": "IDENTITY: this result is scenario weeth_market_depeg_oracles_held at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. SHOCK REACH: NO SHOCKS DECLARED: this definition asks for no price move at all; its propagation matrix is empty, so every described mark lands in held_flat. The information is in market_realization, which is mandatory on every answered engine of this scenario."
+    },
+    {
+      "scenario_id": "dm_rate_horizon_plus_200bps",
+      "scenario_version": "v1",
+      "label": "Debt Manager borrow APY +200bps (PROJECTION)",
+      "path_assumption": "collateral prices held flat at the current sample; the APY steps once, at t=0, and holds for the whole horizon",
+      "shocks": [
+        {
+          "axis": "borrow_apy",
+          "factor_num": 1,
+          "factor_den": 1
+        }
+      ],
+      "shock_reach": {
+        "declared_shocks": 1,
+        "declared_shocks_at_identity": 1,
+        "reach": "projection_no_spot_pass",
+        "applied_shocks": [],
+        "marks_moved": 0,
+        "marks_held_by_declared_factor": 0,
+        "marks_held_by_transform": 0,
+        "marks_held_by_arithmetic": 0,
+        "marks_snapped": 0,
+        "marks_base_snapped": 0,
+        "marks_cap_bound": 0,
+        "held_flat_marks": 0,
+        "held_flat_assets": [],
+        "note": "PROJECTION, NO SPOT PASS: no ApplyScenario pass ran at all, so the after side IS the before side, nothing was applied and nothing was held flat. The declared borrow_apy shock at 1/1 was not applied to any mark; the projection block is the answer."
+      },
+      "covered_engines": [
+        "debt_manager"
+      ],
+      "withheld_engines": [],
+      "unmeasurable_engines": [],
+      "engines": [
+        {
+          "accounts": 1406,
+          "after_collateral_at_risk_usd": "16768539245",
+          "after_eligible_accounts": 49,
+          "bad_debt_delta_usd": "0",
+          "before_bad_debt_usd": "239603961",
+          "before_collateral_at_risk_usd": "16768539245",
+          "before_eligible_accounts": 49,
+          "before_eligible_debt_usd": "6949455788",
+          "eligible_accounts_delta": 0,
+          "eligible_debt_delta_usd": "0",
+          "engine": "debt_manager",
+          "flipped_to_eligible": 0,
+          "hf_dropped_accounts": null,
+          "infinite_accounts": 0,
+          "market_realization": null,
+          "movement_excluded_accounts": 0,
+          "movement_rule": "eligibility_flipped_false_to_true",
+          "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 6-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is eligibility_flipped_false_to_true: `flipped_to_eligible` counts eligibility flips FALSE to TRUE only, so it is not `eligible_accounts_delta`, which is a NET and also subtracts any flip back to healthy — five accounts flipping in and five flipping out is a net of 0 and is not \"nothing happened\". `hf_dropped_accounts` is null here because the Debt Manager has no health-factor wad. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (1406 minus 0 = 1406), never `accounts`: The eligibility flip is testable for every account this run measured on both sides, so the only accounts excluded from it are before-side rows carrying no after-side state at all — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+          "projection": {
+            "label": "PROJECTION",
+            "basis": "delta-only",
+            "annual_delta_bps": 200,
+            "apy_observed_at_block": 155323444,
+            "prices_held_flat": true,
+            "horizons": [
+              {
+                "horizon_seconds": 2592000,
+                "debt_usd": "27828808216758",
+                "projected_usd": "27874554202867",
+                "additional_interest_usd": "45745986109",
+                "becomes_liquidatable": null
+              },
+              {
+                "horizon_seconds": 7776000,
+                "debt_usd": "27828808216758",
+                "projected_usd": "27966046175087",
+                "additional_interest_usd": "137237958329",
+                "becomes_liquidatable": null
+              }
+            ],
+            "note": "DELTA-ONLY: this is the additional interest the +200bps step contributes over the horizon. A batch carries no borrow-APY observation and this service makes no chain calls, so the base accrual is absent. No time-to-liquidatable is published from a path that would understate debt growth."
+          },
+          "refused_in_batch_positions": 6,
+          "total_collateral_usd_after": "153171572777189",
+          "total_collateral_usd_before": "153171572777189",
+          "total_debt_usd_after": "27828808216758",
+          "total_debt_usd_before": "27828808216758",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 6
+        }
+      ],
+      "positions_answered": 1406,
+      "positions_withheld": 0,
+      "note": "IDENTITY: this result is scenario dm_rate_horizon_plus_200bps at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. NOT COVERED: aave_v3_etherfi carry rows in this batch and this scenario's committed definition does not cover them, so they are absent from `covered_engines` entirely. That absence is by DEFINITION, never withholding. SHOCK REACH: PROJECTION, NO SPOT PASS: no ApplyScenario pass ran at all, so the after side IS the before side, nothing was applied and nothing was held flat. The declared borrow_apy shock at 1/1 was not applied to any mark; the projection block is the answer."
+    },
+    {
+      "scenario_id": "ethfi_minus_50",
+      "scenario_version": "v1",
+      "label": "ETHFI -50 percent",
+      "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+      "shocks": [
+        {
+          "axis": "asset_usd",
+          "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+          "factor_num": 50,
+          "factor_den": 100
+        }
+      ],
+      "shock_reach": {
+        "applied_shocks": [
+          {
+            "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+            "chain_id": 10,
+            "source": "priceproviderv2",
+            "factor_num": "50",
+            "factor_den": "100",
+            "before": "1250000",
+            "after": "625000",
+            "snapped": false,
+            "base_snapped": false,
+            "cap_bound": false
+          }
+        ],
+        "declared_shocks": 1,
+        "declared_shocks_at_identity": 0,
+        "held_flat_assets": [
+          {
+            "chain_id": 10,
+            "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663"
+          },
+          {
+            "chain_id": 10,
+            "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58"
+          }
+        ],
+        "held_flat_marks": 6,
+        "marks_base_snapped": 0,
+        "marks_cap_bound": 0,
+        "marks_held_by_arithmetic": 0,
+        "marks_held_by_declared_factor": 0,
+        "marks_held_by_transform": 0,
+        "marks_moved": 1,
+        "marks_snapped": 0,
+        "note": "EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (1 of 1). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures.",
+        "reach": "every_mark_moved"
+      },
+      "covered_engines": [
+        "debt_manager"
+      ],
+      "withheld_engines": [],
+      "unmeasurable_engines": [],
+      "engines": [
+        {
+          "accounts": 1406,
+          "after_collateral_at_risk_usd": "16768539245",
+          "after_eligible_accounts": 51,
+          "bad_debt_delta_usd": "1200000000",
+          "before_bad_debt_usd": "239603961",
+          "before_collateral_at_risk_usd": "16768539245",
+          "before_eligible_accounts": 49,
+          "before_eligible_debt_usd": "6949455788",
+          "eligible_accounts_delta": 2,
+          "eligible_debt_delta_usd": "9800000000",
+          "engine": "debt_manager",
+          "flipped_to_eligible": 2,
+          "hf_dropped_accounts": null,
+          "infinite_accounts": 0,
+          "market_realization": null,
+          "movement_excluded_accounts": 0,
+          "movement_rule": "eligibility_flipped_false_to_true",
+          "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 6-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is eligibility_flipped_false_to_true: `flipped_to_eligible` counts eligibility flips FALSE to TRUE only, so it is not `eligible_accounts_delta`, which is a NET and also subtracts any flip back to healthy — five accounts flipping in and five flipping out is a net of 0 and is not \"nothing happened\". `hf_dropped_accounts` is null here because the Debt Manager has no health-factor wad. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (1406 minus 0 = 1406), never `accounts`: The eligibility flip is testable for every account this run measured on both sides, so the only accounts excluded from it are before-side rows carrying no after-side state at all — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+          "projection": null,
+          "refused_in_batch_positions": 6,
+          "total_collateral_usd_after": "153171572777189",
+          "total_collateral_usd_before": "153171572777189",
+          "total_debt_usd_after": "27828808216758",
+          "total_debt_usd_before": "27828808216758",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 6
+        }
+      ],
+      "positions_answered": 1406,
+      "positions_withheld": 0,
+      "note": "IDENTITY: this result is scenario ethfi_minus_50 at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. NOT COVERED: aave_v3_etherfi carry rows in this batch and this scenario's committed definition does not cover them, so they are absent from `covered_engines` entirely. That absence is by DEFINITION, never withholding. SHOCK REACH: EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (1 of 1). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures."
+    }
+  ],
+  "scenario_config_version": "v1",
+  "served_at": "2026-08-08T20:22:50Z"
+}

@@ -1,0 +1,1275 @@
+{
+  "served_at": "2026-08-08T20:22:50Z",
+  "batch": {
+    "id": 18251,
+    "computed_at": "2026-08-08T20:22:08Z",
+    "age_seconds": 42,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 9964,
+    "refused_count": 6,
+    "refused_engines": [],
+    "flagged_count": 30,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25714690,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25714690,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 155323444,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-08-08T20:02:45Z",
+          "age_seconds": 1205,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "scenario_config_version": "v1",
+  "scenario_id": "eth_minus_30",
+  "scenario_version": "v1",
+  "label": "ETH -30 percent",
+  "description": "Factor shock on ETH/USD. Every ETH-linked collateral moves jointly because each one's USD price is composed from ETH/USD by construction; weETH additionally carries its redemption rate, held flat here.",
+  "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+  "shocks": [
+    {
+      "axis": "eth_usd",
+      "factor_num": 70,
+      "factor_den": 100
+    }
+  ],
+  "out_of_model": [
+    "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+    "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+    "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+    "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+    "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+    "Aave price caps are checked, not assumed: a down-shock leaves them slack, and any cap that did bind is reported per input"
+  ],
+  "applied_shocks": [
+    {
+      "asset": "0x4200000000000000000000000000000000000006",
+      "chain_id": 10,
+      "source": "priceproviderv2",
+      "factor_num": "70",
+      "factor_den": "100",
+      "before": "1000000000",
+      "after": "700000000",
+      "snapped": false,
+      "base_snapped": false,
+      "cap_bound": false
+    },
+    {
+      "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+      "chain_id": 10,
+      "source": "priceproviderv2",
+      "factor_num": "70",
+      "factor_den": "100",
+      "before": "4000000000",
+      "after": "2800000000",
+      "snapped": false,
+      "base_snapped": false,
+      "cap_bound": false
+    },
+    {
+      "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "chain_id": 1,
+      "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+      "factor_num": "70",
+      "factor_den": "100",
+      "before": "400000000000",
+      "after": "280000000000",
+      "snapped": false,
+      "base_snapped": false,
+      "cap_bound": false
+    }
+  ],
+  "held_flat": [
+    {
+      "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+      "chain_id": 10,
+      "source": "priceproviderv2",
+      "value": "1000000"
+    },
+    {
+      "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "chain_id": 1,
+      "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+      "value": "100000000"
+    },
+    {
+      "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+      "chain_id": 10,
+      "source": "priceproviderv2",
+      "value": "1250000"
+    }
+  ],
+  "engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "usd_decimals": 8,
+      "before": {
+        "accounts": 8552,
+        "eligible_accounts": 46,
+        "total_collateral_usd": "410000000000000",
+        "total_debt_usd": "190000000000000",
+        "eligible_debt_usd": "4600",
+        "collateral_at_risk_usd": "9100",
+        "bad_debt_usd": "0",
+        "hf_histogram": {
+          "comparator": "hf_wad",
+          "wad_scale": "1000000000000000000",
+          "buckets": [
+            {
+              "label": "< 0.90",
+              "lower_wad": null,
+              "upper_wad": "900000000000000000",
+              "count": 40
+            },
+            {
+              "label": "0.90 – 1.00",
+              "lower_wad": "900000000000000000",
+              "upper_wad": "1000000000000000000",
+              "count": 6
+            },
+            {
+              "label": "1.00 – 1.05",
+              "lower_wad": "1000000000000000000",
+              "upper_wad": "1050000000000000000",
+              "count": 27
+            },
+            {
+              "label": "1.05 – 1.10",
+              "lower_wad": "1050000000000000000",
+              "upper_wad": "1100000000000000000",
+              "count": 318
+            },
+            {
+              "label": "1.10 – 1.25",
+              "lower_wad": "1100000000000000000",
+              "upper_wad": "1250000000000000000",
+              "count": 1204
+            },
+            {
+              "label": "1.25 – 1.50",
+              "lower_wad": "1250000000000000000",
+              "upper_wad": "1500000000000000000",
+              "count": 2890
+            },
+            {
+              "label": "1.50 – 2.00",
+              "lower_wad": "1500000000000000000",
+              "upper_wad": "2000000000000000000",
+              "count": 4055
+            },
+            {
+              "label": ">= 2.00",
+              "lower_wad": "2000000000000000000",
+              "upper_wad": null,
+              "count": 12
+            }
+          ],
+          "infinite_count": 0,
+          "refused_count": 0,
+          "note": "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is the positions this run measured on NEITHER side — both are counted here rather than dropped, so the buckets plus these two account for the whole run. `hf_transitions` states that same population as its last lane and splits it by cause."
+        },
+        "collateral_by_asset": [
+          {
+            "asset": "0x0000000000000000000000000000000000000Bad",
+            "decimals": 18,
+            "amount": "5000000000000000000",
+            "value_usd": null,
+            "unpriced": true,
+            "note": "UNPRICED: the account holds this token and NO price witness describes it on this side, so its USD value is UNKNOWABLE — not zero. `amount` is exact; none of this holding is inside `total_collateral_usd`."
+          },
+          {
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+            "symbol": "weETH",
+            "decimals": 18,
+            "amount": "2000000000000000000",
+            "value_usd": "800000000000",
+            "unpriced": false,
+            "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
+          }
+        ]
+      },
+      "after": {
+        "accounts": 8552,
+        "eligible_accounts": 60,
+        "total_collateral_usd": "287000000000000",
+        "total_debt_usd": "190000000000000",
+        "eligible_debt_usd": "600000004600",
+        "collateral_at_risk_usd": "6370",
+        "bad_debt_usd": "66666666667",
+        "hf_histogram": {
+          "comparator": "hf_wad",
+          "wad_scale": "1000000000000000000",
+          "buckets": [
+            {
+              "label": "< 0.90",
+              "lower_wad": null,
+              "upper_wad": "900000000000000000",
+              "count": 46
+            },
+            {
+              "label": "0.90 – 1.00",
+              "lower_wad": "900000000000000000",
+              "upper_wad": "1000000000000000000",
+              "count": 14
+            },
+            {
+              "label": "1.00 – 1.05",
+              "lower_wad": "1000000000000000000",
+              "upper_wad": "1050000000000000000",
+              "count": 331
+            },
+            {
+              "label": "1.05 – 1.10",
+              "lower_wad": "1050000000000000000",
+              "upper_wad": "1100000000000000000",
+              "count": 1204
+            },
+            {
+              "label": "1.10 – 1.25",
+              "lower_wad": "1100000000000000000",
+              "upper_wad": "1250000000000000000",
+              "count": 2890
+            },
+            {
+              "label": "1.25 – 1.50",
+              "lower_wad": "1250000000000000000",
+              "upper_wad": "1500000000000000000",
+              "count": 4055
+            },
+            {
+              "label": "1.50 – 2.00",
+              "lower_wad": "1500000000000000000",
+              "upper_wad": "2000000000000000000",
+              "count": 12
+            },
+            {
+              "label": ">= 2.00",
+              "lower_wad": "2000000000000000000",
+              "upper_wad": null,
+              "count": 0
+            }
+          ],
+          "infinite_count": 0,
+          "refused_count": 0,
+          "note": "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is the positions this run measured on NEITHER side — both are counted here rather than dropped, so the buckets plus these two account for the whole run. `hf_transitions` states that same population as its last lane and splits it by cause."
+        },
+        "collateral_by_asset": [
+          {
+            "asset": "0x0000000000000000000000000000000000000Bad",
+            "decimals": 18,
+            "amount": "5000000000000000000",
+            "value_usd": null,
+            "unpriced": true,
+            "note": "UNPRICED: the account holds this token and NO price witness describes it on this side, so its USD value is UNKNOWABLE — not zero. `amount` is exact; none of this holding is inside `total_collateral_usd`."
+          },
+          {
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+            "symbol": "weETH",
+            "decimals": 18,
+            "amount": "2000000000000000000",
+            "value_usd": "560000000000",
+            "unpriced": false,
+            "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
+          }
+        ]
+      },
+      "hf_transitions": {
+        "comparator": "hf_wad",
+        "wad_scale": "1000000000000000000",
+        "lanes": [
+          {
+            "index": 0,
+            "kind": "bucket",
+            "label": "< 0.90",
+            "lower_wad": null,
+            "upper_wad": "900000000000000000"
+          },
+          {
+            "index": 1,
+            "kind": "bucket",
+            "label": "0.90 – 1.00",
+            "lower_wad": "900000000000000000",
+            "upper_wad": "1000000000000000000"
+          },
+          {
+            "index": 2,
+            "kind": "bucket",
+            "label": "1.00 – 1.05",
+            "lower_wad": "1000000000000000000",
+            "upper_wad": "1050000000000000000"
+          },
+          {
+            "index": 3,
+            "kind": "bucket",
+            "label": "1.05 – 1.10",
+            "lower_wad": "1050000000000000000",
+            "upper_wad": "1100000000000000000"
+          },
+          {
+            "index": 4,
+            "kind": "bucket",
+            "label": "1.10 – 1.25",
+            "lower_wad": "1100000000000000000",
+            "upper_wad": "1250000000000000000"
+          },
+          {
+            "index": 5,
+            "kind": "bucket",
+            "label": "1.25 – 1.50",
+            "lower_wad": "1250000000000000000",
+            "upper_wad": "1500000000000000000"
+          },
+          {
+            "index": 6,
+            "kind": "bucket",
+            "label": "1.50 – 2.00",
+            "lower_wad": "1500000000000000000",
+            "upper_wad": "2000000000000000000"
+          },
+          {
+            "index": 7,
+            "kind": "bucket",
+            "label": ">= 2.00",
+            "lower_wad": "2000000000000000000",
+            "upper_wad": null
+          },
+          {
+            "index": 8,
+            "kind": "infinite",
+            "label": "no debt (unbounded)",
+            "lower_wad": null,
+            "upper_wad": null
+          },
+          {
+            "index": 9,
+            "kind": "unmeasured",
+            "label": "not measured",
+            "lower_wad": null,
+            "upper_wad": null
+          }
+        ],
+        "outflows": [
+          {
+            "from": 0,
+            "cells": [
+              {
+                "to": 0,
+                "rows": 40,
+                "debt_before_usd": "888681010289",
+                "debt_after_usd": "888681010289"
+              }
+            ]
+          },
+          {
+            "from": 1,
+            "cells": [
+              {
+                "to": 0,
+                "rows": 6,
+                "debt_before_usd": "133302151543",
+                "debt_after_usd": "133302151543"
+              }
+            ]
+          },
+          {
+            "from": 2,
+            "cells": [
+              {
+                "to": 1,
+                "rows": 14,
+                "debt_before_usd": "311038353601",
+                "debt_after_usd": "311038353601"
+              },
+              {
+                "to": 2,
+                "rows": 13,
+                "debt_before_usd": "288821328344",
+                "debt_after_usd": "288821328344"
+              }
+            ]
+          },
+          {
+            "from": 3,
+            "cells": [
+              {
+                "to": 2,
+                "rows": 318,
+                "debt_before_usd": "7065014031805",
+                "debt_after_usd": "7065014031805"
+              }
+            ]
+          },
+          {
+            "from": 4,
+            "cells": [
+              {
+                "to": 3,
+                "rows": 1204,
+                "debt_before_usd": "26749298409728",
+                "debt_after_usd": "26749298409728"
+              }
+            ]
+          },
+          {
+            "from": 5,
+            "cells": [
+              {
+                "to": 4,
+                "rows": 2890,
+                "debt_before_usd": "64207202993451",
+                "debt_after_usd": "64207202993451"
+              }
+            ]
+          },
+          {
+            "from": 6,
+            "cells": [
+              {
+                "to": 5,
+                "rows": 4055,
+                "debt_before_usd": "90090037418153",
+                "debt_after_usd": "90090037418153"
+              }
+            ]
+          },
+          {
+            "from": 7,
+            "cells": [
+              {
+                "to": 6,
+                "rows": 12,
+                "debt_before_usd": "266604303086",
+                "debt_after_usd": "266604303086"
+              }
+            ]
+          },
+          {
+            "from": 8,
+            "cells": []
+          },
+          {
+            "from": 9,
+            "cells": []
+          }
+        ],
+        "from_rows": [
+          40,
+          6,
+          27,
+          318,
+          1204,
+          2890,
+          4055,
+          12,
+          0,
+          0
+        ],
+        "to_rows": [
+          46,
+          14,
+          331,
+          1204,
+          2890,
+          4055,
+          12,
+          0,
+          0,
+          0
+        ],
+        "total_rows": 8552,
+        "measured_rows": 8552,
+        "unmeasured_rows": 0,
+        "unmeasured_refused_in_batch_rows": 0,
+        "unmeasured_excluded_by_this_layer_rows": 0,
+        "held_rows": 53,
+        "lane_changed_rows": 8499,
+        "note": "ROWS ARE THE BEFORE LANE AND COLUMNS ARE THE AFTER LANE, over the POSITION ROWS of this engine in this run. Every count here counts rows, the same unit `coverage.batch_positions` uses, never distinct addresses; on this batch one row IS one account on this engine, and the server CHECKED that over every row in this matrix, measured and unmeasured alike, rather than assuming it. Lanes 0 to 7 are the SAME buckets, on the SAME comparator and the SAME edges, that the two `hf_histogram`s beside them serve. Lane 8 is rows with NO DEBT, unbounded and never a bucket, and IS `infinite_count`'s population. Lane 9 is rows this run measured on NEITHER side, and IS `refused_count`'s population. `from_rows` IS the before histogram and `to_rows` IS the after histogram, lane for lane: a weld, not a hope. A cell absent from `cells` holds ZERO rows. The dense `lanes`, `outflows`, `from_rows` and `to_rows` arrays are what make that omission complete. Lane 9's rows reached no arithmetic here: `unmeasured_refused_in_batch_rows` of them riskd refused (counted in `coverage.refused_in_batch`, and served per row with its refusal code by `/v1/positions` and `/v1/address/{addr}`), and `unmeasured_excluded_by_this_layer_rows` of them this service could not rebuild or verify (listed per row in `coverage.excluded`). Their persisted numbers still exist on those surfaces. THIS RUN measured none of them, which is why their cell's two debts are null and never \"0\". Debt is in THIS engine's own 8-decimal unit and is never summed with another engine's. The two sides are SEPARATE figures because Aave's debt is a PRICED sum a shock can move, while the Debt Manager's is USD-normalized and copied across the shock unchanged. A no-debt row's \"0\" is a knowable zero; a null is an unknowable. `lane_changed_rows` counts rows whose LANE changed. A move of any size INSIDE one lane is not counted and a move of one wei across an edge is, so it follows the histogram's edges rather than the scenario's magnitude. It is NOT `movers_total` (Aave ranks strict health-factor drops; the Debt Manager counts eligibility flips) and NOT `newly_eligible_accounts` (a signed net), and it is not a crossing count of any particular edge: derive that from the cells. Under this scenario no row can enter or leave lane 8 or lane 9, so every lane change here is between buckets. On the Debt Manager these lanes are the exact rational maxBorrowLT/borrowings, a DISCLOSURE and not the liquidation verdict: take eligibility from `newly_eligible_accounts` and `movers`. When `measured_rows` is 0 both `held_rows` and `lane_changed_rows` are NULL rather than 0, because a zero there would claim a measurement nobody made. `total_rows` is THIS ENGINE's whole book in this run. It is not `coverage.batch_positions`, which counts the whole batch including engines this scenario does not cover, and summing it across engines does not give `coverage.in_book`: a withheld engine's rebuildable rows are inside `coverage.in_book` with no `engines[]` entry at all, and this engine's unmeasured rows are inside `total_rows` and outside `coverage.in_book`. The two differences can cancel on a given book, so an equality seen once is not a law."
+      },
+      "newly_eligible_accounts": 14,
+      "eligible_debt_delta_usd": "600000000000",
+      "bad_debt_delta_usd": "66666666667",
+      "movers": [],
+      "movers_total": 14,
+      "movers_note": "the legacy market's movers are not carried on the demo wire; the count is the newly eligible accounts",
+      "market_realization": null,
+      "projection": null,
+      "note": "delta-only: after minus before over the positions in the run, in this engine's own 8-decimal unit."
+    },
+    {
+      "engine": "debt_manager",
+      "usd_decimals": 6,
+      "before": {
+        "accounts": 1406,
+        "eligible_accounts": 49,
+        "total_collateral_usd": "153171572777189",
+        "total_debt_usd": "27828808216758",
+        "eligible_debt_usd": "6949455788",
+        "collateral_at_risk_usd": "16768539245",
+        "bad_debt_usd": "239603961",
+        "hf_histogram": {
+          "comparator": "hf_num/hf_den",
+          "wad_scale": "1000000000000000000",
+          "buckets": [
+            {
+              "label": "< 0.90",
+              "lower_wad": null,
+              "upper_wad": "900000000000000000",
+              "count": 41
+            },
+            {
+              "label": "0.90 – 1.00",
+              "lower_wad": "900000000000000000",
+              "upper_wad": "1000000000000000000",
+              "count": 8
+            },
+            {
+              "label": "1.00 – 1.05",
+              "lower_wad": "1000000000000000000",
+              "upper_wad": "1050000000000000000",
+              "count": 14
+            },
+            {
+              "label": "1.05 – 1.10",
+              "lower_wad": "1050000000000000000",
+              "upper_wad": "1100000000000000000",
+              "count": 13
+            },
+            {
+              "label": "1.10 – 1.25",
+              "lower_wad": "1100000000000000000",
+              "upper_wad": "1250000000000000000",
+              "count": 73
+            },
+            {
+              "label": "1.25 – 1.50",
+              "lower_wad": "1250000000000000000",
+              "upper_wad": "1500000000000000000",
+              "count": 153
+            },
+            {
+              "label": "1.50 – 2.00",
+              "lower_wad": "1500000000000000000",
+              "upper_wad": "2000000000000000000",
+              "count": 300
+            },
+            {
+              "label": ">= 2.00",
+              "lower_wad": "2000000000000000000",
+              "upper_wad": null,
+              "count": 804
+            }
+          ],
+          "infinite_count": 0,
+          "refused_count": 6,
+          "note": "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is the positions this run measured on NEITHER side — both are counted here rather than dropped, so the buckets plus these two account for the whole run. `hf_transitions` states that same population as its last lane and splits it by cause."
+        },
+        "collateral_by_asset": [
+          {
+            "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+            "symbol": "USDC",
+            "decimals": 6,
+            "amount": "100000000",
+            "value_usd": "100000000",
+            "unpriced": false,
+            "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
+          },
+          {
+            "asset": "0x4200000000000000000000000000000000000006",
+            "symbol": "WETH",
+            "decimals": 18,
+            "amount": "2500000000000000000",
+            "value_usd": "2500000000",
+            "unpriced": false,
+            "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
+          },
+          {
+            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+            "symbol": "weETH",
+            "decimals": 18,
+            "amount": "1000000000000000000",
+            "value_usd": "4000000000",
+            "unpriced": false,
+            "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
+          }
+        ]
+      },
+      "after": {
+        "accounts": 1406,
+        "eligible_accounts": 167,
+        "total_collateral_usd": "107220100944032",
+        "total_debt_usd": "27828808216758",
+        "eligible_debt_usd": "1286949455788",
+        "collateral_at_risk_usd": "3217373639470",
+        "bad_debt_usd": "41020000000",
+        "hf_histogram": {
+          "comparator": "hf_num/hf_den",
+          "wad_scale": "1000000000000000000",
+          "buckets": [
+            {
+              "label": "< 0.90",
+              "lower_wad": null,
+              "upper_wad": "900000000000000000",
+              "count": 155
+            },
+            {
+              "label": "0.90 – 1.00",
+              "lower_wad": "900000000000000000",
+              "upper_wad": "1000000000000000000",
+              "count": 12
+            },
+            {
+              "label": "1.00 – 1.05",
+              "lower_wad": "1000000000000000000",
+              "upper_wad": "1050000000000000000",
+              "count": 135
+            },
+            {
+              "label": "1.05 – 1.10",
+              "lower_wad": "1050000000000000000",
+              "upper_wad": "1100000000000000000",
+              "count": 43
+            },
+            {
+              "label": "1.10 – 1.25",
+              "lower_wad": "1100000000000000000",
+              "upper_wad": "1250000000000000000",
+              "count": 129
+            },
+            {
+              "label": "1.25 – 1.50",
+              "lower_wad": "1250000000000000000",
+              "upper_wad": "1500000000000000000",
+              "count": 188
+            },
+            {
+              "label": "1.50 – 2.00",
+              "lower_wad": "1500000000000000000",
+              "upper_wad": "2000000000000000000",
+              "count": 320
+            },
+            {
+              "label": ">= 2.00",
+              "lower_wad": "2000000000000000000",
+              "upper_wad": null,
+              "count": 424
+            }
+          ],
+          "infinite_count": 0,
+          "refused_count": 6,
+          "note": "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is the positions this run measured on NEITHER side — both are counted here rather than dropped, so the buckets plus these two account for the whole run. `hf_transitions` states that same population as its last lane and splits it by cause."
+        },
+        "collateral_by_asset": [
+          {
+            "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+            "symbol": "USDC",
+            "decimals": 6,
+            "amount": "100000000",
+            "value_usd": "100000000",
+            "unpriced": false,
+            "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
+          },
+          {
+            "asset": "0x4200000000000000000000000000000000000006",
+            "symbol": "WETH",
+            "decimals": 18,
+            "amount": "2500000000000000000",
+            "value_usd": "1750000000",
+            "unpriced": false,
+            "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
+          },
+          {
+            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+            "symbol": "weETH",
+            "decimals": 18,
+            "amount": "1000000000000000000",
+            "value_usd": "2800000000",
+            "unpriced": false,
+            "note": "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
+          }
+        ]
+      },
+      "hf_transitions": {
+        "comparator": "hf_num/hf_den",
+        "wad_scale": "1000000000000000000",
+        "lanes": [
+          {
+            "index": 0,
+            "kind": "bucket",
+            "label": "< 0.90",
+            "lower_wad": null,
+            "upper_wad": "900000000000000000"
+          },
+          {
+            "index": 1,
+            "kind": "bucket",
+            "label": "0.90 – 1.00",
+            "lower_wad": "900000000000000000",
+            "upper_wad": "1000000000000000000"
+          },
+          {
+            "index": 2,
+            "kind": "bucket",
+            "label": "1.00 – 1.05",
+            "lower_wad": "1000000000000000000",
+            "upper_wad": "1050000000000000000"
+          },
+          {
+            "index": 3,
+            "kind": "bucket",
+            "label": "1.05 – 1.10",
+            "lower_wad": "1050000000000000000",
+            "upper_wad": "1100000000000000000"
+          },
+          {
+            "index": 4,
+            "kind": "bucket",
+            "label": "1.10 – 1.25",
+            "lower_wad": "1100000000000000000",
+            "upper_wad": "1250000000000000000"
+          },
+          {
+            "index": 5,
+            "kind": "bucket",
+            "label": "1.25 – 1.50",
+            "lower_wad": "1250000000000000000",
+            "upper_wad": "1500000000000000000"
+          },
+          {
+            "index": 6,
+            "kind": "bucket",
+            "label": "1.50 – 2.00",
+            "lower_wad": "1500000000000000000",
+            "upper_wad": "2000000000000000000"
+          },
+          {
+            "index": 7,
+            "kind": "bucket",
+            "label": ">= 2.00",
+            "lower_wad": "2000000000000000000",
+            "upper_wad": null
+          },
+          {
+            "index": 8,
+            "kind": "infinite",
+            "label": "no debt (unbounded)",
+            "lower_wad": null,
+            "upper_wad": null
+          },
+          {
+            "index": 9,
+            "kind": "unmeasured",
+            "label": "not measured",
+            "lower_wad": null,
+            "upper_wad": null
+          }
+        ],
+        "outflows": [
+          {
+            "from": 0,
+            "cells": [
+              {
+                "to": 0,
+                "rows": 41,
+                "debt_before_usd": "811508632209",
+                "debt_after_usd": "811508632209"
+              }
+            ]
+          },
+          {
+            "from": 1,
+            "cells": [
+              {
+                "to": 0,
+                "rows": 8,
+                "debt_before_usd": "158343147748",
+                "debt_after_usd": "158343147748"
+              }
+            ]
+          },
+          {
+            "from": 2,
+            "cells": [
+              {
+                "to": 0,
+                "rows": 14,
+                "debt_before_usd": "277100508559",
+                "debt_after_usd": "277100508559"
+              }
+            ]
+          },
+          {
+            "from": 3,
+            "cells": [
+              {
+                "to": 0,
+                "rows": 13,
+                "debt_before_usd": "257307615090",
+                "debt_after_usd": "257307615090"
+              }
+            ]
+          },
+          {
+            "from": 4,
+            "cells": [
+              {
+                "to": 0,
+                "rows": 73,
+                "debt_before_usd": "1444881223202",
+                "debt_after_usd": "1444881223202"
+              }
+            ]
+          },
+          {
+            "from": 5,
+            "cells": [
+              {
+                "to": 0,
+                "rows": 6,
+                "debt_before_usd": "118757360811",
+                "debt_after_usd": "118757360811"
+              },
+              {
+                "to": 1,
+                "rows": 12,
+                "debt_before_usd": "237514721622",
+                "debt_after_usd": "237514721622"
+              },
+              {
+                "to": 2,
+                "rows": 135,
+                "debt_before_usd": "2672040618252",
+                "debt_after_usd": "2672040618252"
+              }
+            ]
+          },
+          {
+            "from": 6,
+            "cells": [
+              {
+                "to": 3,
+                "rows": 43,
+                "debt_before_usd": "851094419146",
+                "debt_after_usd": "851094419146"
+              },
+              {
+                "to": 4,
+                "rows": 129,
+                "debt_before_usd": "2553283257440",
+                "debt_after_usd": "2553283257440"
+              },
+              {
+                "to": 5,
+                "rows": 128,
+                "debt_before_usd": "2533490363972",
+                "debt_after_usd": "2533490363972"
+              }
+            ]
+          },
+          {
+            "from": 7,
+            "cells": [
+              {
+                "to": 5,
+                "rows": 60,
+                "debt_before_usd": "1187573608112",
+                "debt_after_usd": "1187573608112"
+              },
+              {
+                "to": 6,
+                "rows": 320,
+                "debt_before_usd": "6333725909930",
+                "debt_after_usd": "6333725909930"
+              },
+              {
+                "to": 7,
+                "rows": 424,
+                "debt_before_usd": "8392186830665",
+                "debt_after_usd": "8392186830665"
+              }
+            ]
+          },
+          {
+            "from": 8,
+            "cells": []
+          },
+          {
+            "from": 9,
+            "cells": [
+              {
+                "to": 9,
+                "rows": 6,
+                "debt_before_usd": null,
+                "debt_after_usd": null
+              }
+            ]
+          }
+        ],
+        "from_rows": [
+          41,
+          8,
+          14,
+          13,
+          73,
+          153,
+          300,
+          804,
+          0,
+          6
+        ],
+        "to_rows": [
+          155,
+          12,
+          135,
+          43,
+          129,
+          188,
+          320,
+          424,
+          0,
+          6
+        ],
+        "total_rows": 1412,
+        "measured_rows": 1406,
+        "unmeasured_rows": 6,
+        "unmeasured_refused_in_batch_rows": 6,
+        "unmeasured_excluded_by_this_layer_rows": 0,
+        "held_rows": 465,
+        "lane_changed_rows": 941,
+        "note": "ROWS ARE THE BEFORE LANE AND COLUMNS ARE THE AFTER LANE, over the POSITION ROWS of this engine in this run. Every count here counts rows, the same unit `coverage.batch_positions` uses, never distinct addresses; on this batch one row IS one account on this engine, and the server CHECKED that over every row in this matrix, measured and unmeasured alike, rather than assuming it. Lanes 0 to 7 are the SAME buckets, on the SAME comparator and the SAME edges, that the two `hf_histogram`s beside them serve. Lane 8 is rows with NO DEBT, unbounded and never a bucket, and IS `infinite_count`'s population. Lane 9 is rows this run measured on NEITHER side, and IS `refused_count`'s population. `from_rows` IS the before histogram and `to_rows` IS the after histogram, lane for lane: a weld, not a hope. A cell absent from `cells` holds ZERO rows. The dense `lanes`, `outflows`, `from_rows` and `to_rows` arrays are what make that omission complete. Lane 9's rows reached no arithmetic here: `unmeasured_refused_in_batch_rows` of them riskd refused (counted in `coverage.refused_in_batch`, and served per row with its refusal code by `/v1/positions` and `/v1/address/{addr}`), and `unmeasured_excluded_by_this_layer_rows` of them this service could not rebuild or verify (listed per row in `coverage.excluded`). Their persisted numbers still exist on those surfaces. THIS RUN measured none of them, which is why their cell's two debts are null and never \"0\". Debt is in THIS engine's own 6-decimal unit and is never summed with another engine's. The two sides are SEPARATE figures because Aave's debt is a PRICED sum a shock can move, while the Debt Manager's is USD-normalized and copied across the shock unchanged. A no-debt row's \"0\" is a knowable zero; a null is an unknowable. `lane_changed_rows` counts rows whose LANE changed. A move of any size INSIDE one lane is not counted and a move of one wei across an edge is, so it follows the histogram's edges rather than the scenario's magnitude. It is NOT `movers_total` (Aave ranks strict health-factor drops; the Debt Manager counts eligibility flips) and NOT `newly_eligible_accounts` (a signed net), and it is not a crossing count of any particular edge: derive that from the cells. Under this scenario no row can enter or leave lane 8 or lane 9, so every lane change here is between buckets. On the Debt Manager these lanes are the exact rational maxBorrowLT/borrowings, a DISCLOSURE and not the liquidation verdict: take eligibility from `newly_eligible_accounts` and `movers`. When `measured_rows` is 0 both `held_rows` and `lane_changed_rows` are NULL rather than 0, because a zero there would claim a measurement nobody made. `total_rows` is THIS ENGINE's whole book in this run. It is not `coverage.batch_positions`, which counts the whole batch including engines this scenario does not cover, and summing it across engines does not give `coverage.in_book`: a withheld engine's rebuildable rows are inside `coverage.in_book` with no `engines[]` entry at all, and this engine's unmeasured rows are inside `total_rows` and outside `coverage.in_book`. The two differences can cancel on a given book, so an equality seen once is not a law."
+      },
+      "newly_eligible_accounts": 118,
+      "eligible_debt_delta_usd": "1280000000000",
+      "bad_debt_delta_usd": "40780396039",
+      "movers": [
+        {
+          "account": "0x3548318571caaab223cec83b1941a16e4bbc3937",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "12665424775",
+          "hf_before_den": "12621352543",
+          "hf_after_num": "88657973425",
+          "hf_after_den": "126213525430",
+          "became_eligible": true,
+          "debt_usd": "12621352543"
+        },
+        {
+          "account": "0x747749109dd8bbbef8e04280daf67df247329082",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "45223249974",
+          "hf_before_den": "45061282814",
+          "hf_after_num": "316562749818",
+          "hf_after_den": "450612828140",
+          "became_eligible": true,
+          "debt_usd": "45061282814"
+        },
+        {
+          "account": "0xffb843b619f2fc36f541b93eaf66873ce80f71e1",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "48680124202",
+          "hf_before_den": "48501009860",
+          "hf_after_num": "340760869414",
+          "hf_after_den": "485010098600",
+          "became_eligible": true,
+          "debt_usd": "48501009860"
+        },
+        {
+          "account": "0x0d630800b4fd02212bf9bf48201a366ef28fe81b",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "37379953949",
+          "hf_before_den": "37205183085",
+          "hf_after_num": "261659677643",
+          "hf_after_den": "372051830850",
+          "became_eligible": true,
+          "debt_usd": "37205183085"
+        },
+        {
+          "account": "0x581e4d4408de5f860b27fed63f6357e83477b147",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "30737814314",
+          "hf_before_den": "30581674093",
+          "hf_after_num": "215164700198",
+          "hf_after_den": "305816740930",
+          "became_eligible": true,
+          "debt_usd": "30581674093"
+        },
+        {
+          "account": "0x229fdfffedb4662ec5c861ec8137fc42029a0b9e",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "33869101488",
+          "hf_before_den": "33585985614",
+          "hf_after_num": "237083710416",
+          "hf_after_den": "335859856140",
+          "became_eligible": true,
+          "debt_usd": "33585985614"
+        },
+        {
+          "account": "0x50531bb03f8f2f02d71fcdf97cfc77aa10cc047d",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "17710649563",
+          "hf_before_den": "17559021134",
+          "hf_after_num": "123974546941",
+          "hf_after_den": "175590211340",
+          "became_eligible": true,
+          "debt_usd": "17559021134"
+        },
+        {
+          "account": "0x0060d8134ac9bff69f958fc81300be1bd34d7d84",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "19982749140",
+          "hf_before_den": "19801170640",
+          "hf_after_num": "139879243980",
+          "hf_after_den": "198011706400",
+          "became_eligible": true,
+          "debt_usd": "19801170640"
+        },
+        {
+          "account": "0x3184bbb65aa3e2f4ee770431d7b0e2235a37523e",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "13821910190",
+          "hf_before_den": "13598909222",
+          "hf_after_num": "96753371330",
+          "hf_after_den": "135989092220",
+          "became_eligible": true,
+          "debt_usd": "13598909222"
+        },
+        {
+          "account": "0x510903aa473aa5194203f2f6818a875aa673fb27",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "24229376702",
+          "hf_before_den": "23781790063",
+          "hf_after_num": "169605636914",
+          "hf_after_den": "237817900630",
+          "became_eligible": true,
+          "debt_usd": "23781790063"
+        },
+        {
+          "account": "0x3754007dda33592cb535cec7e9f504edc063655c",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "11042352206",
+          "hf_before_den": "10816959596",
+          "hf_after_num": "77296465442",
+          "hf_after_den": "108169595960",
+          "became_eligible": true,
+          "debt_usd": "10816959596"
+        },
+        {
+          "account": "0x0f5950e1a0cbc0ac1f25e138cf51d8f49a9f2de0",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "46137627741",
+          "hf_before_den": "44744008859",
+          "hf_after_num": "322963394187",
+          "hf_after_den": "447440088590",
+          "became_eligible": true,
+          "debt_usd": "44744008859"
+        },
+        {
+          "account": "0xbd3c20e2f41705dd63c2b42662f798b308d5eaf9",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "28998914039",
+          "hf_before_den": "27868257656",
+          "hf_after_num": "202992398273",
+          "hf_after_den": "278682576560",
+          "became_eligible": true,
+          "debt_usd": "27868257656"
+        },
+        {
+          "account": "0x3ba04b304b3a432d11a88f16600c9ba93bd25cc0",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "33253091704",
+          "hf_before_den": "31793123882",
+          "hf_after_num": "232771641928",
+          "hf_after_den": "317931238820",
+          "became_eligible": true,
+          "debt_usd": "31793123882"
+        },
+        {
+          "account": "0x968df9c36e6cff8d8a41c0714bfa8ef6d73f5b11",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "17917860688",
+          "hf_before_den": "16941578635",
+          "hf_after_num": "125425024816",
+          "hf_after_den": "169415786350",
+          "became_eligible": true,
+          "debt_usd": "16941578635"
+        },
+        {
+          "account": "0x705a549c473a17ef654b7b241277a055c9834084",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "56252427583",
+          "hf_before_den": "52949447649",
+          "hf_after_num": "393766993081",
+          "hf_after_den": "529494476490",
+          "became_eligible": true,
+          "debt_usd": "52949447649"
+        },
+        {
+          "account": "0x8df6e9e9639ac5a3969bd8144271cf75c5977f01",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "38655263905",
+          "hf_before_den": "36093176529",
+          "hf_after_num": "270586847335",
+          "hf_after_den": "360931765290",
+          "became_eligible": true,
+          "debt_usd": "36093176529"
+        },
+        {
+          "account": "0xd75c9edb18c97e5b907d149d0be76b6c67d720be",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "63193122612",
+          "hf_before_den": "58813560686",
+          "hf_after_num": "442351858284",
+          "hf_after_den": "588135606860",
+          "became_eligible": true,
+          "debt_usd": "58813560686"
+        },
+        {
+          "account": "0x7bb15b65bb77fa5e6423c61c447f52308da6ccf0",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "62237695535",
+          "hf_before_den": "57834243914",
+          "hf_after_num": "435663868745",
+          "hf_after_den": "578342439140",
+          "became_eligible": true,
+          "debt_usd": "57834243914"
+        },
+        {
+          "account": "0x4b26891c8debbe593b21183753347399386ad50e",
+          "engine": "debt_manager",
+          "hf_before_wad": null,
+          "hf_after_wad": null,
+          "hf_drop_wad": null,
+          "hf_before_num": "43869212070",
+          "hf_before_den": "40566215588",
+          "hf_after_num": "307084484490",
+          "hf_after_den": "405662155880",
+          "became_eligible": true,
+          "debt_usd": "40566215588"
+        }
+      ],
+      "movers_total": 118,
+      "movers_note": "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose Debt Manager eligibility FLIPPED false -> true under this scenario are movers, ranked here by the exact ratio AFTER the shock, nearest the cap first. The Debt Manager has no health-factor wad, so `hf_before_num/den` and `hf_after_num/den` are the EXACT rational maxBorrowLT/borrowings, a disclosure only. `movers_total` counts flips to eligible ONLY, so it is not `newly_eligible_accounts`, which is a NET count and also subtracts any flip back to healthy. `movers` carries the 20 nearest the cap; the other 98 are not on this page.",
+      "market_realization": null,
+      "projection": null,
+      "note": "delta-only: after minus before over the positions in the run, in this engine's own 6-decimal unit."
+    }
+  ],
+  "excluded_engines": [],
+  "coverage": {
+    "batch_positions": 9964,
+    "in_book": 9958,
+    "refused_in_batch": 6,
+    "excluded_by_this_layer": 0,
+    "excluded": [],
+    "withheld_engines": [],
+    "stress_coverage_is_full": true,
+    "note": "every position the batch carries is on the wire. `excluded` lists positions this layer could not rebuild into the pure library's input form — they are absent from the stress and waterfall arithmetic and are named here rather than dropped."
+  },
+  "notes": [
+    "aggregates are per engine in each engine's OWN unit and decimals; they are never summed across engines.",
+    "deltas are DELTA-ONLY: after minus before, the scenario's own contribution over the positions in the run.",
+    "eligibility, collateral-at-risk and bad-debt measures are the SAME arithmetic as /v1/book's unshocked waterfall point, evaluated on each side of the shock.",
+    "collateral_by_asset carries the contract example's rows and is not welded to the demo totals; the page does not read it"
+  ]
+}
