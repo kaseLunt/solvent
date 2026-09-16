@@ -130,4 +130,8 @@ test("horizonLabel: integer arithmetic only — hours under a day, whole days, a
   expect(horizonLabel(129_600)).not.toBe("2d");
   expect(horizonLabel(86_340)).toBe("23h");
   expect(horizonLabel(7_776_000)).toBe("90d");
+  // A nonzero horizon under a minute is never printed as a zero.
+  expect(horizonLabel(59)).toBe("<1m");
+  expect(horizonLabel(1)).toBe("<1m");
+  expect(horizonLabel(60)).toBe("1m");
 });

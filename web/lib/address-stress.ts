@@ -121,6 +121,7 @@ const DAY = 86_400;
  * a day ("3h"), minutes under an hour ("30m"). Truncation, so a horizon is never printed longer than it is.
  */
 export function horizonLabel(seconds: number): string {
+  if (seconds < MINUTE) return "<1m";
   if (seconds < HOUR) return `${String((seconds - (seconds % MINUTE)) / MINUTE)}m`;
   if (seconds < DAY) return `${String((seconds - (seconds % HOUR)) / HOUR)}h`;
   const days = (seconds - (seconds % DAY)) / DAY;

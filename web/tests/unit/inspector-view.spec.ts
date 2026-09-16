@@ -397,3 +397,20 @@ test("stressEmptyText: loading, error, withheld with its cause, no position, and
   expect(rows.stress).toEqual({ kind: "rows", rows: [] });
   expect(stressEmptyText(rows)).toBe("No scenarios.");
 });
+
+test("historyFinding: a lookup still loading or failed earns no history sentence — the history is not read until the lookup answers, so it is never a definitive negative", () => {
+  const history: AddressReading["history"] = { phase: "ready", value: lookup(HISTORY) };
+  const lookupLoading = deriveInspectorView(reading({ lookup: { phase: "loading" }, history }), TIER_FALLBACK);
+  expect(lookupLoading.historyOutcome).toBeNull();
+  expect(historyFinding(lookupLoading)).toBe("History waits on the lookup.");
+  const lookupFailed = deriveInspectorView(reading({ lookup: { phase: "error", message: "rate limited (429), retry after 30s" }, history }), TIER_FALLBACK);
+  expect(lookupFailed.state).toBe("unavailable");
+  expect(historyFinding(lookupFailed)).toBe("History not read — the lookup could not be completed.");
+  expect(historyFinding(lookupFailed)).not.toContain("No Cash history");
+  const contradiction = deriveInspectorView(
+    reading({ lookup: { phase: "ready", value: lookup({ ...ADDRESS_FOUND, positions: [] }) }, history }),
+    TIER_FALLBACK,
+  );
+  expect(contradiction.state).toBe("unavailable");
+  expect(historyFinding(contradiction)).toBe("History not read — the lookup could not be completed.");
+});

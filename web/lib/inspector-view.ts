@@ -301,6 +301,9 @@ const NEAR_LINE_NOTE = " · dashed line: 10% of cap";
 export function historyFinding(view: InspectorView): string {
   if (view.historyLoad.phase === "loading") return "Loading history…";
   if (view.historyLoad.phase === "error") return `History unavailable: ${view.historyLoad.message}`;
+  // The empty arms (invalid, loading, unavailable) never read the history, so no sentence about it is earned yet.
+  if (view.state === "loading") return "History waits on the lookup.";
+  if (view.state === "invalid" || view.state === "unavailable") return "History not read — the lookup could not be completed.";
   if (view.historyOutcome === "unknowable") return "The history is withheld this batch — it cannot be established, and that is never “no history”.";
   if (view.historyOutcome === "not-found") return "No history for this account in the covered window.";
   if (view.room === null) return "No Cash history for this account in the covered window.";
