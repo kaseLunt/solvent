@@ -1,0 +1,43 @@
+import Link from "next/link";
+import { KitTable, SectionHead, StatusPill, type KitRow } from "@/components/kit";
+import { truncateAddress } from "@/lib/format";
+import { moversCaption, type MoversTable as Table } from "@/lib/lab-movers";
+import styles from "./lab.module.css";
+
+const COLUMNS = [
+  { key: "account", header: "Account" },
+  { key: "before", header: "Room today", align: "right" as const },
+  { key: "after", header: "Room after", align: "right" as const },
+  { key: "debt", header: "Debt", align: "right" as const },
+  { key: "flips", header: "Becomes liquidatable?", align: "right" as const },
+];
+
+/** The wire's movers, one row each; rows open the Inspector; sub-$100 rows dim (plan R4, R5). */
+export function MoversTable({ table }: { table: Table }) {
+  const rows: KitRow[] = table.rows.map((m) => ({
+    key: m.account,
+    testId: `lab-movers-row-${m.account}`,
+    dim: m.tier === "small" || m.tier === "dust",
+    cells: {
+      account: (
+        <Link href={`/inspector/${m.account}`} className={styles.mono} title={m.account}>
+          {truncateAddress(m.account)}
+        </Link>
+      ),
+      before: m.roomBefore,
+      after: m.roomAfter,
+      debt: m.debtText,
+      flips: m.becomesLiquidatable === null ? <StatusPill tone="refused">Cannot say</StatusPill> : m.becomesLiquidatable ? <StatusPill tone="crit">Yes</StatusPill> : "No",
+    },
+  }));
+  return (
+    <section id="movers" data-testid="lab-movers">
+      <SectionHead title="Most affected accounts" qualifier="room today → after the shock · the wire's own ranking" />
+      <KitTable columns={COLUMNS} rows={rows} testId="lab-movers-table" emptyText="No account moved under this scenario." />
+      <p className={styles.dim} data-testid="lab-movers-caption" title={table.note}>
+        {moversCaption(table)}
+        {table.unreadable.length > 0 ? ` · unreadable: ${table.unreadable.join(", ")}` : ""}
+      </p>
+    </section>
+  );
+}

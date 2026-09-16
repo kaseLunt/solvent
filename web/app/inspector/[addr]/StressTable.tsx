@@ -78,7 +78,7 @@ export function StressTable({ view }: { view: InspectorView }) {
       <SectionHead
         title="Stress this address"
         qualifier="the committed scenarios, applied to this account · shocked figures are projections, not readings"
-        link={{ href: "/lab", label: "Open Scenarios →" }}
+        link={{ href: view.cash === null ? "/lab" : `/lab?address=${view.cash.account}`, label: "Open Scenarios →" }}
       />
       <KitTable testId="inspector-stress-table" columns={COLUMNS} rows={rows} emptyText={stressEmptyText(view)} />
       <p className={styles.dim}>Before and after are the engine’s own cap and debt under each shock; a rate step is a delta-only projection with prices held flat.</p>

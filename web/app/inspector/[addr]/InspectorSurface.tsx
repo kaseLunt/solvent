@@ -44,7 +44,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
   const kicker = view.kicker.endsWith(short) ? (
     <>
       {view.kicker.slice(0, -short.length)}
-      <span className={styles.kickAddr}>{short}</span>
+      <span className={kit.kickAddr}>{short}</span>
     </>
   ) : (
     view.kicker
@@ -56,7 +56,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
           testId="inspector-address"
           initial={reading.valid ? addr : ""}
           hint="any 0x address"
-          secondary={view.cash === null ? undefined : { href: "#stress", label: "Stress this address →" }}
+          secondary={view.cash === null ? undefined : { href: `/lab?address=${addr}`, label: "Stress this address →" }}
           onInspect={(address) => {
             rememberLookup(address);
             router.push(`/inspector/${address}`);

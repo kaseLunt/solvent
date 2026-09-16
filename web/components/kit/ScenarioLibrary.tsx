@@ -29,7 +29,8 @@ export interface ScenarioLibraryProps {
   onCheck: (id: string, on: boolean) => void;
   /** Rendered under the header in one-address mode: the AddressField. */
   addressSlot?: ReactNode;
-  run: { label: string; disabled: boolean; onRun: () => void };
+  /** Absent when the mode has its own action (one-address mode runs on Inspect). */
+  run?: { label: string; disabled: boolean; onRun: () => void };
   /** Null hides the button (address mode, or Compare not built yet). */
   compare: { label: string; disabled: boolean; onCompare: () => void } | null;
   emptyText: string;
@@ -131,28 +132,32 @@ export function ScenarioLibrary({
             </li>
           ))}
         </ul>
-        <div className={styles.libFoot}>
-          <button
-            type="button"
-            className={`${styles.btn} ${styles.btnPrimary}`}
-            disabled={run.disabled}
-            onClick={run.onRun}
-            data-testid="lab-run"
-          >
-            {run.label}
-          </button>
-          {compare !== null && (
-            <button
-              type="button"
-              className={`${styles.btn} ${styles.btnGhost}`}
-              disabled={compare.disabled}
-              onClick={compare.onCompare}
-              data-testid="lab-compare"
-            >
-              {compare.label}
-            </button>
-          )}
-        </div>
+        {(run !== undefined || compare !== null) && (
+          <div className={styles.libFoot}>
+            {run !== undefined && (
+              <button
+                type="button"
+                className={`${styles.btn} ${styles.btnPrimary}`}
+                disabled={run.disabled}
+                onClick={run.onRun}
+                data-testid="lab-run"
+              >
+                {run.label}
+              </button>
+            )}
+            {compare !== null && (
+              <button
+                type="button"
+                className={`${styles.btn} ${styles.btnGhost}`}
+                disabled={compare.disabled}
+                onClick={compare.onCompare}
+                data-testid="lab-compare"
+              >
+                {compare.label}
+              </button>
+            )}
+          </div>
+        )}
       </aside>
       {footnote !== undefined && <p className={styles.libNote}>{footnote}</p>}
     </>

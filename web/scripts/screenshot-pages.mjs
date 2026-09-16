@@ -3,7 +3,7 @@
 // with the approved mockups before a page lands.
 //
 // Usage (from web/, with a production server on :3111):
-//   node scripts/screenshot-pages.mjs <outDir> [overview|book|inspector ...]
+//   node scripts/screenshot-pages.mjs <outDir> [overview|book|inspector|lab ...]
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -18,7 +18,7 @@ mkdirSync(out, { recursive: true });
 const fx = (name) => import(pathToFileURL(path.resolve("tests/fixtures", name)).href);
 const demo = await fx("demo/index.ts");
 const proof = await fx("proof.ts");
-const PAGES = { overview: "/", book: "/book", inspector: `/inspector/${demo.DEMO_NEAR_ADDR}` };
+const PAGES = { overview: "/", book: "/book", inspector: `/inspector/${demo.DEMO_NEAR_ADDR}`, lab: "/lab?scenario=eth_minus_30", labBare: "/lab", labAddress: `/lab?address=${demo.DEMO_NEAR_ADDR}` };
 const wanted = pageArgs.length === 0 ? Object.keys(PAGES) : pageArgs;
 const CORS = { "access-control-allow-origin": "*" };
 const json = (route, body) =>
@@ -56,6 +56,10 @@ for (const theme of ["dark", "light"]) {
     await page.route("**/v1/address/*/history*", (r) => json(r, demo.DEMO_HISTORY_NEAR));
     await page.route("**/v1/address/*/stress*", (r) => json(r, demo.DEMO_STRESS_NEAR));
     await page.route("**/v1/address/*", (r) => json(r, demo.DEMO_ADDRESS_NEAR));
+    // The Scenarios routes: the listing, one run-book, the set run (Task 10's demo bodies).
+    await page.route("**/v1/scenarios/run-book-set", (r) => json(r, demo.DEMO_RUN_BOOK_SET));
+    await page.route("**/v1/scenarios/*/run-book", (r) => json(r, demo.DEMO_RUN_BOOK_ETH));
+    await page.route("**/v1/scenarios", (r) => json(r, demo.DEMO_SCENARIOS));
     await page.goto(`http://localhost:3111${url}`, { waitUntil: "networkidle" });
     await page.waitForTimeout(600);
     await page.screenshot({ path: path.join(out, `${name}-${theme}-fold.png`) });

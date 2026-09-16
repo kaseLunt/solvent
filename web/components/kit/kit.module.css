@@ -100,6 +100,8 @@
 .tbl td { padding: 9px 8px; border-bottom: 1px solid var(--chip-bg); font-size: var(--type-body); white-space: nowrap; color: var(--ink); font-variant-numeric: tabular-nums; }
 .tbl td.r, .tbl th.r { text-align: right; }
 .addr { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink); }
+/* An address inside a small-caps kicker keeps its own case. */
+.kickAddr { text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: var(--type-mono-sm); }
 .sub { color: var(--ink-3); font-size: var(--type-floor); }
 .tbl tr.dim td { color: var(--ink-3); }
 .pillStatus { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: var(--type-floor); font-weight: var(--w-medium); white-space: nowrap; }
@@ -157,6 +159,9 @@
 .libMode button { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
 .libMode .libModeOn { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .libAddress { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+/* The field fills the 300 px library column; the placeholder is the hint there. */
+.libAddress .searchIn { min-width: 0; flex: 1 1 100%; }
+.libAddress .searchHint { display: none; }
 .libList { list-style: none; margin: 0; padding: 0; }
 .libRow { padding: 11px 14px; border-bottom: 1px solid var(--chip-bg); display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; }
 .libRowOn { background: var(--chip-bg); }
