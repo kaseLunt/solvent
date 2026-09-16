@@ -1,5 +1,5 @@
 import { ChartCard, TrustChecklist } from "@/components/kit";
-import type { InspectorView } from "@/lib/inspector-view";
+import { historyHead, type InspectorView } from "@/lib/inspector-view";
 import { NEAR_LINE_TENTHS } from "@/lib/room-history";
 import styles from "../inspector.module.css";
 import { MeasuredSparkline } from "./MeasuredSparkline";
@@ -27,12 +27,11 @@ export function TrustCard({ view }: { view: InspectorView }) {
   const { trust, room } = view;
   const nearLine = Number(NEAR_LINE_TENTHS) / 10;
   const plotted = room?.values.filter((v): v is number => v !== null) ?? [];
-  const batches = room?.points.length ?? 0;
   return (
     <ChartCard title="Trust" testId="inspector-trust-card" link={{ href: "/proof", label: "Evidence →" }}>
       {trust === null ? <p className={styles.note}>{emptyWords(view.state)}</p> : <TrustChecklist items={trust} testId="inspector-trust" />}
       <p className={`${styles.note} ${styles.sparkHead}`}>
-        {room === null ? "History · no Cash history for this account" : `History · room % over the last ${String(batches)} batch${batches === 1 ? "" : "es"}`}
+        {historyHead(view)}
       </p>
       {room !== null && (
         <div className={styles.spark}>

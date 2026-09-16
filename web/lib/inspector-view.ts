@@ -320,6 +320,18 @@ export function historyFinding(view: InspectorView): string {
 }
 
 /** The stress table's words when it has no rows: the load phase, or the reading's own kind — a withheld book is never "no scenarios". */
+/** The Trust card's spark head: the same ladder as `historyFinding` in one short phrase — an unread or withheld history is never "no history". */
+export function historyHead(view: InspectorView): string {
+  if (view.historyLoad.phase === "loading") return "History · loading…";
+  if (view.historyLoad.phase === "error") return "History · unavailable";
+  if (view.state === "loading") return "History · waits on the lookup";
+  if (view.state === "invalid" || view.state === "unavailable") return "History · not read — the lookup could not be completed";
+  if (view.historyOutcome === "unknowable") return "History · withheld this batch";
+  if (view.room === null) return "History · no Cash history for this account";
+  const batches = view.room.points.length;
+  return `History · room % over the last ${String(batches)} batch${batches === 1 ? "" : "es"}`;
+}
+
 export function stressEmptyText(view: InspectorView): string {
   if (view.stressLoad.phase === "loading") return "Running the committed scenarios…";
   if (view.stressLoad.phase === "error") return `Stress unavailable: ${view.stressLoad.message}`;

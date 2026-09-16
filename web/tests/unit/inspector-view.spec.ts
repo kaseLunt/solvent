@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
-import { deriveInspectorView, historyFinding, stressEmptyText } from "../../lib/inspector-view";
+import { deriveInspectorView, historyFinding, historyHead, stressEmptyText } from "../../lib/inspector-view";
 import { ADDRESS_FOUND, ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, FOUND_ADDR, HISTORY } from "../fixtures/inspector";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 import { near } from "./helpers/cash-position";
@@ -413,4 +413,27 @@ test("historyFinding: a lookup still loading or failed earns no history sentence
   );
   expect(contradiction.state).toBe("unavailable");
   expect(historyFinding(contradiction)).toBe("History not read — the lookup could not be completed.");
+});
+
+test("historyHead: the Trust card's spark head follows the same ladder — loading, unavailable, a lookup not answered, withheld, no Cash history, then the batch count", () => {
+  const cash: AddressReading["lookup"] = { phase: "ready", value: found([nearWire()]) };
+  const ready = (value: Schemas["AddressHistoryResponse"]): AddressReading["history"] => ({ phase: "ready", value: lookup(value) });
+  const head = (overrides: Partial<AddressReading>) => historyHead(deriveInspectorView(reading(overrides), TIER_FALLBACK));
+  expect(head({ lookup: cash, history: { phase: "loading" } })).toBe("History · loading…");
+  expect(head({ lookup: cash, history: { phase: "error", message: "rate limited (429), retry after 30s" } })).toBe("History · unavailable");
+  expect(head({ lookup: { phase: "loading" }, history: ready(HISTORY) })).toBe("History · waits on the lookup");
+  expect(head({ lookup: { phase: "error", message: "rate limited (429), retry after 30s" }, history: ready(HISTORY) })).toBe(
+    "History · not read — the lookup could not be completed",
+  );
+  const withheld: Schemas["AddressHistoryResponse"] = {
+    ...HISTORY,
+    found: null,
+    lookup_complete: false,
+    engines: [],
+    withheld_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }],
+  };
+  expect(head({ lookup: cash, history: ready(withheld) })).toBe("History · withheld this batch");
+  expect(head({ lookup: cash, history: ready(withheld) })).not.toContain("no Cash history");
+  expect(head({ lookup: cash, history: ready(HISTORY) })).toBe("History · no Cash history for this account");
+  expect(head({ lookup: cash, history: ready(dmHistory(FOUND_ADDR, 2)) })).toBe("History · room % over the last 3 batches");
 });
