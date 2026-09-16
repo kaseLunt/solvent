@@ -127,7 +127,11 @@ export interface LiveAgeReading {
 export type ResumeRepair = () => Promise<boolean>;
 
 /** The reading a caller with no receipt at all gets. */
-const NO_READING: LiveAgeReading = { seconds: null, unresolved: false, refreshFailed: false };
+const NO_READING: LiveAgeReading = {
+  seconds: null,
+  unresolved: false,
+  refreshFailed: false,
+};
 
 /**
  * Every lifecycle event this hook listens to: the three that mean "this tab may
@@ -209,6 +213,8 @@ export function useAnchoredAgeSeconds(
   // each render must not re-anchor on its own identity — only on the wire's.
   const wireAgeSeconds = receipt?.ageSeconds ?? null;
   const receiptId = receipt?.receiptId ?? null;
+  const receivedAtMs = receipt?.receivedAtMs ?? null;
+  const receivedAtWallMs = receipt?.receivedAtWallMs ?? null;
   const [live, setLive] = useState<LiveAge | null>(null);
   // The blind-resume marker, carrying the receipt it happened over (Wave R6).
   const [blind, setBlind] = useState<BlindResume | null>(null);
@@ -230,7 +236,11 @@ export function useAnchoredAgeSeconds(
     if (wireAgeSeconds === null || receiptId === null) return;
 
     // Receipt: the wire number pinned to BOTH clocks, once.
-    const anchor = anchorWireAge(wireAgeSeconds);
+    const anchor = anchorWireAge(
+      wireAgeSeconds,
+      receivedAtMs ?? monotonicNowMs(),
+      receivedAtWallMs ?? wallNowMs(),
+    );
     // The nondecreasing floor, scoped to THIS receipt (see freshness.ts).
     let floorSeconds = wireAgeSeconds;
     // SEEDED FROM THE RECEIPT, not null: taking the anchor IS a reconcile, so
@@ -239,7 +249,10 @@ export function useAnchoredAgeSeconds(
     // exactly one request. An UNRECONCILED DEPARTURE is carried across —
     // arriving at a new number is not the same as proving the tab was awake.
     trackerRef.current = {
-      lastResume: { monotonicMs: anchor.receivedAtMs, wallMs: anchor.receivedAtWallMs },
+      lastResume: {
+        monotonicMs: anchor.receivedAtMs,
+        wallMs: anchor.receivedAtWallMs,
+      },
       hiddenSinceReconcile: trackerRef.current.hiddenSinceReconcile,
       // A RECEIPT IS NOT A PROVEN RESUME. Arriving at a new number says nothing
       // about whether this tab was awake for the interval before it, so the
@@ -249,7 +262,12 @@ export function useAnchoredAgeSeconds(
     };
 
     const reconcile = (): void => {
-      floorSeconds = anchoredAgeSeconds(anchor, monotonicNowMs(), wallNowMs(), floorSeconds);
+      floorSeconds = anchoredAgeSeconds(
+        anchor,
+        monotonicNowMs(),
+        wallNowMs(),
+        floorSeconds,
+      );
       setLive({ receiptId, wireAgeSeconds, seconds: floorSeconds });
     };
 
@@ -275,7 +293,9 @@ export function useAnchoredAgeSeconds(
     const markExhausted = (): void => {
       if (cancelled) return;
       setBlind((previous) =>
-        previous !== null && previous.receiptId === receiptId && !previous.exhausted
+        previous !== null &&
+        previous.receiptId === receiptId &&
+        !previous.exhausted
           ? { receiptId, exhausted: true }
           : previous,
       );
@@ -389,7 +409,7 @@ export function useAnchoredAgeSeconds(
         lifecycleTarget(type).removeEventListener(type, onLifecycleSignal);
       }
     };
-  }, [wireAgeSeconds, receiptId]);
+  }, [wireAgeSeconds, receiptId, receivedAtMs, receivedAtWallMs]);
 
   if (wireAgeSeconds === null || receiptId === null) return NO_READING;
   // THE DISCHARGE, as a derivation rather than a second piece of bookkeeping: a
@@ -400,7 +420,9 @@ export function useAnchoredAgeSeconds(
   // A committed reading from ANOTHER receipt is not this receipt's age — the
   // wire's own number stands until this receipt has been reconciled once.
   const seconds =
-    live === null || live.receiptId !== receiptId || live.wireAgeSeconds !== wireAgeSeconds
+    live === null ||
+    live.receiptId !== receiptId ||
+    live.wireAgeSeconds !== wireAgeSeconds
       ? wireAgeSeconds
       : live.seconds;
   return { seconds, unresolved, refreshFailed: unresolved && blind.exhausted };

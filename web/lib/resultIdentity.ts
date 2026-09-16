@@ -21,7 +21,7 @@
 // Pinned by tests/unit/result-identity.spec.ts; the render consequences by
 // tests/e2e/p1b-fixes.spec.ts (p1b-5).
 
-import { receiptIdentity, type AgeReceipt } from "./freshness";
+import { receiptIdentity, type AgeReceipt, type ReceivedAt } from "./freshness";
 
 /** The §5 identity of one async result, as the surfaces bind it. */
 export interface ResultIdentity {
@@ -57,7 +57,8 @@ export function identityLine(id: ResultIdentity): string {
       : id.scope === "book"
         ? "the book"
         : "the committed set";
-  const engines = id.engines.length > 0 ? id.engines.join(", ") : "none answered";
+  const engines =
+    id.engines.length > 0 ? id.engines.join(", ") : "none answered";
   return `results for ${subject} · batch #${String(id.batchId)} · config ${id.configVersion} · engines ${engines}`;
 }
 
@@ -88,7 +89,10 @@ export interface StressIdentitySource {
      * whose top-level address is honest can still smuggle another
      * account's state in a nested result.
      */
-    readonly results: readonly { readonly engine: string; readonly account: string }[];
+    readonly results: readonly {
+      readonly engine: string;
+      readonly account: string;
+    }[];
   }[];
 }
 
@@ -147,7 +151,10 @@ export function stressNestedAccountMismatch(
 }
 
 /** The §5 identity of one settled address-stress result. */
-export function stressResultIdentity(addr: string, response: StressIdentitySource): ResultIdentity {
+export function stressResultIdentity(
+  addr: string,
+  response: StressIdentitySource,
+): ResultIdentity {
   // ANSWERED engines: the DISTINCT engines present in the RESULTS, in wire
   // order. Never the scenario definitions' `engines` lists (a definition
   // names what the scenario models, not who answered for THIS address), and
@@ -177,6 +184,18 @@ export function stressResultIdentity(addr: string, response: StressIdentitySourc
  * re-anchor on a fresher response, which is exactly the defect the unit pin
  * on this function exists to kill (p1b-5-M2).
  */
-export function resultReceipt(id: ResultIdentity, ageSeconds: number): AgeReceipt {
-  return { ageSeconds, receiptId: receiptIdentity(id.servedAt, id.batchId) };
+export function resultReceipt(
+  id: ResultIdentity,
+  ageSeconds: number,
+  receivedAt?: ReceivedAt,
+): AgeReceipt {
+  const receiptId = receiptIdentity(id.servedAt, id.batchId);
+  return receivedAt === undefined
+    ? { ageSeconds, receiptId }
+    : {
+        ageSeconds,
+        receiptId,
+        receivedAtMs: receivedAt.monotonicMs,
+        receivedAtWallMs: receivedAt.wallMs,
+      };
 }

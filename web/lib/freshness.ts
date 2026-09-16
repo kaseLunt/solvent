@@ -213,6 +213,20 @@ export interface AgeReceipt {
    * different responses never share one; one response re-rendered always does.
    */
   readonly receiptId: string;
+  /**
+   * The two clocks at the moment this tab was handed the number, when that
+   * moment precedes the render that builds the receipt (a settled result
+   * re-selected later). Absent, the anchor is taken at first sight — right
+   * only when first sight IS the receipt.
+   */
+  readonly receivedAtMs?: number;
+  readonly receivedAtWallMs?: number;
+}
+
+/** The pair of clocks a tab read when a response settled; what a later receipt anchors on. */
+export interface ReceivedAt {
+  readonly monotonicMs: number;
+  readonly wallMs: number;
 }
 
 /**

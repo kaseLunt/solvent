@@ -21,7 +21,8 @@ export type EngineRefusal = Schemas["EngineRefusal"];
 
 export type RunRecord =
   | { readonly phase: "running"; readonly startedAt: number }
-  | { readonly phase: "settled"; readonly outcome: RunBookOutcome; readonly at: number };
+  // `at` is the wall clock and `atMonotonicMs` the monotonic clock at settle: the pair a later re-selection anchors the result's age on.
+  | { readonly phase: "settled"; readonly outcome: RunBookOutcome; readonly at: number; readonly atMonotonicMs: number };
 
 export type SetRecord =
   | { readonly phase: "running"; readonly ids: readonly string[]; readonly startedAt: number }

@@ -14,7 +14,8 @@ import { useAddressLookup } from "@/lib/address-lookup";
 import { isAddress, truncateAddress } from "@/lib/format";
 import { humanAge } from "@/lib/freshness";
 import { deriveInspectorView } from "@/lib/inspector-view";
-import { addressWorkspace } from "@/lib/lab-address";
+import { CASH } from "@/lib/inspector-position";
+import { addressWorkspace, rowOutcome } from "@/lib/lab-address";
 import { deepLinkDecision } from "@/lib/lab-deep-link";
 import { useLabReading } from "@/lib/lab-reading";
 import { deriveLabView, type LabChip } from "@/lib/lab-view";
@@ -88,10 +89,13 @@ export function LabSurface() {
     selectedId: view.selectedId,
   });
 
-  // The result's own age, anchored to its receipt; the chip ticks from the moment the run settled.
+  // The batch's own age (the wire's number) anchored at the clocks this tab settled the result on,
+  // so a re-selected older result does not restart its age at the moment of re-selection.
   const identity = book.identity;
   const age = useAnchoredAgeSeconds(
-    identity === null ? null : resultReceipt(identity, 0),
+    identity === null || book.run === null || book.receivedAt === null
+      ? null
+      : resultReceipt(identity, book.run.batch.age_seconds, book.receivedAt),
   );
 
   // Deep links are decided from the listing at render (the notice is derived, never stored) and dispatched once.
@@ -133,12 +137,15 @@ export function LabSurface() {
       reading.runSet(decision.runIds);
   }, [decision, reading, single]);
 
-  const computed: LabChip = {
-    label: "Computed",
-    value: `${humanAge(age.seconds ?? 0)} ago`,
-  };
+  // No number while the age is unknown: an unresolved reading is not an age, and null is no receipt.
+  const computed: LabChip | null =
+    age.seconds === null
+      ? null
+      : age.unresolved
+        ? { label: "Computed", value: "age unknown", tone: "warn" }
+        : { label: "Computed", value: `${humanAge(age.seconds)} ago` };
   const chips: LabChip[] =
-    identity === null
+    computed === null
       ? book.chips
       : [...book.chips.slice(0, 2), computed, ...book.chips.slice(2)];
   const running = book.state === "running";
@@ -168,13 +175,7 @@ export function LabSurface() {
     mode === "address"
       ? view.library.map((r) => ({
           ...r,
-          outcome: {
-            key: "not-run",
-            text: space.rows.some((x) => x.id === r.id)
-              ? "Applies to this address"
-              : "Not on this address",
-            tone: "dim",
-          },
+          outcome: rowOutcome(space.rows.find((x) => x.id === r.id)),
           checked: false,
         }))
       : view.library;
@@ -239,7 +240,9 @@ export function LabSurface() {
           emptyText={
             book.state === "listing-loading"
               ? "Loading the committed scenarios…"
-              : "No committed scenarios are listed."
+              : book.state === "listing-unavailable"
+                ? book.headline.emphasis
+                : "No committed scenarios are listed."
           }
           footnote={`Committed, versioned scenarios${view.configVersion === null ? "" : ` (config ${view.configVersion})`}. No sliders — every result is reproducible.`}
         />
@@ -289,7 +292,7 @@ export function LabSurface() {
               pending={running}
               testPrefix="lab-kpi"
             />
-            <TransitionCard reading={book.cash} />
+            <TransitionCard reading={book.cash} engine={CASH} />
             {cashResult !== null && <MoversTable table={cashResult.movers} />}
             {book.legacy !== null && <LegacyResult reading={book.legacy} />}
             <AssumptionsDrawer

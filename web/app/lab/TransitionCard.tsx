@@ -1,4 +1,5 @@
 import { ChartCard, Heatmap, type HeatCellView } from "@/components/kit";
+import { engineName } from "@/lib/inspector-headline";
 import { heatIntensity } from "@/lib/lab-geometry";
 import type { HeatmapView } from "@/lib/lab-transitions";
 import type { EngineReading } from "@/lib/lab-view";
@@ -30,15 +31,15 @@ export function finding(view: HeatmapView): string {
   return `${axes} ${moves}${unmeasured}`;
 }
 
-function words(reading: EngineReading | null): string {
+function words(reading: EngineReading | null, engine: string): string {
   if (reading === null) return "Run a scenario to see where accounts move.";
   switch (reading.kind) {
     case "result":
       return finding(reading.result.heat);
     case "withheld":
-      return "Withheld: the Cash book was not computed under this scenario.";
+      return `Withheld: ${engineName(engine)} was not computed under this scenario.`;
     case "not-covered":
-      return "This scenario does not model the Cash book.";
+      return `This scenario does not model ${engineName(engine)}.`;
     case "contradictory":
     case "unreadable":
       return "Not drawn: the result contradicts itself.";
@@ -48,10 +49,13 @@ function words(reading: EngineReading | null): string {
 /** Where accounts move (spec §5.4): the transition heatmap, or the state's own word. */
 export function TransitionCard({
   reading,
+  engine,
   testId = "lab-transitions",
   gridTestId = "lab-heatmap",
 }: {
   reading: EngineReading | null;
+  /** The engine this card reads — its refusal words name it. */
+  engine: string;
   testId?: string;
   gridTestId?: string;
 }) {
@@ -66,7 +70,9 @@ export function TransitionCard({
           ? undefined
           : { href: "#movers", label: "Most affected accounts →" }
       }
-      finding={<span data-testid={`${testId}-finding`}>{words(reading)}</span>}
+      finding={
+        <span data-testid={`${testId}-finding`}>{words(reading, engine)}</span>
+      }
     >
       {heat !== null ? (
         <Heatmap

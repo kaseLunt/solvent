@@ -11,7 +11,7 @@ import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, t
 function reading(overrides: Partial<LabReading>): LabReading {
   return { listing: { phase: "ready", value: SCENARIOS }, runs: new Map(), set: null, run: () => {}, runSet: () => {}, reloadListing: () => {}, ...overrides };
 }
-const settled = (id: string, outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): Map<string, RunRecord> => new Map([[id, { phase: "settled", outcome, at: 1 }]]);
+const settled = (id: string, outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): Map<string, RunRecord> => new Map([[id, { phase: "settled", outcome, at: 1, atMonotonicMs: 1 }]]);
 const ui = (selectedId: string | null = "eth_minus_30", checked: string[] = []) => ({ selectedId, checked: new Set(checked) });
 
 /** The demo's Cash engine: the plan's R16 figures on the plan's movement table. */

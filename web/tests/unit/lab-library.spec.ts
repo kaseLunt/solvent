@@ -6,7 +6,7 @@ import { cashEngineOf, cashRefusalOf, definitionSkew, libraryRows, outcomeLine, 
 import { SCENARIOS } from "../fixtures/lab-book";
 import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, transitionsOf } from "./helpers/run-book-engine";
 
-const settled = (outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): RunRecord => ({ phase: "settled", outcome, at: 1 });
+const settled = (outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): RunRecord => ({ phase: "settled", outcome, at: 1, atMonotonicMs: 1 });
 
 test("rows come from the listing verbatim, in wire order, engines as human names, selection and checks carried", () => {
   const rows = libraryRows(SCENARIOS, new Map(), "ethfi_minus_50", new Set(["eth_minus_30"]));
