@@ -9,34 +9,23 @@
 //   - no `Retry-After` is read or invented for the busy arm — nothing computes
 //     when a semaphore slot frees;
 //   - the shape rules are enforced LOCALLY, before a request is spent;
-//   - the SET-level membership gate runs before any row is classified;
-//   - a reach count is NEVER printed as a cause, and "K of K snapped" is
-//     unreachable: the cell composes the three `marks_held_by_*` figures;
-//   - a zero denominator draws no bar and divides nothing;
-//   - a movement count is never printed without its denominator.
+//   - each refusal's sentence on the Scenarios page (lib/lab-headline.ts's
+//     failure arms) states what the client established and claims no gauge it
+//     was not given.
+//
+// The old tornado's cell decisions (the set-level membership gate, the bar
+// lengths, the cause sentences) retired with that surface (2026-09-16, Plan 3):
+// a set result's rows are read by lib/lab-compare.ts, pinned in
+// tests/unit/lab-compare.spec.ts.
 
 import { expect, test } from "@playwright/test";
 
+import { failureHeadline } from "../../lib/lab-headline";
 import {
   classifySetRunRefusal,
   runBookSet,
   MAX_SET_RUN_SCENARIOS,
   type SetRunOutcome,
-} from "../../lib/runbookSet";
-import {
-  barLength,
-  freshnessClause,
-  heldCauseSentence,
-  movementSentence,
-  resultContradiction,
-  setContradiction,
-  tornadoCellState,
-} from "../../app/lab/tornadoCells";
-import { setRunFailureReason } from "../../app/lab/tornadoLines";
-import type {
-  RunBookSetResponse,
-  SetRunEngineSummary,
-  SetRunScenarioResult,
 } from "../../lib/runbookSet";
 
 const headers = (map: Record<string, string> = {}) => ({
@@ -101,12 +90,16 @@ test.describe("the set-run's refusal register dispatches on the CODE", () => {
     expect(outcome.inFlight).toBeNull();
     // The busy sentence states capacity UNKNOWN and claims no zero — the
     // "0 of 0"-shaped claim ("at most 0 … and 0 are running") is pinned out.
-    const reason = setRunFailureReason(outcome);
-    expect(reason).toContain("SERVICE BUSY (503 set_run_busy)");
-    expect(reason).toContain("no count is claimed");
-    expect(reason).not.toMatch(/at most 0 set-run/);
-    expect(reason).not.toMatch(/\b0 are running/);
-    expect(reason).not.toMatch(/\b0 of 0\b/);
+    const sentence = failureHeadline("busy", {
+      message: outcome.message,
+      inFlight: outcome.inFlight,
+      maxInFlight: outcome.maxInFlight,
+    });
+    expect(sentence.emphasis).toBe("The evaluator is busy.");
+    expect(sentence.tone).toBe("refused");
+    expect(sentence.dek).toContain("The service did not state its capacity.");
+    expect(sentence.dek).not.toMatch(/\b0 of 0\b/);
+    expect(sentence.dek).not.toMatch(/\b0 are running/);
     // ABSENT gauges are the same unknown, not a different zero.
     const absent = classifySetRunRefusal(503, headers(), '{"error":{"code":"set_run_busy","message":"m"}}');
     expect(absent.kind).toBe("busy");
@@ -201,13 +194,13 @@ test.describe("the shape rules are enforced locally, before a request is spent",
   });
 
   test("refused-locally carries its own register sentence, naming that nothing was sent", () => {
-    const reason = setRunFailureReason({
-      kind: "refused-locally",
+    const sentence = failureHeadline("refused-locally", {
       message: '"ETH_down" is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent',
     });
-    expect(reason).toContain("REFUSED LOCALLY, NOTHING SENT");
-    expect(reason).toContain("ETH_down");
-    expect(reason).toContain("No request left this page");
+    expect(sentence.emphasis).toBe("Nothing was sent.");
+    expect(sentence.tone).toBe("refused");
+    expect(sentence.dek).toContain("ETH_down");
+    expect(sentence.dek).toContain("nothing was sent");
   });
 
   test("an unreachable service is its own arm, never a failure about the book", async () => {
@@ -226,446 +219,5 @@ test.describe("the shape rules are enforced locally, before a request is spent",
       },
     });
     expect(sent).toBe('{"scenario_ids":["b_two","a_one"]}');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The cell decisions
-// ---------------------------------------------------------------------------
-
-const engine = (over: Partial<SetRunEngineSummary> = {}): SetRunEngineSummary => ({
-  engine: "debt_manager",
-  usd_decimals: 6,
-  movement_rule: "eligibility_flipped_false_to_true",
-  accounts: 4,
-  infinite_accounts: 0,
-  movement_excluded_accounts: 0,
-  refused_in_batch_positions: 0,
-  unrebuildable_positions: 0,
-  before_eligible_accounts: 1,
-  after_eligible_accounts: 1,
-  eligible_accounts_delta: 0,
-  flipped_to_eligible: 0,
-  hf_dropped_accounts: null,
-  before_eligible_debt_usd: "4200000000",
-  eligible_debt_delta_usd: "0",
-  before_bad_debt_usd: "0",
-  bad_debt_delta_usd: "0",
-  before_collateral_at_risk_usd: "0",
-  after_collateral_at_risk_usd: "0",
-  total_debt_usd_before: "4200000000",
-  total_debt_usd_after: "4200000000",
-  total_collateral_usd_before: "4000000000",
-  total_collateral_usd_after: "4000000000",
-  market_realization: null,
-  projection: null,
-  note: "",
-  ...over,
-});
-
-const result = (over: Partial<SetRunScenarioResult> = {}): SetRunScenarioResult => ({
-  scenario_id: "stable_depeg_0995_in_band",
-  scenario_version: "v1",
-  label: "in-band depeg",
-  path_assumption: "instantaneous mark at the shocked level",
-  shocks: [{ axis: "stable_usd", factor_num: 995, factor_den: 1000 }],
-  shock_reach: {
-    declared_shocks: 3,
-    declared_shocks_at_identity: 0,
-    reach: "no_mark_moved",
-    applied_shocks: [],
-    marks_moved: 0,
-    marks_held_by_declared_factor: 0,
-    marks_held_by_transform: 4,
-    marks_held_by_arithmetic: 0,
-    marks_snapped: 3,
-    marks_base_snapped: 1,
-    marks_cap_bound: 0,
-    held_flat_marks: 1,
-    held_flat_assets: [],
-    note: "",
-  },
-  covered_engines: ["debt_manager"],
-  withheld_engines: [],
-  unmeasurable_engines: [],
-  engines: [engine()],
-  positions_answered: 4,
-  positions_withheld: 0,
-  note: "",
-  ...over,
-});
-
-test.describe("the set-level gate runs first, over the whole body", () => {
-  const body = (over: Partial<RunBookSetResponse>): RunBookSetResponse =>
-    ({
-      requested_scenario_ids: ["a_one", "b_two"],
-      results: [result({ scenario_id: "a_one" }), result({ scenario_id: "b_two" })],
-      evaluation: { scenarios_evaluated: 2 },
-      ...over,
-    }) as unknown as RunBookSetResponse;
-  // The ids this page actually POSTed — r57 item 1: the gate's second input.
-  const DISPATCHED = ["a_one", "b_two"];
-
-  test("a coherent body passes", () => {
-    expect(setContradiction(body({}), DISPATCHED)).toBeNull();
-  });
-
-  test("an id answered twice, an id never answered, and a disagreeing count are each named", () => {
-    const twice = setContradiction(
-      body({ results: [result({ scenario_id: "a_one" }), result({ scenario_id: "a_one" })] }),
-      DISPATCHED,
-    );
-    expect(twice?.faults.join(" ")).toContain("more than one result");
-    expect(twice?.faults.join(" ")).toContain("b_two was requested and has no result");
-
-    const miscount = setContradiction(
-      body({ evaluation: { scenarios_evaluated: 3 } as RunBookSetResponse["evaluation"] }),
-      DISPATCHED,
-    );
-    expect(miscount?.faults.join(" ")).toContain("scenarios_evaluated is 3");
-  });
-
-  test("an answer nobody asked for is a fault too", () => {
-    const stray = setContradiction(
-      body({ results: [result({ scenario_id: "a_one" }), result({ scenario_id: "zzz" })] }),
-      DISPATCHED,
-    );
-    expect(stray?.faults.join(" ")).toContain("zzz was answered and was not requested");
-  });
-});
-
-test.describe("one result contradicting ITSELF refuses that result only", () => {
-  test("a partition hole, a repeat, and a zero-account numeric row are each named", () => {
-    expect(resultContradiction(result())).toEqual([]);
-    expect(
-      resultContradiction(result({ covered_engines: ["debt_manager", "aave_v3_etherfi"] })).join(" "),
-    ).toContain("not a partition");
-    expect(
-      resultContradiction(
-        result({ covered_engines: ["debt_manager"], withheld_engines: ["debt_manager"] }),
-      ).join(" "),
-    ).toContain("appears in 2 of the three engine arrays");
-    expect(resultContradiction(result({ engines: [engine({ accounts: 0 })] })).join(" ")).toContain(
-      "numeric row with zero accounts",
-    );
-  });
-});
-
-test.describe("the axis law's client half", () => {
-  // The listing row each result is judged against — r57 item 2 made the join
-  // mandatory: a result with NO listing row refuses as UNLISTED, so every
-  // reach-arm law below supplies the matching identity and engine set.
-  const listedFor = (r: SetRunScenarioResult) => ({
-    scenarioId: r.scenario_id,
-    version: r.scenario_version,
-    configVersion: "v1",
-  });
-
-  test("a shock that did not reach draws NO BAR and names the causes, never the flags", () => {
-    const cell = tornadoCellState(result(), "v1", listedFor(result()), ["debt_manager"]);
-    expect(cell.state).toBe("shock-did-not-reach");
-    if (cell.state !== "shock-did-not-reach") return;
-    // THE FORBIDDEN SENTENCE. "3 of 4 snapped" is false under a header claiming
-    // nothing moved, and "K of K snapped" is false on both committed examples.
-    expect(cell.sentence).not.toContain("snapped)");
-    expect(cell.sentence).not.toMatch(/\d+ of \d+ snapped/);
-    expect(cell.sentence).toContain("4 pinned by the stable snap, a snapped base or a bound cap");
-  });
-
-  test("the DECLARED HOLD gets its OWN sentence and never borrows the swallowed-move one", () => {
-    const census = result({
-      scenario_id: "dm_composition_census",
-      path_assumption: "no move is asserted",
-      shock_reach: {
-        ...result().shock_reach,
-        reach: "all_shocks_declared_at_identity",
-        declared_shocks: 8,
-        declared_shocks_at_identity: 8,
-        marks_held_by_transform: 0,
-        marks_held_by_declared_factor: 2,
-        marks_snapped: 0,
-        marks_base_snapped: 0,
-        applied_shocks: [{}, {}] as SetRunScenarioResult["shock_reach"]["applied_shocks"],
-      },
-    });
-    const cell = tornadoCellState(census, "v1", listedFor(census), ["debt_manager"]);
-    expect(cell.state).toBe("declared-hold");
-    if (cell.state !== "declared-hold") return;
-    expect(cell.sentence).toContain("BY DECISION rather than by accident");
-    expect(cell.sentence).toContain("no move is asserted");
-    expect(cell.sentence).toContain("The matrix is not empty");
-    expect(cell.sentence).not.toContain("came back at the value it started at");
-    expect(cell.sentence).not.toContain("snapped");
-  });
-
-  test("a projection draws no delta bar and points at its own block", () => {
-    const projection = result({
-      shock_reach: { ...result().shock_reach, reach: "projection_no_spot_pass" },
-    });
-    const cell = tornadoCellState(projection, "v1", listedFor(projection), ["debt_manager"]);
-    expect(cell.state).toBe("projection-no-spot-pass");
-  });
-
-  test("a reached scenario draws bars, and a partly-reached one draws them WITH the qualification", () => {
-    const moved = result({ shock_reach: { ...result().shock_reach, reach: "every_mark_moved" } });
-    const reached = tornadoCellState(moved, "v1", listedFor(moved), ["debt_manager"]);
-    expect(reached.state).toBe("bars");
-
-    const held = result({
-      shock_reach: {
-        ...result().shock_reach,
-        reach: "some_marks_held",
-        marks_moved: 1,
-        marks_held_by_transform: 1,
-        applied_shocks: [{}, {}] as SetRunScenarioResult["shock_reach"]["applied_shocks"],
-      },
-    });
-    const partly = tornadoCellState(held, "v1", listedFor(held), ["debt_manager"]);
-    expect(partly.state).toBe("partly-reached");
-    if (partly.state !== "partly-reached") return;
-    expect(partly.sentence).toContain("1 of 2 marks");
-    expect(partly.sentence).toContain("Of the held marks:");
-  });
-
-  test("a result with no answerable engine is an ABSENCE, not a zero bar", () => {
-    const withheld = result({
-      covered_engines: ["debt_manager"],
-      withheld_engines: ["debt_manager"],
-      engines: [],
-      shock_reach: { ...result().shock_reach, reach: "every_mark_moved" },
-    });
-    const cell = tornadoCellState(withheld, "v1", listedFor(withheld), ["debt_manager"]);
-    expect(cell.state).toBe("no-answerable-engine");
-    if (cell.state !== "no-answerable-engine") return;
-    expect(cell.sentence).toContain("an absence, never a zero");
-  });
-
-  test("a definition that moved under a stable id refuses the row rather than reconciling it", () => {
-    const cell = tornadoCellState(
-      result(),
-      "v1",
-      {
-        scenarioId: "stable_depeg_0995_in_band",
-        version: "v2",
-        configVersion: "v1",
-      },
-      ["debt_manager"],
-    );
-    expect(cell.state).toBe("definition-changed");
-  });
-
-  test("a zero denominator draws no bar and divides nothing", () => {
-    const zero = barLength(engine({ total_debt_usd_before: "0" }));
-    expect(zero.drawn).toBe(false);
-    if (zero.drawn) return;
-    expect(zero.sentence).toContain("no debt on the before side");
-
-    const drawn = barLength(engine({ eligible_debt_delta_usd: "2100000000" }));
-    expect(drawn.drawn).toBe(true);
-    if (!drawn.drawn) return;
-    expect(drawn.ratio).toBeCloseTo(0.5, 12);
-  });
-
-  test("the sanctioned ratio is against the BEFORE side, so a moved after side cannot change it", () => {
-    const a = barLength(engine({ eligible_debt_delta_usd: "2100000000", total_debt_usd_after: "1" }));
-    const b = barLength(engine({ eligible_debt_delta_usd: "2100000000", total_debt_usd_after: "999" }));
-    expect(a).toEqual(b);
-  });
-
-  test("a movement count is never printed without its denominator", () => {
-    expect(
-      movementSentence(
-        engine({
-          engine: "aave_v3_etherfi",
-          usd_decimals: 8,
-          movement_rule: "hf_strictly_dropped",
-          accounts: 46,
-          infinite_accounts: 44,
-          movement_excluded_accounts: 44,
-          hf_dropped_accounts: 0,
-          flipped_to_eligible: null,
-        }),
-      ),
-    ).toBe(
-      "0 of 2 health factors strictly dropped. 44 of the 46 measured accounts could not be tested for movement at all " +
-        "and are outside that denominator.",
-    );
-    expect(movementSentence(engine())).toBe("0 of 4 accounts flipped into eligibility.");
-  });
-
-  test("the held-cause sentence prints only the nonzero terms", () => {
-    expect(heldCauseSentence(result())).toBe(
-      "Of the held marks: 4 pinned by the stable snap, a snapped base or a bound cap.",
-    );
-    expect(
-      heldCauseSentence(
-        result({
-          shock_reach: {
-            ...result().shock_reach,
-            marks_held_by_transform: 0,
-            marks_held_by_declared_factor: 0,
-            marks_held_by_arithmetic: 0,
-          },
-        }),
-      ),
-    ).toBe("No mark was held.");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// p1b-3 (closes Codex r3 finding 3) — the tornado classifies BEFORE it draws.
-// `barLength` used bare `BigInt`: `""` coerced to 0n (an empty denominator
-// wore the no-denominator sentence — "carries no debt on the before side", a
-// measurement claim off a value nobody could read — and an empty delta wore
-// the measured-zero costume), and `"-"` threw a SyntaxError the route
-// boundary ate. The composition: `tornadoCellState` refuses a malformed row
-// FIRST (after the identity/coverage gates, before any reach arm), and
-// `barLength` itself reads only through `wireBigInt` — its null arm is a
-// typed MALFORMED refusal, never a coercion, never a throw, and never the
-// no-denominator sentence.
-// ---------------------------------------------------------------------------
-
-test.describe("p1b-3 — barLength asserts the wire contract and never coerces", () => {
-  test("an empty denominator is MALFORMED, never the no-denominator measurement claim", () => {
-    // THE NO-COERCION PIN (mutation target: barLength reverted to bare
-    // BigInt): BigInt("") is 0n, which resurrects the "no debt on the before
-    // side" sentence — a claim about the book from an unreadable value.
-    const bar = barLength(engine({ total_debt_usd_before: "" }));
-    expect(bar).toEqual({
-      drawn: false,
-      reason: "malformed",
-      fields: ["total_debt_usd_before"],
-      sentence: expect.stringContaining("outside the wire Decimal contract") as unknown as string,
-    });
-    if (bar.drawn || bar.reason !== "malformed") return;
-    expect(bar.sentence).not.toContain("no debt on the before side");
-    expect(bar.sentence).toContain("Unreadable is not zero");
-  });
-
-  test("a dash delta refuses by name instead of throwing, and a radix prefix never reads as 16", () => {
-    const dash = barLength(engine({ eligible_debt_delta_usd: "-" }));
-    expect(dash.drawn).toBe(false);
-    if (dash.drawn || dash.reason !== "malformed") throw new Error("expected the malformed arm");
-    expect(dash.fields).toEqual(["eligible_debt_delta_usd"]);
-
-    const radix = barLength(engine({ eligible_debt_delta_usd: "0x10" }));
-    expect(radix.drawn).toBe(false);
-    if (radix.drawn || radix.reason !== "malformed") throw new Error("expected the malformed arm");
-    expect(radix.fields).toEqual(["eligible_debt_delta_usd"]);
-  });
-
-  test("both fields malformed are named together, in wire read order", () => {
-    const bar = barLength(engine({ eligible_debt_delta_usd: " 1", total_debt_usd_before: "1.0" }));
-    if (bar.drawn || bar.reason !== "malformed") throw new Error("expected the malformed arm");
-    expect(bar.fields).toEqual(["eligible_debt_delta_usd", "total_debt_usd_before"]);
-  });
-
-  test("a contract-legal zero denominator KEEPS the existing no-denominator refusal", () => {
-    // The measured-zero denominator is a true fact about the book and its
-    // sentence stays; only the unreadable one stops wearing it.
-    const zero = barLength(engine({ total_debt_usd_before: "0" }));
-    expect(zero.drawn).toBe(false);
-    if (zero.drawn) return;
-    expect(zero.reason).toBe("no-denominator");
-    expect(zero.sentence).toContain("no debt on the before side");
-  });
-});
-
-test.describe("p1b-3 — tornadoCellState classifies the row before any reach arm draws it", () => {
-  const listedFor = (r: SetRunScenarioResult) => ({
-    scenarioId: r.scenario_id,
-    version: r.scenario_version,
-    configVersion: "v1",
-  });
-
-  test("a malformed engine Decimal refuses the ROW, fields named per engine index", () => {
-    const moved = result({
-      shock_reach: { ...result().shock_reach, reach: "every_mark_moved" },
-      engines: [engine({ total_debt_usd_before: "" })],
-    });
-    expect(tornadoCellState(moved, "v1", listedFor(moved), ["debt_manager"])).toEqual({
-      state: "malformed",
-      fields: ["engines[0].total_debt_usd_before"],
-    });
-  });
-
-  test("the arm sits BEFORE the reach switch: a malformed partly-reached row never draws its qualified bars", () => {
-    const held = result({
-      shock_reach: {
-        ...result().shock_reach,
-        reach: "some_marks_held",
-        marks_moved: 1,
-        applied_shocks: [{}, {}] as SetRunScenarioResult["shock_reach"]["applied_shocks"],
-      },
-      engines: [engine({ eligible_debt_delta_usd: "0.5" })],
-    });
-    const cell = tornadoCellState(held, "v1", listedFor(held), ["debt_manager"]);
-    expect(cell.state).toBe("malformed");
-    if (cell.state !== "malformed") return;
-    expect(cell.fields).toEqual(["engines[0].eligible_debt_delta_usd"]);
-  });
-
-  test("the arm sits AFTER the identity gates: a definition that moved wins over a malformed number", () => {
-    // A malformed row is still identity-bound: identity is judged before any
-    // number is read, so the DEFINITION CHANGED refusal keeps its precedence.
-    const moved = result({
-      shock_reach: { ...result().shock_reach, reach: "every_mark_moved" },
-      engines: [engine({ total_debt_usd_before: "" })],
-    });
-    const cell = tornadoCellState(
-      moved,
-      "v1",
-      { scenarioId: moved.scenario_id, version: "v2", configVersion: "v1" },
-      ["debt_manager"],
-    );
-    expect(cell.state).toBe("definition-changed");
-  });
-
-  test("a second engine's malformed block field is named beside the first engine's clean row", () => {
-    const moved = result({
-      covered_engines: ["aave_v3_etherfi", "debt_manager"],
-      shock_reach: { ...result().shock_reach, reach: "every_mark_moved" },
-      engines: [
-        engine({ engine: "aave_v3_etherfi", usd_decimals: 8, movement_rule: "hf_strictly_dropped", hf_dropped_accounts: 0, flipped_to_eligible: null }),
-        engine({
-          market_realization: {
-            hfs_unchanged: true,
-            execution_shortfall_usd: "1e5",
-            bad_debt_at_liquidation_usd: "0",
-            usd_decimals: 6,
-            seizure_model: "pro-rata-over-counted-collateral",
-            note: "",
-          },
-        }),
-      ],
-    });
-    const cell = tornadoCellState(moved, "v1", listedFor(moved), [
-      "aave_v3_etherfi",
-      "debt_manager",
-    ]);
-    expect(cell).toEqual({
-      state: "malformed",
-      fields: ["engines[1].market_realization.execution_shortfall_usd"],
-    });
-  });
-});
-
-test.describe("the header states the freshness arm in force, once", () => {
-  const withFreshness = (
-    freshness: RunBookSetResponse["evaluation"]["freshness"],
-    newest: number | null,
-  ): RunBookSetResponse =>
-    ({
-      batch: { id: 7 },
-      evaluation: { freshness, newest_servable_batch_id: newest },
-    }) as unknown as RunBookSetResponse;
-
-  test("each arm gets its own clause, and OLDER is never described as a materialization", () => {
-    expect(freshnessClause(withFreshness("still_newest", 7))).toBe("batch 7");
-    expect(freshnessClause(withFreshness("superseded", 8))).toContain("has since materialized");
-    const older = freshnessClause(withFreshness("newest_is_older", 6));
-    expect(older).toContain("OLDER");
-    expect(older).not.toContain("materialized");
-    expect(freshnessClause(withFreshness("none_servable", null))).toContain("a re-run would be refused");
   });
 });

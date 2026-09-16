@@ -1,9 +1,9 @@
 // THE SHARED WIRE GUARD (p1b-1) — Track B's validation primitives, one law
 // for every classifier and refusal arm on the web surface.
 //
-// Extracted from `app/lab/matrixCells.ts`, where p0-8 first pinned them as
-// module-private helpers. Track B's classifiers (engine, set-run, factor
-// price) all judge the same wire contract, so the primitives live here once.
+// Once the old Lab's module-private matrix helpers, now the one home: the
+// classifiers (engine, set-run, factor price) all judge the same wire
+// contract, so the primitives live here once.
 //
 // THE DEFECT CLASS THIS MODULE KILLS: `BigInt("")` and `BigInt(" ")` silently
 // coerce to `0n`, and `BigInt("0x10")` to `16n` — all outside the wire

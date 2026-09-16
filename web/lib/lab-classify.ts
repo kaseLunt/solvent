@@ -296,10 +296,10 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
 
 /**
  * CLASSIFY ONE ENGINE ROW, in wire read order. Empty list = renderable; a
- * non-empty list is the p0-8 malformed register's content. `tornadoCellState`
- * composes this per answered engine and names each failure
- * `engines[i].<field>` — one law, one function, so the row state, the header
- * clause and the ledger register all refuse on the SAME classification.
+ * non-empty list is the malformed register's content. `compareRows` in
+ * lab-compare composes this per answered engine and names each failure
+ * `engines[i].<field>` — one law, one function, so every surface that reads
+ * a set result refuses on the SAME classification.
  */
 export function classifySetRunEngine(engine: SetRunEngineSummary): { malformedFields: string[] } {
   const e = engine as unknown as Record<string, unknown>;

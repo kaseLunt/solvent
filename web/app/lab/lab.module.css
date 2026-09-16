@@ -1,16 +1,17 @@
 /* Scenarios (spec §5.4): the 300px library beside one workspace; stacks under 900px. Page-local rules only. */
 .page { display: grid; grid-template-columns: 300px 1fr; gap: 20px; align-items: start; }
 .libCol { min-width: 0; }
-.workspace { min-width: 0; display: grid; gap: 12px; align-content: start; }
+/* One explicit column that can shrink: an implicit `auto` column would size to the tiles' max-content and overrun a narrow viewport. */
+.workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
 .notice { margin: 0; color: var(--warn-text); font-size: var(--type-small); }
 .banner { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 14px; border: 1px dashed var(--warn); border-radius: 8px; color: var(--ink); font-size: var(--type-body); }
 .dim { color: var(--ink-3); font-size: var(--type-small); margin: 6px 0 0; }
 .mono { font-family: var(--mono); font-size: var(--type-mono); color: var(--ink); text-decoration: none; }
 .legacy { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--panel); }
 .legacy > summary { cursor: pointer; font-size: var(--type-body); font-weight: var(--w-medium); color: var(--ink); }
-.legacyBody { display: grid; gap: 12px; margin-top: 12px; }
-.tilesPair { display: grid; gap: 12px; }
-.method { display: grid; gap: 8px; font-size: var(--type-body); color: var(--ink); }
+.legacyBody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+.tilesPair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.method { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; font-size: var(--type-body); color: var(--ink); }
 .method h3 { margin: 8px 0 0; font-size: var(--type-card); }
 .method code { font-family: var(--mono); font-size: var(--type-mono-sm); }
 .method ul { margin: 0; padding-left: 18px; }

@@ -13,7 +13,8 @@ const SURFACES = [
   { path: "/", label: "Overview", h1: /70,000 people borrow against crypto/ },
   { path: "/book", label: "Book", h1: /liquidatable|could not be computed|could not be loaded/ },
   { path: "/inspector", label: "Inspector", h1: "Is this address at risk?" },
-  { path: "/lab", label: "Scenarios", h1: "Scenario Lab" },
+  // With no API the listing cannot be fetched, and the Scenarios page says so as its H1.
+  { path: "/lab", label: "Scenarios", h1: "The committed scenarios could not be listed." },
   { path: "/observatory", label: "History", h1: "Observatory" },
   { path: "/feed", label: "Activity", h1: "Feed" },
   { path: "/proof", label: "Verification", h1: "Proof" },

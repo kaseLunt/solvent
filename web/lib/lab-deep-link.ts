@@ -4,6 +4,7 @@
 
 import { MAX_SET_RUN_SCENARIOS } from "./runbookSet";
 
+/** What a /lab URL's two scenario params, read together, ask this page to do. */
 export type DeepLinkDecision =
   /** Neither param present: nothing deep-linked. */
   | { kind: "none" }
@@ -32,8 +33,8 @@ export type DeepLinkDecision =
        */
       notice: string | null;
       /**
-       * R58 item 6 — the same disclosure in DISPATCH-TIME PAST TENSE, the one
-       * that travels into the run's stored dispatch record. A settled surface
+       * The same disclosure in dispatch-time past tense, the one that travels
+       * into the run's stored dispatch record. A settled surface
        * describes what the dispatch omitted, and a listing refresh that later
        * publishes a filtered id must not flip that record into a false
        * present-tense statement about the current deployment.
@@ -117,8 +118,8 @@ export function deepLinkDecision(
   if (wildcardClause !== null) clauses.push(wildcardClause);
   if (overCapClause !== null) clauses.push(overCapClause);
 
-  // R58 item 6 — the DISPATCH-TIME account of the same filtering, past tense
-  // throughout: it describes the request that ran, never the listing on screen.
+  // The dispatch-time account of the same filtering, past tense throughout: it
+  // describes the request that ran, never the listing on screen.
   const dispatchClauses: string[] = [];
   if (filteredIds.length > 0) {
     dispatchClauses.push(

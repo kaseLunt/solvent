@@ -89,7 +89,7 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   await expect(page.getByTestId("inspector-trust-reconcile")).toContainText("29/29 Cash rows exact");
   await expect(page.getByTestId("inspector-room-spark").locator("svg")).toBeVisible();
   await expect(page.getByTestId("inspector-legacy")).toHaveCount(0);
-  await expect(page.getByTestId("inspector-address-secondary")).toHaveAttribute("href", "#stress");
+  await expect(page.getByTestId("inspector-address-secondary")).toHaveAttribute("href", `/lab?address=${DEMO_NEAR_ADDR}`);
 });
 
 test("liquidatable and healthy — the other two spec templates, verbatim", async ({ page }) => {

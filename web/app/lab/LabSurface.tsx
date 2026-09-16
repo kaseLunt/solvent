@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   AddressField,
   ScenarioLibrary,
@@ -53,9 +53,17 @@ function labUrl(params: URLSearchParams): string {
   return query === "" ? "/lab" : `/lab?${query}`;
 }
 
+/**
+ * The URL is this page's own state, written through the history API, which the
+ * app router folds into `useSearchParams`. A router navigation onto the same
+ * static route with other search params does not write the URL in production.
+ */
+function replaceUrl(url: string): void {
+  window.history.replaceState(null, "", url);
+}
+
 export function LabSurface() {
   const params = useSearchParams();
-  const router = useRouter();
   const reading = useLabReading();
   const meta = useMetaConstants();
   const linkedAddress = params.get("address");
@@ -198,7 +206,7 @@ export function LabSurface() {
             const next = new URLSearchParams(params.toString());
             if (m === "book") next.delete("address");
             else if (address !== "") next.set("address", address);
-            router.replace(labUrl(next));
+            replaceUrl(labUrl(next));
           }}
           items={items}
           onSelect={setSelectedId}
@@ -220,7 +228,7 @@ export function LabSurface() {
                   setAddress(addr);
                   const next = new URLSearchParams(params.toString());
                   next.set("address", addr);
-                  router.replace(labUrl(next));
+                  replaceUrl(labUrl(next));
                 }}
               />
             ) : undefined

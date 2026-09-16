@@ -1,1016 +1,589 @@
-// W3 + W-SD-A — the Scenarios surface, against mock routes whose bodies are
-// GENERATED fixtures (tests/fixtures/generate.mjs and generate-lab-book.mjs
-// document the provenance: contract-validated stress bodies from
-// packages/client-ts, the run-book 200 example extracted verbatim from
-// api/openapi.yaml, the /v1/scenarios example envelope over definitions
-// derived by the contract's own `Omit<Scenario,"results">` rule, and three
-// documented single-change variants). Nothing here is hand-shaped.
-//
-// WHAT W-SD-A CHANGED, and why the expectations below moved with it:
-//
-//   BOOK MODE IS THE DEFAULT AND ARRIVES ALIVE. The committed listing comes
-//   from `GET /v1/scenarios` (cold, no batch envelope) and the frontier from
-//   `/v1/book`'s waterfall — so the surface no longer harvests its scenario
-//   list from an address run's outcomes, and no longer renders an empty state
-//   until one happens. Every expectation that pinned the harvest, the empty
-//   state, or `pickDefaultScenario` is therefore gone or inverted, and each
-//   such change is annotated at its site.
-//
-// What this file pins:
-//   - cold arrival renders dek + frontier + matrix + committed list with ZERO
-//     run requests issued
-//   - `?scenario=<id>` auto-runs EXACTLY ONE scenario, and only a member of
-//     the served set
-//   - the matrix's five cell states, plus the single-batch guard's own
-//     superseded state — and that a superseded result is never blended
-//   - address mode is reachable and SECONDARY
-//   - the address-mode laws W3 established: chips from the wire, the depeg
-//     flagship, exact rationals, held_flat, boundary group, `found: null`
-
+// web/tests/e2e/lab.spec.ts
+// The Scenarios page-test contract (spec 2026-09-15 §5.4, §7). Mocked from the
+// demo dataset for the primary state (the demo Book's own eth_minus_30 run)
+// and shaped bodies for the other outcomes. Every headline string here is
+// produced by lib/lab-headline.ts (book mode) or lib/lab-address.ts (one
+// address); every figure is the demo Book's.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
-
-const API = "http://localhost:8080";
-const MINUS = "−";
-
-function fixture(name: string): string {
-  return readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url)), "utf8");
-}
+import {
+  DEMO_ADDRESS_NEAR,
+  DEMO_EVENTS_NEAR,
+  DEMO_HISTORY_NEAR,
+  DEMO_META,
+  DEMO_NEAR_ADDR,
+  DEMO_PARAMS_DM,
+  DEMO_RUN_BOOK_ETH,
+  DEMO_RUN_BOOK_SET,
+  DEMO_SCENARIOS,
+  DEMO_STRESS_NEAR,
+} from "../fixtures/demo";
+import { ADDRESS_NOT_FOUND, NOT_FOUND_ADDR } from "../fixtures/inspector";
+import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 
 const CORS = { "access-control-allow-origin": "*" };
-
-const STRESS_AAVE = JSON.parse(fixture("stress-aave.json")) as {
-  address: string;
-  scenarios: { id: string; label: string }[];
+/** The two POST routes are cross-origin and preflighted; the OPTIONS leg is answered here and never counted as a run. */
+const POST_CORS = {
+  ...CORS,
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "content-type, accept",
 };
-const STRESS_DM = JSON.parse(fixture("stress-dm.json")) as {
-  address: string;
-  scenarios: { id: string; label: string }[];
+const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
+  route.fulfill({ status, headers: { ...CORS, ...headers }, contentType: "application/json", body: JSON.stringify(body) });
+const preflight = (route: Route) => route.fulfill({ status: 204, headers: POST_CORS, body: "" });
+const fixture = (name: string): unknown => JSON.parse(readFileSync(fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url)), "utf8"));
+
+interface Mocks {
+  scenarios?: unknown;
+  scenariosStatus?: number;
+  runBook?: unknown;
+  runBookStatus?: number;
+  runBookHeaders?: Record<string, string>;
+  runBookDelayMs?: number;
+  set?: unknown;
+  setStatus?: number;
+  address?: unknown;
+  addressStatus?: number;
+  stress?: unknown;
+  stressStatus?: number;
+}
+
+interface Counts {
+  runs: () => number;
+  sets: () => number;
+  lookups: () => number;
+  /** The set-run request bodies, in dispatch order. */
+  posted: () => readonly string[];
+}
+
+/** Every route the page can issue is answered; `*` never crosses `/`, so the listing route does not swallow the run routes. */
+async function mockLab(page: Page, m: Mocks = {}): Promise<Counts> {
+  let runs = 0;
+  let sets = 0;
+  let lookups = 0;
+  const posted: string[] = [];
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, DEMO_META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_MANIFEST));
+  await page.route("**/v1/params*", (route) => json(route, DEMO_PARAMS_DM));
+  await page.route("**/v1/events*", (route) => json(route, DEMO_EVENTS_NEAR));
+  await page.route("**/v1/address/*/history*", (route) => json(route, DEMO_HISTORY_NEAR));
+  await page.route("**/v1/address/*/stress*", (route) => json(route, m.stress ?? DEMO_STRESS_NEAR, m.stressStatus ?? 200));
+  await page.route("**/v1/address/*", (route) => {
+    lookups += 1;
+    return json(route, m.address ?? DEMO_ADDRESS_NEAR, m.addressStatus ?? 200);
+  });
+  await page.route("**/v1/scenarios/run-book-set", (route) => {
+    if (route.request().method() === "OPTIONS") return preflight(route);
+    sets += 1;
+    posted.push(route.request().postData() ?? "");
+    return json(route, m.set ?? DEMO_RUN_BOOK_SET, m.setStatus ?? 200, POST_CORS);
+  });
+  await page.route("**/v1/scenarios/*/run-book", async (route) => {
+    if (route.request().method() === "OPTIONS") return preflight(route);
+    runs += 1;
+    if (m.runBookDelayMs !== undefined) await new Promise((r) => setTimeout(r, m.runBookDelayMs));
+    return json(route, m.runBook ?? DEMO_RUN_BOOK_ETH, m.runBookStatus ?? 200, { ...POST_CORS, ...m.runBookHeaders });
+  });
+  await page.route("**/v1/scenarios", (route) => json(route, m.scenarios ?? DEMO_SCENARIOS, m.scenariosStatus ?? 200));
+  return { runs: () => runs, sets: () => sets, lookups: () => lookups, posted: () => posted };
+}
+
+const surface = (page: Page) => page.getByTestId("lab-surface");
+const headline = (page: Page) => page.getByTestId("lab-verdict-headline");
+const dek = (page: Page) => page.getByTestId("lab-verdict-dek");
+const chip = (page: Page, label: string) => page.locator(`[data-chip='${label}']`);
+const tile = (page: Page, key: string) => page.getByTestId(`lab-kpi-${key}`);
+const row = (page: Page, id: string) => page.getByTestId(`lab-library-row-${id}`);
+const cell = (page: Page, from: number, to: number) => page.getByTestId(`lab-heatmap-cell-${String(from)}-${String(to)}`);
+const runIt = async (page: Page) => {
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
 };
-const STRESS_UNKNOWABLE = JSON.parse(fixture("stress-unknowable.json")) as { address: string };
-const SCENARIOS = JSON.parse(fixture("scenarios.json")) as {
-  scenarios: { id: string; label: string; engines: string[] }[];
+/** A Cash book that was not computed never prints as a zero: not in its tiles, not in the verdict. The legacy fold keeps its own honest zeros. */
+const expectNoCashZero = async (page: Page) => {
+  for (const key of ["newly", "debt", "baddebt", "moved"]) await expect(tile(page, key)).not.toContainText("$0");
+  await expect(page.getByTestId("lab-verdict")).not.toContainText("$0");
+};
+type Engine = (typeof DEMO_RUN_BOOK_ETH)["engines"][number];
+const cashEngine = (): Engine => {
+  const e = DEMO_RUN_BOOK_ETH.engines.find((x) => x.engine === "debt_manager");
+  if (e === undefined) throw new Error("the demo run carries no Cash engine");
+  return e;
+};
+const withCash = (patch: (e: Engine) => unknown) => ({
+  ...DEMO_RUN_BOOK_ETH,
+  engines: DEMO_RUN_BOOK_ETH.engines.map((e) => (e.engine === "debt_manager" ? patch(e) : e)),
+});
+const firstScenario = (): (typeof DEMO_SCENARIOS)["scenarios"][number] => {
+  const s = DEMO_SCENARIOS.scenarios[0];
+  if (s === undefined) throw new Error("the demo listing is empty");
+  return s;
 };
 
-function json(route: Route, body: string, status = 200) {
-  return route.fulfill({ status, contentType: "application/json", headers: CORS, body });
-}
-
-/** The two COLD routes book mode reads on arrival. Neither is a run. */
-async function mockCold(page: Page) {
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) => json(route, fixture("book.json")));
-}
-
-async function mockStress(page: Page, addr: string, body: string, status = 200) {
-  await page.route(`${API}/v1/address/${addr}/stress`, (route) => json(route, body, status));
-}
-
-/**
- * Address mode is the SECONDARY register now, so every address-mode spec
- * reaches it the way a reader does: one click from the default whole-book view.
- */
-async function runStress(page: Page, addr: string) {
-  await mockCold(page);
+test("cold load: the library from the listing, the first scenario's definition, nothing dispatched, tiles in the not-run register", async ({ page }) => {
+  const counts = await mockLab(page);
   await page.goto("/lab");
-  await page.getByTestId("mode-address").click();
-  const input = page.getByTestId("lab-address-input");
-  const button = page.getByTestId("run-stress-button");
-  // A fill can land BEFORE React hydrates (the DOM takes the value, React
-  // state stays empty and the submit stays disabled). Refill until React
-  // acknowledges it — the enable is driven only by React state.
-  await expect(async () => {
-    await input.fill(addr);
-    await expect(button).toBeEnabled({ timeout: 250 });
-  }).toPass();
-  await button.click();
-}
-
-// ---------------------------------------------------------------------------
-// W-SD-A — book mode: the default, alive on arrival.
-// ---------------------------------------------------------------------------
-
-test("COLD ARRIVAL: dek + frontier + matrix + committed list, with ZERO run requests", async ({
-  page,
-}) => {
-  let runRequests = 0;
-  await mockCold(page);
-  await page.route(`${API}/v1/scenarios/*/run-book`, (route) => {
-    runRequests += 1;
-    return route.abort();
-  });
-
-  await page.goto("/lab");
-
-  // Book mode is the DEFAULT — nothing was clicked to get here.
-  await expect(page.getByTestId("mode-book")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("lab-book-panel")).toBeVisible();
-
-  // The dek is the COMPUTED cliff sentence over the served waterfall.
-  //
-  // WAVE R9 (round-17 finding 2) CHANGED THIS EXPECTATION, and the change IS
-  // the finding, RENDERED. The terminal bad-debt clause read only the LEAD
-  // engine (the one holding the most terminal eligible debt), so this sentence
-  // stated aave's $2,190.47619048 and stopped — over a book whose OTHER served
-  // engine, debt_manager, reaches $2,219.801981 at that very same step. The
-  // committed fixture has been carrying a second insolvent engine all along and
-  // the page never said its name. Both are named now, each at its own decimals,
-  // and they are never added together.
-  await expect(page.getByTestId("lab-dek")).toHaveText(
-    `The first step already bites: ETH down 10% makes 1 account on aave_v3_etherfi newly ` +
-      `liquidatable. By ${MINUS}50%, aave_v3_etherfi's Σ eligible debt reaches $6,000 and its ` +
-      `bad debt $2,190.47619048, and debt_manager's bad debt reaches $2,219.801981 at that ` +
-      `same step.`,
-  );
-  // NEVER SUMMED: the two books total $4,410.278171, a number that appears
-  // nowhere on the page.
-  await expect(page.getByTestId("lab-dek")).not.toContainText("4,410");
-
-  // The frontier: one panel per engine, drawn from /v1/book's waterfall.
-  await expect(page.getByTestId("lab-frontier")).toBeVisible();
-  await expect(page.getByTestId("frontier-panel")).toHaveCount(2);
-  await expect(page.getByTestId("frontier-reading")).toContainText(
-    "unshocked is the standing census",
-  );
-
-  // The matrix: the COMMITTED listing × the engines it names.
-  await expect(page.getByTestId("lab-matrix")).toBeVisible();
-  await expect(page.getByTestId("matrix-row")).toHaveCount(SCENARIOS.scenarios.length);
-
-  // The committed-scenario list and detail, from the cold listing.
-  await expect(page.getByTestId("lab-chip")).toHaveCount(SCENARIOS.scenarios.length);
-  await expect(page.getByTestId("committed-detail")).toBeVisible();
-
-  // THE POINT: not one run was issued to put all of that on screen.
-  expect(runRequests).toBe(0);
-  await expect(page.getByTestId("book-result")).toHaveCount(0);
-  await expect(page.getByTestId("matrix-batch-line")).toContainText("no run has been issued yet");
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  await expect(surface(page)).toHaveAttribute("data-mode", "book");
+  const rows = page.locator("[data-testid^='lab-library-row-']");
+  await expect(rows).toHaveCount(DEMO_SCENARIOS.scenarios.length);
+  await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "not-run");
+  await expect(row(page, "eth_minus_30")).toContainText("Not run yet");
+  await expect(row(page, "eth_minus_30")).toContainText(firstScenario().description);
+  // The mode toggle says what each mode does.
+  await expect(page.getByTestId("lab-mode-book")).toHaveText("Whole book");
+  await expect(page.getByTestId("lab-mode-address")).toHaveText("One address");
+  await expect(headline(page)).toHaveText("ETH -30 percent — 1 committed shock, not run yet.");
+  await expect(page.getByTestId("lab-projection")).toContainText("PROJECTION");
+  await expect(page.getByTestId("lab-run")).toHaveText("Run ETH -30 percent");
+  for (const key of ["newly", "debt", "baddebt", "moved"]) {
+    await expect(tile(page, key)).toContainText("—");
+    await expect(tile(page, key)).toContainText("not run");
+    await expect(tile(page, key)).toHaveAttribute("data-tone", "refused");
+  }
+  await expect(page.getByTestId("lab-transitions-finding")).toHaveText("Run a scenario to see where accounts move.");
+  await expect(page.getByTestId("lab-transitions")).toContainText("No result yet.");
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expect(page.getByTestId("lab-movers")).toHaveCount(0);
+  await expect(page.getByTestId("lab-drawer")).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(counts.runs()).toBe(0);
+  expect(counts.sets()).toBe(0);
 });
 
-test("the committed list comes from /v1/scenarios — NOT harvested from a run", async ({
-  page,
-}) => {
-  // W-SD-A CHANGED THIS EXPECTATION. It used to be impossible to assert: the
-  // list did not exist until an address run returned it. The listing route is
-  // now the only source, and blocking it leaves the matrix ABSENT rather than
-  // partial or invented.
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/book`, (route) => json(route, fixture("book.json")));
-  await page.route(`${API}/v1/scenarios`, (route) =>
-    json(route, fixture("error-unavailable.json"), 503),
-  );
-
+test("one click, one POST: the demo result — the §3.5 headline, the dek, the identity chips, the four tiles, the library's outcome word", async ({ page }) => {
+  const counts = await mockLab(page);
   await page.goto("/lab");
-  await expect(page.getByTestId("listing-error")).toBeVisible();
-  await expect(page.getByTestId("listing-error")).toContainText(
-    "No scenario list is hardcoded here and none is invented",
+  await runIt(page);
+  expect(counts.runs()).toBe(1);
+  await expect(headline(page)).toHaveText("$1.2M more Cash debt becomes liquidatable, across 118 accounts.");
+  await expect(dek(page)).toHaveText(
+    "Bad debt would rise by $40K if all 167 were liquidated at the shocked prices. 425 accounts move to a worse band; none improve. Of the 27 accounts within 9.09% of their cap today, all 27 cross it.",
   );
-  await expect(page.getByTestId("lab-matrix")).toHaveCount(0);
-  // The frontier does NOT depend on the listing, and still renders.
-  await expect(page.getByTestId("lab-frontier")).toBeVisible();
+  await expect(chip(page, "Result for batch")).toContainText("18,251");
+  await expect(chip(page, "Scenario")).toContainText("eth_minus_30 · v1");
+  await expect(chip(page, "Computed")).toContainText("ago");
+  await expect(chip(page, "Engines")).toContainText("Aave v3 market (legacy) and Cash");
+  await expect(chip(page, "Config")).toContainText("v1");
+  await expect(tile(page, "newly")).toContainText("118");
+  await expect(tile(page, "newly")).toContainText("was 49, now 167");
+  await expect(tile(page, "newly")).toHaveAttribute("data-tone", "crit");
+  await expect(tile(page, "debt")).toContainText("+$1.2M");
+  await expect(tile(page, "debt")).toContainText("$6,949 → $1.2M");
+  await expect(tile(page, "baddebt")).toContainText("+$40K");
+  await expect(tile(page, "baddebt")).toContainText("$239.60 → $41K");
+  await expect(tile(page, "baddebt")).toHaveAttribute("data-tone", "warn");
+  await expect(tile(page, "moved")).toContainText("941");
+  await expect(tile(page, "moved")).toContainText("of 1,406 measured · 0 improved");
+  await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "result");
+  await expect(row(page, "eth_minus_30")).toContainText("+$1.2M liquidatable · 118 accounts");
+  await expect(page.getByTestId("lab-drawer")).toBeVisible();
+  // Answer before evidence: header above tiles above the heatmap above the movers.
+  const y = async (id: string) => (await page.getByTestId(id).boundingBox())?.y ?? Number.NaN;
+  expect(await y("lab-verdict")).toBeLessThan(await y("lab-kpi-newly"));
+  expect(await y("lab-kpi-newly")).toBeLessThan(await y("lab-transitions"));
+  expect(await y("lab-transitions")).toBeLessThan(await y("lab-movers"));
 });
 
-test("the frontier renders the wire's caveats VERBATIM and never plots a withheld engine", async ({
-  page,
-}) => {
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) => json(route, fixture("book-engine-refused.json")));
-
+test("where accounts move: the wire's lanes merged into seven room bands with the true bounds; the unmeasured cell is dashed, never a zero", async ({ page }) => {
+  await mockLab(page);
   await page.goto("/lab");
-  // One panel only: the withheld engine contributes no points at all.
-  await expect(page.getByTestId("frontier-panel")).toHaveCount(1);
-  await expect(page.getByTestId("frontier-panel")).toHaveAttribute("data-engine", "debt_manager");
-  // …and is NAMED, so the absence cannot be silent.
-  await expect(page.getByTestId("frontier-excluded")).toContainText("FLAG_CUSTODY_UNPROVEN");
-  // The wire's own notes, byte for byte.
-  await expect(page.getByTestId("frontier-at-risk-note")).toContainText(
-    "carries NO monotonicity invariant",
-  );
-  await expect(page.getByTestId("frontier-eligibility-note")).toContainText(
-    "realized ≤ eligible",
-  );
-  // The dek says unknown, never zero.
-  await expect(page.getByTestId("lab-dek")).toContainText("its side is unknown rather than zero");
-});
-
-test("a monotonicity violation is SURFACED with its point named, never smoothed", async ({
-  page,
-}) => {
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) =>
-    json(route, fixture("book-monotonicity-violation.json")),
-  );
-
-  await page.goto("/lab");
-  await expect(page.getByTestId("frontier-monotonicity-violation")).toContainText(
-    "monotonicity VIOLATED at debt_manager step 2",
-  );
-  await expect(page.getByTestId("lab-dek")).toContainText(
-    "breaks its monotonicity invariant at debt_manager step 2",
+  await runIt(page);
+  const grid = page.getByTestId("lab-heatmap");
+  await expect(grid).toHaveAttribute("data-merged", "true");
+  await expect(grid.locator("[role='columnheader']")).toHaveText(["over cap", "< 4.76%", "4.76% – 9.09%", "9.09% – 20%", "≥ 20%", "no debt", "not measured"]);
+  await expect(cell(page, 0, 0)).toHaveAttribute("data-count", "49");
+  await expect(cell(page, 0, 0)).toHaveAttribute("data-movement", "held");
+  await expect(cell(page, 1, 0)).toHaveText("14");
+  await expect(cell(page, 1, 0)).toHaveAttribute("data-movement", "worse");
+  await expect(cell(page, 4, 0)).toHaveText("18");
+  await expect(cell(page, 4, 1)).toHaveText("135");
+  await expect(cell(page, 4, 4)).toHaveText("932");
+  await expect(cell(page, 6, 6)).toHaveText("6");
+  await expect(cell(page, 6, 6)).toHaveAttribute("data-movement", "unmeasured");
+  await expect(cell(page, 0, 4)).toHaveAttribute("data-count", "0");
+  await expect(cell(page, 0, 4)).toHaveText("");
+  await expect(page.getByTestId("lab-transitions-finding")).toHaveText(
+    "Rows: room under cap today · columns: after the shock · cells are accounts. 425 accounts change band; 118 cross the cap; none improve. 6 not measured.",
   );
 });
 
-// ---------------------------------------------------------------------------
-// W-SD-A — the matrix's cell states.
-// ---------------------------------------------------------------------------
-
-/** Route run-book per scenario id; `stall` never settles, so the row stays running. */
-async function mockRuns(page: Page, bodies: Record<string, string | "stall">) {
-  await page.route(`${API}/v1/scenarios/*/run-book`, async (route) => {
-    const id = /\/v1\/scenarios\/([a-z0-9_]+)\/run-book/.exec(route.request().url())?.[1] ?? "";
-    const body = bodies[id];
-    if (body === undefined) return route.fulfill({ status: 404, headers: CORS, body: "{}" });
-    if (body === "stall") return new Promise(() => {/* never settles */});
-    return json(route, body);
-  });
-}
-
-test("the matrix renders ALL FIVE cell states, and not-covered never looks like withheld", async ({
-  page,
-}) => {
-  await mockCold(page);
-  await mockRuns(page, {
-    eth_minus_30: fixture("run-book.eth_minus_30.json"), // batch 1 → RESULT
-    weeth_market_depeg_oracles_held: fixture("run-book.weeth-withheld.json"), // batch 1 → WITHHELD
-    ethfi_minus_50: "stall", // → RUNNING
-  });
-
+test("most affected accounts: the wire's movers, 20 of 118, rows open the Inspector, the verdict pill, the caption", async ({ page }) => {
+  await mockLab(page);
   await page.goto("/lab");
-  const cell = (scenario: string, engine: number) =>
-    page.locator(`[data-testid="matrix-row"][data-scenario-id="${scenario}"] td`).nth(engine);
-
-  // 1. NOT COVERED · structural, from the listing, with zero runs issued.
-  //    dm_rate_horizon_plus_200bps is defined for debt_manager only.
-  const notCovered = cell("dm_rate_horizon_plus_200bps", 1);
-  await expect(notCovered).toHaveAttribute("data-cell-state", "not-covered");
-  await expect(notCovered).toContainText("NOT COVERED");
-  await expect(notCovered).toHaveAttribute("title", /not a refusal and not a failed run/);
-
-  // 2. NOT RUN — a covered cell nobody has asked about yet.
-  await expect(cell("ethfi_minus_50", 2)).toHaveAttribute("data-cell-state", "not-run");
-
-  // 3. RESULT — the run's own delta, in the engine's own decimals.
-  await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
-  const result = cell("eth_minus_30", 2);
-  await expect(result).toHaveAttribute("data-cell-state", "result");
-  await expect(result).toContainText("$1,500"); // 1500000000 @ 6dp, grouped
-  // W-3L: the DELTA-ONLY basis is stated ONCE for the whole grid in its METHOD
-  // line rather than once per cell. The cell's sub shrinks to its own two
-  // facts, and the BATCH PIN moved OUT of the title into rendered text — a
-  // batch id is a number, and LAW-5 gives a number no home behind a hover.
-  await expect(page.getByTestId("matrix-method")).toContainText("DELTA-ONLY");
-  await expect(page.getByTestId("matrix-method")).toContainText(
-    "no total column, because engine books are never summed",
-  );
-  await expect(result).toContainText("net eligible accounts +1");
-  await expect(result).toContainText("batch #1");
-
-  // 4. WITHHELD — a refusal, with its code, on an engine the DEFINITION names.
-  await page
-    .locator('[data-testid="matrix-run"][data-scenario-id="weeth_market_depeg_oracles_held"]')
-    .click();
-  const withheld = cell("weeth_market_depeg_oracles_held", 1);
-  await expect(withheld).toHaveAttribute("data-cell-state", "withheld");
-  await expect(withheld).toContainText("FLAG_CUSTODY_UNPROVEN");
-
-  // 5. RUNNING — in flight, never blank and never a stale value.
-  await page.locator('[data-testid="matrix-run"][data-scenario-id="ethfi_minus_50"]').click();
-  await expect(cell("ethfi_minus_50", 2)).toHaveAttribute("data-cell-state", "running");
-
-  // THE LOAD-BEARING DISTINCTION: the two absences are different states, and
-  // neither is rendered as the other or as a zero.
-  await expect(notCovered).toHaveAttribute("data-cell-state", "not-covered");
-  await expect(withheld).not.toContainText("NOT COVERED");
-  await expect(notCovered).not.toContainText("FLAG_CUSTODY_UNPROVEN");
-
-  // No total column, ever: engine books are never summed. W-3L moved the
-  // clause out of the legend's tail and into the grid's METHOD line, which is
-  // where the basis for every cell is now stated once.
-  await expect(page.getByTestId("matrix-method")).toContainText("no total column");
-  await expect(page.locator('[data-testid="matrix-table"] thead th')).toHaveCount(4); // scenario + 2 engines + run
+  await runIt(page);
+  const rows = page.locator("[data-testid^='lab-movers-row-']");
+  await expect(rows).toHaveCount(20);
+  const first = cashEngine().movers[0];
+  if (first === undefined) throw new Error("the demo run carries no movers");
+  const firstRow = page.getByTestId(`lab-movers-row-${first.account}`);
+  await expect(firstRow.locator("a")).toHaveAttribute("href", `/inspector/${first.account}`);
+  await expect(firstRow).toContainText("Yes");
+  await expect(page.getByTestId("lab-movers-caption")).toHaveText("showing 20 of 118 accounts moved");
 });
 
-test("SUPERSESSION: the stale result is NAMED, kept on screen, and never mixed", async ({
-  page,
-}) => {
-  await mockCold(page);
-  let ethCalls = 0;
-  await page.route(`${API}/v1/scenarios/*/run-book`, (route) => {
-    const url = route.request().url();
-    if (url.includes("/eth_minus_30/")) {
-      ethCalls += 1;
-      return json(
-        route,
-        fixture(ethCalls === 1 ? "run-book.eth_minus_30.json" : "run-book.eth_minus_30.batch2.json"),
-      );
-    }
-    return json(route, fixture("run-book.weeth.batch2.json"));
-  });
-
+test("a second click while a run is in flight is ignored: one POST, the button disabled, the running state", async ({ page }) => {
+  const counts = await mockLab(page, { runBookDelayMs: 600 });
   await page.goto("/lab");
-  await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
-
-  // While batch 1 is the only held result, it IS the cohort.
-  const ethCell = page.locator(
-    '[data-testid="matrix-row"][data-scenario-id="eth_minus_30"] td',
-  ).nth(2);
-  await expect(ethCell).toHaveAttribute("data-cell-state", "result");
-  await expect(page.getByTestId("matrix-batch-line")).toContainText(
-    "results shown together were measured at batch #1",
-  );
-
-  // A newer batch lands mid-matrix. The older row does NOT silently join it.
-  await page
-    .locator('[data-testid="matrix-run"][data-scenario-id="weeth_market_depeg_oracles_held"]')
-    .click();
-  await expect(ethCell).toHaveAttribute("data-cell-state", "superseded");
-  await expect(ethCell).toContainText("SUPERSEDED");
-  await expect(ethCell).toContainText("at batch #1");
-  await expect(ethCell).toContainText("matrix reads #2");
-  await expect(ethCell).toContainText("re-run this row");
-
-  // The header states the anchor AND counts what is not on it — one sentence
-  // that can never be read as a cross-batch total.
-  const batchLine = page.getByTestId("matrix-batch-line");
-  await expect(batchLine).toContainText("measured at batch #2");
-  await expect(batchLine).toContainText("1 row(s) still hold an older batch's result");
-  await expect(batchLine).toContainText("never blended into the sentence above");
-
-  // THE RE-RUN AFFORDANCE ACTUALLY WORKS: running the stale row again against
-  // the newer batch rejoins it to the cohort. (The route serves batch 1 on the
-  // first call and batch 2 on the second — which is exactly what a re-run
-  // against a book that has moved on returns.)
-  await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
-  await expect(ethCell).toHaveAttribute("data-cell-state", "result");
-  // WAVE R10 CHANGED THIS EXPECTATION (round-18 finding 2). The assurance used
-  // to read "Every held result is on that batch." — a claim over HELD evidence,
-  // which includes the pin an IN-FLIGHT row is still carrying and which the
-  // displayed lists deliberately omit. Both rows are settled here, so the two
-  // sets coincide and the old sentence was not false in THIS state; it was
-  // false with a row re-running while holding an older batch, which is pinned
-  // by tests/e2e/r10-fixes.spec.ts (2). The claim now speaks about what is
-  // DISPLAYED in every state, and older held pins are disclosed separately.
-  await expect(page.getByTestId("matrix-batch-line")).toContainText(
-    "Every DISPLAYED result was measured at that batch.",
-  );
+  const run = page.getByTestId("lab-run");
+  await run.click();
+  await expect(surface(page)).toHaveAttribute("data-state", "running");
+  await expect(headline(page)).toHaveText("Running ETH -30 percent…");
+  await expect(run).toBeDisabled();
+  await expect(tile(page, "newly")).toHaveAttribute("aria-busy", "true");
+  await expect(row(page, "eth_minus_30")).toContainText("Running…");
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  expect(counts.runs()).toBe(1);
 });
 
-test("the matrix discloses that the frontier reads its OWN batch", async ({ page }) => {
-  await mockCold(page);
-  await mockRuns(page, {
-    weeth_market_depeg_oracles_held: fixture("run-book.weeth.batch2.json"), // batch 2
-  });
-  await page.goto("/lab");
-  await page
-    .locator('[data-testid="matrix-run"][data-scenario-id="weeth_market_depeg_oracles_held"]')
-    .click();
-  // book.json is batch 1; the run is batch 2. The two are named, never merged.
-  await expect(page.getByTestId("matrix-batch-line")).toContainText(
-    "The loss frontier above reads batch #1, a different batch from this table",
-  );
-});
-
-// ---------------------------------------------------------------------------
-// W-SD-A — the deep link.
-// ---------------------------------------------------------------------------
-
-test("?scenario=<id> auto-runs EXACTLY ONE scenario; bare arrival runs none", async ({ page }) => {
-  const runs: string[] = [];
-  await mockCold(page);
-  await page.route(`${API}/v1/scenarios/*/run-book`, (route) => {
-    runs.push(route.request().url());
-    return json(route, fixture("run-book.eth_minus_30.json"));
-  });
-
+test("deep links: ?scenario= runs exactly one; an unlisted id runs nothing; both params together run nothing and say so", async ({ page }) => {
+  const one = await mockLab(page);
   await page.goto("/lab?scenario=eth_minus_30");
-  await expect(page.getByTestId("book-result")).toBeVisible();
-  expect(runs).toHaveLength(1);
-  expect(runs[0]).toContain("/v1/scenarios/eth_minus_30/run-book");
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  expect(one.runs()).toBe(1);
+  await page.goto("/lab?scenario=ghost");
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  await page.waitForTimeout(300);
+  expect(one.runs()).toBe(1);
+  await page.goto("/lab?scenario=eth_minus_30&scenarios=ethfi_minus_50");
+  await expect(page.getByTestId("lab-deeplink-notice")).toBeVisible();
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  await page.waitForTimeout(300);
+  expect(one.runs()).toBe(1);
+  expect(one.sets()).toBe(0);
 });
 
-test("a deep link naming an id the deployment does not publish runs NOTHING", async ({ page }) => {
-  const runs: string[] = [];
-  await mockCold(page);
-  await page.route(`${API}/v1/scenarios/*/run-book`, (route) => {
-    runs.push(route.request().url());
-    return route.abort();
+test("deep links: ?scenarios= posts exactly the listed ids it names, once, and pre-ticks them; an unlisted id is filtered before dispatch and named", async ({ page }) => {
+  const counts = await mockLab(page);
+  await page.goto("/lab?scenarios=eth_minus_30,ethfi_minus_50");
+  await expect.poll(() => counts.sets()).toBe(1);
+  expect(counts.posted()[0]).toBe('{"scenario_ids":["eth_minus_30","ethfi_minus_50"]}');
+  await expect(page.getByTestId("lab-library-check-eth_minus_30")).toBeChecked();
+  await expect(page.getByTestId("lab-library-check-ethfi_minus_50")).toBeChecked();
+  await expect(page.getByTestId("lab-library-check-weeth_market_depeg_oracles_held")).not.toBeChecked();
+  await expect(page.getByTestId("lab-deeplink-notice")).toHaveCount(0);
+  // The set is Compare's; the workspace itself has not run anything.
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  await page.waitForTimeout(300);
+  expect(counts.runs()).toBe(0);
+  expect(counts.sets()).toBe(1);
+
+  await page.goto("/lab?scenarios=eth_minus_30,ghost");
+  await expect(page.getByTestId("lab-deeplink-notice")).toContainText("ghost");
+  await expect.poll(() => counts.sets()).toBe(2);
+  expect(counts.posted()[1]).toBe('{"scenario_ids":["eth_minus_30"]}');
+});
+
+test("the selection is per scenario and a result stays with its scenario", async ({ page }) => {
+  await mockLab(page);
+  await page.goto("/lab");
+  await runIt(page);
+  await row(page, "ethfi_minus_50").getByRole("button").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  await expect(headline(page)).toContainText("ETHFI -50 percent");
+  await expect(row(page, "eth_minus_30")).toContainText("+$1.2M liquidatable · 118 accounts");
+  await row(page, "eth_minus_30").getByRole("button").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  await expect(headline(page)).toContainText("$1.2M more Cash debt");
+});
+
+test("withheld: the Cash book excluded is a named refusal — no grid, dashed tiles, the legacy result still folded below", async ({ page }) => {
+  await mockLab(page, {
+    runBook: {
+      ...DEMO_RUN_BOOK_ETH,
+      engines: DEMO_RUN_BOOK_ETH.engines.filter((e) => e.engine !== "debt_manager"),
+      excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "the custody flag is unproven for this batch", note: "" }],
+    },
   });
-
-  await page.goto("/lab?scenario=not_a_committed_id");
-  await expect(page.getByTestId("lab-matrix")).toBeVisible();
-  expect(runs).toEqual([]);
-  // The surface still arrives alive; the unknown id simply selects nothing.
-  await expect(page.getByTestId("lab-dek")).toContainText("The first step already bites");
-});
-
-// ---------------------------------------------------------------------------
-// W-SD-A — address mode: reachable, and secondary.
-// ---------------------------------------------------------------------------
-
-test("address mode is REACHABLE but SECONDARY — book is the default register", async ({
-  page,
-}) => {
-  await mockCold(page);
   await page.goto("/lab");
-
-  // Ordinal demotion: whole book is the first control on the surface.
-  const buttons = page.locator('[role="group"][aria-label="run mode"] button');
-  await expect(buttons.nth(0)).toHaveAttribute("data-testid", "mode-book");
-  await expect(buttons.nth(1)).toHaveAttribute("data-testid", "mode-address");
-  await expect(page.getByTestId("mode-caption")).toContainText(
-    "whole book is the default view; one address is the secondary register",
-  );
-
-  // …and reachable in one click, where it says what it is.
-  await page.getByTestId("mode-address").click();
-  await expect(page.getByTestId("lab-address-section")).toBeVisible();
-  await expect(page.getByTestId("address-secondary-note")).toContainText("SECONDARY REGISTER");
-  await expect(page.getByTestId("lab-address-input")).toBeVisible();
-  // Book mode's panel is not left standing underneath it.
-  await expect(page.getByTestId("lab-book-panel")).toHaveCount(0);
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "withheld");
+  await expect(headline(page)).toHaveText("Cannot say — the Cash book is withheld under ETH -30 percent.");
+  await expect(tile(page, "newly")).toContainText("withheld");
+  await expect(tile(page, "newly")).toHaveAttribute("data-tone", "refused");
+  await expect(chip(page, "Engines")).toContainText("Cash withheld");
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expect(page.getByTestId("lab-legacy")).toBeVisible();
+  await expect(row(page, "eth_minus_30")).toContainText("Withheld");
+  await expectNoCashZero(page);
 });
 
-// ---------------------------------------------------------------------------
-// The run-book outcome states, now reached from BOOK mode's own run control.
-// ---------------------------------------------------------------------------
-
-test("book mode: the honest-404 state — never a spinner, never fake data", async ({ page }) => {
-  // W-SD-A CHANGED THIS EXPECTATION: the test no longer runs an address stress
-  // first. Book mode learns the committed set from `/v1/scenarios`, so the run
-  // control is reachable on arrival.
-  await mockCold(page);
-  await page.route(`${API}/v1/scenarios/*/run-book`, (route) =>
-    json(route, fixture("error-not-found.json"), 404),
-  );
-
+test("a hole is withheld by name, never an empty healthy book: the Cash book in neither array, in both arrays, and beside a served legacy row", async ({ page }) => {
+  // Neither array names the Cash book: the result carries no row and no refusal for it.
+  await mockLab(page, { runBook: { ...DEMO_RUN_BOOK_ETH, engines: [], excluded_engines: [] } });
   await page.goto("/lab");
-  await page.getByTestId("run-book-button").click();
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "withheld");
+  await expect(headline(page)).toHaveText("Cannot say — the Cash book is withheld under ETH -30 percent.");
+  await expect(dek(page)).toContainText("no row for this engine and no refusal");
+  await expect(tile(page, "newly")).toContainText("withheld");
+  await expect(tile(page, "debt")).not.toContainText("$0");
+  await expect(row(page, "eth_minus_30")).toContainText("Withheld");
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expectNoCashZero(page);
 
-  const notServed = page.getByTestId("runbook-not-served");
-  await expect(notServed).toBeVisible();
-  await expect(notServed).toContainText("book-wide stress not yet served by this deployment");
-  await expect(notServed).toContainText("/run-book");
-  await expect(page.getByTestId("book-result")).toHaveCount(0);
-  await expect(page.getByTestId("book-running")).toHaveCount(0);
-
-  // And the matrix says UNANSWERED — a 404 is not a zero.
-  const cell = page
-    .locator('[data-testid="matrix-row"][data-scenario-id="eth_minus_30"] td')
-    .nth(2);
-  await expect(cell).toHaveAttribute("data-cell-state", "unanswered");
-  await expect(cell).toContainText("about the DEPLOYMENT");
-});
-
-test("book mode: renders the served run-book response — the UI ships ready", async ({ page }) => {
-  await mockCold(page);
-  await page.route(`${API}/v1/scenarios/*/run-book`, (route) =>
-    json(route, fixture("run-book.weeth_market_depeg_oracles_held.json")),
-  );
-
+  // The Cash book in both arrays: the refusal is the answer, and the row's figures never print.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page, {
+    runBook: {
+      ...DEMO_RUN_BOOK_ETH,
+      excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "the custody flag is unproven for this batch", note: "" }],
+    },
+  });
   await page.goto("/lab");
-  // W-SD-A CHANGED THIS EXPECTATION: the flagship is now selected by CLICKING
-  // its committed chip, not by `pickDefaultScenario` scanning an address run's
-  // results for a realization axis. That function is deleted.
-  await page
-    .locator('[data-testid="lab-chip"][data-scenario-id="weeth_market_depeg_oracles_held"]')
-    .click();
-  await page.getByTestId("run-book-button").click();
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "withheld");
+  await expect(tile(page, "newly")).toContainText("withheld");
+  await expect(tile(page, "newly")).not.toContainText("118");
+  await expect(page.locator("main")).not.toContainText("+$1.2M");
 
-  await expect(page.getByTestId("book-result")).toBeVisible();
-
-  // Per-engine aggregates in each engine's OWN decimals, never combined.
-  const engines = page.getByTestId("book-engine");
-  await expect(engines).toHaveCount(2);
-  await expect(engines.nth(0)).toContainText("aave_v3_etherfi");
-  // CX-4: ONE grouped-USD renderer across the Lab. These used to print
-  // `$8000` here and `$8,000` in the frontier panel above, from the same wire
-  // field, because two money helpers disagreed about thousands separators.
-  await expect(engines.nth(0)).toContainText("$8,000"); // 800000000000 @ 8dp
-  await expect(engines.nth(1)).toContainText("debt_manager");
-  await expect(engines.nth(1)).toContainText("$4,620"); // 4620000000 @ 6dp
-
-  // The book-wide flagship claim: HFs unchanged while shortfall is realized.
-  await expect(page.getByTestId("hfs-unchanged-banner")).toHaveCount(2);
-  // WAVE W-EX-A MOVED THIS MONEY, and the move is the repair. The contract's
-  // run-book 200 example used to publish $400 of execution shortfall on the
-  // AAVE engine — an engine whose own `eligible_accounts` is 0. An execution
-  // shortfall is summed over LIQUIDATABLE positions only
-  // (internal/risk/shortfall.go:97-104), so an empty sum is "0", and the
-  // example is now CAPTURED from the running handler rather than composed. The
-  // shortfall lives where the eligible account is: the Debt Manager.
-  await expect(engines.nth(0).getByTestId("market-realization")).toContainText("$0");
-  await expect(engines.nth(1).getByTestId("market-realization")).toContainText("$200");
-
-  // Delta-only labeling on the wire-published deltas.
-  await expect(engines.nth(0)).toContainText("DELTA-ONLY");
-
-  // Coverage, exclusions, and the empty held_flat CLAIM all render.
-  await expect(page.getByTestId("book-coverage")).toContainText("stress_coverage_is_full");
-  await expect(page.getByTestId("book-excluded")).toContainText("excluded engines: none");
-});
-
-test("book mode: 503 renders the no-batch refusal — a statement about the service", async ({
-  page,
-}) => {
-  await mockCold(page);
-  await page.route(`${API}/v1/scenarios/*/run-book`, (route) =>
-    route.fulfill({
-      status: 503,
-      contentType: "application/json",
-      headers: { ...CORS, "retry-after": "5" },
-      body: fixture("error-unavailable.json"),
-    }),
-  );
-
+  // Only the legacy row served, the Cash book named nowhere: withheld for Cash, the legacy result its own.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page, { runBook: { ...DEMO_RUN_BOOK_ETH, engines: DEMO_RUN_BOOK_ETH.engines.filter((e) => e.engine !== "debt_manager") } });
   await page.goto("/lab");
-  await page.getByTestId("run-book-button").click();
-
-  const noBatch = page.getByTestId("runbook-no-batch");
-  await expect(noBatch).toBeVisible();
-  await expect(noBatch).toContainText("no complete risk batch");
-  await expect(noBatch).toContainText("retry after 5s");
-  await expect(page.getByTestId("book-result")).toHaveCount(0);
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "withheld");
+  await expect(dek(page)).toContainText("no row for this engine and no refusal");
+  await expect(page.getByTestId("lab-legacy")).toBeVisible();
+  await expect(page.getByTestId("lab-legacy-kpi-newly")).toContainText("14");
 });
 
-test("a 503 on /v1/book refuses the frontier — a service statement, never an empty book", async ({
-  page,
-}) => {
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) => json(route, fixture("error-unavailable.json"), 503));
-
+test("a malformed wire field is refused by name: the contradictory state, the field named, nothing drawn, the route still standing", async ({ page }) => {
+  await mockLab(page, { runBook: withCash((e) => ({ ...e, eligible_debt_delta_usd: "" })) });
   await page.goto("/lab");
-  await expect(page.getByTestId("frontier-refused")).toContainText("no servable batch (503)");
-  await expect(page.getByTestId("lab-dek")).toContainText(
-    "That is a statement about the SERVICE, never an empty book",
-  );
-  // The matrix does NOT depend on a batch, and still renders.
-  await expect(page.getByTestId("lab-matrix")).toBeVisible();
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
+  await expect(headline(page)).toHaveText("The result for ETH -30 percent contradicts itself.");
+  await expect(dek(page)).toContainText("eligible_debt_delta_usd is outside the wire contract");
+  await expect(tile(page, "debt")).toContainText("—");
+  await expect(tile(page, "debt")).toContainText("contradictory");
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expect(page.getByTestId("lab-movers")).toHaveCount(0);
+  await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
+  await expectNoCashZero(page);
+  // The route stays live: the shell and the library are still on the page.
+  await expect(page.getByRole("banner")).toBeVisible();
+  await expect(page.getByTestId("lab-run")).toBeEnabled();
 });
 
-// ---------------------------------------------------------------------------
-// Address mode (W3's laws, unchanged — reached through the secondary tab).
-// ---------------------------------------------------------------------------
+test("the fetch failures each name themselves: 404 not served, 503 no batch with the server's retry, 429, 500", async ({ page }) => {
+  await mockLab(page, { runBook: fixture("error-not-found.json"), runBookStatus: 404 });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "not-served");
+  await expect(headline(page)).toHaveText("Book-wide stress is not served by this deployment.");
+  await expect(row(page, "eth_minus_30")).toContainText("Not served");
 
-test("scenario chips render from the wire's committed set — never hardcoded", async ({ page }) => {
-  await mockStress(page, STRESS_AAVE.address, fixture("stress-aave.json"));
-  await runStress(page, STRESS_AAVE.address);
-  await expect(page.getByTestId("lab-found")).toBeVisible();
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  // The API exposes no Retry-After across origins, so the envelope's own retry_after_seconds is the
+  // retry the page can state; a header the browser may not read never reaches the sentence.
+  await mockLab(page, { runBook: fixture("error-unavailable.json"), runBookStatus: 503, runBookHeaders: { "retry-after": "30" } });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "no-batch");
+  await expect(headline(page)).toHaveText("No servable batch.");
+  await expect(dek(page)).toContainText("(503). Retry after 5s.");
 
-  // Exactly the fixture's scenarios, in wire order. The committed set is
-  // eleven; this contract-validated body is a three-scenario excerpt — the
-  // chip count FOLLOWING THE DATA is the proof nothing is hardcoded.
-  const chips = page.getByTestId("lab-chip");
-  await expect(chips).toHaveCount(STRESS_AAVE.scenarios.length);
-  for (const [index, scenario] of STRESS_AAVE.scenarios.entries()) {
-    await expect(chips.nth(index)).toContainText(scenario.label);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page, { runBook: fixture("error-rate-limited.json"), runBookStatus: 429 });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "rate-limited");
+  await expect(headline(page)).toHaveText("Rate limited (429).");
+
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page, { runBook: { error: { code: "internal", message: "internal" } }, runBookStatus: 500 });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "failed");
+  await expect(headline(page)).toHaveText("The service answered 500.");
+});
+
+test("a re-run that fails replaces the result it had: nothing retained wears the new request's answer", async ({ page }) => {
+  const counts = await mockLab(page);
+  await page.goto("/lab");
+  await runIt(page);
+  await expect(tile(page, "newly")).toContainText("118");
+  // The later route wins: the same scenario now answers 404.
+  await page.route("**/v1/scenarios/*/run-book", (route) =>
+    route.request().method() === "OPTIONS" ? preflight(route) : json(route, fixture("error-not-found.json"), 404, POST_CORS),
+  );
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "not-served");
+  await expect(headline(page)).toHaveText("Book-wide stress is not served by this deployment.");
+  await expect(tile(page, "newly")).toContainText("—");
+  await expect(tile(page, "newly")).not.toContainText("118");
+  await expect(row(page, "eth_minus_30")).toContainText("Not served");
+  await expect(row(page, "eth_minus_30")).not.toContainText("+$1.2M");
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expect(page.getByTestId("lab-movers")).toHaveCount(0);
+  expect(counts.runs()).toBe(1);
+});
+
+test("a listing that cannot be fetched says so in the library and the workspace, and nothing runs", async ({ page }) => {
+  const counts = await mockLab(page, { scenarios: fixture("error-unavailable.json"), scenariosStatus: 503 });
+  await page.goto("/lab");
+  await expect(surface(page)).toHaveAttribute("data-state", "listing-unavailable");
+  await expect(headline(page)).toHaveText("The committed scenarios could not be listed.");
+  await expect(page.getByTestId("lab-library")).toContainText("The committed scenarios could not be listed.");
+  await expect(page.locator("[data-testid^='lab-library-row-']")).toHaveCount(0);
+  await expect(page.getByTestId("lab-run")).toBeDisabled();
+  await page.waitForTimeout(300);
+  expect(counts.runs()).toBe(0);
+  expect(counts.sets()).toBe(0);
+});
+
+test("a superseded batch keeps the result under a banner; a drifted listing marks the result for a previous input; a new version is its own state", async ({ page }) => {
+  await mockLab(page, { runBook: { ...DEMO_RUN_BOOK_ETH, batch: { ...DEMO_RUN_BOOK_ETH.batch, supersession: { ...DEMO_RUN_BOOK_ETH.batch.supersession, superseded: true } } } });
+  await page.goto("/lab");
+  await runIt(page);
+  await expect(surface(page)).toHaveAttribute("data-banner", "superseded");
+  await expect(page.getByTestId("lab-banner")).toContainText("Batch 18,251 has been superseded");
+  await expect(chip(page, "Result for batch")).toContainText("18,251 · superseded");
+  await expect(tile(page, "newly")).toContainText("118");
+  await expect(page.getByTestId("lab-banner-rerun")).toBeEnabled();
+
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const drifted = { ...DEMO_SCENARIOS, scenarios: DEMO_SCENARIOS.scenarios.map((s) => (s.id === "eth_minus_30" ? { ...s, path_assumption: "a different path" } : s)) };
+  await mockLab(page, { scenarios: drifted });
+  await page.goto("/lab");
+  await runIt(page);
+  await expect(surface(page)).toHaveAttribute("data-banner", "stale-input");
+  await expect(page.getByTestId("lab-banner")).toContainText("path assumption");
+
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const rev = { ...DEMO_SCENARIOS, scenarios: DEMO_SCENARIOS.scenarios.map((s) => (s.id === "eth_minus_30" ? { ...s, version: "v2" } : s)) };
+  await mockLab(page, { scenarios: rev });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "definition-changed");
+  await expect(headline(page)).toHaveText("ETH -30 percent changed since this result was computed.");
+  await expect(tile(page, "newly")).toContainText("—");
+});
+
+test("a matrix that contradicts itself is not drawn, and the page says why", async ({ page }) => {
+  await mockLab(page, { runBook: withCash((e) => ({ ...e, hf_transitions: { ...e.hf_transitions, total_rows: 5 } })) });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
+  await expect(headline(page)).toHaveText("The result for ETH -30 percent contradicts itself.");
+  await expect(dek(page)).toContainText("total_rows");
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expect(row(page, "eth_minus_30")).toContainText("Contradictory");
+});
+
+test("never summed: the legacy result carries its own decimals in its own fold, beside the Cash tiles it never joins", async ({ page }) => {
+  await mockLab(page);
+  await page.goto("/lab");
+  await runIt(page);
+  const legacy = page.getByTestId("lab-legacy");
+  await expect(legacy).toBeVisible();
+  await legacy.locator("summary").click();
+  await expect(page.getByTestId("lab-legacy-kpi-newly")).toContainText("14");
+  await expect(page.getByTestId("lab-legacy-kpi-debt")).toContainText("+$6,000");
+  await expect(page.getByTestId("lab-legacy-heatmap")).toHaveAttribute("data-merged", "false");
+  await expect(page.getByTestId("lab-legacy-heatmap").locator("[role='columnheader']").first()).toHaveText("< 0.90");
+  await expect(tile(page, "debt")).toContainText("+$1.2M");
+  await expect(legacy).toContainText("never added together");
+});
+
+test("the drawer: path assumption, applied shocks, held flat, out of model, the exact wire values, the wire's notes; Escape closes it", async ({ page }) => {
+  await mockLab(page);
+  await page.goto("/lab");
+  await runIt(page);
+  await page.getByTestId("lab-drawer").click();
+  const body = page.getByTestId("lab-drawer-body");
+  await expect(body).toContainText(DEMO_RUN_BOOK_ETH.path_assumption);
+  await expect(body).toContainText("1,280,000.000000");
+  const outOfModel = DEMO_RUN_BOOK_ETH.out_of_model[0];
+  if (outOfModel === undefined) throw new Error("the demo run names nothing out of model");
+  await expect(body).toContainText(outOfModel);
+  await expect(page.getByTestId("lab-drawer-transitions-note")).toHaveText(cashEngine().hf_transitions.note);
+  await page.keyboard.press("Escape");
+  await expect(body).toBeHidden();
+});
+
+test("one-address mode via ?address=: the Inspector's reading — before/after tiles, every scenario's row, the library's own verdict words, the identity", async ({ page }) => {
+  const counts = await mockLab(page);
+  await page.goto(`/lab?address=${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-mode", "address");
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  await expect(headline(page)).toHaveText("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
+  // The identity: the account in the kicker, the batch and the scenario as chips.
+  await expect(page.getByTestId("lab-verdict")).toContainText("0x7a3f…c21e");
+  await expect(chip(page, "Result for batch")).toContainText("18,251");
+  await expect(chip(page, "Scenario")).toContainText("eth_minus_30");
+  await expect(page.getByTestId("lab-address-kpi-debt-before")).toContainText("$4,822");
+  await expect(page.getByTestId("lab-address-kpi-cap-before")).toContainText("$5,012");
+  await expect(page.getByTestId("lab-address-kpi-room-before")).toContainText("$190.50");
+  await expect(page.getByTestId("lab-address-kpi-status-before")).toContainText("Near cap");
+  await expect(page.getByTestId("lab-address-kpi-status-after")).toContainText("Liquidatable");
+  await expect(page.getByTestId("lab-address-kpi-room-after")).toContainText("over cap by $");
+  await expect(page.getByTestId("lab-address-table").locator("tbody tr")).toHaveCount(DEMO_STRESS_NEAR.scenarios.length);
+  // The library's words are the rows' own verdicts, not book-mode outcomes.
+  await expect(row(page, "eth_minus_30")).toContainText("Becomes liquidatable");
+  await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "result");
+  await expect(row(page, "ethfi_minus_50")).toContainText("Becomes liquidatable");
+  await expect(row(page, "dm_rate_horizon_plus_200bps")).toContainText("Stays inside its cap through 90d");
+  await expect(row(page, "weeth_market_depeg_oracles_held")).toContainText("Not on this address");
+  await expect(row(page, "weeth_market_depeg_oracles_held")).toHaveAttribute("data-outcome", "not-covered");
+  await expect(page.getByTestId("lab-library-check-eth_minus_30")).toHaveCount(0);
+  // Book mode's run button has no place here: the address field's Inspect is the action.
+  await expect(page.getByTestId("lab-run")).toHaveCount(0);
+  await expect(page.getByTestId("lab-kpi-newly")).toHaveCount(0);
+  await expect(page.getByTestId("lab-address-input")).toHaveValue(DEMO_NEAR_ADDR);
+  expect(counts.lookups()).toBe(1);
+  await page.getByTestId("lab-mode-book").click();
+  await expect(surface(page)).toHaveAttribute("data-mode", "book");
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  await expect(page).toHaveURL(/\/lab$/);
+  // The link carries the address again once the mode returns to it.
+  await page.getByTestId("lab-mode-address").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  await expect(page).toHaveURL(new RegExp(`address=${DEMO_NEAR_ADDR}`));
+});
+
+test("one-address mode: an invalid address is an inline refusal and never a request; a not-found address is a complete answer", async ({ page }) => {
+  const counts = await mockLab(page);
+  await page.goto("/lab");
+  await page.getByTestId("lab-mode-address").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "idle");
+  await expect(headline(page)).toHaveText("Stress one address.");
+  await page.getByTestId("lab-address-input").fill("0xnope");
+  await page.getByTestId("lab-address-inspect").click();
+  await expect(page.getByTestId("lab-address-refused")).toBeVisible();
+  await expect(surface(page)).toHaveAttribute("data-state", "idle");
+  await page.waitForTimeout(300);
+  expect(counts.lookups()).toBe(0);
+  await expect(page).not.toHaveURL(/address=/);
+
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page, { address: ADDRESS_NOT_FOUND, stress: { ...DEMO_STRESS_NEAR, address: NOT_FOUND_ADDR, found: false, scenarios: [] } });
+  await page.goto(`/lab?address=${NOT_FOUND_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "no-position");
+  // A definitive negative names the batch it was established in.
+  await expect(headline(page)).toHaveText(`No Cash position for 0xBBbB…0002 in batch ${String(ADDRESS_NOT_FOUND.batch.id)}.`);
+  await expect(page.locator("main")).not.toContainText("Cannot say");
+  await expect(row(page, "eth_minus_30")).toContainText("Not on this address");
+});
+
+test("the first viewport at 1440×900 holds the library head, the verdict, the tiles and the top of the heatmap; 390 wide has no horizontal overflow", async ({ page }) => {
+  await mockLab(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/lab?scenario=eth_minus_30");
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  for (const id of ["lab-mode-book", "lab-library-row-eth_minus_30", "lab-verdict", "lab-kpi-moved"]) {
+    const box = await page.getByTestId(id).boundingBox();
+    expect(box).not.toBeNull();
+    if (box === null) throw new Error(`${id} has no box`);
+    expect(box.y + box.height).toBeLessThanOrEqual(900);
   }
-
-  // The projected axis carries the PROJECTION badge on its chip.
-  await expect(
-    page.locator('[data-testid="lab-chip"][data-scenario-id="dm_rate_horizon_plus_200bps"]'),
-  ).toContainText("PROJECTION");
-
-  // This committed excerpt has no stable_usd-only member, so the boundary
-  // group does NOT render — absence, not invention.
-  await expect(page.getByTestId("lab-boundary-group")).toHaveCount(0);
-});
-
-test("the depeg flagship: hfs_unchanged asserted, HFs bit-identical, shortfall priced", async ({
-  page,
-}) => {
-  await mockStress(page, STRESS_AAVE.address, fixture("stress-aave.json"));
-  await runStress(page, STRESS_AAVE.address);
-
-  // W-SD-A CHANGED THIS EXPECTATION: the default chip is the committed set's
-  // OWN first member in wire order, not the realization-bearing one
-  // `pickDefaultScenario` used to hunt for. The click is now load-bearing.
-  await page
-    .locator('[data-testid="lab-chip"][data-scenario-id="weeth_market_depeg_oracles_held"]')
-    .click();
-
-  const contrast = page.getByTestId("flagship-contrast");
-  await expect(contrast).toBeVisible();
-  await expect(contrast).toContainText("what the protocol sees");
-  await expect(contrast).toContainText("what the market realizes");
-
-  // The banner renders because the WIRE asserts it.
-  await expect(page.getByTestId("hfs-unchanged-banner")).toBeVisible();
-  await expect(page.getByTestId("hfs-unchanged-banner")).toContainText("hfs_unchanged");
-
-  // Bit-identical health factors, at full 18-decimal exactness, twice.
-  await expect(contrast.getByText("1.080000000000000000")).toHaveCount(2);
-  await expect(page.getByTestId("bit-identical")).toBeVisible();
-
-  // The market side: shortfall in the realization's own decimals + the
-  // seizure-model disclosure, captioned.
-  await expect(page.getByTestId("market-realization")).toContainText("$0");
-  await expect(page.getByTestId("seizure-model")).toContainText(
-    "pro-rata-over-counted-collateral",
-  );
-});
-
-test("exact rationals, held_flat, and snap/cap disclosures render from data", async ({ page }) => {
-  await mockStress(page, STRESS_AAVE.address, fixture("stress-aave.json"));
-  await runStress(page, STRESS_AAVE.address);
-  await page.locator('[data-testid="lab-chip"][data-scenario-id="eth_minus_30"]').click();
-
-  // The shock factor as the honest number it is: ratio AND percent, exact.
-  const shocks = page.getByTestId("scenario-shocks");
-  await expect(shocks).toContainText("70/100");
-  await expect(shocks).toContainText(`${MINUS}30%`);
-
-  // held_flat: the named list, visible.
-  const heldFlat = page.getByTestId("held-flat");
-  await expect(heldFlat).toBeVisible();
-  await expect(heldFlat).toContainText("0xA0b8…eB48");
-  await expect(heldFlat).toContainText("100000000");
-
-  // Applied-shock disclosures: every flag stated explicitly, even when false.
-  const flags = page.getByTestId("shock-flags");
-  await expect(flags).toContainText("snapped: no");
-  await expect(flags).toContainText("base_snapped: no");
-  await expect(flags).toContainText("cap_bound: no");
-
-  // The state pair marks the crossing and carries the warn-band disclosure.
-  await expect(page.getByTestId("state-pair")).toContainText("NEWLY ELIGIBLE");
-  await expect(page.getByTestId("warn-band-disclosure")).toContainText("presentation band");
-});
-
-test("boundary group and PROJECTION panel render from the DM fixture's data", async ({ page }) => {
-  await mockStress(page, STRESS_DM.address, fixture("stress-dm.json"));
-  await runStress(page, STRESS_DM.address);
-  await expect(page.getByTestId("lab-found")).toBeVisible();
-
-  // The stable-snap group: derived from the stable_usd axis, one committed
-  // member in this body — it renders that member, and only that member.
-  const group = page.getByTestId("lab-boundary-group");
-  await expect(group).toBeVisible();
-  await expect(page.getByTestId("lab-boundary-item")).toHaveCount(1);
-  await expect(group).toContainText("Stablecoin depeg to 0.995 (inside the snap band)");
-  await expect(group).toContainText("995/1000");
-  await expect(group).toContainText(`${MINUS}0.5%`);
-  await expect(group).toContainText("no-op · served states bit-identical");
-
-  // The rate scenario: a PROJECTION, delta-only, sealed horizon verdicts, and
-  // the wire's own no-time-to-liquidatable statement.
-  await page
-    .locator('[data-testid="lab-chip"][data-scenario-id="dm_rate_horizon_plus_200bps"]')
-    .click();
-  const projection = page.getByTestId("projection-panel");
-  await expect(projection).toBeVisible();
-  await expect(projection).toContainText("PROJECTION");
-  await expect(projection).toContainText("delta-only");
-  await expect(projection).toContainText("+200bps");
-  await expect(projection).toContainText("(= 30 d)");
-  await expect(projection.locator("tbody tr")).toHaveCount(2);
-  await expect(projection).toContainText("becomes liquidatable");
-  await expect(projection).toContainText("No time-to-liquidatable");
-});
-
-test("found:null renders 'cannot be established' with the refusal named — never 'no position'", async ({
-  page,
-}) => {
-  await mockStress(page, STRESS_UNKNOWABLE.address, fixture("stress-unknowable.json"));
-  await runStress(page, STRESS_UNKNOWABLE.address);
-
-  const unknowable = page.getByTestId("lab-unknowable");
-  await expect(unknowable).toBeVisible();
-  await expect(unknowable).toContainText("cannot be established");
-  await expect(unknowable).toContainText("FLAG_CUSTODY_UNPROVEN");
-  // The ONLY surface entitled to say "no position" (the definitive-negative
-  // panel) must be absent. (The wire's own note QUOTES the phrase while
-  // negating it, so this is asserted structurally, not by text search.)
-  await expect(page.getByTestId("lab-not-found")).toHaveCount(0);
-});
-
-test("address mode: 429 renders the rate-limit refusal with the server's own retry", async ({
-  page,
-}) => {
-  await page.route(`${API}/v1/address/${STRESS_AAVE.address}/stress`, (route) =>
-    route.fulfill({
-      status: 429,
-      contentType: "application/json",
-      headers: { ...CORS, "retry-after": "3" },
-      body: fixture("error-rate-limited.json"),
-    }),
-  );
-
-  await runStress(page, STRESS_AAVE.address);
-  const error = page.getByTestId("lab-error");
-  await expect(error).toBeVisible();
-  await expect(error).toContainText("rate limited (429)");
-  await expect(error).toContainText("retry after 3s");
-  await expect(page.getByTestId("lab-found")).toHaveCount(0);
-});
-
-test("an invalid address never becomes a request", async ({ page }) => {
-  let stressRequests = 0;
-  await mockCold(page);
-  await page.route(`${API}/v1/address/**`, (route) => {
-    stressRequests += 1;
-    return route.abort();
-  });
-
-  await page.goto("/lab");
-  await page.getByTestId("mode-address").click();
-  const input = page.getByTestId("lab-address-input");
-  // Refill until hydration has happened (the hint renders only from React
-  // state) so the disabled assertion is about VALIDATION, not about SSR.
-  await expect(async () => {
-    await input.fill("not-an-address");
-    await expect(page.getByTestId("address-hint")).toBeVisible({ timeout: 250 });
-  }).toPass();
-  await expect(page.getByTestId("address-hint")).toContainText("40 hex");
-  await expect(page.getByTestId("run-stress-button")).toBeDisabled();
-  expect(stressRequests).toBe(0);
-});
-
-// ---------------------------------------------------------------------------
-// W-3L (inventory 152-206) — the dek hoist, the frontier-refusal takeaway and
-// the CommittedDetail split. Placement asserted by VISIBILITY (the r75
-// lesson) and by DOM position, never containment through a closed fold.
-// ---------------------------------------------------------------------------
-
-test("W-3L: the dek sits at the PAGE head, above the mode bar, and survives the mode switch", async ({
-  page,
-}) => {
-  await mockCold(page);
-  await page.goto("/lab");
-
-  const dek = page.getByTestId("lab-dek");
-  await expect(dek).toContainText("The first step already bites");
-  // ABOVE the mode bar: the surface's answer leads the page.
-  const dekBox = await dek.boundingBox();
-  const modeBox = await page.getByTestId("mode-book").boundingBox();
-  if (dekBox === null || modeBox === null) throw new Error("expected laid-out dek + mode bar");
-  expect(dekBox.y + dekBox.height).toBeLessThanOrEqual(modeBox.y);
-
-  // The dek is the PAGE's answer now, not book mode's caption: switching to
-  // the address register keeps the whole sentence on screen.
-  await page.getByTestId("mode-address").click();
-  await expect(page.getByTestId("lab-address-section")).toBeVisible();
-  await expect(dek).toBeVisible();
-  await expect(dek).toContainText("The first step already bites");
-  await expect(dek).toContainText("debt_manager's bad debt reaches $2,219.801981");
-});
-
-test("W-3L: the frontier refusal LEADS with its takeaway; the server's words render beneath", async ({
-  page,
-}) => {
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) =>
-    json(route, fixture("error-unavailable.json"), 503),
-  );
-  await page.goto("/lab");
-
-  const refused = page.getByTestId("frontier-refused");
-  await expect(refused).toBeVisible();
-  await expect(refused.getByTestId("frontier-refused-takeaway")).toBeVisible();
-  await expect(refused.getByTestId("frontier-refused-takeaway")).toHaveText(
-    "no frontier on this batch — a statement about the service, never an empty book.",
-  );
-  await expect(refused).toContainText("no servable batch (503)");
-});
-
-test("W-3L: CommittedDetail — computed takeaway, visible method, definition provenance folded", async ({
-  page,
-}) => {
-  await mockCold(page);
-  await page.goto("/lab");
-  const detail = page.getByTestId("committed-detail");
-  await expect(detail).toBeVisible();
-
-  // The takeaway: the first committed member's label plus what it moves,
-  // through the shared factor formatter.
-  await expect(detail.getByTestId("committed-takeaway")).toHaveText(
-    "ETH -30 percent declares eth_usd ×0.7 — committed shock factors, applied through each " +
-      "engine's own read path.",
-  );
-
-  // The method line stays visible with the fold closed — it carries the
-  // NOT COVERED vs WITHHELD distinction.
-  await expect(
-    detail.getByText("which is not the same statement as a withheld engine", { exact: false }),
-  ).toBeVisible();
-
-  // The fold: exact factors + path assumption + endpoint, closed by default.
-  const fold = detail.getByTestId("committed-forensics");
-  await expect(fold.locator("summary")).toHaveText(
-    "1 shock factor(s) + the path assumption + the endpoint",
-  );
-  await expect(detail.getByTestId("committed-shocks")).toBeHidden();
-  await expect(detail.getByText("writes nothing")).toBeHidden();
-  await fold.locator("summary").click();
-  await expect(detail.getByTestId("committed-shocks")).toBeVisible();
-  await expect(detail.getByTestId("committed-shocks")).toContainText("70/100");
-  await expect(detail.getByText("writes nothing")).toBeVisible();
-
-  // The zero-shock committed scenario keeps the honest no-mark arm in ITS
-  // takeaway when selected.
-  await page.getByTestId("lab-chip").nth(1).click();
-  await expect(detail.getByTestId("committed-takeaway")).toContainText(
-    "moves no oracle mark — this scenario's information lives on another axis.",
-  );
-});
-
-// ---------------------------------------------------------------------------
-// r83 — three wrong-answer paths off the LAB-A landing, each law written
-// FIRST and observed red against the defective bundle.
-// ---------------------------------------------------------------------------
-
-test("r83: a stale book refusal does not outlive recovery — re-entry and address success both re-read", async ({
-  page,
-}) => {
-  // The service answers 503 once, then recovers. The pre-hoist panel
-  // re-read /v1/book on every book-mode mount; the lifted state must keep
-  // that promise, or the head claims no batch beside a serving panel.
-  let bookCalls = 0;
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) => {
-    bookCalls += 1;
-    return bookCalls === 1
-      ? json(route, fixture("error-unavailable.json"), 503)
-      : json(route, fixture("book.json"));
-  });
-  await page.goto("/lab");
-  await expect(page.getByTestId("lab-dek")).toContainText(
-    "No complete risk batch is available",
-  );
-
-  // Leaving and re-entering book mode re-reads the book: the refusal is a
-  // statement about the service THEN, never a permanent verdict.
-  await page.getByTestId("mode-address").click();
-  await page.getByTestId("mode-book").click();
-  await expect(page.getByTestId("lab-dek")).toContainText("The first step already bites");
-  await expect(page.getByTestId("lab-frontier")).toBeVisible();
-  expect(bookCalls).toBeGreaterThanOrEqual(2);
-});
-
-test("r83: an address success under a stale refusal re-reads the book WITHOUT leaving address mode", async ({
-  page,
-}) => {
-  let bookCalls = 0;
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) => {
-    bookCalls += 1;
-    return bookCalls === 1
-      ? json(route, fixture("error-unavailable.json"), 503)
-      : json(route, fixture("book.json"));
-  });
-  await mockStress(page, STRESS_AAVE.address, fixture("stress-aave.json"));
-  await page.goto("/lab");
-  await expect(page.getByTestId("lab-dek")).toContainText(
-    "No complete risk batch is available",
-  );
-
-  await page.getByTestId("mode-address").click();
-  const input = page.getByTestId("lab-address-input");
-  const button = page.getByTestId("run-stress-button");
-  await expect(async () => {
-    await input.fill(STRESS_AAVE.address);
-    await expect(button).toBeEnabled({ timeout: 250 });
-  }).toPass();
-  await button.click();
-  await expect(page.getByTestId("lab-found")).toBeVisible();
-
-  // The head may not keep claiming no batch beside a successful lookup.
-  await expect(page.getByTestId("lab-dek")).toContainText("The first step already bites");
-});
-
-test("r83: an unreadable book is never blamed on the service — the two refusal arms split", async ({
-  page,
-}) => {
-  // A network failure has NO HTTP response: nothing licenses a
-  // service-side verdict, and the takeaway must not issue one.
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) => route.abort());
-  await page.goto("/lab");
-
-  const takeaway = page.getByTestId("frontier-refused-takeaway");
-  await expect(takeaway).toBeVisible();
-  await expect(takeaway).toHaveText(
-    "no frontier can be stated — the book could not be read, and an unread book is not a safe book.",
-  );
-  await expect(takeaway).not.toContainText("statement about the service");
-});
-
-test("r84: an aborted newer read never suppresses a live older recovery — arbitration is by ACCEPTED settlement", async ({
-  page,
-}) => {
-  // The exact re-entrant schedule Codex named: a stored 503, an address
-  // success dispatching recovery read #2 (HELD), a book-mode entry
-  // dispatching read #3 (HELD), leaving book mode ABORTING #3 — and then
-  // #2 settling 200. Dispatch-order arbitration discarded #2 because #3
-  // had claimed the sequence; #3, aborted, could never settle; the head
-  // kept claiming no batch beside a successful lookup, forever.
-  let bookCalls = 0;
-  const held: Route[] = [];
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) => {
-    bookCalls += 1;
-    if (bookCalls === 1) return json(route, fixture("error-unavailable.json"), 503);
-    held.push(route);
-  });
-  await mockStress(page, STRESS_AAVE.address, fixture("stress-aave.json"));
-  await page.goto("/lab");
-  await expect(page.getByTestId("lab-dek")).toContainText(
-    "No complete risk batch is available",
-  );
-
-  // Address success dispatches recovery read #2 — held open.
-  await page.getByTestId("mode-address").click();
-  const input = page.getByTestId("lab-address-input");
-  const button = page.getByTestId("run-stress-button");
-  await expect(async () => {
-    await input.fill(STRESS_AAVE.address);
-    await expect(button).toBeEnabled({ timeout: 250 });
-  }).toPass();
-  await button.click();
-  await expect(page.getByTestId("lab-found")).toBeVisible();
-  await expect.poll(() => held.length).toBeGreaterThanOrEqual(1);
-
-  // Book re-entry dispatches #3 (held); leaving aborts it client-side.
-  await page.getByTestId("mode-book").click();
-  await expect.poll(() => held.length).toBeGreaterThanOrEqual(2);
-  await page.getByTestId("mode-address").click();
-
-  // NOW the older, still-live #2 settles 200: its answer must land.
-  const recovery = held[0];
-  if (recovery === undefined) throw new Error("expected the held recovery read");
-  await json(recovery, fixture("book.json"));
-  await expect(page.getByTestId("lab-dek")).toContainText("The first step already bites");
-
-  // Release any remaining held routes (the aborted #3's route included).
-  for (const route of held.slice(1)) {
-    try {
-      await route.abort();
-    } catch {
-      // the browser already canceled it — nothing to release
-    }
-  }
-});
-
-test("r85: the matrix row DECLARES its shock axes — movement is never claimed from a cold definition", async ({
-  page,
-}) => {
-  await mockCold(page);
-  await page.goto("/lab");
-  const rows = page.getByTestId("matrix-row");
-  await expect(rows.first()).toContainText("declares shocks on the ETH mark");
-  await expect(rows.first()).not.toContainText("· moves");
-  // The zero-shock depeg keeps the self-negating family words — the one
-  // place "moves" survives is inside its own negation.
-  await expect(rows.nth(1)).toContainText("market realization (no oracle mark moves)");
-});
-
-test("W-3L (194): the row's disclosures compose into ONE settlement line, each piece keeping its identity", async ({
-  page,
-}) => {
-  // The r8 sequence: a first run that serves, a re-run that fails — the
-  // held outcome stays at its pin and the failure banner appears. The
-  // banner must render INSIDE the row's single settlement line (the
-  // composition), with its own testid and provenance intact.
-  let runCalls = 0;
-  await page.route("**/v1/stream**", (route) => route.abort());
-  await page.route(`${API}/v1/scenarios`, (route) => json(route, fixture("scenarios.json")));
-  await page.route(`${API}/v1/book`, (route) => json(route, fixture("book.json")));
-  await page.route(`${API}/v1/scenarios/eth_minus_30/run-book`, (route) => {
-    runCalls += 1;
-    return runCalls === 1
-      ? json(route, fixture("run-book.eth_minus_30.json"))
-      : json(route, fixture("error-unavailable.json"), 503);
-  });
-  await page.goto("/lab");
-
-  const row = page.locator('[data-testid="matrix-row"][data-scenario-id="eth_minus_30"]');
-  const run = row.getByTestId("matrix-run");
-  await run.click();
-  await expect(row.locator('[data-cell-state="result"]').first()).toBeVisible();
-  await run.click();
-
-  const banner = row.getByTestId("matrix-rerun-failed");
-  await expect(banner).toBeVisible();
-
-  // The composition: exactly one settlement line on the row, and the
-  // banner is ITS descendant — never a loose stacked footnote.
-  const settlement = row.getByTestId("matrix-settlement");
-  await expect(settlement).toHaveCount(1);
-  await expect(settlement.getByTestId("matrix-rerun-failed")).toBeVisible();
-
-  // A row with nothing to settle renders NO settlement line at all.
-  await expect(
-    page
-      .locator('[data-testid="matrix-row"][data-scenario-id="ethfi_minus_50"]')
-      .getByTestId("matrix-settlement"),
-  ).toHaveCount(0);
+  const transitions = await page.getByTestId("lab-transitions").boundingBox();
+  if (transitions === null) throw new Error("lab-transitions has no box");
+  expect(transitions.y).toBeLessThan(900);
+  await page.setViewportSize({ width: 390, height: 800 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
 });
