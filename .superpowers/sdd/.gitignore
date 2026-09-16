@@ -28,3 +28,8 @@
 # `!*.md` cannot re-include descendants of an excluded directory — the archives were
 # silently untracked). Re-include the directory; `!*.md` then covers its files.
 !p3-consults/
+
+# Plan workspaces of the subagent-driven-development skill (2026-09-15 onward): the
+# ledger, briefs and reports are the plan's record, same argument as the consult
+# archives above. Diffs and review packages inside stay ignored (`*.diff` is not `*.md`).
+!2026-09-15-ui-kit-overview-book/

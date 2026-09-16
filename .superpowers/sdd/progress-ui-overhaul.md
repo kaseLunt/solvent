@@ -4359,3 +4359,26 @@ refusal-phrasebook, live-pill, cash-summary, demo-fixture-weld.
 - e2e AFTER (`npx playwright test --project=e2e`): **3 failed / 323 passed / 10 skipped** — 471 − 135 retired = 336; the 3 are the kit-nav overflow tests above, pre-existing at HEAD
 - Gate verdict: not all-green for two pre-existing causes outside this task (kit nav at ≤390px; demo fixtures vs the clock-law census). Cleanup staged, commit withheld pending the owner's call (Task 14 report).
 
+
+## 2026-09-15 · Plan 1 CLOSES — kit, Overview, Book (spec docs/specs/2026-09-15-ui-product-register-design.md)
+
+Landed b891fe7..0661cf7 (22 commits, all scope-gated on main). Suites on the closing build:
+unit 1,057 / e2e 331 passed, 10 skipped, 0 failed (`npx playwright test`: 1,389 + 1 hardening pin);
+typecheck / lint / lint:css clean; screenshot pins for Overview + Book (dark/light, 1440×900) landed
+and hold; widths probe: no horizontal scroll at 1366/1440/1920/2560, shell 1280/1280/1520/1680;
+contrast: every kit text/ground pair ≥4.5:1 in both themes (ink-3 on chip-bg is <4.5 and unused).
+Owner approved Overview and Book side-by-side with the mockups on 2026-09-15 20:43.
+
+Reviews: 7 task reviews (3 fix rounds, all closed); final whole-branch review → 1 Critical + 4
+Important, fixed in one wave (lib/cash-view.ts shared derivation; refused rows never sliced; tier-toned
+snapshot chip; page-batch supersession; walking marker) + one hardening (liquidatableRows computed
+guard); re-review clean. Codex round (spec §9.5) could not run: Codex CLI 0.144.5 rejects the
+config's `gpt-6-astra` — owner to upgrade the CLI; the round is owed before Plan 2 lands.
+
+Carried forward: Plan 2 (Inspector) — AddressField, TrustChecklist, Sparkline join the kit; Prices
+identity chip from /v1/params; the D1/I3/I4 e2e pins the re-review named (refused-row debt cell,
+"once" on the page-batch reload, mid-walk marker). Plan 4 (convergence) — retire --t-*/--fs-* aliases,
+PostureRibbon/Ribbon/Stampline/StatCard (still imported by History/Activity/Verification/API and the
+styleguide), the theme-toggle register, the "All N accounts" explorer decision, Collateral-mix (needs
+per-asset collateral on the wire). Deferred minors are enumerated in
+.superpowers/sdd/2026-09-15-ui-kit-overview-book/progress.md.
