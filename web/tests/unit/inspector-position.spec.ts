@@ -151,7 +151,7 @@ test("boundaryOf: absent, breached, no-price-path and unreadable arms", () => {
   const unscaled = near({ liquidation_price: { ...p.liquidation_price, prices: [noScale as never] } });
   const u = boundaryOf(unscaled, readCashPosition(unscaled));
   expect(u.kind).toBe("unreadable");
-  if (u.kind === "unreadable") expect(u.fields).toContain("price_decimals");
+  if (u.kind === "unreadable") expect(u.fields).toContain("prices[0].price_decimals");
   // p0-8: a served entry without a boundary price is "absent", not a health claim
   const noFloor = near({ liquidation_price: { ...p.liquidation_price, prices: [{ ...first, lowest_healthy_price: null }] } });
   expect(boundaryOf(noFloor, readCashPosition(noFloor)).kind).toBe("absent");
@@ -170,4 +170,71 @@ test("pricesChip: source display, oldest age, worst verdict", () => {
   expect(sourceDisplay("priceproviderv2")).toBe("PriceProvider v2");
   expect(sourceDisplay("aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f")).toBe("Aave oracle");
   expect(sourceDisplay("redstone-classic")).toBe("redstone-classic");
+});
+
+test("review round: an empty factor list is phrased on its axis, a partial joint solve is refused, contradictions are named, negatives are not positions", () => {
+  const p = near();
+  if (p.liquidation_price === null) throw new Error("lp");
+  const lp = p.liquidation_price;
+  const first = lp.prices[0];
+  if (first === undefined) throw new Error("price");
+  // the solver serves factor_assets: [] for "no counted collateral in the factor" — the sentence names the axis, never an empty subject
+  const noFactor = near({
+    liquidation_price: { ...lp, never_liquidatable: true, reason: "position holds no counted collateral in the factor", factor_assets: [], prices: [], scale_factor_num: null, scale_factor_den: null },
+  });
+  const nf = boundaryOf(noFactor, readCashPosition(noFactor));
+  expect(nf.kind).toBe("no-price-path");
+  if (nf.kind === "no-price-path") expect(nf.sentence).toBe("No downward move on the ETH/USD axis alone reaches the boundary.");
+  // a joint solve with one floor missing is never half-printed
+  const partial = near({
+    liquidation_price: {
+      ...lp,
+      factor_assets: [WEETH, ETHFI],
+      prices: [first, { asset: ETHFI, current_price: "1250000", price_decimals: 6, price_floor: null, lowest_healthy_price: null }],
+    },
+  });
+  const pr = boundaryOf(partial, readCashPosition(partial));
+  expect(pr.kind).toBe("unreadable");
+  if (pr.kind === "unreadable") expect(pr.fields).toContain("prices[1].lowest_healthy_price");
+  // every malformed entry is named by index
+  const noScale = { ...first };
+  delete (noScale as { price_decimals?: number }).price_decimals;
+  const twoBad = near({ liquidation_price: { ...lp, prices: [null as never, noScale as never] } });
+  const tb = boundaryOf(twoBad, readCashPosition(twoBad));
+  expect(tb.kind).toBe("unreadable");
+  if (tb.kind === "unreadable") {
+    expect(tb.fields).toContain("prices[0].entry");
+    expect(tb.fields).toContain("prices[1].price_decimals");
+  }
+  // a boundary above spot, or an already-breached solve, beside a not-liquidatable verdict is a contradiction, never "falls below"
+  const rise = near({ liquidation_price: { ...lp, scale_factor_num: "4400000000", scale_factor_den: "4200000000" } });
+  expect(boundaryOf(rise, readCashPosition(rise)).kind).toBe("contradictory");
+  const breached = near({ liquidation_price: { ...lp, already_breached: true } });
+  expect(boundaryOf(breached, readCashPosition(breached)).kind).toBe("contradictory");
+  // a refused position computes no boundary even when the wire still carries a solve
+  const refused = near({ status: "refused", refusal: { code: "SWEEP_FAILED", detail: "sweep failed", note: "" }, max_borrow_lt: null, liquidation_verdict: "unknowable", borrowings: "4100000000" });
+  expect(boundaryOf(refused, readCashPosition(refused)).kind).toBe("absent");
+  // debt above cap with a not-liquidatable verdict reads near, never healthy; the room shows the contradiction
+  const over = readCashPosition(near({ borrowings: "5400000000" }));
+  expect(over.status).toBe("near");
+  expect(over.roomPercent).toBe("−7.8%");
+  expect(over.usedPercent).toBe("107.8%");
+  // a negative wire decimal is not a position
+  expect(readCashPosition(near({ borrowings: "-1" })).computed).toBe(false);
+  // an out-of-enum price verdict ranks crit by rule
+  const input = p.price_inputs[0];
+  if (input === undefined) throw new Error("input");
+  expect(pricesChip([{ ...input, verdict: "weird" as never }]).tone).toBe("crit");
+  // held assets are named once each
+  const dup = near({ liquidation_price: { ...lp, held_assets: [WEETH, ETHFI, ETHFI] } });
+  const d = boundaryOf(dup, readCashPosition(dup));
+  if (d.kind !== "boundary") throw new Error(d.kind);
+  expect(d.sentence).toContain("with ETHFI flat");
+  expect(d.sentence.split("ETHFI").length).toBe(2);
+  // an empty symbol falls back to the truncated address
+  const blank = near();
+  const leg = blank.legs[0];
+  if (leg === undefined) throw new Error("leg");
+  blank.legs[0] = { ...leg, symbol: "" };
+  expect(collateralTable(blank, readCashPosition(blank)).legs[0]?.symbol).toBe("0x5A7f…CBFF");
 });
