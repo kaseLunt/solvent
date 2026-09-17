@@ -110,8 +110,8 @@ The integrator builds the visual tasks personally: **Task 1** (kit parts), **Tas
 
 | Element | `data-testid` | Notes |
 |---|---|---|
-| Surface root | `lab-surface` | `data-mode` ∈ `book · address`; `data-state` ∈ `listing-loading · listing-unavailable · not-run · running · result · not-covered · withheld · contradictory · definition-changed · not-served · no-batch · rate-limited · busy · unreachable · failed` (book) or `idle · invalid · loading · unavailable · no-position · withheld · rows` (address); `data-banner` ∈ `stale-input · superseded` when present |
-| Library | `lab-library`, rows `lab-library-row-{id}` (`data-outcome` = the outcome key: `not-run · running · result · withheld · not-covered · failed`), checkbox `lab-library-check-{id}`, mode toggle `lab-mode-book` / `lab-mode-address`, footer `lab-run`, `lab-compare` | from `ScenarioLibrary` |
+| Surface root | `lab-surface` | `data-mode` ∈ `book · address`; `data-state` ∈ `listing-loading · listing-unavailable · not-run · running · result · not-covered · withheld · contradictory · definition-changed · not-served · no-batch · rate-limited · unreachable · failed` (book; `busy` is a set-run outcome, never a book state) or `idle · invalid · loading · unavailable · no-position · withheld · rows` (address); `data-banner` ∈ `stale-input · superseded · rerun-failed · retained-refused` when present (a computed result is never replaced by a failed re-run: it is held under `rerun-failed`, or disclosed as `retained-refused` when its definition changed) |
+| Library | `lab-library`, rows `lab-library-row-{id}` (`data-outcome` = the outcome key: `not-run · running · result · withheld · not-covered · failed · definition-changed`), checkbox `lab-library-check-{id}`, mode toggle `lab-mode-book` / `lab-mode-address`, footer `lab-run`, `lab-compare` | from `ScenarioLibrary` |
 | Address slot (address mode) | `lab-address`, `-input`, `-inspect`, `-refused` | from `AddressField` |
 | Verdict header | `lab-verdict`, `-headline`, `-dek`, `-identity` | chips carry `data-chip="{label}"`; the PROJECTION pill has `data-testid="lab-projection"` |
 | Banner | `lab-banner` | `data-kind` ∈ `stale-input · superseded`; "Run again" button `lab-banner-rerun` |
@@ -121,7 +121,7 @@ The integrator builds the visual tasks personally: **Task 1** (kit parts), **Tas
 | Legacy | `lab-legacy` (`<details>`), tiles `lab-legacy-kpi-{newly,debt,baddebt,moved}`, grid `lab-legacy-heatmap` | |
 | Drawer | `lab-drawer` (button), `lab-drawer-body` | |
 | Address workspace | `lab-address-tiles`, tiles `lab-address-kpi-{debt,cap,room,status}-{before,after}`, table `lab-address-table` | |
-| Compare | `lab-compare-card`, rows `lab-compare-row-{id}` (`data-kind`), plot `lab-dotplot` | Task 13 |
+| Compare | `lab-compare-card`, state `lab-compare-state` (`data-kind` ∈ `idle · running · ok · failed`), rows `lab-compare-row-{id}` (`data-kind` ∈ `point · refused`), plot `lab-dotplot` | Task 13 |
 | Deep-link notice | `lab-deeplink-notice` | |
 
 ---

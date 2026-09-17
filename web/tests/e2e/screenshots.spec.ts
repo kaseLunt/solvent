@@ -13,6 +13,8 @@ import {
   DEMO_PARAMS_DM,
   DEMO_POSITIONS_DM_PAGE_1,
   DEMO_POSITIONS_DM_PAGE_2,
+  DEMO_RUN_BOOK_ETH,
+  DEMO_SCENARIOS,
   DEMO_STRESS_NEAR,
 } from "../fixtures/demo";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
@@ -38,6 +40,9 @@ async function mockDemo(page: Page) {
   await page.route("**/v1/address/*/history*", (route) => json(route, DEMO_HISTORY_NEAR));
   await page.route("**/v1/address/*/stress*", (route) => json(route, DEMO_STRESS_NEAR));
   await page.route("**/v1/address/*", (route) => json(route, DEMO_ADDRESS_NEAR));
+  // The Scenarios page: the listing and the demo run-book welded to the Book (the pinned state runs no set).
+  await page.route("**/v1/scenarios/*/run-book", (route) => json(route, DEMO_RUN_BOOK_ETH));
+  await page.route("**/v1/scenarios", (route) => json(route, DEMO_SCENARIOS));
 }
 
 // Each page says when it has left its pending register; a pin taken earlier would freeze a skeleton.
@@ -52,6 +57,15 @@ const PAGES = [
       await expect(tab.getByTestId("inspector-room-spark").locator("svg")).toBeVisible();
       await expect(tab.getByTestId("inspector-stress-table").locator("tbody tr")).toHaveCount(3);
       await expect(tab.getByTestId("inspector-activity").locator("tbody tr")).toHaveCount(6);
+    },
+  },
+  {
+    name: "lab",
+    path: "/lab?scenario=eth_minus_30",
+    ready: async (tab: Page) => {
+      await expect(tab.getByTestId("lab-surface")).toHaveAttribute("data-state", "result");
+      await expect(tab.getByTestId("lab-heatmap")).toBeVisible();
+      await expect(tab.getByTestId("lab-movers").locator("tbody tr")).toHaveCount(20);
     },
   },
 ] as const;
@@ -72,8 +86,8 @@ for (const theme of ["dark", "light"] as const) {
       await page.ready(tab);
       await expect(tab).toHaveScreenshot(`${page.name}-${theme}.png`, {
         maxDiffPixelRatio: 0.01,
-        // The age ticks; the pill and the snapshot chip are masked, everything else is pinned.
-        mask: [tab.getByTestId("live-pill"), tab.locator("[data-chip='Snapshot']")],
+        // The ages tick; the pill, the snapshot chip and the Scenarios page's Computed chip are masked, everything else is pinned.
+        mask: [tab.getByTestId("live-pill"), tab.locator("[data-chip='Snapshot']"), tab.locator("[data-chip='Computed']")],
       });
     });
   }
