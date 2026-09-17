@@ -638,7 +638,7 @@ const MATRIX: Cell[] = [
     },
   },
 
-  // ---- Proof Center ---------------------------------------------------
+  // ---- Verification ---------------------------------------------------
   {
     surface: "proof",
     state: "ok:proof-and-live-split",
@@ -650,8 +650,9 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       // Two subjects; the reconciled-exact claim lives ONLY on the proof
       // card — a live batch never reads as reconciled-exact.
-      await expect(page.getByTestId("proof-subject")).toContainText("PROOF · EXACT");
-      await expect(page.getByTestId("live-subject")).not.toContainText("PROOF · EXACT");
+      await expect(page.getByTestId("verification-surface")).toHaveAttribute("data-receipt", "exact");
+      await expect(page.getByTestId("verification-subject-proof")).toContainText("PROOF · EXACT");
+      await expect(page.getByTestId("verification-subject-live")).not.toContainText("PROOF · EXACT");
     },
   },
   {
@@ -663,9 +664,10 @@ const MATRIX: Cell[] = [
       await page.route("**/v1/evidence*", (route) => fulfillJson(route, EVIDENCE_PROOF_FAILED));
     },
     verify: async (page) => {
-      await expect(page.getByTestId("proof-status")).toContainText("RECEIPT REJECTED");
+      await expect(page.getByTestId("verification-surface")).toHaveAttribute("data-receipt", "failed");
+      await expect(page.getByTestId("verification-proof-status")).toContainText("RECEIPT REJECTED");
       // The live subject keeps ITS truth — serving continues, unconflated.
-      await expect(page.getByTestId("live-status")).toContainText("SERVING");
+      await expect(page.getByTestId("verification-live-status")).toContainText("SERVING");
       await expect(page.locator("body")).not.toContainText("PROOF · EXACT @");
     },
   },
@@ -678,8 +680,9 @@ const MATRIX: Cell[] = [
       await page.route("**/v1/evidence*", (route) => fulfillJson(route, EVIDENCE_NO_RECEIPT));
     },
     verify: async (page) => {
-      await expect(page.getByTestId("proof-status")).toContainText("NO COMMITTED RECEIPT");
-      await expect(page.getByTestId("live-status")).toContainText("SERVING");
+      await expect(page.getByTestId("verification-surface")).toHaveAttribute("data-receipt", "none");
+      await expect(page.getByTestId("verification-proof-status")).toContainText("NO COMMITTED RECEIPT");
+      await expect(page.getByTestId("verification-live-status")).toContainText("SERVING");
     },
   },
   {
@@ -691,9 +694,9 @@ const MATRIX: Cell[] = [
       await page.route("**/v1/evidence*", (route) => fulfillJson(route, EVIDENCE_NO_BATCH));
     },
     verify: async (page) => {
-      await expect(page.getByTestId("live-status")).toContainText("NO SERVABLE BATCH");
+      await expect(page.getByTestId("verification-live-status")).toContainText("NO SERVABLE BATCH");
       // No key is ever fabricated for a batch that does not exist.
-      await expect(page.getByTestId("materialization-key")).toContainText("never fabricated");
+      await expect(page.getByTestId("verification-key")).toContainText("never fabricated");
     },
   },
   {
@@ -705,10 +708,10 @@ const MATRIX: Cell[] = [
       await page.route("**/v1/evidence*", (route) => route.abort());
     },
     verify: async (page) => {
-      await expect(page.getByTestId("proof-unavailable")).toBeVisible();
+      await expect(page.getByTestId("verification-surface")).toHaveAttribute("data-state", "unavailable");
       // Neither subject is invented while the manifest is unreachable.
-      await expect(page.getByTestId("proof-subject")).toHaveCount(0);
-      await expect(page.getByTestId("live-subject")).toHaveCount(0);
+      await expect(page.getByTestId("verification-subject-proof")).toHaveCount(0);
+      await expect(page.getByTestId("verification-subject-live")).toHaveCount(0);
     },
   },
 

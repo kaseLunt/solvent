@@ -1,0 +1,64 @@
+/* Verification: the pinned proof and the live batch, set in the Console register. Page-local rules only — the header,
+ * tiles, table and drawer are the kit's; these are the architecture strip's sentence grid and receipt line, the two
+ * subject cards' rows and provenance folds, the identifier + copy pairing, and the raw-JSON terminal. The proof card
+ * is accent-ruled and the live card ok-ruled: the split is the product, and neither may borrow the other's rule. */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+
+/* ---- Architecture & verification: the anchor the Overview lands on clears the 56px app bar ---- */
+.architecture { scroll-margin-top: 72px; }
+.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }
+.step { margin: 0; font-size: var(--type-body); color: var(--ink-2); line-height: 1.45; min-width: 0; }
+.stepNum { display: block; font-size: var(--type-floor); color: var(--accent-text); font-weight: var(--w-semibold); letter-spacing: 0.08em; margin-bottom: 4px; }
+.receipt { margin: 12px 0 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: var(--type-body); color: var(--ink); font-variant-numeric: tabular-nums; }
+.receipt[data-tone="ok"] { border-color: var(--ok); }
+.receipt[data-tone="warn"] { border-color: var(--warn); color: var(--warn-text); }
+.receipt[data-tone="refused"] { border-style: dashed; color: var(--ink-2); }
+
+/* ---- the two subjects ---- */
+.subjects { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+.proofCard { border-top: 3px solid var(--accent); }
+.liveCard { border-top: 3px solid var(--ok); }
+.cardHead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.explain { font: inherit; font-size: var(--type-label); color: var(--accent-text); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; white-space: nowrap; }
+.explain:hover { text-decoration-style: solid; }
+.takeaway { margin: 10px 0 0; font-size: var(--type-body); color: var(--ink); }
+.rows { margin-top: 10px; }
+.row { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-top: 1px solid var(--line); font-size: var(--type-body); }
+.row:first-child { border-top: 0; }
+.k { color: var(--ink-2); white-space: nowrap; }
+.v { text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; min-width: 0; color: var(--ink); }
+.vOk { color: var(--ok-text); }
+.vWarn { color: var(--warn-text); }
+.vCrit { color: var(--crit-text); }
+.vDim { color: var(--ink-3); }
+/* Provenance folds: counted, closed by default; a hazard never lives inside one. */
+.fold { margin-top: 10px; font-size: var(--type-body); }
+.fold > summary { cursor: pointer; font-size: var(--type-small); color: var(--ink-2); }
+.fold > summary:hover { color: var(--accent-text); }
+.foldSection { margin: 10px 0 2px; font-size: var(--type-small); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+
+/* ---- identifiers: the whole value, mono, wrapping, beside its copy affordance ---- */
+.ident { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.mono { font-family: var(--mono); font-size: var(--type-mono-sm); overflow-wrap: anywhere; }
+.copy { font-family: var(--mono); font-size: var(--type-small); line-height: 1; padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink-3); cursor: pointer; }
+.copy:hover { color: var(--accent-text); border-color: var(--accent); }
+.copied { color: var(--ok-text); border-color: var(--ok); }
+
+/* ---- probes: the kit's table, with the note allowed to wrap ---- */
+.wrap { white-space: normal; }
+
+/* ---- raw JSON (the raw-view law): the wire body, verbatim ---- */
+.raw { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--term-bg); color: var(--term-ink); font-family: var(--mono); font-size: var(--type-mono-sm); line-height: 1.6; overflow-x: auto; }
+
+/* ---- the drawer: a subject's evidence chain, then the doctrine ---- */
+.method { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; font-size: var(--type-body); color: var(--ink); }
+.method h3 { margin: 8px 0 0; font-size: var(--type-card); }
+.method h4 { margin: 10px 0 0; font-size: var(--type-small); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); font-weight: var(--w-medium); }
+.method p { margin: 0; }
+.comparator { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--panel-2); font-family: var(--mono); font-size: var(--type-mono-sm); line-height: 1.6; color: var(--ink-2); white-space: pre-wrap; }
+.disclosure { color: var(--ink-2); font-size: var(--type-small); }
+
+@media (max-width: 900px) {
+  .steps { grid-template-columns: 1fr 1fr; }
+  .subjects { grid-template-columns: 1fr; }
+}

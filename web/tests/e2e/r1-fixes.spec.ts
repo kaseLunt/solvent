@@ -12,8 +12,9 @@
 //   (5)  RETIRED with the Scenarios rebuild (2026-09-16, Plan 3) — the laws are
 //        in tests/e2e/lab.spec.ts (the cold load, the not-found arm, the mode
 //        toggle's words);
-//   (6)  no numbered eyebrows anywhere; Proof's H1 is "Proof"; the nav's two
-//        registers sit adjacent with a divider, not across a void;
+//   (6)  no numbered eyebrows anywhere; the nav's two registers sit adjacent
+//        with a divider, not across a void (the Proof H1 arm retired with the
+//        Verification convergence, Plan 4);
 //   (7)  numeric column HEADERS are right-aligned over their cells;
 //   (8)  section order: map above table, positions above histogram, census
 //        above waterfall;
@@ -123,11 +124,9 @@ test("(6) not one numbered eyebrow survives on the seven surfaces", async ({ pag
   }
 });
 
-test("(6) Proof's H1 is the surface's own name", async ({ page }) => {
-  await muteStream(page);
-  await page.goto("/proof");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Proof");
-});
+// (6)'s Proof H1 arm is RETIRED with the Verification convergence (plan 2026-09-16, Task 5): the page's H1 is its
+// computed sentence (R2, `proofTakeaway`), and its name is the nav label and the kicker "Verification · this
+// deployment" — pinned in tests/e2e/verification.spec.ts; the shell smoke pins the no-API H1.
 
 test("(10) the adjudicated intros render — Observatory, Feed, Proof, Developers (the Inspector arm retired under Plan 2, the Lab arm under Plan 3)", async ({
   page,
@@ -152,12 +151,9 @@ test("(10) the adjudicated intros render — Observatory, Feed, Proof, Developer
       "history. The two never blend.",
   );
 
-  await page.goto("/proof");
-  await expect(page.locator("main")).toContainText(
-    "What this deployment is, exactly: the pinned proof of its last reconcile and the identity " +
-      "of the batch it serves now. Nothing here is measured on request: every field is carried " +
-      "by the build or persisted by a batch.",
-  );
+  // The Proof arm is RETIRED with the Verification convergence (plan 2026-09-16, Task 5): the intro is drawer
+  // doctrine now (R3), pinned verbatim in tests/e2e/verification.spec.ts; the dek keeps "Two subjects, never one:
+  // the pinned proof and the live batch."
 
   // The API arm is RETIRED with the API convergence (plan 2026-09-16, Task 6): the intro is
   // drawer doctrine now (R3), pinned verbatim in tests/e2e/api.spec.ts; the dek keeps its closing clause.

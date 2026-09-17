@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
-import { ProofSurface } from "./ProofSurface";
+import { VerificationSurface } from "./VerificationSurface";
 
-export const metadata: Metadata = { title: "Proof Center" };
+export const metadata: Metadata = { title: "Verification" };
 
 /**
- * The Proof Center route (W6). All data arrives client-side through
- * lib/proof-data (the documented /v1/evidence seam) — nothing is fetched at
- * build time, so a static shell never bakes in a stale manifest.
+ * Verification (spec §5.5): what this deployment is, exactly — the pinned proof
+ * and the live batch. Every figure arrives client-side (lib/proof-data for the
+ * manifest; the Overview's meta and book readers for the architecture steps),
+ * so a static shell never bakes in a stale manifest.
  */
 export default function ProofPage() {
-  return <ProofSurface />;
+  return <VerificationSurface />;
 }
