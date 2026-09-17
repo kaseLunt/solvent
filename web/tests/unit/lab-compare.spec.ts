@@ -67,10 +67,10 @@ test("points are ranked by |share|, the words carry sign and tier, every non-ans
   expect(eth.shareText).toBe("+4.5%");
   expect(eth.deltaText).toBe("+$1.2M");
   expect(eth.newly).toBe(118);
-  // A contribution too small for a tenth keeps its sign and says it is under the resolution — never "+0%".
-  expect(v.rows[1]?.shareText).toBe("+<0.1%");
+  // A contribution too small for a tenth says it is under the resolution, unsigned — never "+0%"; its sign is the dot's side and the figure's.
+  expect(v.rows[1]?.shareText).toBe("<0.1%");
   expect(v.rows[1]?.deltaText).toBe("+$9,800");
-  expect(v.rows[2]?.shareText).toBe("−<0.1%");
+  expect(v.rows[2]?.shareText).toBe("<0.1%");
   expect(v.rows[2]?.deltaText).toBe("−$2,000");
   expect(v.rows[2]?.newly).toBeNull();
   expect(v.rows[3]?.shareText).toBe("0%");
@@ -158,4 +158,25 @@ test("setMembership: an echo that matches the ask while the results do not — a
 test("setMembership: a duplicated id in requested_scenario_ids refuses before any set question is posed", () => {
   const set = { ...answering([result("a_one", "A", {})]), requested_scenario_ids: ["a_one", "a_one"] };
   expect(setMembership(["a_one"], set)).toEqual(["a_one appears 2 times in requested_scenario_ids; a set names each id once"]);
+});
+
+test("the envelope's lists are read only once they are lists: a body missing one is refused by the field's name, never dereferenced", () => {
+  const two = answering([result("a_one", "A", {}), result("b_two", "B", {})]);
+  const noIds = { ...two, requested_scenario_ids: undefined } as unknown as RunBookSetResponse;
+  expect(setMembership(["a_one", "b_two"], noIds)).toEqual(["requested_scenario_ids is not a list"]);
+  const noResults = { ...two, results: null } as unknown as RunBookSetResponse;
+  expect(setMembership(["a_one", "b_two"], noResults)).toEqual(["results is not a list"]);
+  const noEvaluation = { ...two, evaluation: undefined } as unknown as RunBookSetResponse;
+  expect(setMembership(["a_one", "b_two"], noEvaluation)).toEqual(["evaluation.scenarios_evaluated is not a count"]);
+  expect(setMembership(["a_one"], {} as unknown as RunBookSetResponse)).toEqual(["requested_scenario_ids is not a list", "results is not a list", "evaluation.scenarios_evaluated is not a count"]);
+  // The reader behind the gate never dereferences a missing list either.
+  expect(compareRows(noResults, "debt_manager").rows).toEqual([]);
+  // A result's four engine lists: each missing one is named, and the row is contradictory before any engine is read.
+  const noEngines = compareRows(setOf([{ ...result("x", "X", {}), engines: undefined } as unknown as SetRunScenarioResult]), "debt_manager").rows[0]!;
+  expect(noEngines.kind).toBe("contradictory");
+  expect(noEngines.reason).toBe("engines is not a list");
+  expect(noEngines.shareTenths).toBeNull();
+  const none = compareRows(setOf([{ ...result("y", "Y", {}), covered_engines: null, withheld_engines: "", unmeasurable_engines: {} } as unknown as SetRunScenarioResult]), "debt_manager").rows[0]!;
+  expect(none.kind).toBe("contradictory");
+  expect(none.reason).toBe("covered_engines, withheld_engines, unmeasurable_engines are not a list");
 });

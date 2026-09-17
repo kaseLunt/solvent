@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 import type { LabReading } from "../../lib/lab-reading";
 import type { RunRecord, SetRecord } from "../../lib/lab-library";
 import { deriveLabView, readEngine } from "../../lib/lab-view";
-import { failureHeadline } from "../../lib/lab-headline";
+import { contradictoryHeadline, failureHeadline } from "../../lib/lab-headline";
 import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
 import { SCENARIOS } from "../fixtures/lab-book";
 import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, transitionsOf, type Engine } from "./helpers/run-book-engine";
@@ -167,9 +167,9 @@ test("every fetch failure is its own state with the failure sentence", () => {
 
 test("compare: idle, running, ok (both engines' views), failed", () => {
   expect(deriveLabView(reading({}), ui()).compare).toEqual({ kind: "idle" });
-  const running: SetRecord = { phase: "running", ids: ["eth_minus_30", "ethfi_minus_50"], startedAt: 1 };
+  const running: SetRecord = { phase: "running", ids: ["eth_minus_30", "ethfi_minus_50"], startedAt: 1, held: null };
   expect(deriveLabView(reading({ set: running }), ui()).compare).toEqual({ kind: "running", ids: ["eth_minus_30", "ethfi_minus_50"] });
-  const busy: SetRecord = { phase: "settled", ids: ["a"], outcome: { kind: "busy", message: "another evaluation holds the slot", maxInFlight: 1, inFlight: 1 }, at: 2 };
+  const busy: SetRecord = { phase: "settled", ids: ["a"], outcome: { kind: "busy", message: "another evaluation holds the slot", maxInFlight: 1, inFlight: 1 }, at: 2, held: null };
   const b = deriveLabView(reading({ set: busy }), ui()).compare;
   expect(b.kind).toBe("failed");
   if (b.kind === "failed") expect(b.headline.emphasis).toBe("The evaluator is busy.");
@@ -244,17 +244,95 @@ const demoSetFor = (ids: readonly string[]): typeof DEMO_RUN_BOOK_SET => {
 
 test("compare: a set is read only when it answers the request — the asked ids are the authority, and a body naming more is refused whole with every fault named", () => {
   const asked = ["eth_minus_30", "ethfi_minus_50"];
-  const answered: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "ok", response: demoSetFor(asked) }, at: 2 };
+  const answered: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "ok", response: demoSetFor(asked) }, at: 2, held: null };
   const ok = deriveLabView(reading({ set: answered }), ui()).compare;
   expect(ok.kind).toBe("ok");
   if (ok.kind === "ok") expect(ok.cash.rows.map((r) => r.id)).toEqual(["eth_minus_30", "ethfi_minus_50"]);
-  const unasked: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "ok", response: DEMO_RUN_BOOK_SET }, at: 2 };
+  const unasked: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "ok", response: DEMO_RUN_BOOK_SET }, at: 2, held: null };
   const failed = deriveLabView(reading({ set: unasked }), ui()).compare;
   expect(failed.kind).toBe("failed");
   if (failed.kind !== "failed") return;
   expect(failed.headline.emphasis).toBe("The set does not answer the request.");
   expect(failed.headline.tone).toBe("refused");
   expect(failed.headline.dek).toBe(
-    "Asked 2 ids, the response names 4; weeth_market_depeg_oracles_held is named in requested_scenario_ids and was not dispatched; dm_rate_horizon_plus_200bps is named in requested_scenario_ids and was not dispatched. Nothing from it is drawn.",
+    "Faults: asked 2 ids, the response names 4; weeth_market_depeg_oracles_held is named in requested_scenario_ids and was not dispatched; dm_rate_horizon_plus_200bps is named in requested_scenario_ids and was not dispatched. Nothing from it is drawn.",
   );
+});
+
+test("a 2xx body that does not read never replaces a computed result: the held figures stand under a banner naming the contradiction; with nothing held, the contradictory state as before; an honest answer releases the hold", () => {
+  const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
+  const held = { response: run, at: 1, atMonotonicMs: 1 };
+  const malformed = runBookOf([demoCash({ eligible_debt_delta_usd: "1e6" })], ETH_DEF);
+  const over = (response: typeof run, h: typeof held | null) => new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "ok", response }, at: 2, atMonotonicMs: 2, held: h }]]);
+  const v = deriveLabView(reading({ runs: over(malformed, held) }), ui());
+  expect(v.book.state).toBe("result");
+  expect(v.book.banner).toBe("rerun-failed");
+  expect(v.book.headline.emphasis).toBe("$1.2M more Cash debt becomes liquidatable,");
+  expect(v.book.rerunFailure).toEqual(contradictoryHeadline("ETH -30 percent", ["eligible_debt_delta_usd is outside the wire contract"]));
+  expect(v.book.run).toBe(run);
+  expect(v.book.receivedAt).toEqual({ wallMs: 1, monotonicMs: 1 });
+  expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "result", text: "+$1.2M liquidatable · 118 accounts", tone: "crit" });
+  // With nothing held, the same body is the contradictory state under no banner.
+  const bare = deriveLabView(reading({ runs: over(malformed, null) }), ui());
+  expect(bare.book.state).toBe("contradictory");
+  expect(bare.book.banner).toBeNull();
+  expect(bare.book.rerunFailure).toBeNull();
+  // A self-contradicting matrix is the same class.
+  const contradictory = runBookOf([demoCash({ hf_transitions: { ...transitionsOf(DEMO_CASH_TABLE), total_rows: 5 } })], ETH_DEF);
+  const c = deriveLabView(reading({ runs: over(contradictory, held) }), ui());
+  expect(c.book.state).toBe("result");
+  expect(c.book.banner).toBe("rerun-failed");
+  expect(c.book.rerunFailure?.emphasis).toBe("The result for ETH -30 percent contradicts itself.");
+  // An honest answer releases the hold: a withheld book over a held result is the withheld state, no banner.
+  const withheld = runBookOf([legacyEngine({ 7: { 7: 1 } })], ETH_DEF, { excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "the custody flag is unproven", note: "" }] });
+  const w = deriveLabView(reading({ runs: over(withheld, held) }), ui());
+  expect(w.book.state).toBe("withheld");
+  expect(w.book.banner).toBeNull();
+  // A retained body whose definition changed is disclosed, not shown, under a malformed answer as under any failure.
+  const otherVersion = runBookOf([demoCash()], { ...ETH_DEF, version: "v2" });
+  const r = deriveLabView(reading({ runs: over(malformed, { response: otherVersion, at: 1, atMonotonicMs: 1 }) }), ui());
+  expect(r.book.state).toBe("contradictory");
+  expect(r.book.banner).toBe("retained-refused");
+  expect(r.book.retained).toEqual({ batchId: otherVersion.batch.id, skew: ["version"] });
+  expect(r.book.cash).toBeNull();
+});
+
+test("compare: a failed Compare never replaces the comparison it had — the held set's views stand beside the failure; a set that does not answer its request is such a failure", () => {
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  const held = { ids: asked, response: demoSetFor(asked), at: 2 };
+  const busy: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "busy", message: "another evaluation holds the slot", maxInFlight: 1, inFlight: 1 }, at: 3, held };
+  const b = deriveLabView(reading({ set: busy }), ui()).compare;
+  expect(b.kind).toBe("failed");
+  if (b.kind !== "failed") return;
+  expect(b.headline.emphasis).toBe("The evaluator is busy.");
+  expect(b.held?.cash.rows.map((r) => r.id)).toEqual(["eth_minus_30", "ethfi_minus_50"]);
+  expect(b.held?.cash.batchId).toBe(18251);
+  expect(b.held?.legacy.engine).toBe("aave_v3_etherfi");
+  const unasked: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "ok", response: DEMO_RUN_BOOK_SET }, at: 3, held };
+  const u = deriveLabView(reading({ set: unasked }), ui()).compare;
+  expect(u.kind).toBe("failed");
+  if (u.kind === "failed") expect(u.held?.cash.rows).toHaveLength(2);
+  // With nothing held, a failure carries nothing.
+  const f = deriveLabView(reading({ set: { ...busy, held: null } }), ui()).compare;
+  expect(f.kind).toBe("failed");
+  if (f.kind === "failed") expect(f.held).toBeNull();
+});
+
+test("readEngine never throws at render: a body missing an envelope list, or a null side or matrix, is unreadable by the field's name — the contradictory state, the route standing", () => {
+  const run = runBookOf([demoCash()], DEFINITION_ETH);
+  const missingLists = { ...run, engines: undefined, excluded_engines: null } as unknown as typeof run;
+  expect(readEngine(missingLists, "debt_manager", DEFINITION_ETH)).toEqual({ kind: "unreadable", fields: ["excluded_engines", "engines"] });
+  const nullSide = runBookOf([{ ...demoCash(), before: null } as unknown as Engine], DEFINITION_ETH);
+  expect(readEngine(nullSide, "debt_manager", DEFINITION_ETH)).toEqual({ kind: "unreadable", fields: ["before"] });
+  const nullMatrix = runBookOf([{ ...demoCash(), hf_transitions: null } as unknown as Engine], DEFINITION_ETH);
+  expect(readEngine(nullMatrix, "debt_manager", DEFINITION_ETH)).toEqual({ kind: "unreadable", fields: ["hf_transitions"] });
+  const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: nullSide }) }), ui());
+  expect(v.book.state).toBe("contradictory");
+  expect(v.book.headline.dek).toBe("before is outside the wire contract. Nothing from it is drawn.");
+  // A missing refusal list through the view: named, and the chips print what lists exist.
+  const noExcluded = { ...run, excluded_engines: undefined } as unknown as typeof run;
+  const e = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: noExcluded }) }), ui());
+  expect(e.book.state).toBe("contradictory");
+  expect(e.book.headline.dek).toBe("excluded_engines is outside the wire contract. Nothing from it is drawn.");
+  expect(e.book.chips.find((c) => c.label === "Engines")?.value).toBe("Cash");
 });

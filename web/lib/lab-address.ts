@@ -7,7 +7,7 @@ import { headroomBand } from "./headroom";
 import { humanUsdFull } from "./human-price";
 import type { CashStatus } from "./inspector-position";
 import type { InspectorView } from "./inspector-view";
-import type { LabHeadline } from "./lab-headline";
+import { refused, sentence, UNREADABLE_SCALE, type LabHeadline } from "./lab-headline";
 import type { LibraryOutcome } from "./lab-library";
 import { isWireScale } from "./wireGuard";
 
@@ -39,15 +39,8 @@ export interface AddressWorkspace {
   readonly cause: string | null;
 }
 
-const refused = (emphasis: string, dek: string): LabHeadline => ({ emphasis, rest: "", tone: "refused", dek });
 const REFUSED_TILE: AddressTile = { value: "—", tone: "refused" };
 const NOT_COMPUTED: AddressTile = { value: "Not computed", tone: "refused" };
-
-function sentence(text: string): string {
-  const t = text.trim();
-  const c = t.charAt(0).toUpperCase() + t.slice(1);
-  return /[.!?]$/.test(c) ? c : `${c}.`;
-}
 
 function empty(state: AddressWorkspaceState, address: string, headline: LabHeadline, cause: string | null = null): AddressWorkspace {
   return { state, address, rows: [], selected: null, headline, tiles: null, batchId: null, decimals: null, cause };
@@ -108,10 +101,16 @@ function roomWords(room: bigint, decimals: number): string {
   return room < 0n ? `over cap by ${humanUsdFull(-room, decimals)}` : humanUsdFull(room, decimals);
 }
 
-/** A side's room words: "not computed" for a missing, unreadable or unknowable side — the tiles' own word — never a figure beside it. */
-function sideRoomWords(side: StressSide | null, decimals: number): string {
+/**
+ * A side's room words, the one register the tiles, the dek and the table's room cells share: "not computed" for a
+ * missing, unreadable or unknowable side — never a figure beside a refused register; a negative room "over cap by"
+ * a positive figure — never a minus on a dollar figure; the refused scale word where the position's scale did not
+ * pass the guard — a figure prints at no other scale than its own.
+ */
+export function sideRoomWords(side: StressSide | null, decimals: number | null): string {
   const figures = computable(side);
-  return figures === null ? "not computed" : roomWords(figures.room, decimals);
+  if (figures === null) return "not computed";
+  return decimals === null ? UNREADABLE_SCALE : roomWords(figures.room, decimals);
 }
 
 /**
@@ -147,15 +146,15 @@ export function rowVerdict(row: StressRow): RowVerdict {
     if (within !== undefined) return { kind: "liquidatable", within, already: false };
     return { kind: "inside", through: longest };
   }
-  if (row.flips === null) return { kind: "cannot-say", cause: "withheld" };
-  if (row.flips) return { kind: "liquidatable", within: null, already: false };
+  // Past the gate both sides are computable, so the reader's flip is a boolean: null is exactly a missing or unknowable side.
+  if (row.flips === true) return { kind: "liquidatable", within: null, already: false };
   if (row.after?.verdict === "liquidatable") return { kind: "liquidatable", within: null, already: true };
   return { kind: "inside", through: null };
 }
 
 /**
  * The selected row's sentence. Not applicable is the engine's own reason. A
- * side the tiles refuse — unreadable figures or an unknowable verdict — yields
+ * side the tiles refuse — missing, unreadable figures or an unknowable verdict — yields
  * no verdict word in any row kind, whatever the wire's booleans or horizons
  * say of it: that gate is asked before a projection reads its horizons or a
  * spot shock reads the reader's flip.
@@ -278,5 +277,43 @@ export function rowOutcome(row: StressRow | undefined): LibraryOutcome {
       return { key: "result", text: verdict.already ? "Liquidatable today and after" : "Becomes liquidatable", tone: "crit" };
     case "inside":
       return { key: "result", text: verdict.through === null ? "Stays inside its cap" : `Stays inside its cap through ${horizonLabel(verdict.through.seconds)}`, tone: "ok" };
+  }
+}
+
+/** The verdict column's cell: its words, the pill tone it wears (null for plain text), and the demoted detail for the hover — the Inspector's shape. */
+export interface RowVerdictWord {
+  readonly text: string;
+  readonly tone: "crit" | "warn" | "refused" | null;
+  readonly title: string | null;
+}
+
+/**
+ * The table's "Becomes liquidatable?" cell in one-address mode, spoken from `rowVerdict` — the same judgement the
+ * headline and the library word speak from, so the three can never disagree about one row. A projection's yes names
+ * the horizon it happens within, in the projection's warn tone; a side the tiles refuse is a cannot-say, never a yes
+ * or a no from the wire's booleans; an inapplicable row carries the engine's reason as plain text.
+ */
+export function rowVerdictWord(row: StressRow): RowVerdictWord {
+  const verdict = rowVerdict(row);
+  switch (verdict.kind) {
+    case "not-applicable":
+      return { text: verdict.reason, tone: null, title: null };
+    case "cannot-say":
+      switch (verdict.cause) {
+        case "not-a-position":
+          return { text: "Cannot say", tone: "refused", title: "the shocked figures are not a position" };
+        case "withheld":
+          return { text: "Cannot say", tone: "refused", title: "one side of the comparison is withheld or unknowable" };
+        case "no-horizon":
+          return { text: "Cannot say", tone: "refused", title: "the projection carries no horizon" };
+        case "horizon-unknowable":
+          return { text: "Cannot say", tone: "refused", title: `the ${horizonLabel(verdict.horizon.seconds)} horizon carries no verdict` };
+      }
+      break;
+    case "liquidatable":
+      if (verdict.within !== null) return { text: `Yes · within ${horizonLabel(verdict.within.seconds)}`, tone: "warn", title: null };
+      return verdict.already ? { text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" } : { text: "Yes", tone: "crit", title: null };
+    case "inside":
+      return verdict.through === null ? { text: "No", tone: null, title: null } : { text: "No", tone: null, title: `stays inside its cap through ${horizonLabel(verdict.through.seconds)}, the longest horizon projected` };
   }
 }

@@ -24,7 +24,7 @@ import {
   withheldHeadline,
   type LabHeadline,
 } from "./lab-headline";
-import { definitionSkew, libraryRows, type LibraryRow, type RunRecord, type ScenarioDefinition, type ScenariosResponse } from "./lab-library";
+import { definitionSkew, libraryRows, type HeldResult, type LibraryRow, type RunRecord, type ScenarioDefinition, type ScenariosResponse } from "./lab-library";
 import type { LabReading } from "./lab-reading";
 import { groupInt, joinAnd } from "./prose";
 import type { ResultIdentity } from "./resultIdentity";
@@ -89,7 +89,12 @@ export type CompareState =
   | { readonly kind: "idle" }
   | { readonly kind: "running"; readonly ids: readonly string[] }
   | { readonly kind: "ok"; readonly cash: CompareView; readonly legacy: CompareView }
-  | { readonly kind: "failed"; readonly headline: LabHeadline };
+  /** `held`: the comparison a failed Compare left standing — the last set that answered its request, both engines' views — or null when there is none. */
+  | { readonly kind: "failed"; readonly headline: LabHeadline; readonly held: HeldCompare | null };
+export interface HeldCompare {
+  readonly cash: CompareView;
+  readonly legacy: CompareView;
+}
 
 export interface LabUi {
   readonly selectedId: string | null;
@@ -133,10 +138,20 @@ function definitionChips(def: ScenarioDefinition, configVersion: string): LabChi
 }
 
 function enginesChip(run: LabRunBook, cash: EngineReading): LabChip {
-  const served = run.engines.map((e) => engineName(e.engine));
-  const withheld = run.excluded_engines.map((e) => `${engineName(e.engine)} withheld`);
+  const served = servedEngines(run).map((e) => engineName(e.engine));
+  const withheld = excludedEngines(run).map((e) => `${engineName(e.engine)} withheld`);
   const parts = [...(served.length > 0 ? [joinAnd(served)] : []), ...withheld];
   return { label: "Engines", value: parts.join(" · "), tone: withheld.length > 0 || cash.kind === "withheld" ? "warn" : undefined };
+}
+
+/** The envelope's two lists, read only when they are lists: a body missing one prints no engine from it, and `readEngine` names the field. */
+function servedEngines(run: LabRunBook): LabRunBook["engines"] {
+  const value: unknown = run.engines;
+  return Array.isArray(value) ? run.engines : [];
+}
+function excludedEngines(run: LabRunBook): LabRunBook["excluded_engines"] {
+  const value: unknown = run.excluded_engines;
+  return Array.isArray(value) ? run.excluded_engines : [];
 }
 
 function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunBook, receivedAt: ReceivedAt): BookWorkspace {
@@ -144,7 +159,7 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
   const superseded = run.batch.supersession.superseded;
   const kicker = `${def.label} · Cash book`;
   // The answered engines, distinct and in wire order; a withheld engine is a refusal, never an answer.
-  const identity: ResultIdentity = { scope: "book", batchId: run.batch.id, configVersion: run.scenario_config_version, engines: [...new Set(run.engines.map((e) => e.engine))], servedAt: run.served_at };
+  const identity: ResultIdentity = { scope: "book", batchId: run.batch.id, configVersion: run.scenario_config_version, engines: [...new Set(servedEngines(run).map((e) => e.engine))], servedAt: run.served_at };
   const cash = readEngine(run, CASH, def);
   const legacy = def.engines.includes(LEGACY) ? readEngine(run, LEGACY, def) : null;
   const chips: LabChip[] = [
@@ -189,26 +204,39 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
 }
 
 function bookOf(listing: ScenariosResponse, def: ScenarioDefinition, record: RunRecord | undefined): BookWorkspace {
+  const configVersion = listing.scenario_config_version;
+  const chips = definitionChips(def, configVersion);
   if (record === undefined) {
-    return emptyBook("not-run", notRunHeadline({ label: def.label, description: def.description, path_assumption: def.path_assumption, shocks: def.shocks.length }), def, definitionChips(def, listing.scenario_config_version));
+    return emptyBook("not-run", notRunHeadline({ label: def.label, description: def.description, path_assumption: def.path_assumption, shocks: def.shocks.length }), def, chips);
   }
-  if (record.phase === "running") return emptyBook("running", runningHeadline(def.label), def, definitionChips(def, listing.scenario_config_version));
+  if (record.phase === "running") return emptyBook("running", runningHeadline(def.label), def, chips);
   const o = record.outcome;
-  if (o.kind === "ok") return resultBook(def, listing.scenario_config_version, o.response, { wallMs: record.at, monotonicMs: record.atMonotonicMs });
-  const failure = failureOf(o);
-  const chips = definitionChips(def, listing.scenario_config_version);
-  if (record.held !== null) {
-    const held = resultBook(def, listing.scenario_config_version, record.held.response, { wallMs: record.held.at, monotonicMs: record.held.atMonotonicMs });
-    // A retained body whose definition changed is disclosed, never shown as this request's answer: the attempt's own failure is the state.
-    if (held.state === "definition-changed") {
-      return { ...emptyBook(failure.state, failure.headline, def, chips), banner: "retained-refused", retained: { batchId: record.held.response.batch.id, skew: held.skew } };
-    }
-    // A result already computed is never replaced by a failed re-run: it stands for the batch it names, the failure named
-    // beside it — and so is the held result's own condition, which the failure does not cancel.
-    const heldCondition: HeldCondition = held.banner === "superseded" || held.banner === "stale-input" ? held.banner : null;
-    return { ...held, banner: "rerun-failed", heldCondition, rerunFailure: failure.headline };
+  if (o.kind === "ok") {
+    const book = resultBook(def, configVersion, o.response, { wallMs: record.at, monotonicMs: record.atMonotonicMs });
+    // A 2xx body READS as an answer — a result, a withheld book, a scenario that does not model Cash, a definition
+    // that changed — or it does not: malformed or self-contradicting, it is a failed answer, and a failed answer
+    // never replaces the result the page had. The honest answers release the hold; the malformed classes stand
+    // behind it with the contradiction named as the failure.
+    if (book.state !== "contradictory" || record.held === null) return book;
+    return overHeld(def, configVersion, record.held, { state: "contradictory", headline: book.headline }, chips);
   }
-  return emptyBook(failure.state, failure.headline, def, chips);
+  const failure = failureOf(o);
+  return record.held === null ? emptyBook(failure.state, failure.headline, def, chips) : overHeld(def, configVersion, record.held, failure, chips);
+}
+
+/**
+ * A held result under a failure that did not replace it. A result already computed is never replaced by a failed
+ * re-run: it stands for the batch it names, the failure named beside it — and so is the held result's own
+ * condition, which the failure does not cancel. A retained body whose definition changed is disclosed, never shown
+ * as this request's answer: the attempt's own failure is the state.
+ */
+function overHeld(def: ScenarioDefinition, configVersion: string, heldResult: HeldResult, failure: { state: BookState; headline: LabHeadline }, chips: LabChip[]): BookWorkspace {
+  const held = resultBook(def, configVersion, heldResult.response, { wallMs: heldResult.at, monotonicMs: heldResult.atMonotonicMs });
+  if (held.state === "definition-changed") {
+    return { ...emptyBook(failure.state, failure.headline, def, chips), banner: "retained-refused", retained: { batchId: heldResult.response.batch.id, skew: held.skew } };
+  }
+  const heldCondition: HeldCondition = held.banner === "superseded" || held.banner === "stale-input" ? held.banner : null;
+  return { ...held, banner: "rerun-failed", heldCondition, rerunFailure: failure.headline };
 }
 
 function failureOf(o: Exclude<RunBookOutcome, { kind: "ok" }>): { state: BookState; headline: LabHeadline } {
@@ -231,28 +259,31 @@ function compareOf(reading: LabReading): CompareState {
   if (set === null) return { kind: "idle" };
   if (set.phase === "running") return { kind: "running", ids: set.ids };
   const o = set.outcome;
+  // A failed Compare never replaces the comparison it had: the last set that answered its request stands beside the failure.
+  const held: HeldCompare | null = set.held === null ? null : { cash: compareRows(set.held.response, CASH), legacy: compareRows(set.held.response, LEGACY) };
+  const failed = (headline: LabHeadline): CompareState => ({ kind: "failed", headline, held });
   switch (o.kind) {
     case "ok": {
       // The asked ids are the authority on what was asked: a body that does not answer them is refused whole, every fault named.
       const faults = setMembership(set.ids, o.response);
-      if (faults.length > 0) return { kind: "failed", headline: setMembershipHeadline(faults) };
+      if (faults.length > 0) return failed(setMembershipHeadline(faults));
       return { kind: "ok", cash: compareRows(o.response, CASH), legacy: compareRows(o.response, LEGACY) };
     }
     case "busy":
-      return { kind: "failed", headline: failureHeadline("busy", { message: o.message, inFlight: o.inFlight, maxInFlight: o.maxInFlight }) };
+      return failed(failureHeadline("busy", { message: o.message, inFlight: o.inFlight, maxInFlight: o.maxInFlight }));
     case "not-served":
-      return { kind: "failed", headline: failureHeadline("not-served", {}) };
+      return failed(failureHeadline("not-served", {}));
     case "no-batch":
-      return { kind: "failed", headline: failureHeadline("no-batch", { message: o.message, retryAfterSeconds: o.retryAfterSeconds }) };
+      return failed(failureHeadline("no-batch", { message: o.message, retryAfterSeconds: o.retryAfterSeconds }));
     case "rate-limited":
-      return { kind: "failed", headline: failureHeadline("rate-limited", { retryAfterSeconds: o.retryAfterSeconds }) };
+      return failed(failureHeadline("rate-limited", { retryAfterSeconds: o.retryAfterSeconds }));
     case "refused":
       // An envelope-less refusal carries no code; its message stands alone rather than behind an empty one.
-      return { kind: "failed", headline: failureHeadline("failed", { status: o.status, message: o.code === "" ? o.message : `${o.code}: ${o.message}` }) };
+      return failed(failureHeadline("failed", { status: o.status, message: o.code === "" ? o.message : `${o.code}: ${o.message}` }));
     case "unreachable":
-      return { kind: "failed", headline: failureHeadline("unreachable", { message: o.message }) };
+      return failed(failureHeadline("unreachable", { message: o.message }));
     case "refused-locally":
-      return { kind: "failed", headline: failureHeadline("refused-locally", { message: o.message }) };
+      return failed(failureHeadline("refused-locally", { message: o.message }));
   }
 }
 

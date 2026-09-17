@@ -23,7 +23,8 @@ export function finding(view: HeatmapView): string {
   const axes = view.merged
     ? "Rows: room under cap today · columns: after the shock · cells are accounts."
     : "Rows: health-factor lane today · columns: after the shock, as the wire serves them · cells are accounts.";
-  const moves = `${groupInt(view.bandChanged)} accounts change band; ${groupInt(view.crossedCap)} cross the cap; ${view.improved === 0 ? "none improve" : `${groupInt(view.improved)} improve`}.`;
+  const one = (n: number, plural: string, singular: string) => (n === 1 ? singular : plural);
+  const moves = `${groupInt(view.bandChanged)} ${one(view.bandChanged, "accounts change", "account changes")} band; ${groupInt(view.crossedCap)} ${one(view.crossedCap, "cross", "crosses")} the cap; ${view.improved === 0 ? "none improve" : `${groupInt(view.improved)} ${one(view.improved, "improve", "improves")}`}.`;
   const unmeasured =
     view.unmeasuredRows === 0
       ? ""

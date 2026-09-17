@@ -9,15 +9,14 @@ import type { components } from "@solvent/client";
 import { engineName } from "./inspector-headline";
 import { CASH } from "./inspector-position";
 import { readEngine } from "./lab-engine";
-import { signedUsd } from "./lab-headline";
+import { signedCount, signedUsd } from "./lab-headline";
 import { groupInt, joinAnd } from "./prose";
-import type { LabRunBook, LabRunBookEngine, RunBookOutcome } from "./runbook";
-import type { SetRunOutcome } from "./runbookSet";
+import type { LabRunBook, RunBookOutcome } from "./runbook";
+import type { RunBookSetResponse, SetRunOutcome } from "./runbookSet";
 
 type Schemas = components["schemas"];
 export type ScenariosResponse = Schemas["ScenariosResponse"];
 export type ScenarioDefinition = Schemas["ScenarioDefinition"];
-export type EngineRefusal = Schemas["EngineRefusal"];
 
 /** The last computed result an id holds through a re-run, with its settle clocks: a failed re-run stands beside it, never in its place. */
 export interface HeldResult {
@@ -31,9 +30,16 @@ export type RunRecord =
   // `at` is the wall clock and `atMonotonicMs` the monotonic clock at settle: the pair a later re-selection anchors the result's age on.
   | { readonly phase: "settled"; readonly outcome: RunBookOutcome; readonly at: number; readonly atMonotonicMs: number; readonly held: HeldResult | null };
 
+/** The last set response that answered its request, with its ask and its settle clock: a failed Compare stands beside it, never in its place. */
+export interface HeldSet {
+  readonly ids: readonly string[];
+  readonly response: RunBookSetResponse;
+  readonly at: number;
+}
+
 export type SetRecord =
-  | { readonly phase: "running"; readonly ids: readonly string[]; readonly startedAt: number }
-  | { readonly phase: "settled"; readonly ids: readonly string[]; readonly outcome: SetRunOutcome; readonly at: number };
+  | { readonly phase: "running"; readonly ids: readonly string[]; readonly startedAt: number; readonly held: HeldSet | null }
+  | { readonly phase: "settled"; readonly ids: readonly string[]; readonly outcome: SetRunOutcome; readonly at: number; readonly held: HeldSet | null };
 
 export type LibraryOutcomeKey = "not-run" | "running" | "result" | "withheld" | "not-covered" | "failed" | "definition-changed";
 export type LibraryOutcomeTone = "crit" | "warn" | "ok" | "refused" | "dim";
@@ -55,11 +61,6 @@ export interface LibraryRow {
   readonly selected: boolean;
 }
 
-/** The Cash engine's book in a run, found by engine id — never by position. */
-export const cashEngineOf = (run: LabRunBook): LabRunBookEngine | null => run.engines.find((e) => e.engine === CASH) ?? null;
-/** The Cash engine's refusal in a run, found by engine id — never by position. */
-export const cashRefusalOf = (run: LabRunBook): EngineRefusal | null => run.excluded_engines.find((e) => e.engine === CASH) ?? null;
-
 const FAILURE_WORD: Record<Exclude<RunBookOutcome["kind"], "ok" | "failed">, string> = {
   "not-served": "Not served",
   "no-batch": "No batch",
@@ -74,11 +75,16 @@ export function outcomeLine(record: RunRecord | undefined, definition: ScenarioD
   if (record === undefined) return { key: "not-run", text: "Not run yet", tone: "dim" };
   if (record.phase === "running") return { key: "running", text: "Running…", tone: "dim" };
   const o = record.outcome;
-  if (o.kind === "ok") return cashOutcome(o.response, definition, configVersion);
   // A failed re-run leaves the held result's word while the page keeps those figures; a retained body the page
-  // does not show (its definition changed) leaves the row to the request's own failure.
+  // does not show (its definition changed) leaves the row to the request's own failure. A 200 whose Cash reading
+  // does not read — malformed or self-contradicting — is a failed answer under the same law, never a replacement.
   const held = record.held === null ? null : cashOutcome(record.held.response, definition, configVersion);
-  if (held !== null && held.key !== "definition-changed") return held;
+  const standing = held !== null && held.key !== "definition-changed" ? held : null;
+  if (o.kind === "ok") {
+    const word = cashOutcome(o.response, definition, configVersion);
+    return word.key === "failed" && standing !== null ? standing : word;
+  }
+  if (standing !== null) return standing;
   if (o.kind === "failed") return failed(`Failed ${String(o.status)}`);
   return failed(FAILURE_WORD[o.kind]);
 }
@@ -101,6 +107,10 @@ function cashOutcome(response: LabRunBook, definition: ScenarioDefinition, confi
       if (newly > 0) {
         return { key: "result", text: `${signedUsd(deltaEligibleDebt, decimals)} liquidatable · ${groupInt(newly)} account${newly === 1 ? "" : "s"}`, tone: "crit" };
       }
+      // The wire's count is a NET: at or below zero, the headline's own law — the net beside the gross the merged lanes show, in a word.
+      const net = `Net ${signedCount(newly)} account${newly === -1 ? "" : "s"}`;
+      if (heat.crossedCap > 0) return { key: "result", text: `${net} · ${groupInt(heat.crossedCap)} cross${heat.crossedCap === 1 ? "es" : ""} the cap`, tone: "warn" };
+      if (newly < 0) return { key: "result", text: net, tone: "ok" };
       if (heat.bandChanged === 0) return { key: "result", text: "No band change", tone: "ok" };
       return { key: "result", text: `${groupInt(heat.bandChanged)} change band`, tone: "warn" };
     }

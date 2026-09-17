@@ -728,7 +728,11 @@ test("compare: two ticks enable the button, one POST posts exactly those ids, th
   await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
   expect(counts.sets()).toBe(1);
   expect(counts.posted()[0]).toBe('{"scenario_ids":["eth_minus_30","ethfi_minus_50"]}');
-  await expect(page.getByTestId("lab-compare-state")).toContainText("batch 18,251 (still the newest)");
+  // The finding leads the card in the lib's words; the caption is one plain line naming the batch; the value column is headed and the axis captioned.
+  await expect(page.getByTestId("lab-compare-state")).toHaveText("ETH -30 percent moves the most: +$1.2M more liquidatable Cash debt, 4.5% of the book. ETHFI -50 percent: +$9,800, under 0.1%.");
+  await expect(page.getByTestId("lab-compare-caption")).toHaveText("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251).");
+  await expect(page.getByTestId("lab-dotplot")).toContainText("share · change");
+  await expect(page.getByTestId("lab-dotplot")).toContainText("share of the Cash book");
   await expect(page.getByTestId("lab-compare-superseded")).toHaveCount(0);
   // The rows are the answered set's own — the two asked ids and no other — in the order compareRows ranks them: |share|, then |Δ|, then wire order.
   const asked = ["eth_minus_30", "ethfi_minus_50"];
@@ -738,10 +742,13 @@ test("compare: two ticks enable the button, one POST posts exactly those ids, th
   expect(ids).toEqual(["lab-compare-row-eth_minus_30", "lab-compare-row-ethfi_minus_50"]);
   for (const r of expected) await expect(page.getByTestId(`lab-compare-row-${r.id}`)).toHaveAttribute("data-kind", r.kind === "point" ? "point" : "refused");
   await expect(page.getByTestId("lab-dotplot").locator("circle")).toHaveCount(expected.filter((r) => r.kind === "point").length);
-  // The demo figures, to the character: the share, then the absolute delta; the book is the caption's word, not the row's.
+  // One stem per point, from zero to the dot: the magnitude, not only the position.
+  await expect(page.getByTestId("lab-dotplot").locator("line[data-role='stem']")).toHaveCount(expected.filter((r) => r.kind === "point").length);
+  // The demo figures, to the character: the share, then the absolute delta; the book is the caption's word, not the row's; a share under a tenth is unsigned.
   await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
   await expect(page.getByTestId("lab-compare-row-eth_minus_30")).not.toContainText("Cash book");
-  await expect(page.getByTestId("lab-compare-row-ethfi_minus_50")).toContainText("+<0.1% · +$9,800");
+  await expect(page.getByTestId("lab-compare-row-ethfi_minus_50")).toContainText("<0.1% · +$9,800");
+  await expect(page.getByTestId("lab-compare-row-ethfi_minus_50")).not.toContainText("+<");
   // No label clips: the value column ends inside the plot's own box.
   const plotBox = await page.getByTestId("lab-dotplot").boundingBox();
   const valueBox = await page.getByTestId("lab-compare-row-eth_minus_30").locator("css=text").last().boundingBox();
@@ -793,10 +800,11 @@ test("compare: a scenario the set withheld for Cash is a dashed row with its wor
   await expect(row.locator("css=text").last()).toHaveText("withheld");
   await expect(row).not.toContainText("%");
   await expect(row).not.toContainText("$");
-  // Ranked after every point, and the points keep their figures.
+  // Ranked after every point, and the points keep their figures; the finding names the refusal as refused.
   const ids = await page.locator("[data-testid^='lab-compare-row-']").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-testid")));
   expect(ids[ids.length - 1]).toBe("lab-compare-row-ethfi_minus_50");
   await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
+  await expect(page.getByTestId("lab-compare-state")).toHaveText("ETH -30 percent moves the most: +$1.2M more liquidatable Cash debt, 4.5% of the book. ETHFI -50 percent could not be evaluated: withheld.");
 });
 
 test("compare: a busy evaluator fails the set by name and frees the button; a second Compare during a set is ignored; a superseded evaluation is labelled", async ({ page }) => {
@@ -831,7 +839,7 @@ test("compare: a busy evaluator fails the set by name and frees the button; a se
   const superseded = page.getByTestId("lab-compare-superseded");
   await expect(superseded).toHaveAttribute("data-freshness", "superseded");
   await expect(superseded).toContainText("evaluated on batch 18,251; the newest servable batch is 18,252");
-  await expect(state).toContainText("batch 18,251 (since superseded)");
+  await expect(page.getByTestId("lab-compare-caption")).toHaveText("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251 — superseded).");
 });
 
 test("compare: one-address mode has no Compare, and the ticks and the result survive the round trip back to the book", async ({ page }) => {
@@ -866,5 +874,202 @@ test("compare: a set that answers ids nobody asked for is refused whole, every f
   await expect(page.locator("[data-testid^='lab-compare-row-']")).toHaveCount(0);
   await expect(page.locator("main")).not.toContainText("+4.5%");
   await expect(page.getByTestId("lab-compare")).toBeEnabled();
+  expect(counts.sets()).toBe(1);
+});
+
+test("one-address mode: the table's verdict column is the row's own verdict and its room cells are the tiles' words — a liquidatable horizon says within, a side that is not a position is a cannot-say beside not computed, never a Yes, a No or a figure", async ({ page }) => {
+  // The projection's 90d horizon flips; ETHFI's shocked side carries a negative debt (a legal string, not a position).
+  const stress = {
+    ...DEMO_STRESS_NEAR,
+    scenarios: DEMO_STRESS_NEAR.scenarios.map((s) => {
+      if (s.id === "dm_rate_horizon_plus_200bps") {
+        return { ...s, results: s.results.map((r) => (!r.projection ? r : { ...r, projection: { ...r.projection, horizons: r.projection.horizons.map((h, i) => (i === 1 ? { ...h, becomes_liquidatable: true } : h)) } })) };
+      }
+      if (s.id === "ethfi_minus_50") return { ...s, results: s.results.map((r) => (!r.after ? r : { ...r, after: { ...r.after, debt_usd: "-4822000000" } })) };
+      return s;
+    }),
+  };
+  await mockLab(page, { stress });
+  await page.goto(`/lab?address=${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  const table = page.getByTestId("lab-address-table");
+  const rowFor = (label: string) => table.locator("tbody tr").filter({ hasText: label });
+  const eth = rowFor("ETH -30 percent");
+  const ethfi = rowFor("ETHFI -50 percent");
+  const projection = rowFor("Debt Manager borrow APY +200bps");
+  // The room cells in the tiles' own words: a negative room is "over cap by", never a minus on a dollar figure.
+  await expect(eth.locator("td").nth(1)).toHaveText("$190.50");
+  await expect(eth.locator("td").nth(2)).toHaveText("over cap by $1,069");
+  await expect(eth.locator("td").nth(3)).toHaveText("Yes");
+  await expect(eth.locator("td").nth(3).locator("[data-tone='crit']")).toHaveCount(1);
+  // A projection judged by its horizons: the verdict names the horizon in the warn tone the headline and the library use.
+  await expect(projection.locator("td").nth(3)).toHaveText("Yes · within 90d");
+  await expect(projection.locator("td").nth(3).locator("[data-tone='warn']")).toHaveCount(1);
+  await expect(row(page, "dm_rate_horizon_plus_200bps")).toContainText("Becomes liquidatable within 90d");
+  // A side that is not a position: no verdict word and no figure, whatever the wire's booleans say.
+  await expect(ethfi.locator("td").nth(2)).toHaveText("not computed");
+  await expect(ethfi.locator("td").nth(3)).toHaveText("Cannot say");
+  await expect(ethfi.locator("td").nth(3).locator("[data-tone='refused']")).toHaveCount(1);
+  await expect(ethfi).not.toContainText("$4,822");
+  await expect(row(page, "ethfi_minus_50")).toContainText("Cannot say");
+  await expect(table).not.toContainText("−$");
+});
+
+test("a net count at or below zero states the net and the gross: the headline names the crossings, the tile prints the true minus, the library's word follows", async ({ page }) => {
+  await mockLab(page, { runBook: withCash((e) => ({ ...e, newly_eligible_accounts: -3 })) });
+  await page.goto("/lab");
+  await runIt(page);
+  await expect(headline(page)).toHaveText("Net, 3 fewer Cash accounts are liquidatable under ETH -30 percent, though 118 accounts cross the cap.");
+  await expect(page.getByTestId("lab-verdict")).toHaveAttribute("data-variant", "warn");
+  await expect(dek(page)).toContainText("425 accounts move to a worse band; none improve.");
+  await expect(tile(page, "newly")).toContainText("−3");
+  await expect(tile(page, "newly")).not.toContainText("-3");
+  await expect(tile(page, "newly")).toContainText("was 49, now 167");
+  await expect(row(page, "eth_minus_30")).toContainText("Net −3 accounts · 118 cross the cap");
+  await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "result");
+  await expect(page.locator("main")).not.toContainText("No Cash account becomes liquidatable");
+});
+
+test("one-address mode: the highlighted library row is the workspace's subject — a linked scenario the address was not stressed under is not the highlight", async ({ page }) => {
+  await mockLab(page);
+  await page.goto(`/lab?address=${DEMO_NEAR_ADDR}&scenario=weeth_market_depeg_oracles_held`);
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  await expect(headline(page)).toHaveText("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
+  await expect(chip(page, "Scenario")).toContainText("eth_minus_30");
+  await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
+  await expect(row(page, "weeth_market_depeg_oracles_held")).not.toHaveAttribute("data-selected", "true");
+  // A row the address carries moves the subject and the highlight together.
+  await row(page, "ethfi_minus_50").getByRole("button").click();
+  await expect(headline(page)).toContainText("ETHFI -50 percent");
+  await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
+  await expect(row(page, "eth_minus_30")).not.toHaveAttribute("data-selected", "true");
+  // A row not on the address: the subject falls back to the first row the address carries (R15), and the highlight follows the subject — never the row clicked.
+  await row(page, "weeth_market_depeg_oracles_held").getByRole("button").click();
+  await expect(headline(page)).toHaveText("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
+  await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
+  await expect(row(page, "ethfi_minus_50")).not.toHaveAttribute("data-selected", "true");
+  await expect(row(page, "weeth_market_depeg_oracles_held")).not.toHaveAttribute("data-selected", "true");
+});
+
+test("a re-run that answers a body which does not read never replaces the result it had: the held figures stand under a banner naming the contradiction", async ({ page }) => {
+  await mockLab(page);
+  await page.goto("/lab");
+  await runIt(page);
+  await page.route("**/v1/scenarios/*/run-book", (route) =>
+    route.request().method() === "OPTIONS" ? preflight(route) : json(route, withCash((e) => ({ ...e, eligible_debt_delta_usd: "1e6" })), 200, POST_CORS),
+  );
+  await page.getByTestId("lab-run").click();
+  const banner = page.getByTestId("lab-banner");
+  await expect(banner).toHaveAttribute("data-kind", "rerun-failed");
+  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. eligible_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
+  await expect(banner).toContainText("The result below stands for batch 18,251.");
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  await expect(headline(page)).toContainText("$1.2M more Cash debt becomes liquidatable");
+  await expect(tile(page, "newly")).toContainText("118");
+  await expect(tile(page, "debt")).toContainText("+$1.2M");
+  await expect(page.getByTestId("lab-heatmap")).toBeVisible();
+  await expect(row(page, "eth_minus_30")).toContainText("+$1.2M liquidatable · 118 accounts");
+  await expect(row(page, "eth_minus_30")).not.toContainText("Unreadable");
+  // With nothing held, the same body is the contradictory state, as before, under no banner.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page, { runBook: withCash((e) => ({ ...e, eligible_debt_delta_usd: "1e6" })) });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
+  await expect(page.getByTestId("lab-banner")).toHaveCount(0);
+  await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
+});
+
+test("compare: a second Compare that fails never replaces the comparison it had: the dots and the legacy fold stand under a line naming the failure", async ({ page }) => {
+  await mockLab(page);
+  await page.goto("/lab?scenarios=eth_minus_30,ethfi_minus_50");
+  const state = page.getByTestId("lab-compare-state");
+  await expect(state).toHaveAttribute("data-kind", "ok");
+  await page.route("**/v1/scenarios/run-book-set", (route) =>
+    route.request().method() === "OPTIONS" ? preflight(route) : json(route, fixture("error-rate-limited.json"), 429, POST_CORS),
+  );
+  await page.getByTestId("lab-compare").click();
+  await expect(state).toHaveAttribute("data-kind", "failed");
+  await expect(state).toHaveText("Compare again failed — Rate limited (429). Retry after 3s. The comparison below stands for batch 18,251.");
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toHaveAttribute("data-kind", "point");
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
+  await expect(page.getByTestId("lab-compare-row-ethfi_minus_50")).toContainText("<0.1% · +$9,800");
+  await expect(page.getByTestId("lab-dotplot").locator("circle")).toHaveCount(2);
+  await expect(page.getByTestId("lab-compare-legacy")).toBeVisible();
+  await expect(page.getByTestId("lab-compare")).toBeEnabled();
+});
+
+test("compare: a legacy market withheld or not modelled in every scenario still has its fold — every row dashed with its word, no dot, no money", async ({ page }) => {
+  const withheldLegacy = {
+    ...DEMO_RUN_BOOK_SET,
+    results: DEMO_RUN_BOOK_SET.results.map((r) =>
+      r.scenario_id === "eth_minus_30" ? { ...r, withheld_engines: ["aave_v3_etherfi"], engines: r.engines.filter((e) => e.engine !== "aave_v3_etherfi") } : r,
+    ),
+  };
+  await mockLab(page, { set: withheldLegacy });
+  await page.goto("/lab?scenarios=eth_minus_30,ethfi_minus_50");
+  await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
+  const legacy = page.getByTestId("lab-compare-legacy");
+  await expect(legacy).toBeVisible();
+  await legacy.locator("summary").click();
+  await expect(page.getByTestId("lab-dotplot-legacy").locator("circle")).toHaveCount(0);
+  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toHaveAttribute("data-kind", "refused");
+  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toContainText("withheld");
+  await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toHaveAttribute("data-kind", "refused");
+  await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toContainText("not modelled for the legacy market");
+  await expect(legacy).not.toContainText("$");
+  // The Cash plot is untouched by the legacy refusal.
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
+});
+
+test("?address= with something that is not an address is the invalid state: its own sentence, nothing looked up", async ({ page }) => {
+  const counts = await mockLab(page);
+  await page.goto("/lab?address=0xnope");
+  await expect(surface(page)).toHaveAttribute("data-mode", "address");
+  await expect(surface(page)).toHaveAttribute("data-state", "invalid");
+  await expect(headline(page)).toHaveText("Not an address.");
+  await expect(dek(page)).toHaveText("An address is 0x followed by exactly 40 hex characters. Nothing was looked up.");
+  // No scenario row: the table carries only its empty word, the headline's own.
+  await expect(page.getByTestId("lab-address-table")).toContainText("Not an address.");
+  await expect(page.getByTestId("lab-address-table")).not.toContainText("ETH -30 percent");
+  await page.waitForTimeout(300);
+  expect(counts.lookups()).toBe(0);
+});
+
+test("compare: a row without a denominator keeps the wire's delta beside its word — no share, no dot", async ({ page }) => {
+  const zeroBook = {
+    ...DEMO_RUN_BOOK_SET,
+    results: DEMO_RUN_BOOK_SET.results.map((r) =>
+      r.scenario_id === "ethfi_minus_50" ? { ...r, engines: r.engines.map((e) => (e.engine === "debt_manager" ? { ...e, eligible_debt_delta_usd: "5000000", total_debt_usd_before: "0" } : e)) } : r,
+    ),
+  };
+  await mockLab(page, { set: zeroBook });
+  await page.goto("/lab?scenarios=eth_minus_30,ethfi_minus_50");
+  await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
+  const r = page.getByTestId("lab-compare-row-ethfi_minus_50");
+  await expect(r).toHaveAttribute("data-kind", "refused");
+  await expect(r.locator("circle")).toHaveCount(0);
+  await expect(r.locator("css=text").last()).toHaveText("no denominator · +$5");
+  await expect(r).not.toContainText("%");
+});
+
+test("two asks in one tick are one POST: a second click before the first has committed is refused by the request in flight, for a run and for a set", async ({ page }) => {
+  const counts = await mockLab(page, { runBookDelayMs: 400, setDelayMs: 400 });
+  await page.goto("/lab");
+  await expect(page.getByTestId("lab-run")).toBeEnabled();
+  await page.getByTestId("lab-run").evaluate((b: HTMLButtonElement) => {
+    b.click();
+    b.click();
+  });
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  expect(counts.runs()).toBe(1);
+  await page.getByTestId("lab-library-check-eth_minus_30").check();
+  await page.getByTestId("lab-library-check-ethfi_minus_50").check();
+  await expect(page.getByTestId("lab-compare")).toBeEnabled();
+  await page.getByTestId("lab-compare").evaluate((b: HTMLButtonElement) => {
+    b.click();
+    b.click();
+  });
+  await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
   expect(counts.sets()).toBe(1);
 });

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { KitTable, KpiTile, SectionHead, StatusPill, VerdictHeader, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { horizonLabel } from "@/lib/address-stress";
-import type { AddressTile, AddressWorkspace as Space } from "@/lib/lab-address";
+import { rowVerdictWord, sideRoomWords, type AddressTile, type AddressWorkspace as Space } from "@/lib/lab-address";
 import { groupInt } from "@/lib/prose";
 import styles from "./lab.module.css";
 import { accountMoney } from "./money";
@@ -23,26 +23,40 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
   const tile = (key: string, side: "before" | "after", label: string, v: AddressTile | undefined) => (
     <KpiTile testId={`lab-address-kpi-${key}-${side}`} label={label} value={v?.value ?? "—"} tone={v?.tone ?? "refused"} pending={space.state === "loading"} />
   );
-  const rows: KitRow[] = space.rows.map((r) => ({
-    key: r.id,
-    dim: !r.applicable,
-    cells: {
-      scenario:
-        r.projection === null ? (
-          r.label
-        ) : (
-          <span title={r.projectionNote ?? undefined}>
-            {r.label} <StatusPill tone="projection">PROJECTION</StatusPill>
-          </span>
-        ),
-      before: money(r.before?.room),
-      after:
-        r.projection === null
-          ? money(r.after?.room)
-          : r.projection.map((h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null ? "—" : `+${money(h.extraInterest)}`} interest`).join(" · "),
-      flips: !r.applicable ? (r.reason ?? "not applicable") : r.flips === null ? <StatusPill tone="refused">Cannot say</StatusPill> : r.flips ? <StatusPill tone="crit">Yes</StatusPill> : "No",
-    },
-  }));
+  // The room cells and the verdict cell speak from the lib's own words — the tiles' room register and the one row
+  // verdict the headline and the library word share — so the table can never say what the header refuses.
+  const rows: KitRow[] = space.rows.map((r) => {
+    const verdict = rowVerdictWord(r);
+    return {
+      key: r.id,
+      dim: !r.applicable,
+      cells: {
+        scenario:
+          r.projection === null ? (
+            r.label
+          ) : (
+            <span title={r.projectionNote ?? undefined}>
+              {r.label} <StatusPill tone="projection">PROJECTION</StatusPill>
+            </span>
+          ),
+        before: sideRoomWords(r.before, space.decimals),
+        after:
+          r.projection === null
+            ? sideRoomWords(r.after, space.decimals)
+            : r.projection.map((h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null ? "—" : `+${money(h.extraInterest)}`} interest`).join(" · "),
+        flips:
+          verdict.tone !== null ? (
+            <StatusPill tone={verdict.tone} title={verdict.title ?? undefined}>
+              {verdict.text}
+            </StatusPill>
+          ) : verdict.title !== null ? (
+            <span title={verdict.title}>{verdict.text}</span>
+          ) : (
+            verdict.text
+          ),
+      },
+    };
+  });
   return (
     <>
       <VerdictHeader

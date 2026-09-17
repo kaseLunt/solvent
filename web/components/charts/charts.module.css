@@ -452,3 +452,9 @@
 /* DotPlot — Compare scenarios (spec §5.4): one signed dot per scenario on a percent axis. */
 .dotPlotRow text { font-size: var(--type-floor); }
 .dotPlotTrack { stroke: var(--line); stroke-width: 1; }
+/* The row label in the sans face: a scenario's name is prose, not a figure; the value column stays mono. */
+.rowLabel { font-family: var(--sans); font-size: var(--type-floor); fill: var(--ink); }
+/* The stem from zero to the dot — the magnitude, not only the position — in the dot's tone at reduced opacity, mixed as the heat tints are. */
+.stemOk { stroke: color-mix(in srgb, var(--ok) 45%, transparent); stroke-width: 2; }
+.stemWarn { stroke: color-mix(in srgb, var(--warn) 45%, transparent); stroke-width: 2; }
+.stemCrit { stroke: color-mix(in srgb, var(--crit) 55%, transparent); stroke-width: 2; }

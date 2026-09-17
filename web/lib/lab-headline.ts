@@ -5,7 +5,9 @@
 import { humanUsd, MINUS } from "./human-usd";
 import { engineName } from "./inspector-headline";
 import { LEGACY } from "./inspector-position";
+import type { CompareRow, CompareView } from "./lab-compare";
 import type { HeatmapView } from "./lab-transitions";
+import { formatTenths } from "./percent";
 import { groupInt, joinAnd } from "./prose";
 
 export interface LabHeadline {
@@ -20,20 +22,29 @@ export function signedUsd(value: bigint, decimals: number): string {
 }
 
 /** The text as given, ended with a full stop unless it already ends a sentence. */
-function terminated(text: string): string {
+export function terminated(text: string): string {
   const t = text.trim();
   if (t === "") return "";
   return /[.!?]$/.test(t) ? t : `${t}.`;
 }
 
 /** A sentence of its own: capitalised and terminated. */
-function sentence(text: string): string {
+export function sentence(text: string): string {
   const t = terminated(text);
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
 const accounts = (n: number): string => `${groupInt(n)} account${n === 1 ? "" : "s"}`;
-const refused = (emphasis: string, dek: string): LabHeadline => ({ emphasis, rest: "", tone: "refused", dek });
+/** A refusal's headline: the dashed tone and no rest — the shape every non-verdict on the page shares, in book mode and one-address mode alike. */
+export const refused = (emphasis: string, dek: string): LabHeadline => ({ emphasis, rest: "", tone: "refused", dek });
+
+/** A signed count in the money formatters' convention: a negative prints the true minus; a count at or above zero prints as the count it is — no plus, because a count is not a delta. */
+export function signedCount(n: number): string {
+  return n < 0 ? `${MINUS}${groupInt(-n)}` : groupInt(n);
+}
+
+/** The page's word for a figure whose scale the wire guard refused: a figure prints at no other scale than its own. */
+export const UNREADABLE_SCALE = "unreadable scale";
 
 export interface ResultFigures {
   readonly label: string;
@@ -61,7 +72,7 @@ function movementSentence(h: HeatmapView): string {
   const n = groupInt(h.bandChanged);
   const verb = h.bandChanged === 1 ? "moves" : "move";
   if (h.improved === 0) return ` ${n} ${h.bandChanged === 1 ? "account" : "accounts"} ${verb} to a worse band; none improve.`;
-  return ` ${n} ${h.bandChanged === 1 ? "account changes" : "accounts change"} band; ${groupInt(h.improved)} improve.`;
+  return ` ${n} ${h.bandChanged === 1 ? "account changes" : "accounts change"} band; ${groupInt(h.improved)} improve${h.improved === 1 ? "s" : ""}.`;
 }
 
 function nearSentence(h: HeatmapView): string {
@@ -71,6 +82,9 @@ function nearSentence(h: HeatmapView): string {
   const crossed = h.nearCrossed === 0 ? "none" : h.nearCrossed === h.nearToday ? `all ${groupInt(h.nearCrossed)}` : groupInt(h.nearCrossed);
   return ` Of ${who}, ${crossed} cross it.`;
 }
+
+/** The wire's net below zero, as a count of accounts: "{n} fewer Cash accounts are liquidatable", in the singular when it is one. */
+const fewer = (n: number): string => `${groupInt(n)} fewer Cash account${n === 1 ? " is" : "s are"} liquidatable`;
 
 export function resultHeadline(f: ResultFigures): LabHeadline {
   const movement =
@@ -83,10 +97,18 @@ export function resultHeadline(f: ResultFigures): LabHeadline {
   if (f.newly > 0 && f.deltaEligibleDebt > 0n) {
     return { emphasis: `${humanUsd(f.deltaEligibleDebt, f.decimals)} more Cash debt becomes liquidatable,`, rest: `across ${accounts(f.newly)}.`, tone: "crit", dek };
   }
-  if (f.newly > 0) return { emphasis: `${accounts(f.newly)} become liquidatable under ${f.label}.`, rest: "", tone: "crit", dek };
+  if (f.newly > 0) return { emphasis: `${accounts(f.newly)} become${f.newly === 1 ? "s" : ""} liquidatable under ${f.label}.`, rest: "", tone: "crit", dek };
+  // The wire's count is a NET: at or below zero it says nothing of the accounts that crossed the cap while others left
+  // it. Where the merged lanes show crossings, the net and the gross are both stated, and neither is worded as a "no".
+  const crossed = f.heat?.crossedCap ?? 0;
+  if (crossed > 0) {
+    const net = f.newly === 0 ? "no more Cash accounts are liquidatable" : fewer(-f.newly);
+    return { emphasis: `Net, ${net} under ${f.label},`, rest: `though ${accounts(crossed)} cross${crossed === 1 ? "es" : ""} the cap.`, tone: "warn", dek };
+  }
+  if (f.newly < 0) return { emphasis: `${fewer(-f.newly)} under ${f.label}.`, rest: "", tone: "ok", dek };
   const moves = f.heat?.bandChanged ?? 0;
   if (moves === 0) return { emphasis: `No Cash account changes band under ${f.label}.`, rest: "", tone: "ok", dek };
-  return { emphasis: `No Cash account becomes liquidatable under ${f.label},`, rest: `but ${groupInt(moves)} change band.`, tone: "warn", dek };
+  return { emphasis: `No Cash account becomes liquidatable under ${f.label},`, rest: `but ${groupInt(moves)} change${moves === 1 ? "s" : ""} band.`, tone: "warn", dek };
 }
 
 export function notRunHeadline(def: { label: string; description: string; path_assumption: string; shocks: number }): LabHeadline {
@@ -131,6 +153,8 @@ function retry(seconds: number | null | undefined): string {
   return typeof seconds === "number" ? `Retry after ${String(seconds)}s.` : "The service did not say when to retry.";
 }
 
+export function failureHeadline(kind: "failed", d: FailureDetail & { readonly status: number }): LabHeadline;
+export function failureHeadline(kind: Exclude<FailureKind, "failed">, d: FailureDetail): LabHeadline;
 export function failureHeadline(kind: FailureKind, d: FailureDetail): LabHeadline {
   switch (kind) {
     case "not-served":
@@ -149,15 +173,92 @@ export function failureHeadline(kind: FailureKind, d: FailureDetail): LabHeadlin
     case "unreachable":
       return refused("The service could not be reached.", sentence(d.message ?? "no HTTP response"));
     case "failed":
-      return refused(`The service answered ${String(d.status ?? 0)}.`, sentence(d.message ?? "without the contract's error envelope"));
+      // The overload makes the status a requirement of this arm: "answered" never prints without its number.
+      return refused(`The service answered ${String(d.status)}.`, sentence(d.message ?? "without the contract's error envelope"));
     case "refused-locally":
       return refused("Nothing was sent.", sentence(d.message ?? "the request was refused before dispatch"));
   }
 }
 
-/** A set whose membership does not answer the request: every fault in one sentence, the dashed tone, nothing drawn. */
+/** The book a compare view is a share of, as the sentences name it: "Cash" for the Cash engine, "legacy" for the legacy market. */
+const compareBook = (engine: string): string => (engine === LEGACY ? "legacy" : engineName(engine));
+
+const COMPARE_KIND_WORD: Record<Exclude<CompareRow["kind"], "point" | "not-covered">, string> = {
+  withheld: "withheld",
+  unmeasurable: "unmeasurable",
+  contradictory: "contradictory",
+  "no-denominator": "no denominator",
+  unreadable: "unreadable",
+};
+
+/**
+ * A compare row's words, the value column's and the finding's alike. A point is its share, then its absolute delta.
+ * A refusal is the kind's word, the wire's reason in brackets unless it is the word itself; not covered is said for
+ * the engine, once. A refusal of the share is not a refusal of the figure: where the wire gave a delta, it stands
+ * beside the word. The share's denominator is the caption's word, never the row's.
+ */
+export function compareRowWords(row: CompareRow, engine: string): string {
+  if (row.kind === "point") return `${row.shareText} · ${row.deltaText}`;
+  const word = row.kind === "not-covered" ? `not modelled for ${engine === LEGACY ? "the legacy market" : engineName(engine)}` : COMPARE_KIND_WORD[row.kind];
+  const reason = row.kind === "not-covered" || row.reason === null || row.reason === word ? "" : ` (${row.reason})`;
+  const delta = row.deltaUsd === null ? "" : ` · ${row.deltaText}`;
+  return `${word}${reason}${delta}`;
+}
+
+type ComparePoint = CompareRow & { readonly deltaUsd: bigint; readonly shareTenths: bigint };
+const isComparePoint = (r: CompareRow): r is ComparePoint => r.kind === "point" && r.deltaUsd !== null && r.shareTenths !== null;
+/** A point's share of the book, unsigned — the sign is the delta's word: "4.5%", "under 0.1%" for a nonzero delta the tenths cannot resolve, "0%" for a measured zero. */
+function shareOfBook(p: ComparePoint): string {
+  if (p.deltaUsd === 0n) return "0%";
+  if (p.shareTenths === 0n) return "under 0.1%";
+  return formatTenths(p.shareTenths < 0n ? -p.shareTenths : p.shareTenths);
+}
+
+/**
+ * The Compare card's finding: the largest share by magnitude named first with its absolute figure and its share of
+ * the book, then the rest in rank order (the view's own order), then every refused row named as refused. When no row
+ * is a share, the sentence says so and names each refusal; nothing is a dot at zero.
+ */
+export function compareHeadline(view: CompareView): string {
+  const book = compareBook(view.engine);
+  const points = view.rows.filter(isComparePoint);
+  const refused = view.rows.filter((r) => !isComparePoint(r));
+  const first = points[0];
+  if (first === undefined) {
+    if (refused.length === 0) return "No scenario was compared.";
+    return `No scenario could be evaluated for the ${book} book: ${refused.map((r) => `${r.label} ${compareRowWords(r, view.engine)}`).join("; ")}.`;
+  }
+  const debt = `liquidatable ${book} debt`;
+  const lead =
+    first.deltaUsd === 0n
+      ? `${joinAnd(points.map((p) => p.label))} ${points.length === 1 ? "leaves" : "leave"} ${debt} unchanged.`
+      : `${first.label} moves the most: ${first.deltaText} ${first.deltaUsd > 0n ? "more" : "less"} ${debt}, ${shareOfBook(first)} of the book.`;
+  const rest = first.deltaUsd === 0n ? [] : points.slice(1).map((p) => `${p.label}: ${p.deltaText}, ${shareOfBook(p)}.`);
+  const refusals = refused.map((r) => `${r.label} could not be evaluated: ${compareRowWords(r, view.engine)}.`);
+  return [lead, ...rest, ...refusals].join(" ");
+}
+
+/** The wire's freshness states other than the newest, in the caption's words: what was true of the evaluated batch when the response was built. */
+const COMPARE_FRESHNESS: Record<Exclude<CompareView["freshness"], "still_newest">, string> = {
+  superseded: "superseded",
+  newest_is_older: "the newest servable batch is now older",
+  none_servable: "no batch was servable when probed",
+};
+
+/** One line of plain words under the plot: what the shares are shares of, and the batch — its freshness named only when it is not the newest. */
+export function compareCaption(view: CompareView): string {
+  const book = compareBook(view.engine);
+  const batch = `batch ${groupInt(view.batchId)}${view.freshness === "still_newest" ? "" : ` — ${COMPARE_FRESHNESS[view.freshness]}`}`;
+  return `Change in liquidatable ${book} debt per scenario, as a share of the ${book} book (${batch}).`;
+}
+
+/**
+ * A set whose membership does not answer the request: every fault in one sentence behind a fixed lead, the dashed
+ * tone, nothing drawn. The lead is fixed so a fault that begins with a scenario id is never recapitalised: the
+ * config is the law, and the page does not rename it.
+ */
 export const setMembershipHeadline = (faults: readonly string[]): LabHeadline =>
-  refused("The set does not answer the request.", `${sentence(faults.join("; "))} Nothing from it is drawn.`);
+  refused("The set does not answer the request.", `Faults: ${terminated(faults.join("; "))} Nothing from it is drawn.`);
 
 export const LISTING_LOADING: LabHeadline = refused(
   "Loading the committed scenarios…",

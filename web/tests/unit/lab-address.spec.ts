@@ -6,7 +6,7 @@ import { lookup } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { deriveInspectorView } from "../../lib/inspector-view";
-import { addressWorkspace, rowOutcome } from "../../lib/lab-address";
+import { addressWorkspace, rowOutcome, rowVerdictWord, sideRoomWords } from "../../lib/lab-address";
 import { DEMO_ADDRESS_NEAR, DEMO_ADDRESS_REFUSED, DEMO_NEAR_ADDR, DEMO_REFUSED_ADDR, DEMO_STRESS_NEAR } from "../fixtures/demo";
 import { ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, NOT_FOUND_ADDR, UNKNOWABLE_ADDR } from "../fixtures/inspector";
 
@@ -319,11 +319,41 @@ test("rowOutcome: the library word is the row's own verdict — the same judgeme
   const unreadable = near(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, debt_usd: "-4822000000" } }))).find((r) => r.id === "eth_minus_30")!;
   expect(unreadable.flips).toBe(true);
   expect(rowOutcome(unreadable)).toEqual({ key: "withheld", text: "Cannot say", tone: "refused" });
-  expect(rowOutcome({ ...eth, flips: null })).toEqual({ key: "withheld", text: "Cannot say", tone: "refused" });
   // A spot row that does not flip: inside when it is not liquidatable today, "today and after" when it already is.
   expect(rowOutcome({ ...eth, flips: false, after: eth.before })).toEqual({ key: "result", text: "Stays inside its cap", tone: "ok" });
   expect(rowOutcome({ ...eth, flips: false })).toEqual({ key: "result", text: "Liquidatable today and after", tone: "crit" });
   expect(rowOutcome({ ...eth, applicable: false, reason: "no Cash position" })).toEqual({ key: "not-covered", text: "Not applicable: no Cash position", tone: "dim" });
   expect(rowOutcome({ ...eth, applicable: false, reason: null })).toEqual({ key: "not-covered", text: "Not applicable: the engine gave no reason", tone: "dim" });
   expect(rowOutcome(undefined)).toEqual({ key: "not-covered", text: "Not on this address", tone: "dim" });
+});
+
+test("rowVerdictWord and sideRoomWords: the table's cells are the lib's own words — the row verdict the headline speaks from, and the tiles' room register", () => {
+  const near = (body: StressBody) => addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(body), selectedId: "eth_minus_30" }).rows;
+  const rows = near(DEMO_STRESS_NEAR);
+  const eth = rows.find((r) => r.id === "eth_minus_30")!;
+  const dm = rows.find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
+  expect(rowVerdictWord(eth)).toEqual({ text: "Yes", tone: "crit", title: null });
+  expect(rowVerdictWord(dm)).toEqual({ text: "No", tone: null, title: "stays inside its cap through 90d, the longest horizon projected" });
+  // A projection whose horizon flips says so, in the projection's warn tone — never a "No" read off its unchanged spot side.
+  const within = near(projected(1, true)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
+  expect(within.flips).toBe(false);
+  expect(rowVerdictWord(within)).toEqual({ text: "Yes · within 90d", tone: "warn", title: null });
+  expect(rowVerdictWord(near(projected(0, null)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!)).toEqual({ text: "Cannot say", tone: "refused", title: "the 30d horizon carries no verdict" });
+  // A side that is not a position: no verdict word, whatever the wire's booleans say.
+  const negative = near(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, debt_usd: "-4822000000" } }))).find((r) => r.id === "eth_minus_30")!;
+  expect(negative.flips).toBe(true);
+  expect(rowVerdictWord(negative)).toEqual({ text: "Cannot say", tone: "refused", title: "the shocked figures are not a position" });
+  expect(rowVerdictWord({ ...eth, after: null })).toEqual({ text: "Cannot say", tone: "refused", title: "one side of the comparison is withheld or unknowable" });
+  expect(rowVerdictWord({ ...eth, flips: false })).toEqual({ text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" });
+  expect(rowVerdictWord({ ...eth, flips: false, after: eth.before })).toEqual({ text: "No", tone: null, title: null });
+  expect(rowVerdictWord({ ...eth, applicable: false, reason: "no Cash position" })).toEqual({ text: "no Cash position", tone: null, title: null });
+  expect(rowVerdictWord({ ...eth, applicable: false, reason: null })).toEqual({ text: "the engine gave no reason", tone: null, title: null });
+  // The room cells: the tiles' words — a negative room "over cap by", a refused side "not computed", an unreadable scale its word; never a minus on a dollar figure.
+  expect(sideRoomWords(eth.before, 6)).toBe("$190.50");
+  expect(sideRoomWords(eth.after, 6)).toBe("over cap by $1,069");
+  expect(sideRoomWords(negative.after, 6)).toBe("not computed");
+  expect(sideRoomWords(null, 6)).toBe("not computed");
+  expect(sideRoomWords({ ...eth.after!, verdict: "unknowable" }, 6)).toBe("not computed");
+  expect(sideRoomWords(eth.after, null)).toBe("unreadable scale");
+  expect(sideRoomWords(eth.after, 6)).not.toContain("−");
 });

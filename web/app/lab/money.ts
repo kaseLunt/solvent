@@ -3,11 +3,10 @@
 // fails the guard prints "unreadable scale"; a null value prints a dash.
 import { humanUsdFull } from "@/lib/human-price";
 import { humanUsd } from "@/lib/human-usd";
-import { signedUsd } from "@/lib/lab-headline";
+import { signedUsd, UNREADABLE_SCALE } from "@/lib/lab-headline";
 import { groupInt } from "@/lib/prose";
 import { isWireScale } from "@/lib/wireGuard";
 
-export const UNREADABLE_SCALE = "unreadable scale";
 type Money = (value: bigint | null | undefined) => string;
 
 const guarded = (decimals: number | null, print: (v: bigint, d: number) => string): Money => {

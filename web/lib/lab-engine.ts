@@ -14,7 +14,6 @@ import { moversTable, type MoversTable } from "./lab-movers";
 import { laneReading, type HeatmapView } from "./lab-transitions";
 import { plainCause } from "./refusal-phrasebook";
 import type { LabRunBook, LabRunBookEngine, RunBookEngine } from "./runbook";
-import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
 type ScenarioDefinition = components["schemas"]["ScenarioDefinition"];
 
@@ -52,32 +51,21 @@ export type EngineReading =
 /** One engine's result, read by id under the classifier and the guards. */
 export function readEngine(run: LabRunBook, engine: string, definition: ScenarioDefinition): EngineReading {
   if (!definition.engines.includes(engine)) return { kind: "not-covered" };
+  // The envelope's two lists are read only once each is a list: a body missing one is unreadable by the field's
+  // name, never dereferenced — a version-skewed 2xx is a refusal, not a throw at render.
+  const excluded: unknown = run.excluded_engines;
+  const served: unknown = run.engines;
+  const notLists = [...(Array.isArray(excluded) ? [] : ["excluded_engines"]), ...(Array.isArray(served) ? [] : ["engines"])];
+  if (notLists.length > 0) return { kind: "unreadable", fields: notLists };
   const refusal = run.excluded_engines.find((e) => e.engine === engine);
   if (refusal !== undefined) return { kind: "withheld", cause: `${engineName(engine)} — ${plainCause(refusal.code, refusal.detail)}` };
   const e = run.engines.find((x) => x.engine === engine);
   if (e === undefined) return { kind: "withheld", cause: `${engineName(engine)} — the result carries no row for this engine and no refusal` };
+  // The classifier walks the whole subtree — the scale, both sides, the matrix, the signed net, every Decimal the
+  // reading consumes, each behind its own named guard — and its faults are the reading's before any nested field
+  // is touched: a null side or matrix is named by the field, never dereferenced.
   const malformed = classifyRunBookEngine(e).malformedFields;
-  const fields: string[] = [...malformed];
-  if (!isWireScale(e.usd_decimals)) fields.push("usd_decimals");
-  // `newly_eligible_accounts` is the wire's signed net count: the classifier
-  // guards it as one, and a negative net is an answer, never a malformed field.
-  const pops: [string, number][] = [
-    ["before.eligible_accounts", e.before.eligible_accounts],
-    ["after.eligible_accounts", e.after.eligible_accounts],
-    ["hf_transitions.measured_rows", e.hf_transitions.measured_rows],
-  ];
-  for (const [name, v] of pops) if (!isWirePopulation(v)) fields.push(name);
-  const decs: [string, string][] = [
-    ["before.eligible_debt_usd", e.before.eligible_debt_usd],
-    ["after.eligible_debt_usd", e.after.eligible_debt_usd],
-    ["eligible_debt_delta_usd", e.eligible_debt_delta_usd],
-    ["before.bad_debt_usd", e.before.bad_debt_usd],
-    ["after.bad_debt_usd", e.after.bad_debt_usd],
-    ["bad_debt_delta_usd", e.bad_debt_delta_usd],
-  ];
-  for (const [name, v] of decs) if (!isWireDecimal(v)) fields.push(name);
-  if (e.hf_transitions.lane_changed_rows !== null && !isWirePopulation(e.hf_transitions.lane_changed_rows)) fields.push("hf_transitions.lane_changed_rows");
-  if (fields.length > 0) return { kind: "unreadable", fields: [...new Set(fields)] };
+  if (malformed.length > 0) return { kind: "unreadable", fields: [...new Set(malformed)] };
   const heat = laneReading(e, { merge: engine === CASH });
   if (heat.kind === "contradictory") return { kind: "contradictory", reasons: heat.reasons };
   return {
@@ -85,6 +73,7 @@ export function readEngine(run: LabRunBook, engine: string, definition: Scenario
     result: {
       engine,
       decimals: e.usd_decimals,
+      // `newly_eligible_accounts` is the wire's SIGNED net: a negative net is an answer, never a malformed field.
       newly: e.newly_eligible_accounts,
       beforeEligible: e.before.eligible_accounts,
       afterEligible: e.after.eligible_accounts,

@@ -2,6 +2,9 @@
 // (spec §3.5 templates and the plan's extra states). Money is the Book's tiers.
 import { expect, test } from "@playwright/test";
 import {
+  compareCaption,
+  compareHeadline,
+  compareRowWords,
   contradictoryHeadline,
   definitionChangedHeadline,
   EMPTY_LISTING,
@@ -13,10 +16,13 @@ import {
   resultHeadline,
   runningHeadline,
   setMembershipHeadline,
+  signedCount,
   signedUsd,
   withheldHeadline,
 } from "../../lib/lab-headline";
+import { compareRows } from "../../lib/lab-compare";
 import { laneReading } from "../../lib/lab-transitions";
+import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
 import { cashEngine, DEMO_CASH_TABLE } from "./helpers/run-book-engine";
 
 const heatOf = (table: Parameters<typeof cashEngine>[0]) => {
@@ -69,7 +75,7 @@ test("no change, band changes only, accounts flipping without a debt delta, impr
   const flipped = resultHeadline({ ...DEMO, newly: 2, deltaEligibleDebt: 0n, heat: null, heatReason: "the matrix's lanes, outflows and two margins are not the same length" });
   expect(flipped.emphasis).toBe("2 accounts become liquidatable under ETH -30 percent.");
   expect(flipped.tone).toBe("crit");
-  expect(flipped.dek).toContain("Where accounts move could not be read: the matrix's lanes, outflows and two margins are not the same length.");
+  expect(flipped.dek).toBe("Bad debt would rise by $40K if all 167 were liquidated at the shocked prices. Where accounts move could not be read: the matrix's lanes, outflows and two margins are not the same length.");
 
   const better = resultHeadline({ ...DEMO, newly: 0, deltaEligibleDebt: -3_000_000_000n, deltaBadDebt: -1_000_000n, heat: heatOf({ 2: { 3: 4 }, 4: { 3: 2 } }) });
   expect(better.emphasis).toBe("No Cash account becomes liquidatable under ETH -30 percent,");
@@ -151,6 +157,94 @@ test("the set-membership refusal: every fault in one sentence, the dashed tone, 
     emphasis: "The set does not answer the request.",
     rest: "",
     tone: "refused",
-    dek: "Asked 2 ids, the response names 4; x is named in requested_scenario_ids and was not dispatched. Nothing from it is drawn.",
+    dek: "Faults: asked 2 ids, the response names 4; x is named in requested_scenario_ids and was not dispatched. Nothing from it is drawn.",
   });
+  // An id-leading fault keeps the id as the config spells it: the lead is fixed, and no fault is recapitalised.
+  expect(setMembershipHeadline(["eth_minus_30 was dispatched and is not named in requested_scenario_ids"]).dek).toBe(
+    "Faults: eth_minus_30 was dispatched and is not named in requested_scenario_ids. Nothing from it is drawn.",
+  );
+});
+
+test("signedCount: a negative count prints the true minus; a count at or above zero prints as the count it is", () => {
+  expect(signedCount(-3)).toBe("−3");
+  expect(signedCount(-1234)).toBe("−1,234");
+  expect(signedCount(0)).toBe("0");
+  expect(signedCount(118)).toBe("118");
+});
+
+test("a net count at or below zero has its own sentence: the net and the gross the merged lanes show, never a 'no'; a net without crossings is the fewer sentence", () => {
+  const dek = "Bad debt would rise by $40K if all 167 were liquidated at the shocked prices. 425 accounts move to a worse band; none improve. Of the 27 accounts within 9.09% of their cap today, all 27 cross it.";
+  // The demo lanes: 118 cross the cap; the wire's net says three fewer — both stated, in the warn tone, the dek unchanged.
+  const net = resultHeadline({ ...DEMO, newly: -3 });
+  expect(net).toEqual({ emphasis: "Net, 3 fewer Cash accounts are liquidatable under ETH -30 percent,", rest: "though 118 accounts cross the cap.", tone: "warn", dek });
+  const zero = resultHeadline({ ...DEMO, newly: 0 });
+  expect(zero).toEqual({ emphasis: "Net, no more Cash accounts are liquidatable under ETH -30 percent,", rest: "though 118 accounts cross the cap.", tone: "warn", dek });
+  const one = resultHeadline({ ...DEMO, newly: -1, heat: heatOf({ 3: { 0: 1 }, 2: { 3: 1 } }) });
+  expect(one.emphasis).toBe("Net, 1 fewer Cash account is liquidatable under ETH -30 percent,");
+  expect(one.rest).toBe("though 1 account crosses the cap.");
+  // No crossing in the lanes: the net alone, in the ok tone — accounts left the cap and none crossed it.
+  const fewer = resultHeadline({ ...DEMO, newly: -3, deltaEligibleDebt: -3_000_000_000n, deltaBadDebt: 0n, heat: heatOf({ 0: { 3: 3 }, 7: { 7: 2 } }) });
+  expect(fewer).toEqual({ emphasis: "3 fewer Cash accounts are liquidatable under ETH -30 percent.", rest: "", tone: "ok", dek: "Bad debt at liquidation does not change. 3 accounts change band; 3 improve." });
+  expect(`${net.emphasis} ${zero.emphasis} ${fewer.emphasis}`).not.toContain("No Cash account");
+});
+
+test("the singular: one account becomes, one changes band, one improves", () => {
+  const one = resultHeadline({ ...DEMO, newly: 1, deltaEligibleDebt: 0n, heat: null, heatReason: "the matrix's lanes, outflows and two margins are not the same length" });
+  expect(one.emphasis).toBe("1 account becomes liquidatable under ETH -30 percent.");
+  const changes = resultHeadline({ ...DEMO, newly: 0, deltaEligibleDebt: 0n, deltaBadDebt: 0n, heat: heatOf({ 2: { 3: 1 }, 7: { 7: 2 } }) });
+  expect(changes.emphasis).toBe("No Cash account becomes liquidatable under ETH -30 percent,");
+  expect(changes.rest).toBe("but 1 changes band.");
+  expect(changes.dek).toBe("Bad debt at liquidation does not change. 1 account changes band; 1 improves. Of the 1 account within 9.09% of its cap today, none cross it.");
+});
+
+test("the failed arm requires its status: the type refuses an unnumbered answer", () => {
+  // @ts-expect-error the failed arm's status is required by its overload
+  expect(failureHeadline("failed", {}).emphasis).toBe("The service answered undefined.");
+});
+
+type SetBody = typeof DEMO_RUN_BOOK_SET;
+type SetResult = SetBody["results"][number];
+/** The demo set answering an ask: its results for the asked ids, the echo the ask itself, the evaluated count agreeing. */
+const demoSetFor = (ids: readonly string[]): SetBody => {
+  const results = DEMO_RUN_BOOK_SET.results.filter((r) => ids.includes(r.scenario_id));
+  return { ...DEMO_RUN_BOOK_SET, requested_scenario_ids: [...ids], results, evaluation: { ...DEMO_RUN_BOOK_SET.evaluation, scenarios_evaluated: results.length } };
+};
+const withResult = (set: SetBody, id: string, edit: (r: SetResult) => SetResult): SetBody => ({ ...set, results: set.results.map((r) => (r.scenario_id === id ? edit(r) : r)) });
+const cashSummary = (patch: Partial<SetResult["engines"][number]>) => (r: SetResult): SetResult => ({ ...r, engines: r.engines.map((e) => (e.engine === "debt_manager" ? { ...e, ...patch } : e)) });
+const withheldCash = (r: SetResult): SetResult => ({ ...r, withheld_engines: ["debt_manager"], engines: r.engines.filter((e) => e.engine !== "debt_manager") });
+const TWO = ["eth_minus_30", "ethfi_minus_50"];
+
+test("compareHeadline: the largest share by magnitude first with its figure and its share of the book, the rest in rank order, every refusal named; all refused says so", () => {
+  const two = compareRows(demoSetFor(TWO), "debt_manager");
+  expect(compareHeadline(two)).toBe("ETH -30 percent moves the most: +$1.2M more liquidatable Cash debt, 4.5% of the book. ETHFI -50 percent: +$9,800, under 0.1%.");
+  // A refused row is named as refused, after the points, in the value column's own words.
+  const withheld = compareRows(withResult(demoSetFor(TWO), "ethfi_minus_50", withheldCash), "debt_manager");
+  expect(compareHeadline(withheld)).toBe("ETH -30 percent moves the most: +$1.2M more liquidatable Cash debt, 4.5% of the book. ETHFI -50 percent could not be evaluated: withheld.");
+  const noDenominator = compareRows(withResult(demoSetFor(TWO), "ethfi_minus_50", cashSummary({ eligible_debt_delta_usd: "5000000", total_debt_usd_before: "0" })), "debt_manager");
+  expect(compareHeadline(noDenominator)).toBe("ETH -30 percent moves the most: +$1.2M more liquidatable Cash debt, 4.5% of the book. ETHFI -50 percent could not be evaluated: no denominator · +$5.");
+  // Every row refused: the sentence says so and names each; nothing is a dot at zero.
+  const none = compareRows(withResult(withResult(demoSetFor(TWO), "eth_minus_30", withheldCash), "ethfi_minus_50", withheldCash), "debt_manager");
+  expect(compareHeadline(none)).toBe("No scenario could be evaluated for the Cash book: ETH -30 percent withheld; ETHFI -50 percent withheld.");
+  // The largest by magnitude leads whatever its sign; a fall is "less".
+  const falling = compareRows(withResult(demoSetFor(TWO), "eth_minus_30", cashSummary({ eligible_debt_delta_usd: "-4500000000000" })), "debt_manager");
+  expect(compareHeadline(falling)).toBe("ETH -30 percent moves the most: −$4.5M less liquidatable Cash debt, 16.1% of the book. ETHFI -50 percent: +$9,800, under 0.1%.");
+  // Every point a measured zero: no mover to name.
+  const still = compareRows(withResult(withResult(demoSetFor(TWO), "eth_minus_30", cashSummary({ eligible_debt_delta_usd: "0" })), "ethfi_minus_50", cashSummary({ eligible_debt_delta_usd: "0" })), "debt_manager");
+  expect(compareHeadline(still)).toBe("ETH -30 percent and ETHFI -50 percent leave liquidatable Cash debt unchanged.");
+  // The legacy book in its own words, never beside the Cash figures.
+  const legacy = compareRows(demoSetFor(TWO), "aave_v3_etherfi");
+  expect(compareHeadline(legacy)).toBe("ETH -30 percent moves the most: +$6,000 more liquidatable legacy debt, 0.3% of the book. ETHFI -50 percent could not be evaluated: not modelled for the legacy market.");
+  expect(compareHeadline({ ...two, rows: [] })).toBe("No scenario was compared.");
+});
+
+test("compareRowWords and compareCaption: the value column's words are the lib's; the caption names the batch, its freshness only when not the newest", () => {
+  const two = compareRows(demoSetFor(TWO), "debt_manager");
+  expect(two.rows.map((r) => compareRowWords(r, "debt_manager"))).toEqual(["+4.5% · +$1.2M", "<0.1% · +$9,800"]);
+  const withheld = compareRows(withResult(demoSetFor(TWO), "ethfi_minus_50", withheldCash), "debt_manager");
+  expect(compareRowWords(withheld.rows[1]!, "debt_manager")).toBe("withheld");
+  expect(compareRowWords(compareRows(demoSetFor(TWO), "aave_v3_etherfi").rows[1]!, "aave_v3_etherfi")).toBe("not modelled for the legacy market");
+  expect(compareCaption(two)).toBe("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251).");
+  expect(compareCaption({ ...two, freshness: "superseded" })).toBe("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251 — superseded).");
+  expect(compareCaption({ ...two, freshness: "none_servable" })).toBe("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251 — no batch was servable when probed).");
+  expect(compareCaption(compareRows(demoSetFor(TWO), "aave_v3_etherfi"))).toBe("Change in liquidatable legacy debt per scenario, as a share of the legacy book (batch 18,251).");
 });

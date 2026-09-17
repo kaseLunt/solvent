@@ -6,89 +6,30 @@ import {
   StatusPill,
   type DotPlotRow,
 } from "@/components/kit";
-import type { CompareKind, CompareRow, CompareView } from "@/lib/lab-compare";
+import type { CompareView } from "@/lib/lab-compare";
+import { compareCaption, compareHeadline, compareRowWords } from "@/lib/lab-headline";
 import type { CompareState } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import { useMeasuredWidth } from "@/lib/useMeasuredWidth";
 import styles from "./lab.module.css";
 import { LegacyCompare, PLOT_MEASURE } from "./LegacyCompare";
 
-/** The not-covered word names the engine; the share's denominator is the caption's word, never the row's. */
-const CASH_NOT_COVERED = "not modelled for Cash";
-const LEGACY_NOT_COVERED = "not modelled for the legacy market";
+/** The value column's header, over the cells' "share · change" figures. */
+export const VALUE_HEADER = "share · change";
 
-type Refusal = Exclude<CompareKind, "point">;
-const KIND_WORD: Record<Exclude<Refusal, "not-covered">, string> = {
-  withheld: "withheld",
-  unmeasurable: "unmeasurable",
-  contradictory: "contradictory",
-  "no-denominator": "no denominator",
-  unreadable: "unreadable",
-};
-
-/**
- * A refusal's word, the wire's reason in brackets unless it is the word itself;
- * not covered is said for the engine, once. A refusal of the share is not a
- * refusal of the figure: where the wire gave a delta, it stands beside the word.
- */
-function noteOf(r: CompareRow, kind: Refusal, notCovered: string): string {
-  const word = kind === "not-covered" ? notCovered : KIND_WORD[kind];
-  const reason =
-    kind === "not-covered" || r.reason === null || r.reason === word
-      ? ""
-      : ` (${r.reason})`;
-  const delta = r.deltaUsd === null ? "" : ` · ${r.deltaText}`;
-  return `${word}${reason}${delta}`;
-}
-
-/** The figures beside a dot: the share, then the absolute delta. */
-const figures = (r: CompareRow): string => `${r.shareText} · ${r.deltaText}`;
-
-/** One plot row per compare row: a point is a signed dot toned by its sign; every other kind is a dashed track with its word and no value. */
-function rowsOf(view: CompareView, notCovered: string): DotPlotRow[] {
+/** One plot row per compare row, in the lib's words: a point is a signed dot toned by its sign; every other kind is a dashed track with its word and no value. */
+function rowsOf(view: CompareView): DotPlotRow[] {
   return view.rows.map((r): DotPlotRow => {
-    if (r.kind !== "point") {
-      const note = noteOf(r, r.kind, notCovered);
-      return {
-        key: r.id,
-        label: r.label,
-        valueText: note,
-        note,
-        tenths: null,
-        tone: "refused",
-      };
-    }
-    const tenths = r.shareTenths;
+    const words = compareRowWords(r, view.engine);
     // A point carries its share by the lib's construction; a row without one is a track, never a dot at zero.
-    if (tenths === null) {
-      return {
-        key: r.id,
-        label: r.label,
-        valueText: "no share",
-        note: "no share",
-        tenths: null,
-        tone: "refused",
-      };
+    if (r.kind !== "point" || r.shareTenths === null) {
+      return { key: r.id, label: r.label, valueText: words, note: words, tenths: null, tone: "refused" };
     }
     // More liquidatable debt is the critical sign; less, and a measured zero, are ok.
-    return {
-      key: r.id,
-      label: r.label,
-      valueText: figures(r),
-      note: null,
-      tenths,
-      tone: tenths > 0n ? "crit" : "ok",
-    };
+    return { key: r.id, label: r.label, valueText: words, note: null, tenths: r.shareTenths, tone: r.shareTenths > 0n ? "crit" : "ok" };
   });
 }
 
-/** The wire's four freshness states, in words: what was true of the evaluated batch when the response was built. */
-const FRESHNESS_WORD: Record<CompareView["freshness"], string> = {
-  still_newest: "still the newest",
-  superseded: "since superseded",
-  newest_is_older: "the newest servable batch is now older than it",
-  none_servable: "no batch was servable when probed",
-};
 const FRESHNESS_PILL: Record<
   Exclude<CompareView["freshness"], "still_newest">,
   string
@@ -105,9 +46,12 @@ function finding(state: CompareState): string {
     case "running":
       return `Evaluating ${String(state.ids.length)} scenario${state.ids.length === 1 ? "" : "s"}…`;
     case "failed":
-      return `${state.headline.emphasis} ${state.headline.dek}`;
+      // A failed Compare over a held comparison names the failure and what stands beneath it; with nothing held, the failure is the state.
+      return state.held === null
+        ? `${state.headline.emphasis} ${state.headline.dek}`
+        : `Compare again failed — ${state.headline.emphasis} ${state.headline.dek} The comparison below stands for batch ${groupInt(state.held.cash.batchId)}.`;
     case "ok":
-      return `Each dot is a scenario's change in liquidatable Cash debt as a share of the Cash book at batch ${groupInt(state.cash.batchId)} (${FRESHNESS_WORD[state.cash.freshness]}). Absolute figures beside.`;
+      return compareHeadline(state.cash);
   }
 }
 
@@ -119,42 +63,53 @@ function finding(state: CompareState): string {
  */
 export function CompareCard({ state }: { state: CompareState }) {
   const { ref, width } = useMeasuredWidth<HTMLDivElement>(PLOT_MEASURE);
-  const ok = state.kind === "ok" ? state : null;
-  const legacyRows = ok === null ? [] : rowsOf(ok.legacy, LEGACY_NOT_COVERED);
-  const legacyPoints = legacyRows.some((r) => r.tenths !== null);
+  // The views drawn: the answered set, or the one a failed Compare left standing — a computed comparison is never replaced by a failure.
+  const views =
+    state.kind === "ok" ? state : state.kind === "failed" ? state.held : null;
+  // The legacy fold stands whenever the set has a legacy row: a refused row is a dashed row with its word, never a fold that vanishes.
+  const legacyRows =
+    views === null ? [] : rowsOf(views.legacy);
   return (
     <ChartCard
       title="Compare scenarios"
       testId="lab-compare-card"
       finding={
-        <span data-testid="lab-compare-state" data-kind={state.kind}>
+        <span
+          data-testid="lab-compare-state"
+          data-kind={state.kind}
+          data-held={
+            state.kind === "failed" && state.held !== null ? "true" : undefined
+          }
+        >
           {finding(state)}
         </span>
       }
     >
       <div ref={ref} className={styles.plotFrame}>
-        {ok !== null ? (
+        {views !== null ? (
           <>
-            {ok.cash.freshness !== "still_newest" && (
+            {views.cash.freshness !== "still_newest" && (
               <p
                 className={styles.notice}
                 data-testid="lab-compare-superseded"
-                data-freshness={ok.cash.freshness}
+                data-freshness={views.cash.freshness}
               >
                 <StatusPill tone="warn">
-                  {FRESHNESS_PILL[ok.cash.freshness]}
+                  {FRESHNESS_PILL[views.cash.freshness]}
                 </StatusPill>{" "}
-                evaluated on batch {groupInt(ok.cash.batchId)};{" "}
-                {ok.cash.newestServable === null
+                evaluated on batch {groupInt(views.cash.batchId)};{" "}
+                {views.cash.newestServable === null
                   ? "no batch was servable at probe time"
-                  : `the newest servable batch is ${groupInt(ok.cash.newestServable)}`}
+                  : `the newest servable batch is ${groupInt(views.cash.newestServable)}`}
                 .
               </p>
             )}
             <DotPlot
-              rows={rowsOf(ok.cash, CASH_NOT_COVERED)}
+              rows={rowsOf(views.cash)}
               width={width}
               axisLabel="change in liquidatable Cash debt, percent of the Cash book"
+              valueHeader={VALUE_HEADER}
+              axisCaption="share of the Cash book"
               testId="lab-dotplot"
               rowTestIdPrefix="lab-compare-row"
             />
@@ -169,7 +124,12 @@ export function CompareCard({ state }: { state: CompareState }) {
           </p>
         )}
       </div>
-      {legacyPoints && <LegacyCompare rows={legacyRows} />}
+      {views !== null && (
+        <p className={styles.dim} data-testid="lab-compare-caption">
+          {compareCaption(views.cash)}
+        </p>
+      )}
+      {legacyRows.length > 0 && <LegacyCompare rows={legacyRows} />}
     </ChartCard>
   );
 }

@@ -7,7 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Phase } from "./address-lookup";
 import { getSolventClient, solventBaseUrl } from "./api";
-import type { HeldResult, RunRecord, ScenariosResponse, SetRecord } from "./lab-library";
+import { setMembership } from "./lab-compare";
+import type { HeldResult, HeldSet, RunRecord, ScenariosResponse, SetRecord } from "./lab-library";
 import { monotonicNowMs } from "./freshness";
 import { describeLookupError } from "./lookup-error";
 import { runBookScenario, type RunBookOutcome } from "./runbook";
@@ -40,8 +41,30 @@ export function withRunning(runs: ReadonlyMap<string, RunRecord>, id: string, no
 
 export function withSettled(runs: ReadonlyMap<string, RunRecord>, id: string, outcome: RunBookOutcome, now: number, monotonicNow: number): Map<string, RunRecord> {
   const next = new Map(runs);
-  next.set(id, { phase: "settled", outcome, at: now, atMonotonicMs: monotonicNow, held: outcome.kind === "ok" ? null : heldOf(runs.get(id)) });
+  // The hold survives every settle, an ok one included: whether the new body READS as an answer is the view's
+  // question, and a 2xx body that does not read never releases the result it had. The hold is always the last
+  // ok result before this settle; a new result stands in front of it, a failure or a malformed body behind it.
+  next.set(id, { phase: "settled", outcome, at: now, atMonotonicMs: monotonicNow, held: heldOf(runs.get(id)) });
   return next;
+}
+
+/** The set that stands: a settled ok that answered its request, else whatever the record already held. A set that did not answer its request is not a comparison to hold. */
+function heldSetOf(prev: SetRecord | null): HeldSet | null {
+  if (prev === null) return null;
+  if (prev.phase === "settled" && prev.outcome.kind === "ok" && setMembership(prev.ids, prev.outcome.response).length === 0) {
+    return { ids: prev.ids, response: prev.outcome.response, at: prev.at };
+  }
+  return prev.held;
+}
+
+export function withSetRunning(prev: SetRecord | null, ids: readonly string[], now: number): SetRecord {
+  return { phase: "running", ids, startedAt: now, held: heldSetOf(prev) };
+}
+
+/** A computed comparison is never replaced by the Compare that follows it: it is held through every failure and released only by a new set that answers its request. */
+export function withSetSettled(prev: SetRecord | null, ids: readonly string[], outcome: SetRunOutcome, now: number): SetRecord {
+  const answers = outcome.kind === "ok" && setMembership(ids, outcome.response).length === 0;
+  return { phase: "settled", ids, outcome, at: now, held: answers ? null : heldSetOf(prev) };
 }
 
 export function useLabReading(): LabReading {
@@ -57,7 +80,12 @@ export function useLabReading(): LabReading {
     runsRef.current = runs;
     setRef.current = set;
   });
+  // One POST per ask: the record is the committed guard, and the controller in flight is the guard before the
+  // commit — two asks in one tick meet the first ask's controller, not a record that has yet to land. A run's
+  // controller is keyed by its scenario id; the set's lives in its own slot, in no id's key, because the id space
+  // is the wire's and no sentinel may sit in it. The slot object is stable, so the unmount cleanup may hold it.
   const controllers = useRef(new Map<string, AbortController>());
+  const setSlot = useRef<{ controller: AbortController | null }>({ controller: null });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -76,16 +104,20 @@ export function useLabReading(): LabReading {
     };
   }, [epoch]);
 
+  // Unmount aborts every request in flight, so no settle lands on a surface that is gone.
   useEffect(() => {
     const live = controllers.current;
+    const slot = setSlot.current;
     return () => {
       for (const c of live.values()) c.abort();
       live.clear();
+      slot.controller?.abort();
+      slot.controller = null;
     };
   }, []);
 
   const run = useCallback((id: string) => {
-    if (!canDispatch(runsRef.current, id)) return;
+    if (controllers.current.has(id) || !canDispatch(runsRef.current, id)) return;
     const controller = new AbortController();
     controllers.current.set(id, controller);
     setRuns((prev) => withRunning(prev, id, Date.now()));
@@ -104,21 +136,22 @@ export function useLabReading(): LabReading {
   }, []);
 
   const runSet = useCallback((ids: readonly string[]) => {
-    if (!canDispatchSet(setRef.current)) return;
+    const slot = setSlot.current;
+    if (slot.controller !== null || !canDispatchSet(setRef.current)) return;
     const controller = new AbortController();
-    controllers.current.set("__set__", controller);
+    slot.controller = controller;
     const asked = [...ids];
-    setSet({ phase: "running", ids: asked, startedAt: Date.now() });
+    setSet((prev) => withSetRunning(prev, asked, Date.now()));
     runBookSet(solventBaseUrl(), asked, { signal: controller.signal }).then(
-      (outcome: SetRunOutcome) => {
+      (outcome) => {
         if (controller.signal.aborted) return;
-        controllers.current.delete("__set__");
-        setSet({ phase: "settled", ids: asked, outcome, at: Date.now() });
+        slot.controller = null;
+        setSet((prev) => withSetSettled(prev, asked, outcome, Date.now()));
       },
       (cause: unknown) => {
         if (controller.signal.aborted) return;
-        controllers.current.delete("__set__");
-        setSet({ phase: "settled", ids: asked, outcome: { kind: "unreachable", message: describeLookupError(cause) }, at: Date.now() });
+        slot.controller = null;
+        setSet((prev) => withSetSettled(prev, asked, { kind: "unreachable", message: describeLookupError(cause) }, Date.now()));
       },
     );
   }, []);

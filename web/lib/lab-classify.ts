@@ -16,7 +16,7 @@ import {
 } from "./wireGuard";
 
 /** A runtime object gate: the JSON cast guarantees nothing. */
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
@@ -29,9 +29,8 @@ function isNullableWireDecimal(value: unknown): boolean {
  * The schema's `number | null` movement counts (`held_rows`,
  * `lane_changed_rows`): null is the wire's own "not measured" statement and
  * is NEVER malformed; a non-null value is a POPULATION — a diagonal or
- * off-diagonal tally of MEASURED rows, nonnegative safe integer (p1b-9
- * finding 2 brought them into the walk; p1b-10 assigned the guard by the
- * schema's semantics — see wireGuard.ts's assignment table).
+ * off-diagonal tally of MEASURED rows, a nonnegative safe integer by the
+ * schema's own semantics (the assignment table in wireGuard.ts).
  */
 function isNullableWirePopulation(value: unknown): boolean {
   return value === null || isWirePopulation(value);
@@ -44,14 +43,12 @@ function isNullableWirePopulation(value: unknown): boolean {
  * is nullable (the open-ended top bucket); `collateral_by_asset[].value_usd`
  * is nullable (an unpriced balance's worth is unknowable, not zero).
  *
- * p1b-9 (Codex round, finding 2): the histogram COUNTS used to bypass this
- * walk entirely — the schema types them `number`, but the JSON cast
- * guarantees nothing, and `count: ""` passed the gate to coerce into a
- * zero-share costume in `belowOneCount`/`measuredCount` (`0 + ""` is `"0"`).
- * Every count the reductions consume is judged per side and per index —
- * since p1b-10 by `isWirePopulation` (these are all tallies of rows and
- * accounts that exist: nonnegative safe integers, per the assignment table
- * in wireGuard.ts).
+ * The histogram COUNTS are walked too: the schema types them `number`, but
+ * the JSON cast guarantees nothing, and an unjudged `count: ""` coerces in
+ * arithmetic into a zero-share costume (`0 + ""` is `"0"`). Every count a
+ * reduction consumes is judged per side and per index by `isWirePopulation`:
+ * these are all tallies of rows and accounts that exist — nonnegative safe
+ * integers, per the assignment table in wireGuard.ts.
  */
 function aggregateChecks(side: "before" | "after", aggregate: unknown): FieldCheck[] {
   if (!isRecord(aggregate)) return [[side, false]];
@@ -105,20 +102,18 @@ function aggregateChecks(side: "before" | "after", aggregate: unknown): FieldChe
 }
 
 /**
- * The transition matrix (`RunBookTransitions`): its OWN `wad_scale` — the
- * controller-pinned field Task 1's review proved coerces to a
- * "0 entered / 0 exited" costume in `belowOneLanes` — the per-index lane
- * bounds, and every occupied cell's two nullable debts.
+ * The transition matrix (`RunBookTransitions`): its OWN `wad_scale` — a
+ * field which, unjudged, coerces into a "0 entered / 0 exited" costume — the
+ * per-index lane bounds, and every occupied cell's two nullable debts.
  *
- * p1b-9 (Codex round, finding 2): AND EVERY COUNT `readTransitions` and the
- * region reductions consume. The old header claimed the counts were "integers
- * the module's own `readTransitions` reconciles" — but a reconciliation over
- * unvalidated values is arithmetic over coercions (`0 + ""` is `"0"`, NaN
- * comparisons are silently false), and a body that failed the wire contract
- * deserves the MALFORMED register, not a contradiction sentence derived from
- * garbage. Judged in wire read order: `lanes[].index`, `outflows[].from`,
- * `cells[].to`/`rows`, the two margins per index, the five census totals,
- * and the two NULLABLE movement counts (null is a statement).
+ * AND EVERY COUNT the lane reading and the region reductions consume: a
+ * reconciliation over unvalidated values is arithmetic over coercions
+ * (`0 + ""` is `"0"`, NaN comparisons are silently false), and a body that
+ * failed the wire contract deserves the MALFORMED register, not a
+ * contradiction sentence derived from garbage. Judged in wire read order:
+ * `lanes[].index`, `outflows[].from`, `cells[].to`/`rows`, the two margins
+ * per index, the five census totals, and the two NULLABLE movement counts
+ * (null is a statement).
  */
 function transitionChecks(transitions: unknown): FieldCheck[] {
   if (!isRecord(transitions)) return [["hf_transitions", false]];
@@ -161,8 +156,8 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
           return;
         }
         checks.push([`${at}.to`, isWirePopulation(cell.to)]);
-        // p1b-11 (finding B): `rows` is the schema's `minimum: 1` — "A cell
-        // is emitted only when it holds at least one row"; an empty cell is
+        // `rows` is the schema's `minimum: 1` — "A cell is emitted only when
+        // it holds at least one row"; an empty cell is
         // ABSENT, never a row of zeros. A fake zero-row cell reconciles
         // EVERY margin and census sum (0 changes nothing), so this floor is
         // the only gate that refuses it.
@@ -206,10 +201,10 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
 
 /**
  * CLASSIFY THE WHOLE ENGINE SUBTREE, in wire read order. Empty list =
- * renderable; a non-empty list is the p0-8 malformed register's content, per
- * index. `cellPrimaryOutcome`'s malformed arm delegates here (one law, one
- * function), so the matrix cell, the superseded payload, the engine panel
- * and the parent summary all refuse on the SAME classification.
+ * renderable; a non-empty list is the malformed register's content, per
+ * index. `readEngine` in lab-engine delegates here (one law, one function),
+ * so the workspace, the library row and the drawer all refuse on the SAME
+ * classification.
  */
 export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFields: string[] } {
   const e = engine as unknown as Record<string, unknown>;
@@ -243,9 +238,9 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
       }
     });
   }
-  // p1b-9 (finding 2): the FULL mover count — `moversDisclosure`'s own
-  // denominator ("top 20 of N"). A malformed total rendered "NaN are not on
-  // this page" as a computed-looking clause.
+  // The FULL mover count — the movers caption's own denominator ("showing 20
+  // of N"). Unjudged, a malformed total renders "NaN are not on this page" as
+  // a computed-looking clause.
   checks.push(["movers_total", isWirePopulation(e.movers_total)]);
 
   const realization = e.market_realization;

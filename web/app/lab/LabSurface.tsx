@@ -186,6 +186,9 @@ export function LabSurface() {
           ...r,
           outcome: rowOutcome(space.rows.find((x) => x.id === r.id)),
           checked: false,
+          // The highlight follows the subject the workspace shows, never the listing's selection alone: a linked
+          // scenario the address was not stressed under falls back to the first row, and the highlight with it.
+          selected: r.id === (space.selected?.id ?? null),
         }))
       : view.library;
 

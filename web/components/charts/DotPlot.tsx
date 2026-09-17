@@ -16,12 +16,18 @@ export interface DotPlotProps {
   rows: readonly DotPlotRow[];
   width: number;
   axisLabel: string;
+  /** The value column's header, over its cells ("share · change"). */
+  valueHeader?: string;
+  /** One line under the axis ticks naming what the axis is a share of; drawn only with the axis, so a plot of refused rows carries none. */
+  axisCaption?: string;
   testId?: string;
   rowTestIdPrefix?: string;
 }
 
 const ROW_H = 26;
 const AXIS_H = 22;
+const HEADER_H = 18;
+const CAPTION_H = 16;
 const VALUE_W = 120; // the value column's floor; it grows to fit its longest text
 const CHAR_W = 7; // 12px mono ≈ 7px per character: the label column is sized to the longest label
 const DOT_CLASS = {
@@ -29,12 +35,20 @@ const DOT_CLASS = {
   ok: styles.dotOk,
   warn: styles.dotWarn,
 } as const;
+// The stem from zero to the dot shows the magnitude, not only the position: the dot's tone at reduced opacity.
+const STEM_CLASS = {
+  crit: styles.stemCrit,
+  ok: styles.stemOk,
+  warn: styles.stemWarn,
+} as const;
 
 /** One signed dot per row on a symmetric percent axis; a row without a value is a dashed track that says why. */
 export function DotPlot({
   rows,
   width,
   axisLabel,
+  valueHeader,
+  axisCaption,
   testId,
   rowTestIdPrefix,
 }: DotPlotProps) {
@@ -45,12 +59,15 @@ export function DotPlot({
       rows.reduce((m, r) => Math.max(m, r.label.length), 0) * CHAR_W + 8,
     ),
   );
-  // The value column fits its longest text, never narrower than VALUE_W. When
-  // the columns outgrow the width asked for, the chart is wider than asked and
-  // its frame scrolls; a label is never clipped.
+  // The value column fits its longest text — its header included — never
+  // narrower than VALUE_W. When the columns outgrow the width asked for, the
+  // chart is wider than asked and its frame scrolls; a label is never clipped.
   const valueW = Math.max(
     VALUE_W,
-    rows.reduce((m, r) => Math.max(m, (r.note ?? r.valueText).length), 0) *
+    rows.reduce(
+      (m, r) => Math.max(m, (r.note ?? r.valueText).length),
+      valueHeader?.length ?? 0,
+    ) *
       CHAR_W +
       16,
   );
@@ -60,9 +77,13 @@ export function DotPlot({
     rows.map((r) => r.tenths),
     plotW,
   );
-  const height = rows.length * ROW_H + AXIS_H;
-  const edge = formatTenths(scale.maxAbsTenths);
   const anyValue = rows.some((r) => r.tenths !== null);
+  const headerH = valueHeader === undefined ? 0 : HEADER_H;
+  const captionH = anyValue && axisCaption !== undefined ? CAPTION_H : 0;
+  const rowsH = rows.length * ROW_H;
+  const height = headerH + rowsH + AXIS_H + captionH;
+  const axisY = headerH + rowsH + AXIS_H - 6;
+  const edge = formatTenths(scale.maxAbsTenths);
   const px = (x: number) => LABEL_W + x;
   return (
     <svg
@@ -73,17 +94,22 @@ export function DotPlot({
       aria-label={axisLabel}
       data-testid={testId}
     >
+      {valueHeader !== undefined && (
+        <text className={styles.axisLabel} x={px(plotW) + 8} y={12}>
+          {valueHeader}
+        </text>
+      )}
       {anyValue && (
         <line
           className={styles.baseline}
           x1={px(scale.zeroX)}
           x2={px(scale.zeroX)}
-          y1={0}
-          y2={rows.length * ROW_H}
+          y1={headerH}
+          y2={headerH + rowsH}
         />
       )}
       {rows.map((row, i) => {
-        const y = i * ROW_H + ROW_H / 2;
+        const y = headerH + i * ROW_H + ROW_H / 2;
         const id =
           rowTestIdPrefix === undefined
             ? undefined
@@ -95,7 +121,7 @@ export function DotPlot({
             data-testid={id}
             data-kind={row.tenths === null ? "refused" : "point"}
           >
-            <text className={styles.axisLabel} x={0} y={y + 4}>
+            <text className={styles.rowLabel} x={0} y={y + 4}>
               {row.label}
             </text>
             <line
@@ -107,14 +133,24 @@ export function DotPlot({
               strokeDasharray={row.tenths === null ? "3 4" : undefined}
             />
             {row.tenths !== null && (
-              <circle
-                className={DOT_CLASS[row.tone]}
-                cx={px(scale.x(row.tenths))}
-                cy={y}
-                r={5}
-              >
-                <title>{row.valueText}</title>
-              </circle>
+              <>
+                <line
+                  className={STEM_CLASS[row.tone]}
+                  data-role="stem"
+                  x1={px(scale.zeroX)}
+                  x2={px(scale.x(row.tenths))}
+                  y1={y}
+                  y2={y}
+                />
+                <circle
+                  className={DOT_CLASS[row.tone]}
+                  cx={px(scale.x(row.tenths))}
+                  cy={y}
+                  r={5}
+                >
+                  <title>{row.valueText}</title>
+                </circle>
+              </>
             )}
             <text className={styles.valueLabel} x={px(plotW) + 8} y={y + 4}>
               {row.note ?? row.valueText}
@@ -127,7 +163,7 @@ export function DotPlot({
           <text
             className={styles.axisLabel}
             x={px(scale.left)}
-            y={height - 6}
+            y={axisY}
             textAnchor="start"
           >
             −{edge}
@@ -135,7 +171,7 @@ export function DotPlot({
           <text
             className={styles.axisLabel}
             x={px(scale.zeroX)}
-            y={height - 6}
+            y={axisY}
             textAnchor="middle"
           >
             0
@@ -143,11 +179,21 @@ export function DotPlot({
           <text
             className={styles.axisLabel}
             x={px(scale.right)}
-            y={height - 6}
+            y={axisY}
             textAnchor="end"
           >
             +{edge}
           </text>
+          {axisCaption !== undefined && (
+            <text
+              className={styles.axisLabel}
+              x={px(scale.zeroX)}
+              y={height - 4}
+              textAnchor="middle"
+            >
+              {axisCaption}
+            </text>
+          )}
         </>
       )}
     </svg>

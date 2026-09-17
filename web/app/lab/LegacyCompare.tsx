@@ -27,6 +27,8 @@ export function LegacyCompare({ rows }: { rows: readonly DotPlotRow[] }) {
             rows={rows}
             width={width}
             axisLabel="change in liquidatable legacy debt, percent of the legacy book"
+            valueHeader="share · change"
+            axisCaption="share of the legacy book"
             testId="lab-dotplot-legacy"
             rowTestIdPrefix="lab-compare-legacy-row"
           />

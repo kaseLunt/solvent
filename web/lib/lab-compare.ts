@@ -4,11 +4,10 @@
 // scenario that did not answer for the engine keeps its own kind; it is never
 // a dot at zero.
 import type { components } from "@solvent/client";
-import { MINUS } from "./human-usd";
-import { classifySetRunEngine } from "./lab-classify";
+import { classifySetRunEngine, isRecord } from "./lab-classify";
 import { signedUsd } from "./lab-headline";
 import { formatTenths, percentTenths } from "./percent";
-import { isWireDecimal, isWireScale } from "./wireGuard";
+import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
 type Schemas = components["schemas"];
 export type RunBookSetResponse = Schemas["RunBookSetResponse"];
@@ -48,10 +47,13 @@ export function shareTenths(delta: bigint, denominator: bigint): bigint | null {
   return percentTenths(delta, denominator);
 }
 
-/** The share's words: a zero delta is "0%"; a nonzero delta under a tenth keeps its sign and says so; otherwise the signed tenths. */
+/**
+ * The share's words: a zero delta is "0%"; a nonzero delta under a tenth says so unsigned — its sign is carried by
+ * the dot's side of zero and by the absolute figure beside it; otherwise the signed tenths.
+ */
 function shareWords(delta: bigint, tenths: bigint): string {
   if (delta === 0n) return "0%";
-  if (tenths === 0n) return delta < 0n ? `${MINUS}<0.1%` : "+<0.1%";
+  if (tenths === 0n) return "<0.1%";
   return tenths < 0n ? formatTenths(tenths) : `+${formatTenths(tenths)}`;
 }
 
@@ -67,6 +69,15 @@ const nonNull = (part: string | null): part is string => part !== null;
  * id in more than one part.
  */
 function censusBreak(r: SetRunScenarioResult): string | null {
+  // The four lists are read only once each is a list: a body missing one is named by the field, never dereferenced.
+  const lists: readonly (readonly [name: string, value: unknown])[] = [
+    ["covered_engines", r.covered_engines],
+    ["engines", r.engines],
+    ["withheld_engines", r.withheld_engines],
+    ["unmeasurable_engines", r.unmeasurable_engines],
+  ];
+  const notLists = lists.filter(([, value]) => !Array.isArray(value)).map(([name]) => name);
+  if (notLists.length > 0) return `${notLists.join(", ")} ${notLists.length === 1 ? "is" : "are"} not a list`;
   const covered = new Set(r.covered_engines);
   const named = [...r.engines.map((s) => s.engine), ...r.withheld_engines, ...r.unmeasurable_engines.map((a) => a.engine)];
   const seen = new Set<string>();
@@ -130,7 +141,9 @@ const abs = (t: bigint): bigint => (t < 0n ? -t : t);
 const compareBig = (a: bigint, b: bigint): number => (a < b ? -1 : a > b ? 1 : 0);
 
 export function compareRows(set: RunBookSetResponse, engine: string): CompareView {
-  const rows = set.results.map((r) => rowOf(r, engine));
+  // `setMembership` refuses a body whose `results` is not a list before this reads it; here the list is only never dereferenced.
+  const results: unknown = set.results;
+  const rows = Array.isArray(results) ? set.results.map((r) => rowOf(r, engine)) : [];
   // |share| descending, then |Δ| descending (a tie under a tenth still ranks by contribution), then wire order (a stable sort).
   const points = rows
     .filter(isPoint)
@@ -150,7 +163,7 @@ export function compareRows(set: RunBookSetResponse, engine: string): CompareVie
 
 /**
  * The set answers the request, or nothing in it may be read (the contract's
- * "one line to check"; the old Lab's R57 gate). The ids this client posted are
+ * "one line to check"). The ids this client posted are
  * the only authority on what was asked: the body's `requested_scenario_ids` is
  * its own claim, so the two must be the same set, and the results must name
  * each requested id exactly once. Every fault is named. A duplicated id refuses
@@ -159,6 +172,15 @@ export function compareRows(set: RunBookSetResponse, engine: string): CompareVie
  */
 export function setMembership(asked: readonly string[], set: RunBookSetResponse): string[] {
   const faults: string[] = [];
+  // The envelope's two lists and its evaluated count are read only once each is what the contract says it is: a
+  // body missing one is refused by the field's name, never dereferenced — a version-skewed 2xx is a refusal, not a throw.
+  const requestedIds: unknown = set.requested_scenario_ids;
+  const results: unknown = set.results;
+  const evaluation: unknown = set.evaluation;
+  if (!Array.isArray(requestedIds)) faults.push("requested_scenario_ids is not a list");
+  if (!Array.isArray(results)) faults.push("results is not a list");
+  if (!isRecord(evaluation) || !isWirePopulation(evaluation.scenarios_evaluated)) faults.push("evaluation.scenarios_evaluated is not a count");
+  if (faults.length > 0) return faults;
   const counts = new Map<string, number>();
   for (const id of set.requested_scenario_ids) counts.set(id, (counts.get(id) ?? 0) + 1);
   for (const [id, n] of counts) {

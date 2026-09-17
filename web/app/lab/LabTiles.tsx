@@ -1,5 +1,6 @@
 import { KpiTile, type Tone } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
+import { signedCount } from "@/lib/lab-headline";
 import type { EngineReading } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import { bookMoney, signedBookMoney } from "./money";
@@ -41,7 +42,7 @@ export function LabTiles({
       <KpiTile
         testId={`${testPrefix}-newly`}
         label="Newly liquidatable"
-        value={r === null ? "—" : groupInt(r.newly)}
+        value={r === null ? "—" : signedCount(r.newly)}
         sub={sub(
           `accounts · was ${groupInt(r?.beforeEligible ?? 0)}, now ${groupInt(r?.afterEligible ?? 0)}`,
         )}
