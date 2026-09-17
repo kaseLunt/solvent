@@ -7,6 +7,20 @@
   height: auto;
 }
 
+/* LAW-3, the frame's half of it. A 1:1 chart has no viewBox — its width attribute IS its
+ * rendered width — so it never shrinks to its frame, and `.chart`'s cap would clip it where
+ * a frame is meant to scroll. The chart's wrapper carries this class and scrolls; the svg
+ * inside it is released from the cap. min-width: 0 so a grid or flex cell lets the frame
+ * shrink and scroll rather than widening the page. */
+.chart1to1 {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.chart1to1 > svg {
+  max-width: none;
+}
+
 .frame {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
@@ -249,11 +263,13 @@
   white-space: pre;
   font-family: var(--mono);
   font-size: var(--t-mono-floor);
-  /* The probe must measure what .axisLabel RENDERS: both consumers of
-   * useMonoCharWidth (LabFrontier, LabTornado) label with .axisLabel, whose
-   * 0.06em letter-spacing adds 0.72px per glyph at 12px. A probe without it
-   * under-measures by exactly that much and every gutter sized from chPx
-   * clips its first character ("eth_minus_60" rendered ":th_minus_60"). */
+  /* The probe must measure what .axisLabel RENDERS: every column sized from
+   * chPx is labelled in .axisLabel, whose 0.06em letter-spacing adds 0.72px
+   * per glyph at 12px. A probe without it under-measures by exactly that
+   * much and a gutter sized from chPx clips its first character
+   * ("eth_minus_60" rendered ":th_minus_60"). A column in an un-spaced mono
+   * face (the dot plot's values) measures a shade wide from the same probe,
+   * which is the side a column may err on. */
   letter-spacing: 0.06em;
 }
 

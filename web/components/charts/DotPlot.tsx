@@ -1,5 +1,8 @@
-import { dotPlotScale } from "@/lib/lab-geometry";
+"use client";
+
+import { dotPlotColumns, dotPlotScale } from "@/lib/lab-geometry";
 import { formatTenths } from "@/lib/percent";
+import { useMonoCharWidth } from "@/lib/useMeasuredWidth";
 import styles from "./charts.module.css";
 
 /** A row either has a value (a dot, toned by its sign) or none (a dashed track, `refused`); the type forbids a dim dot at a value. */
@@ -28,8 +31,6 @@ const ROW_H = 26;
 const AXIS_H = 22;
 const HEADER_H = 18;
 const CAPTION_H = 16;
-const VALUE_W = 120; // the value column's floor; it grows to fit its longest text
-const CHAR_W = 7; // 12px mono ≈ 7px per character: the label column is sized to the longest label
 const DOT_CLASS = {
   crit: styles.dotCrit,
   ok: styles.dotOk,
@@ -52,27 +53,21 @@ export function DotPlot({
   testId,
   rowTestIdPrefix,
 }: DotPlotProps) {
-  const LABEL_W = Math.min(
-    320,
-    Math.max(
-      160,
-      rows.reduce((m, r) => Math.max(m, r.label.length), 0) * CHAR_W + 8,
-    ),
+  // LF-8: the columns are sized from ONE MEASURED mono glyph, never a per-character guess.
+  // The probe is the kit's own; until its first layout pass the hook's generous fallback
+  // holds, so a pre-measurement render errs toward a column too wide, never one that clips.
+  const { ref: probeRef, chPx } = useMonoCharWidth<HTMLSpanElement>();
+  // The value column fits its longest text — its header included — never narrower than its
+  // floor. When the columns outgrow the width asked for, the chart is wider than asked and its
+  // frame scrolls; a label is never clipped.
+  const valueTexts = rows.map((r) => r.note ?? r.valueText);
+  const { labelW, valueW } = dotPlotColumns(
+    rows.map((r) => r.label),
+    valueHeader === undefined ? valueTexts : [valueHeader, ...valueTexts],
+    chPx,
   );
-  // The value column fits its longest text — its header included — never
-  // narrower than VALUE_W. When the columns outgrow the width asked for, the
-  // chart is wider than asked and its frame scrolls; a label is never clipped.
-  const valueW = Math.max(
-    VALUE_W,
-    rows.reduce(
-      (m, r) => Math.max(m, (r.note ?? r.valueText).length),
-      valueHeader?.length ?? 0,
-    ) *
-      CHAR_W +
-      16,
-  );
-  const plotW = Math.max(120, width - LABEL_W - valueW);
-  const svgWidth = LABEL_W + plotW + valueW;
+  const plotW = Math.max(120, width - labelW - valueW);
+  const svgWidth = labelW + plotW + valueW;
   const scale = dotPlotScale(
     rows.map((r) => r.tenths),
     plotW,
@@ -84,118 +79,124 @@ export function DotPlot({
   const height = headerH + rowsH + AXIS_H + captionH;
   const axisY = headerH + rowsH + AXIS_H - 6;
   const edge = formatTenths(scale.maxAbsTenths);
-  const px = (x: number) => LABEL_W + x;
+  const px = (x: number) => labelW + x;
   return (
-    <svg
-      className={styles.chart}
-      width={svgWidth}
-      height={height}
-      role="img"
-      aria-label={axisLabel}
-      data-testid={testId}
-    >
-      {valueHeader !== undefined && (
-        <text className={styles.axisLabel} x={px(plotW) + 8} y={12}>
-          {valueHeader}
-        </text>
-      )}
-      {anyValue && (
-        <line
-          className={styles.baseline}
-          x1={px(scale.zeroX)}
-          x2={px(scale.zeroX)}
-          y1={headerH}
-          y2={headerH + rowsH}
-        />
-      )}
-      {rows.map((row, i) => {
-        const y = headerH + i * ROW_H + ROW_H / 2;
-        const id =
-          rowTestIdPrefix === undefined
-            ? undefined
-            : `${rowTestIdPrefix}-${row.key}`;
-        return (
-          <g
-            key={row.key}
-            className={styles.dotPlotRow}
-            data-testid={id}
-            data-kind={row.tenths === null ? "refused" : "point"}
-          >
-            <text className={styles.rowLabel} x={0} y={y + 4}>
-              {row.label}
+    // The 1:1 chart's frame: it scrolls where the chart is wider than the budget it was given.
+    <div className={styles.chart1to1}>
+      <span className={styles.chProbe} ref={probeRef} aria-hidden>
+        0000000000
+      </span>
+      <svg
+        className={styles.chart}
+        width={svgWidth}
+        height={height}
+        role="img"
+        aria-label={axisLabel}
+        data-testid={testId}
+      >
+        {valueHeader !== undefined && (
+          <text className={styles.axisLabel} x={px(plotW) + 8} y={12}>
+            {valueHeader}
+          </text>
+        )}
+        {anyValue && (
+          <line
+            className={styles.baseline}
+            x1={px(scale.zeroX)}
+            x2={px(scale.zeroX)}
+            y1={headerH}
+            y2={headerH + rowsH}
+          />
+        )}
+        {rows.map((row, i) => {
+          const y = headerH + i * ROW_H + ROW_H / 2;
+          const id =
+            rowTestIdPrefix === undefined
+              ? undefined
+              : `${rowTestIdPrefix}-${row.key}`;
+          return (
+            <g
+              key={row.key}
+              className={styles.dotPlotRow}
+              data-testid={id}
+              data-kind={row.tenths === null ? "refused" : "point"}
+            >
+              <text className={styles.rowLabel} x={0} y={y + 4}>
+                {row.label}
+              </text>
+              <line
+                className={styles.dotPlotTrack}
+                x1={px(scale.left)}
+                x2={px(scale.right)}
+                y1={y}
+                y2={y}
+                strokeDasharray={row.tenths === null ? "3 4" : undefined}
+              />
+              {row.tenths !== null && (
+                <>
+                  <line
+                    className={STEM_CLASS[row.tone]}
+                    data-role="stem"
+                    x1={px(scale.zeroX)}
+                    x2={px(scale.x(row.tenths))}
+                    y1={y}
+                    y2={y}
+                  />
+                  <circle
+                    className={DOT_CLASS[row.tone]}
+                    cx={px(scale.x(row.tenths))}
+                    cy={y}
+                    r={5}
+                  >
+                    <title>{row.valueText}</title>
+                  </circle>
+                </>
+              )}
+              <text className={styles.valueLabel} x={px(plotW) + 8} y={y + 4}>
+                {row.note ?? row.valueText}
+              </text>
+            </g>
+          );
+        })}
+        {anyValue && (
+          <>
+            <text
+              className={styles.axisLabel}
+              x={px(scale.left)}
+              y={axisY}
+              textAnchor="start"
+            >
+              −{edge}
             </text>
-            <line
-              className={styles.dotPlotTrack}
-              x1={px(scale.left)}
-              x2={px(scale.right)}
-              y1={y}
-              y2={y}
-              strokeDasharray={row.tenths === null ? "3 4" : undefined}
-            />
-            {row.tenths !== null && (
-              <>
-                <line
-                  className={STEM_CLASS[row.tone]}
-                  data-role="stem"
-                  x1={px(scale.zeroX)}
-                  x2={px(scale.x(row.tenths))}
-                  y1={y}
-                  y2={y}
-                />
-                <circle
-                  className={DOT_CLASS[row.tone]}
-                  cx={px(scale.x(row.tenths))}
-                  cy={y}
-                  r={5}
-                >
-                  <title>{row.valueText}</title>
-                </circle>
-              </>
-            )}
-            <text className={styles.valueLabel} x={px(plotW) + 8} y={y + 4}>
-              {row.note ?? row.valueText}
-            </text>
-          </g>
-        );
-      })}
-      {anyValue && (
-        <>
-          <text
-            className={styles.axisLabel}
-            x={px(scale.left)}
-            y={axisY}
-            textAnchor="start"
-          >
-            −{edge}
-          </text>
-          <text
-            className={styles.axisLabel}
-            x={px(scale.zeroX)}
-            y={axisY}
-            textAnchor="middle"
-          >
-            0
-          </text>
-          <text
-            className={styles.axisLabel}
-            x={px(scale.right)}
-            y={axisY}
-            textAnchor="end"
-          >
-            +{edge}
-          </text>
-          {axisCaption !== undefined && (
             <text
               className={styles.axisLabel}
               x={px(scale.zeroX)}
-              y={height - 4}
+              y={axisY}
               textAnchor="middle"
             >
-              {axisCaption}
+              0
             </text>
-          )}
-        </>
-      )}
-    </svg>
+            <text
+              className={styles.axisLabel}
+              x={px(scale.right)}
+              y={axisY}
+              textAnchor="end"
+            >
+              +{edge}
+            </text>
+            {axisCaption !== undefined && (
+              <text
+                className={styles.axisLabel}
+                x={px(scale.zeroX)}
+                y={height - 4}
+                textAnchor="middle"
+              >
+                {axisCaption}
+              </text>
+            )}
+          </>
+        )}
+      </svg>
+    </div>
   );
 }

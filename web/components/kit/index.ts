@@ -13,3 +13,4 @@ export { Sparkline, type SparklineProps } from "../charts/Sparkline";
 export { ScenarioLibrary, type LibraryItem, type LibraryOutcomeKey, type LibraryOutcomeTone, type ScenarioLibraryProps } from "./ScenarioLibrary";
 export { Heatmap, type HeatBand, type HeatCellView, type HeatMovement, type HeatmapProps } from "./Heatmap";
 export { DotPlot, type DotPlotProps, type DotPlotRow } from "../charts/DotPlot";
+export { Drawer, type DrawerProps } from "../Drawer";
