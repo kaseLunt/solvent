@@ -118,7 +118,9 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   const head = page.getByTestId(`activity-row-10·${first.tx_hash}·38·0`);
   await expect(head).toBeVisible();
   await expect(head.locator("td").first()).toHaveText(first.block_time ?? "");
-  await expect(head.getByRole("link", { name: /^0x/ })).toHaveAttribute("href", `/inspector/${first.account}`);
+  // The account link opens the Inspector; the tx link is the chain's explorer — two 0x… links, each its own id.
+  await expect(head.getByTestId("activity-account")).toHaveAttribute("href", `/inspector/${first.account}`);
+  await expect(head.getByTestId("activity-tx")).toHaveAttribute("href", `https://optimistic.etherscan.io/tx/${first.tx_hash}`);
   await expect(rows(page).first()).toHaveAttribute("data-testid", `activity-row-10·${first.tx_hash}·38·0`);
 
   // No unit on this page licenses a dollar figure.

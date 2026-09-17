@@ -39,7 +39,7 @@ export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[
           </span>
         ),
       account: (
-        <Link href={`/inspector/${row.account}`} className={kit.addr} title={row.account}>
+        <Link href={`/inspector/${row.account}`} className={kit.addr} title={row.account} data-testid="activity-account">
           {truncateAddress(row.account)}
         </Link>
       ),
@@ -57,11 +57,11 @@ export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[
       ),
       tx:
         row.tx === null ? (
-          <span className={styles.tx} title={row.txTitle}>
+          <span className={styles.tx} title={row.txTitle} data-testid="activity-tx">
             {row.txLabel}
           </span>
         ) : (
-          <a className={styles.tx} href={row.tx} target="_blank" rel="noopener noreferrer" title={row.txTitle}>
+          <a className={styles.tx} href={row.tx} target="_blank" rel="noopener noreferrer" title={row.txTitle} data-testid="activity-tx">
             {row.txLabel} ↗
           </a>
         ),
