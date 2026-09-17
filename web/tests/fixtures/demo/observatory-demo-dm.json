@@ -1,0 +1,6144 @@
+{
+  "served_at": "2026-08-08T20:22:50Z",
+  "engine": "debt_manager",
+  "usd_decimals": 6,
+  "from": "2026-08-01T21:00:00Z",
+  "to": null,
+  "step_seconds": null,
+  "points": [
+    {
+      "bucket_start": "2026-08-01T21:00:00Z",
+      "last_block": 155023969,
+      "batch_id": 16214,
+      "materialization_key": "219a52322824f98a532204157e424620b4dd68813bff369da92536b737774fa6",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-01T21:02:45Z",
+        "age_seconds": 602405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1464,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "25955929423770",
+      "collateral_usd": "155913343929900",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1048999143835616439",
+          "as_of_block": 155023959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-01T22:00:00Z",
+      "last_block": 155025769,
+      "batch_id": 16226,
+      "materialization_key": "4789bbdc10d65ac8d6f568d272f12b53aeb5c508f1f4a9b8cfc5275699ff11aa",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-01T22:02:45Z",
+        "age_seconds": 598805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1463,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26058896014172",
+      "collateral_usd": "156173735603621",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049005136986301370",
+          "as_of_block": 155025759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-01T23:00:00Z",
+      "last_block": 155027569,
+      "batch_id": 16238,
+      "materialization_key": "2296b74b430975b8a1d9e88e0bc13d6a466104b4da86d7d667dbe217a75007e2",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-01T23:02:45Z",
+        "age_seconds": 595205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1468,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26142382438822",
+      "collateral_usd": "156495395906454",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049011130136986302",
+          "as_of_block": 155027559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T00:00:00Z",
+      "last_block": 155029369,
+      "batch_id": 16250,
+      "materialization_key": "eec01348dec08b4f648e9656e7a3f0d77c1ccd6081f8bb26fa47f0bd0c62a481",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T00:02:45Z",
+        "age_seconds": 591605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1468,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26178559889504",
+      "collateral_usd": "156663884636508",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049017123287671233",
+          "as_of_block": 155029359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T01:00:00Z",
+      "last_block": 155031169,
+      "batch_id": 16262,
+      "materialization_key": "e3f7114c1ed7ebe671f58b35d5e0a1f302cf743133d3c786d9cd4465532f29a8",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T01:02:45Z",
+        "age_seconds": 588005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1465,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26262046314154",
+      "collateral_usd": "156051198345400",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049023116438356165",
+          "as_of_block": 155031159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T02:00:00Z",
+      "last_block": 155032969,
+      "batch_id": 16274,
+      "materialization_key": "2dc2d8af51eb66544dde8556352b3aff83b1f4b0bca3c7520821f7264ba7f012",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T02:02:45Z",
+        "age_seconds": 584405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1464,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26239783267581",
+      "collateral_usd": "155453829211569",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049029109589041096",
+          "as_of_block": 155032959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T03:00:00Z",
+      "last_block": 155034769,
+      "batch_id": 16286,
+      "materialization_key": "2afeb2e6abbc3c1f5497bef228d88373559ca117cf690e0cac7bfece5f04d4ee",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T03:02:45Z",
+        "age_seconds": 580805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1467,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26309355288123",
+      "collateral_usd": "155453829211569",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049035102739726028",
+          "as_of_block": 155034759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T04:00:00Z",
+      "last_block": 155036569,
+      "batch_id": 16298,
+      "materialization_key": "f79e16f7d774b3afbcc651f39ab99956f2a253e4481b207858da2895182d1908",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T04:02:45Z",
+        "age_seconds": 577205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1465,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26284309360727",
+      "collateral_usd": "155683586570734",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049041095890410959",
+          "as_of_block": 155036559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T05:00:00Z",
+      "last_block": 155038369,
+      "batch_id": 16310,
+      "materialization_key": "6d76d2620fd91c0ae520352cd632d01472cd66cf421b1d8cc09f9a5ff84a14e8",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T05:02:45Z",
+        "age_seconds": 573605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1462,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26306572407301",
+      "collateral_usd": "155530414997957",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049047089041095891",
+          "as_of_block": 155038359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T06:00:00Z",
+      "last_block": 155040169,
+      "batch_id": 16322,
+      "materialization_key": "ae129f91ea22fe84d98a7967ba31daa1fa83a6e838ec41e8e6a470d918598a9a",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T06:02:45Z",
+        "age_seconds": 570005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1462,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26342749857983",
+      "collateral_usd": "156005246873566",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049053082191780822",
+          "as_of_block": 155040159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T07:00:00Z",
+      "last_block": 155041969,
+      "batch_id": 16334,
+      "materialization_key": "d7c07d2882d656526bf6a19fafccb568d7b303b337cf16ff830e5df1b4a3325c",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T07:02:45Z",
+        "age_seconds": 566405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1463,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26239783267581",
+      "collateral_usd": "156204369918177",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049059075342465754",
+          "as_of_block": 155041959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T08:00:00Z",
+      "last_block": 155043769,
+      "batch_id": 16346,
+      "materialization_key": "39385d24d46cd5310fd4f898403298f8b42b07c534fd8b2737e4486617ee2043",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T08:02:45Z",
+        "age_seconds": 562805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1460,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26345532738804",
+      "collateral_usd": "156158418446344",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049065068493150685",
+          "as_of_block": 155043759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T09:00:00Z",
+      "last_block": 155045569,
+      "batch_id": 16358,
+      "materialization_key": "5bac83e1e81fee1601860c4ab45270e4c280aa5f58c8ca92c77da9acbe4aa279",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T09:02:45Z",
+        "age_seconds": 559205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1457,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26250914790867",
+      "collateral_usd": "156388175805509",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049071061643835617",
+          "as_of_block": 155045559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T10:00:00Z",
+      "last_block": 155047369,
+      "batch_id": 16370,
+      "materialization_key": "23aa8378a5aaf7c352a9424aa6ecd8a540b34ba561c6dce7af7f17c6d55a52b3",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T10:02:45Z",
+        "age_seconds": 555605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1462,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26303789526479",
+      "collateral_usd": "156035881188122",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049077054794520548",
+          "as_of_block": 155047359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T11:00:00Z",
+      "last_block": 155049169,
+      "batch_id": 16382,
+      "materialization_key": "f9dc0d2dada29cd409f50d5dc2945cb8915a10785ec2f7d0cffeb218688fcf17",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T11:02:45Z",
+        "age_seconds": 552005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1466,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26326052573053",
+      "collateral_usd": "156357541490954",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049083047945205480",
+          "as_of_block": 155049159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T12:00:00Z",
+      "last_block": 155050969,
+      "batch_id": 16394,
+      "materialization_key": "6cfd08d01674af6077aec6c4897b2b0d2d802b85962b8ef674b6e46e045cca40",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T12:02:45Z",
+        "age_seconds": 548405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1467,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26270394956619",
+      "collateral_usd": "155898026772622",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049089041095890411",
+          "as_of_block": 155050959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T13:00:00Z",
+      "last_block": 155052769,
+      "batch_id": 16406,
+      "materialization_key": "75c14f44b019e6308c7e1aa3443c8338e2f0905d6a01f19b269eaca44f88faad",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T13:02:45Z",
+        "age_seconds": 544805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1465,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26239783267581",
+      "collateral_usd": "155974612559011",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049095034246575343",
+          "as_of_block": 155052759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T14:00:00Z",
+      "last_block": 155054569,
+      "batch_id": 16418,
+      "materialization_key": "eb7926a96b33f61583a4d73895dc5209f3c3efd788769f7235870b5fd8e75b15",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T14:02:45Z",
+        "age_seconds": 541205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1461,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26284309360727",
+      "collateral_usd": "155698903728012",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049101027397260274",
+          "as_of_block": 155054559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T15:00:00Z",
+      "last_block": 155056369,
+      "batch_id": 16430,
+      "materialization_key": "b88652082c6dab26216ae3530c737f03f6c8564affa4c688bfa277f91d13b95c",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T15:02:45Z",
+        "age_seconds": 537605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1464,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26370578666199",
+      "collateral_usd": "156066515502677",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049107020547945206",
+          "as_of_block": 155056359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T16:00:00Z",
+      "last_block": 155058169,
+      "batch_id": 16442,
+      "materialization_key": "0cd0f530cd15fd52e28ba16d1c2fe729582921914e809f156651bf3c41c7ba80",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T16:02:45Z",
+        "age_seconds": 534005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1459,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26267612075797",
+      "collateral_usd": "155913343929900",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049113013698630137",
+          "as_of_block": 155058159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T17:00:00Z",
+      "last_block": 155059969,
+      "batch_id": 16454,
+      "materialization_key": "0d91230766e20ea4cd2c17b375fe7d446075edd6f7b6ef5cf94b8001b31c01a3",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T17:02:45Z",
+        "age_seconds": 530405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1456,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26323269692231",
+      "collateral_usd": "156434127277343",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049119006849315069",
+          "as_of_block": 155059959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T18:00:00Z",
+      "last_block": 155061769,
+      "batch_id": 16466,
+      "materialization_key": "99a89fb83624c3b77050b518f08472cd464603e2ca006c5b5229e556c1892a96",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T18:02:45Z",
+        "age_seconds": 526805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1460,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26314921049766",
+      "collateral_usd": "157046813568451",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049125000000000000",
+          "as_of_block": 155061759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T19:00:00Z",
+      "last_block": 155063569,
+      "batch_id": 16478,
+      "materialization_key": "b0b47681748bab916c6f8abe68fac3635024015375529fa351efc25616fe4034",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T19:02:45Z",
+        "age_seconds": 523205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1459,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26281526479906",
+      "collateral_usd": "157230619455784",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049130993150684932",
+          "as_of_block": 155063559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T20:00:00Z",
+      "last_block": 155065369,
+      "batch_id": 16490,
+      "materialization_key": "16495389087de986e29ba8519edcb34bd22d9b74c0551aa2e6fca6f0ca456664",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T20:02:45Z",
+        "age_seconds": 519605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1461,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26234217505937",
+      "collateral_usd": "156755787580175",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049136986301369864",
+          "as_of_block": 155065359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T21:00:00Z",
+      "last_block": 155067169,
+      "batch_id": 16502,
+      "materialization_key": "8c5b88a7b0d95a598eb34f22e635be9856b9c14a2ca6167aa0ce38fb73043694",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T21:02:45Z",
+        "age_seconds": 516005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1455,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26220303101829",
+      "collateral_usd": "156970227782063",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049142979452054795",
+          "as_of_block": 155067159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T22:00:00Z",
+      "last_block": 155068969,
+      "batch_id": 16514,
+      "materialization_key": "0d517c603b266628a3a18f2caf501026c577ccd8341c16c972b8950f98f8143e",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T22:02:45Z",
+        "age_seconds": 512405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1455,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26228651744294",
+      "collateral_usd": "157521645444061",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049148972602739727",
+          "as_of_block": 155068959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-02T23:00:00Z",
+      "last_block": 155070769,
+      "batch_id": 16526,
+      "materialization_key": "0ae3c9beab6c7f2321af191081140c02a1be2abf9baf480edba8959edd6f5dab",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-02T23:02:45Z",
+        "age_seconds": 508805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1453,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26206388697721",
+      "collateral_usd": "157582914073172",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049154965753424658",
+          "as_of_block": 155070759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T00:00:00Z",
+      "last_block": 155072569,
+      "batch_id": 16538,
+      "materialization_key": "293ebbd19ec95055c951dfab22813870895fee9af7a0d31ca6e3ed6a9cc90667",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T00:02:45Z",
+        "age_seconds": 505205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1448,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26147948200465",
+      "collateral_usd": "157644182702282",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049160958904109590",
+          "as_of_block": 155072559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T01:00:00Z",
+      "last_block": 155074369,
+      "batch_id": 16550,
+      "materialization_key": "b1b26b67c786c457bd37003bb07103126b577d4da51870569b6b06cd6a6a6089",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T01:02:45Z",
+        "age_seconds": 501605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1448,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26198040055255",
+      "collateral_usd": "158042428791503",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049166952054794521",
+          "as_of_block": 155074359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T02:00:00Z",
+      "last_block": 155076169,
+      "batch_id": 16562,
+      "materialization_key": "211812fd79e2840ebfee31b1140ef42358459dd439fb9becdc22af9633b0fde2",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T02:02:45Z",
+        "age_seconds": 498005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1449,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26309355288123",
+      "collateral_usd": "157935208690559",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049172945205479453",
+          "as_of_block": 155076159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T03:00:00Z",
+      "last_block": 155077969,
+      "batch_id": 16574,
+      "materialization_key": "5f413852ed8681389aca81c760e204fe6adb3f2b06d6e1d04b2df80fe2dce383",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T03:02:45Z",
+        "age_seconds": 494405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1454,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26326052573053",
+      "collateral_usd": "158394723408891",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049178938356164384",
+          "as_of_block": 155077959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T04:00:00Z",
+      "last_block": 155079769,
+      "batch_id": 16586,
+      "materialization_key": "37cb018282b0578190a69ee92498889a4cad325f85ec91217f17719af70aba06",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T04:02:45Z",
+        "age_seconds": 490805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1453,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26351098500448",
+      "collateral_usd": "158440674880724",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049184931506849316",
+          "as_of_block": 155079759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T05:00:00Z",
+      "last_block": 155081569,
+      "batch_id": 16598,
+      "materialization_key": "f3c7ec4fec5b259fa987c98b9d734ca12aad9171e9906c5bc7b0c36ba9bda7b0",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T05:02:45Z",
+        "age_seconds": 487205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1454,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26287092241549",
+      "collateral_usd": "158838920969944",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049190924657534247",
+          "as_of_block": 155081559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T06:00:00Z",
+      "last_block": 155083369,
+      "batch_id": 16610,
+      "materialization_key": "891937633b3ecc7fb7e8e630e2408c5effd21baae4e2e19730a845aead57c5d3",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T06:02:45Z",
+        "age_seconds": 483605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1448,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26317703930588",
+      "collateral_usd": "159099312643666",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049196917808219179",
+          "as_of_block": 155083359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T07:00:00Z",
+      "last_block": 155085169,
+      "batch_id": 16622,
+      "materialization_key": "fb8ff46f32f2fe9594200e5639e2ea324c0d3fdcbd30719e0c546e3862a9201d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T07:02:45Z",
+        "age_seconds": 480005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1446,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26331618334696",
+      "collateral_usd": "158609163610779",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049202910958904110",
+          "as_of_block": 155085159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T08:00:00Z",
+      "last_block": 155086969,
+      "batch_id": 16634,
+      "materialization_key": "2fe56a839d74e58eab6a8775a5caf7b3dae956bbd3d3488dafb91c464cdd6a90",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T08:02:45Z",
+        "age_seconds": 476405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1447,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26367795785378",
+      "collateral_usd": "158578529296223",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049208904109589042",
+          "as_of_block": 155086959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T09:00:00Z",
+      "last_block": 155088769,
+      "batch_id": 16646,
+      "materialization_key": "4a44b98a508943ecf6a29cfb1cd13f1aa35226f5a61c2924ff8f8e9ef113ab2c",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T09:02:45Z",
+        "age_seconds": 472805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1450,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26367795785378",
+      "collateral_usd": "158471309195279",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049214897260273973",
+          "as_of_block": 155088759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T10:00:00Z",
+      "last_block": 155090569,
+      "batch_id": 16658,
+      "materialization_key": "22e8d5abbd9e57678d36c8800ae0c62696201180f84a78e151afc6a100a31cfe",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T10:02:45Z",
+        "age_seconds": 469205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1447,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26462413733315",
+      "collateral_usd": "158747018026278",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049220890410958905",
+          "as_of_block": 155090559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T11:00:00Z",
+      "last_block": 155092369,
+      "batch_id": 16670,
+      "materialization_key": "147e9f801101983c5c861f702f2aa8cf48419325909b2dccf479730d2942f583",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T11:02:45Z",
+        "age_seconds": 465605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1450,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26540334396322",
+      "collateral_usd": "158624480768056",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049226883561643836",
+          "as_of_block": 155092359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T12:00:00Z",
+      "last_block": 155094169,
+      "batch_id": 16682,
+      "materialization_key": "0c9b6a60f1034f51a132c2b1f2f6eed07c8bd07704d0055d475546163804c183",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T12:02:45Z",
+        "age_seconds": 462005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1448,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26548683038787",
+      "collateral_usd": "158134331735169",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049232876712328768",
+          "as_of_block": 155094159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T13:00:00Z",
+      "last_block": 155095969,
+      "batch_id": 16694,
+      "materialization_key": "9caaec2e3dd9b61ace66ecc8908e7fbb8e3b64d81387b1fb017ede2a830a0d1f",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T13:02:45Z",
+        "age_seconds": 458405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1453,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26629386582615",
+      "collateral_usd": "158164966049725",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049238869863013699",
+          "as_of_block": 155095959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T14:00:00Z",
+      "last_block": 155097769,
+      "batch_id": 16706,
+      "materialization_key": "676485bc7a49ca2ed928ad1106735edc0c013230d4c58bb78585bf676eb41a85",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T14:02:45Z",
+        "age_seconds": 454805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1449,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26573728966182",
+      "collateral_usd": "158716383711723",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049244863013698631",
+          "as_of_block": 155097759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T15:00:00Z",
+      "last_block": 155099569,
+      "batch_id": 16718,
+      "materialization_key": "0ebde6d966bb8c2328c43c4744bdb417a02de430c2a4bd7e3be817d92ea2db88",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T15:02:45Z",
+        "age_seconds": 451205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1445,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26595992012755",
+      "collateral_usd": "158149648892447",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049250856164383562",
+          "as_of_block": 155099559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T16:00:00Z",
+      "last_block": 155101369,
+      "batch_id": 16730,
+      "materialization_key": "328039918873cba271929a404dd29ff3dd106e71a81f709e8be411e5a6171fdf",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T16:02:45Z",
+        "age_seconds": 447605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1440,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26651649629189",
+      "collateral_usd": "158287503307947",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049256849315068494",
+          "as_of_block": 155101359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T17:00:00Z",
+      "last_block": 155103169,
+      "batch_id": 16742,
+      "materialization_key": "29566ddf6060512b26fb6467b34ca394726bd30e9fec6746d0bff4b88d506bb3",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T17:02:45Z",
+        "age_seconds": 444005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1435,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26696175722335",
+      "collateral_usd": "158149648892447",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049262842465753425",
+          "as_of_block": 155103159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T18:00:00Z",
+      "last_block": 155104969,
+      "batch_id": 16754,
+      "materialization_key": "4702147240d0eb7c698ac0abf2ceae379fe0c7740894589288140d5c599c69fa",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T18:02:45Z",
+        "age_seconds": 440405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1436,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26746267577126",
+      "collateral_usd": "158057745948781",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049268835616438357",
+          "as_of_block": 155104959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T19:00:00Z",
+      "last_block": 155106769,
+      "batch_id": 16766,
+      "materialization_key": "f16da3c0aa1dba7c52573fb4ed9e24b59d9ff15e69f84b04f64367392a13d33e",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T19:02:45Z",
+        "age_seconds": 436805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1440,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26690609960692",
+      "collateral_usd": "158057745948781",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049274828767123288",
+          "as_of_block": 155106759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T20:00:00Z",
+      "last_block": 155108569,
+      "batch_id": 16778,
+      "materialization_key": "d8fe15de42665aa5a75bc8be8a966328ff6c2a3cb0a66a6dfcaf0b5462ab8df0",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T20:02:45Z",
+        "age_seconds": 433205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1443,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26679478437405",
+      "collateral_usd": "157491011129505",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049280821917808220",
+          "as_of_block": 155108559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T21:00:00Z",
+      "last_block": 155110369,
+      "batch_id": 16790,
+      "materialization_key": "db5ff355fe1a9697f7d109ec06adf22ca5c71d6f4fa737ec88bd3f282000d51d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T21:02:45Z",
+        "age_seconds": 429605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1445,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26771313504521",
+      "collateral_usd": "157782037117782",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049286815068493151",
+          "as_of_block": 155110359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T22:00:00Z",
+      "last_block": 155112169,
+      "batch_id": 16802,
+      "materialization_key": "dcb4c79a645a2b7a8662599187a773e715bd070499fbabe6f66ffbd3b39eee39",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T22:02:45Z",
+        "age_seconds": 426005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1442,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26865931452458",
+      "collateral_usd": "157291888084895",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049292808219178083",
+          "as_of_block": 155112159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-03T23:00:00Z",
+      "last_block": 155113969,
+      "batch_id": 16814,
+      "materialization_key": "3439ed703113cfb91ddb7f3d2b6d93a8e5c2b72b475bd5f4af138e1dcd01cec7",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-03T23:02:45Z",
+        "age_seconds": 422405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1439,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26974463804503",
+      "collateral_usd": "157414425343117",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049298801369863014",
+          "as_of_block": 155113959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T00:00:00Z",
+      "last_block": 155115769,
+      "batch_id": 16826,
+      "materialization_key": "393133a5bf717fc18be43acfa45738f74ddb70fea01a89711ed7de62b4154350",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T00:02:45Z",
+        "age_seconds": 418805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1441,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26935503473000",
+      "collateral_usd": "157567596915894",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049304794520547946",
+          "as_of_block": 155115759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T01:00:00Z",
+      "last_block": 155117569,
+      "batch_id": 16838,
+      "materialization_key": "6030e0ac3bc4ac534fcdf97d2a4e4fac4995d5a7da637bf929222568317da07d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T01:02:45Z",
+        "age_seconds": 415205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1436,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26902108903139",
+      "collateral_usd": "157720768488671",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049310787671232877",
+          "as_of_block": 155117559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T02:00:00Z",
+      "last_block": 155119369,
+      "batch_id": 16850,
+      "materialization_key": "5e95d1b7965dda018b093cd645b56f5295ca37aa09c89bb01a22f3120b6087dd",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T02:02:45Z",
+        "age_seconds": 411605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1437,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26893760260674",
+      "collateral_usd": "158027111634225",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049316780821917809",
+          "as_of_block": 155119359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T03:00:00Z",
+      "last_block": 155121169,
+      "batch_id": 16862,
+      "materialization_key": "8d10ab557180e1183262a653ca627dc3156a1b2a34925e93f53b62fad02eaf0f",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T03:02:45Z",
+        "age_seconds": 408005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1432,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26840885525063",
+      "collateral_usd": "158517260667112",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049322773972602740",
+          "as_of_block": 155121159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T04:00:00Z",
+      "last_block": 155122969,
+      "batch_id": 16874,
+      "materialization_key": "71e6a045d37754963f1dc636d8af2bfa7aa2fa5dfd4b5bed9f30f4b276d81c7a",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T04:02:45Z",
+        "age_seconds": 404405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1427,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26801925193559",
+      "collateral_usd": "158394723408891",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049328767123287672",
+          "as_of_block": 155122959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T05:00:00Z",
+      "last_block": 155124769,
+      "batch_id": 16886,
+      "materialization_key": "7821edc6e6e0eb806709e54d17993cc82630f1e041a05abb7617e41456d62003",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T05:02:45Z",
+        "age_seconds": 400805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1425,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26712873007266",
+      "collateral_usd": "158455992038002",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049334760273972603",
+          "as_of_block": 155124759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T06:00:00Z",
+      "last_block": 155126569,
+      "batch_id": 16898,
+      "materialization_key": "32a9df5c9ba70e38e6d5cf8952d70db9bec1e3e9859a3a5e6ee9f400f4d1c7de",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T06:02:45Z",
+        "age_seconds": 397205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1429,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26724004530552",
+      "collateral_usd": "158241551836113",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049340753424657535",
+          "as_of_block": 155126559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T07:00:00Z",
+      "last_block": 155128369,
+      "batch_id": 16910,
+      "materialization_key": "b3f6f983982a2672a51ca09e30b8870f806814f6fdebee84d10995a8e780e2cd",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T07:02:45Z",
+        "age_seconds": 393605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1433,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26832536882598",
+      "collateral_usd": "158195600364280",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049346746575342466",
+          "as_of_block": 155128359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T08:00:00Z",
+      "last_block": 155130169,
+      "batch_id": 16922,
+      "materialization_key": "8eb044dd2236c064b6c743ba11647e4d7912ded7523a8d964a6e1873fce778aa",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T08:02:45Z",
+        "age_seconds": 390005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1436,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26790793670272",
+      "collateral_usd": "158455992038002",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049352739726027398",
+          "as_of_block": 155130159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T09:00:00Z",
+      "last_block": 155131969,
+      "batch_id": 16934,
+      "materialization_key": "7a901553a317ca231a250edcd72c44d89c9108d29a6b683fb3d7df8942a3b7ba",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T09:02:45Z",
+        "age_seconds": 386405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1441,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26793576551094",
+      "collateral_usd": "158103697420614",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049358732876712329",
+          "as_of_block": 155131959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T10:00:00Z",
+      "last_block": 155133769,
+      "batch_id": 16946,
+      "materialization_key": "39e5d7cb497312086fdd415f9c4c7a1e968f8ffba266ed03e261fc1ed40fde0d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T10:02:45Z",
+        "age_seconds": 382805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1440,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26835319763419",
+      "collateral_usd": "157965843005115",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049364726027397261",
+          "as_of_block": 155133759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T11:00:00Z",
+      "last_block": 155135569,
+      "batch_id": 16958,
+      "materialization_key": "98829cabc7dcbebd25b6beed19ca2b1b2ba42773776a09e44962104d1d80cb2d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T11:02:45Z",
+        "age_seconds": 379205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1439,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26896543141496",
+      "collateral_usd": "157904574376004",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049370719178082192",
+          "as_of_block": 155135559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T12:00:00Z",
+      "last_block": 155137369,
+      "batch_id": 16970,
+      "materialization_key": "5cd409566d164d56a43d18b66ea91352ed77a7711e208d48e3c395197fcb9783",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T12:02:45Z",
+        "age_seconds": 375605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1435,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26974463804503",
+      "collateral_usd": "157644182702282",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049376712328767124",
+          "as_of_block": 155137359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T13:00:00Z",
+      "last_block": 155139169,
+      "batch_id": 16982,
+      "materialization_key": "af09a6fe23c65c20eaa0b048b08415267356d2671823b78062241dce1c11692b",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T13:02:45Z",
+        "age_seconds": 372005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1435,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26966115162038",
+      "collateral_usd": "157460376814950",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049382705479452055",
+          "as_of_block": 155139159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T14:00:00Z",
+      "last_block": 155140969,
+      "batch_id": 16994,
+      "materialization_key": "88f02063771e2df9ac898bd637e5d99cf9110ca32df5073e9ec7c70d431b9827",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T14:02:45Z",
+        "age_seconds": 368405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1432,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27027338540115",
+      "collateral_usd": "157644182702282",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049388698630136987",
+          "as_of_block": 155140959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T15:00:00Z",
+      "last_block": 155142769,
+      "batch_id": 17006,
+      "materialization_key": "9ac568b96ebf990b83ffa637628f03d927b1227b149a45a572c6bc8511ef9170",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T15:02:45Z",
+        "age_seconds": 364805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1437,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26935503473000",
+      "collateral_usd": "157981160162392",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049394691780821918",
+          "as_of_block": 155142759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T16:00:00Z",
+      "last_block": 155144569,
+      "batch_id": 17018,
+      "materialization_key": "41e2df5ac446ac19337edc65037a6b8dc0fb78bf695e54c76586db779e22c397",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T16:02:45Z",
+        "age_seconds": 361205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1433,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26829754001776",
+      "collateral_usd": "157736085645949",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049400684931506850",
+          "as_of_block": 155144559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T17:00:00Z",
+      "last_block": 155146369,
+      "batch_id": 17030,
+      "materialization_key": "881c0d83e1ac3919827b5284fd11db44ee098de3f64876f4c6e62009a0ec4175",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T17:02:45Z",
+        "age_seconds": 357605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1437,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26790793670272",
+      "collateral_usd": "157138716512118",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049406678082191781",
+          "as_of_block": 155146359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T18:00:00Z",
+      "last_block": 155148169,
+      "batch_id": 17042,
+      "materialization_key": "b875fb8643bf47953bfe3e05ac78412e119453d9dbac451d26f85cb6e74f5398",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T18:02:45Z",
+        "age_seconds": 354005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1438,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26740701815482",
+      "collateral_usd": "157690134174116",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049412671232876713",
+          "as_of_block": 155148159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T19:00:00Z",
+      "last_block": 155149969,
+      "batch_id": 17054,
+      "materialization_key": "13ce2e4040fe26403fe9cbf07356b657e9c26c4939639031dd1772b70fe17f55",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T19:02:45Z",
+        "age_seconds": 350405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1442,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26671129794940",
+      "collateral_usd": "157337839556728",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049418664383561644",
+          "as_of_block": 155149959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T20:00:00Z",
+      "last_block": 155151769,
+      "batch_id": 17066,
+      "materialization_key": "ef368afb0bbdd2e0d43401d2635a054531270a56a0c5ef397523a5ae29e8c5e5",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T20:02:45Z",
+        "age_seconds": 346805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1443,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26668346914119",
+      "collateral_usd": "156970227782063",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049424657534246576",
+          "as_of_block": 155151759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T21:00:00Z",
+      "last_block": 155153569,
+      "batch_id": 17078,
+      "materialization_key": "557ffc5c2a5209ef9c5fc85d929040a0aee089c8fe9de1e9701badfb0d90384c",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T21:02:45Z",
+        "age_seconds": 343205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1443,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26715655888087",
+      "collateral_usd": "157475693972228",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049430650684931507",
+          "as_of_block": 155153559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T22:00:00Z",
+      "last_block": 155155369,
+      "batch_id": 17090,
+      "materialization_key": "3da57def9c84b15a06f6905a87cedd87307b70c20db285437b01b1dbb61da429",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T22:02:45Z",
+        "age_seconds": 339605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1440,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26743484696304",
+      "collateral_usd": "156893641995674",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049436643835616439",
+          "as_of_block": 155155359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-04T23:00:00Z",
+      "last_block": 155157169,
+      "batch_id": 17102,
+      "materialization_key": "5a56abc38d6b696d1a5a03a2c8ad2525dbcbb0342073703d37701e838e5b2f71",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-04T23:02:45Z",
+        "age_seconds": 336005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1437,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26810273836024",
+      "collateral_usd": "156755787580175",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049442636986301370",
+          "as_of_block": 155157159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T00:00:00Z",
+      "last_block": 155158969,
+      "batch_id": 17114,
+      "materialization_key": "abd152e008e35da66c310a3df90a53c889059a1040321f40970a362ded566b23",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T00:02:45Z",
+        "age_seconds": 332405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1442,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26788010789451",
+      "collateral_usd": "156326907176399",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049448630136986302",
+          "as_of_block": 155158959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T01:00:00Z",
+      "last_block": 155160769,
+      "batch_id": 17126,
+      "materialization_key": "c64e2376f790a1c2f7a78f401a56d38f4ffb22fb86f81c64e4d10018e6677c1c",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T01:02:45Z",
+        "age_seconds": 328805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1438,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26807490955202",
+      "collateral_usd": "155913343929900",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049454623287671233",
+          "as_of_block": 155160759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T02:00:00Z",
+      "last_block": 155162569,
+      "batch_id": 17138,
+      "materialization_key": "92b42ceb8bb9d68f5f169d254efcb1147cc24c7f4ee3e3b5f010992ea1d5d289",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T02:02:45Z",
+        "age_seconds": 325205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": true,
+      "refusal_code": "FLAG_CUSTODY_UNPROVEN",
+      "accounts": null,
+      "refused_positions": 0,
+      "liquidatable_positions": null,
+      "debt_usd": null,
+      "collateral_usd": null,
+      "rates": []
+    },
+    {
+      "bucket_start": "2026-08-05T03:00:00Z",
+      "last_block": 155164369,
+      "batch_id": 17150,
+      "materialization_key": "a7e25d14d35b82c8291cffda257a6b6daf6f42f7836adbbcafef5d490688d98a",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T03:02:45Z",
+        "age_seconds": 321605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1437,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26943852115465",
+      "collateral_usd": "156173735603621",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049466609589041096",
+          "as_of_block": 155164359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T04:00:00Z",
+      "last_block": 155166169,
+      "batch_id": 17162,
+      "materialization_key": "6d74bfe3173dda3fcf96210e92653680a950e2f21a24e8eb78b7c83138f15491",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T04:02:45Z",
+        "age_seconds": 318005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1440,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26893760260674",
+      "collateral_usd": "156265638547288",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049472602739726028",
+          "as_of_block": 155166159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T05:00:00Z",
+      "last_block": 155167969,
+      "batch_id": 17174,
+      "materialization_key": "1c71f9f3dc5a25858995ae2b501e7a1edb480b50ce91758703b10a891067cf8c",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T05:02:45Z",
+        "age_seconds": 314405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1441,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26977246685325",
+      "collateral_usd": "155974612559011",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049478595890410959",
+          "as_of_block": 155167959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T06:00:00Z",
+      "last_block": 155169769,
+      "batch_id": 17186,
+      "materialization_key": "d1b57be16796a46d0190edea95ebcffba89586df469d598ebc91a2b818c188ef",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T06:02:45Z",
+        "age_seconds": 310805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1446,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26960549400395",
+      "collateral_usd": "155790806671678",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049484589041095891",
+          "as_of_block": 155169759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T07:00:00Z",
+      "last_block": 155171569,
+      "batch_id": 17198,
+      "materialization_key": "14ca471a39c336ab8bb78ac0ff4529eea462909d19544d88fdb21a06763dffbd",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T07:02:45Z",
+        "age_seconds": 307205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1442,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26877062975744",
+      "collateral_usd": "155775489514401",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049490582191780822",
+          "as_of_block": 155171559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T08:00:00Z",
+      "last_block": 155173369,
+      "batch_id": 17210,
+      "materialization_key": "4730aa9d13beaedb1294396a88ddd44445118c6b851a317468e67646b45bea75",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T08:02:45Z",
+        "age_seconds": 303605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1439,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26854799929171",
+      "collateral_usd": "155208754695125",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049496575342465754",
+          "as_of_block": 155173359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T09:00:00Z",
+      "last_block": 155175169,
+      "batch_id": 17222,
+      "materialization_key": "3ef8d6cc1fbbbea5208eed07ee8cde7339e3a618a0a253bc2b0d000cf3de5eaf",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T09:02:45Z",
+        "age_seconds": 300005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1442,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26916023307248",
+      "collateral_usd": "155070900279626",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049502568493150685",
+          "as_of_block": 155175159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T10:00:00Z",
+      "last_block": 155176969,
+      "batch_id": 17234,
+      "materialization_key": "0b29e1f1b8659ba8dba2e6fe7c4a984986769155edcf47cdf98b360137e3a070",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T10:02:45Z",
+        "age_seconds": 296405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1439,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27002292612720",
+      "collateral_usd": "155423194897013",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049508561643835617",
+          "as_of_block": 155176959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T11:00:00Z",
+      "last_block": 155178769,
+      "batch_id": 17246,
+      "materialization_key": "ab76ecca2cb79746abb49100eff8c3ae6c7e9e8656b036034f6c98974668c1dd",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T11:02:45Z",
+        "age_seconds": 292805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1436,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26890977379853",
+      "collateral_usd": "155055583122348",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049514554794520548",
+          "as_of_block": 155178759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T12:00:00Z",
+      "last_block": 155180569,
+      "batch_id": 17258,
+      "materialization_key": "e93612cd8da0c6e87d0e60160c664f8070af2041ac20a4d9e30b9f05086178a5",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T12:02:45Z",
+        "age_seconds": 289205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1437,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26910457545604",
+      "collateral_usd": "155453829211569",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049520547945205480",
+          "as_of_block": 155180559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T13:00:00Z",
+      "last_block": 155182369,
+      "batch_id": 17270,
+      "materialization_key": "c4d823b0d633a8d728a72f0e835ab9d22dc49681b7c82dbfaa71b930cd13ded6",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T13:02:45Z",
+        "age_seconds": 285605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1437,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26985595327790",
+      "collateral_usd": "155162803223292",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049526541095890411",
+          "as_of_block": 155182359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T14:00:00Z",
+      "last_block": 155184169,
+      "batch_id": 17282,
+      "materialization_key": "d78cd3f5b1ad368fa485abe9cfa1d5c0d12ea7054f396980126611781c72ae8e",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T14:02:45Z",
+        "age_seconds": 282005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1441,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27060733109975",
+      "collateral_usd": "155070900279626",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049532534246575343",
+          "as_of_block": 155184159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T15:00:00Z",
+      "last_block": 155185969,
+      "batch_id": 17294,
+      "materialization_key": "243f0cfcb723f451adc472031a63056b78ba4da0c23f4e55f4c673cee70a23bc",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T15:02:45Z",
+        "age_seconds": 278405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1441,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27066298871618",
+      "collateral_usd": "154642019875850",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049538527397260274",
+          "as_of_block": 155185959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T16:00:00Z",
+      "last_block": 155187769,
+      "batch_id": 17306,
+      "materialization_key": "8e8f71db762eabd628d0b5598f65dac85bc91fbd06c2fa7cf51a5093b353174d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T16:02:45Z",
+        "age_seconds": 274805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1446,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27049601586688",
+      "collateral_usd": "154963680178682",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049544520547945206",
+          "as_of_block": 155187759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T17:00:00Z",
+      "last_block": 155189569,
+      "batch_id": 17318,
+      "materialization_key": "1f42c65988f7e068b3ec6730606b3c93d6ba8c5950c6ee06707741dcc0299075",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T17:02:45Z",
+        "age_seconds": 271205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1446,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27110824964765",
+      "collateral_usd": "154764557134071",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049550513698630137",
+          "as_of_block": 155189559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T18:00:00Z",
+      "last_block": 155191369,
+      "batch_id": 17330,
+      "materialization_key": "f8bb746aa2cc04ec810e0689d513f7ed4ccf1bf63af15ad82b88cfede0ce784d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T18:02:45Z",
+        "age_seconds": 267605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1441,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27010641255185",
+      "collateral_usd": "154197822314796",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049556506849315069",
+          "as_of_block": 155191359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T19:00:00Z",
+      "last_block": 155193169,
+      "batch_id": 17342,
+      "materialization_key": "ce9a0dc8a86e7917bca02aa202aff3d5075fd49d70a0a146a23e009c2596e76b",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T19:02:45Z",
+        "age_seconds": 264005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1437,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26941069234643",
+      "collateral_usd": "154412262516684",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049562500000000000",
+          "as_of_block": 155193159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T20:00:00Z",
+      "last_block": 155194969,
+      "batch_id": 17354,
+      "materialization_key": "82355f645013c4c87a14387a4d282c749f1a0b2494d933cf786159f34381cc07",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T20:02:45Z",
+        "age_seconds": 260405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1438,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27035687182580",
+      "collateral_usd": "154611385561294",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049568493150684932",
+          "as_of_block": 155194959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T21:00:00Z",
+      "last_block": 155196769,
+      "batch_id": 17366,
+      "materialization_key": "84010ac3582eeca7ac8f4508d6bbf4e77d7a762cd9f6c4592b7941b72f2e18e7",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T21:02:45Z",
+        "age_seconds": 256805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1441,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26957766519573",
+      "collateral_usd": "154473531145795",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049574486301369864",
+          "as_of_block": 155196759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T22:00:00Z",
+      "last_block": 155198569,
+      "batch_id": 17378,
+      "materialization_key": "111ed67fd72c2c392fd047492c6721b02241171fd4babe9b7f478a40cf4f396d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T22:02:45Z",
+        "age_seconds": 253205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1438,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26854799929171",
+      "collateral_usd": "154121236528407",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049580479452054795",
+          "as_of_block": 155198559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-05T23:00:00Z",
+      "last_block": 155200369,
+      "batch_id": 17390,
+      "materialization_key": "9bef87b14bb69e67e386d91881935ffb58a57bc510ffcc7201c102400f5f98c2",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-05T23:02:45Z",
+        "age_seconds": 249605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1434,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26751833338769",
+      "collateral_usd": "154090602213852",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049586472602739727",
+          "as_of_block": 155200359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T00:00:00Z",
+      "last_block": 155202169,
+      "batch_id": 17402,
+      "materialization_key": "d2898f3ff266d4defebd808cdb95fad25b8226dcb68ccbf2663af965708ebfbb",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T00:02:45Z",
+        "age_seconds": 246005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1428,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26821405359311",
+      "collateral_usd": "153539184551854",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049592465753424658",
+          "as_of_block": 155202159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T01:00:00Z",
+      "last_block": 155203969,
+      "batch_id": 17414,
+      "materialization_key": "42a4d94bf89d5c26bb22486190dcbef9accf00f944c1082f7057ef528cefd933",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T01:02:45Z",
+        "age_seconds": 242405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1428,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26927154830535",
+      "collateral_usd": "152926498260745",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049598458904109590",
+          "as_of_block": 155203959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T02:00:00Z",
+      "last_block": 155205769,
+      "batch_id": 17426,
+      "materialization_key": "c1ea62f79aa97848efecdbd8b0e0276675efd3422672e844d3e5c4fcb7f969cb",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T02:02:45Z",
+        "age_seconds": 238805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1428,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26857582809993",
+      "collateral_usd": "153462598765465",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049604452054794521",
+          "as_of_block": 155205759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T03:00:00Z",
+      "last_block": 155207569,
+      "batch_id": 17438,
+      "materialization_key": "2872d00fcd2f657f457a2ca21593d8bd970c8a03fe198d8d586eaf814b0f88b4",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T03:02:45Z",
+        "age_seconds": 235205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1425,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26871497214101",
+      "collateral_usd": "153661721810076",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049610445205479453",
+          "as_of_block": 155207559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T04:00:00Z",
+      "last_block": 155209369,
+      "batch_id": 17450,
+      "materialization_key": "2873446c3301e9ba777c17c85eceaab843910a11b857028931ac25d1851b654c",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T04:02:45Z",
+        "age_seconds": 231605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1424,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26957766519573",
+      "collateral_usd": "154167188000240",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049616438356164384",
+          "as_of_block": 155209359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T05:00:00Z",
+      "last_block": 155211169,
+      "batch_id": 17462,
+      "materialization_key": "9f83ff951a1feef54a8596fc5a3b4955e3d95dd439f2ae635470a07740c2b6be",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T05:02:45Z",
+        "age_seconds": 228005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1421,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27005075493541",
+      "collateral_usd": "153998699270185",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049622431506849316",
+          "as_of_block": 155211159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T06:00:00Z",
+      "last_block": 155212969,
+      "batch_id": 17474,
+      "materialization_key": "9fb1343e786d98c8a408d7b88b6cc38553685bd83084763d1bc953984782684c",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T06:02:45Z",
+        "age_seconds": 224405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1423,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26896543141496",
+      "collateral_usd": "154090602213852",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049628424657534247",
+          "as_of_block": 155212959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T07:00:00Z",
+      "last_block": 155214769,
+      "batch_id": 17486,
+      "materialization_key": "5e60fd717053f584a7b428bf332c2c13f68d390339118f74542099f6602eb244",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T07:02:45Z",
+        "age_seconds": 220805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1428,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26857582809993",
+      "collateral_usd": "154427579673961",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049634417808219179",
+          "as_of_block": 155214759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T08:00:00Z",
+      "last_block": 155216569,
+      "batch_id": 17498,
+      "materialization_key": "c73de80d774f2eac0ef773d8fb56daa7efea4446baed4f52b4f7960ebd35899a",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T08:02:45Z",
+        "age_seconds": 217205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1429,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26943852115465",
+      "collateral_usd": "154366311044851",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049640410958904110",
+          "as_of_block": 155216559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T09:00:00Z",
+      "last_block": 155218369,
+      "batch_id": 17510,
+      "materialization_key": "170eb15719a751a192bc12dc545638a077fbc999ebb58af89c7db32fb6540cf9",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T09:02:45Z",
+        "age_seconds": 213605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1429,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26913240426426",
+      "collateral_usd": "154550116932183",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049646404109589042",
+          "as_of_block": 155218359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T10:00:00Z",
+      "last_block": 155220169,
+      "batch_id": 17522,
+      "materialization_key": "0ed2347bce29cfbb3aadcddf8118f66153cacfdf91a0476ee7199a8bdcbf4538",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T10:02:45Z",
+        "age_seconds": 210005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1428,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26960549400395",
+      "collateral_usd": "154029333584741",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049652397260273973",
+          "as_of_block": 155220159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T11:00:00Z",
+      "last_block": 155221969,
+      "batch_id": 17534,
+      "materialization_key": "fa222dadcf6cb2fb9ca5ab3995ccc963d85ece29f0a0fc66909d2fa8c776e42c",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T11:02:45Z",
+        "age_seconds": 206405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1429,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26938286353821",
+      "collateral_usd": "153952747798352",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049658390410958905",
+          "as_of_block": 155221959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T12:00:00Z",
+      "last_block": 155223769,
+      "batch_id": 17546,
+      "materialization_key": "a863622b17dcd3500303a522dd738572c6b56d1f6478bb808a310f82930853b1",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T12:02:45Z",
+        "age_seconds": 202805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1426,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27035687182580",
+      "collateral_usd": "153569818866409",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049664383561643836",
+          "as_of_block": 155223759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T13:00:00Z",
+      "last_block": 155225569,
+      "batch_id": 17558,
+      "materialization_key": "e7a0abc32479b415d735ae484c4af47305662b22f32b75275b4d094d0288b41e",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T13:02:45Z",
+        "age_seconds": 199205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1425,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27144219534625",
+      "collateral_usd": "153462598765465",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049670376712328768",
+          "as_of_block": 155225559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T14:00:00Z",
+      "last_block": 155227369,
+      "batch_id": 17570,
+      "materialization_key": "ff8c47ea8fbcd2674a9bcebc4c7da5f6af0428b32e7f0554920542fdd9ae8caa",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T14:02:45Z",
+        "age_seconds": 195605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1425,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27066298871618",
+      "collateral_usd": "153983382112908",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049676369863013699",
+          "as_of_block": 155227359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T15:00:00Z",
+      "last_block": 155229169,
+      "batch_id": 17582,
+      "materialization_key": "642416ba7f224249632334a023b435ff7b29eae79ee5de79873640f5df3d364f",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T15:02:45Z",
+        "age_seconds": 192005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1421,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26957766519573",
+      "collateral_usd": "154289725258462",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049682363013698631",
+          "as_of_block": 155229159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T16:00:00Z",
+      "last_block": 155230969,
+      "batch_id": 17594,
+      "materialization_key": "a8872602be533d54e6725b298bdba603661cd29af395a5869a17e9ba0c462db9",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T16:02:45Z",
+        "age_seconds": 188405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1416,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26963332281216",
+      "collateral_usd": "154289725258462",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049688356164383562",
+          "as_of_block": 155230959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T17:00:00Z",
+      "last_block": 155232769,
+      "batch_id": 17606,
+      "materialization_key": "6758cd81d014af4675d34bf5c7908ca13c4b025dc84d000930ac7818ca999885",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T17:02:45Z",
+        "age_seconds": 184805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1411,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26938286353821",
+      "collateral_usd": "154075285056574",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049694349315068494",
+          "as_of_block": 155232759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T18:00:00Z",
+      "last_block": 155234569,
+      "batch_id": 17618,
+      "materialization_key": "62f2ca10beebb7e652c0d2ecd312969a75bf9aa863f33233a7de6750550ece22",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T18:02:45Z",
+        "age_seconds": 181205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1408,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27038470063402",
+      "collateral_usd": "154075285056574",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049700342465753425",
+          "as_of_block": 155234559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T19:00:00Z",
+      "last_block": 155236369,
+      "batch_id": 17630,
+      "materialization_key": "1a9b52bb304c1884246658d887e023b716bf42179841726eecd76530a97004a0",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T19:02:45Z",
+        "age_seconds": 177605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1411,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26991161089433",
+      "collateral_usd": "154519482617628",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049706335616438357",
+          "as_of_block": 155236359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T20:00:00Z",
+      "last_block": 155238169,
+      "batch_id": 17642,
+      "materialization_key": "7ae0d987383da3016f8e47bd64ce29b48ed491c0f2d00a1092d6c7862b810bc2",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T20:02:45Z",
+        "age_seconds": 174005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1410,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26918806188070",
+      "collateral_usd": "154703288504960",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049712328767123288",
+          "as_of_block": 155238159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T21:00:00Z",
+      "last_block": 155239969,
+      "batch_id": 17654,
+      "materialization_key": "d33088f5f9364840ae070babcf10a2f80f17085026c0696a48c0909de79f1c02",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T21:02:45Z",
+        "age_seconds": 170405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1407,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "26963332281216",
+      "collateral_usd": "154320359573017",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049718321917808220",
+          "as_of_block": 155239959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T22:00:00Z",
+      "last_block": 155241769,
+      "batch_id": 17666,
+      "materialization_key": "cb88d6850b7f4a627fe76c589a4270e43a21422c832cbbbe0035785d374000e1",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T22:02:45Z",
+        "age_seconds": 166805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1407,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "26888194499031",
+      "collateral_usd": "153753624753742",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049724315068493151",
+          "as_of_block": 155241759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-06T23:00:00Z",
+      "last_block": 155243569,
+      "batch_id": 17678,
+      "materialization_key": "6d2f23ba83e0664e6f212a57a87ba9ec86504ffe6ff2c21071615d27ab507d74",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-06T23:02:45Z",
+        "age_seconds": 163205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1404,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "26913240426426",
+      "collateral_usd": "154289725258462",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049730308219178083",
+          "as_of_block": 155243559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T00:00:00Z",
+      "last_block": 155245369,
+      "batch_id": 17690,
+      "materialization_key": "8f49d6e9175582e42ca73acab207ec0fe179ed6a2dde33a1e81d9f3d1038864e",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T00:02:45Z",
+        "age_seconds": 159605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1407,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27018989897650",
+      "collateral_usd": "153968064955630",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049736301369863014",
+          "as_of_block": 155245359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T01:00:00Z",
+      "last_block": 155247169,
+      "batch_id": 17702,
+      "materialization_key": "8e7ffdeeb81f472034437f960e785d61e5aba9ab35c6348cfb81cbaf5f44d1c5",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T01:02:45Z",
+        "age_seconds": 156005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1409,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27080213275727",
+      "collateral_usd": "154044650742018",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049742294520547946",
+          "as_of_block": 155247159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T02:00:00Z",
+      "last_block": 155248969,
+      "batch_id": 17714,
+      "materialization_key": "3b2b47b02974cea6971117599f1e5e570f0503b16ad858a24efb29124df3dd62",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T02:02:45Z",
+        "age_seconds": 152405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1409,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27183179866129",
+      "collateral_usd": "153585136023687",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049748287671232877",
+          "as_of_block": 155248959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T05:00:00Z",
+      "last_block": 155254369,
+      "batch_id": 17750,
+      "materialization_key": "56c15df54a35b49a2f4585a0c7eca8404fc7af98b0cb6506b56f67aa52e5da80",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T05:02:45Z",
+        "age_seconds": 141605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1416,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27188745627772",
+      "collateral_usd": "152788643845246",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049766267123287672",
+          "as_of_block": 155254359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T06:00:00Z",
+      "last_block": 155256169,
+      "batch_id": 17762,
+      "materialization_key": "67528c7c0cca9f0fe20994c27973250b0c06141f76891a98f94fcde70027c11a",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T06:02:45Z",
+        "age_seconds": 138005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1414,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27188745627772",
+      "collateral_usd": "152267860497803",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049772260273972603",
+          "as_of_block": 155256159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T07:00:00Z",
+      "last_block": 155257969,
+      "batch_id": 17774,
+      "materialization_key": "7ad29e55999beb8b839d9a1b38edf46614f08f3dd09d41d92503bce511537c6b",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T07:02:45Z",
+        "age_seconds": 134405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1419,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27127522249695",
+      "collateral_usd": "152880546788912",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049778253424657535",
+          "as_of_block": 155257959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T08:00:00Z",
+      "last_block": 155259769,
+      "batch_id": 17786,
+      "materialization_key": "c9deef7d7613126ed32f9fe45ca4774ea934ad851cf26baea5fd35f5c5de710b",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T08:02:45Z",
+        "age_seconds": 130805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1424,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27113607845587",
+      "collateral_usd": "152267860497803",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049784246575342466",
+          "as_of_block": 155259759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T09:00:00Z",
+      "last_block": 155261569,
+      "batch_id": 17798,
+      "materialization_key": "460e1c9562f7c1f41e28f7a2ffc5310126633106ace37fc227c2e32d2074957e",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T09:02:45Z",
+        "age_seconds": 127205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1425,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27213791555167",
+      "collateral_usd": "152068737453193",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049790239726027398",
+          "as_of_block": 155261559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T10:00:00Z",
+      "last_block": 155263369,
+      "batch_id": 17810,
+      "materialization_key": "c88800bcd5a77029ef7ae72e14b04fb0c8fc92781eea2a863ea1d03244476afb",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T10:02:45Z",
+        "age_seconds": 123605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1422,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27227705959276",
+      "collateral_usd": "152206591868692",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049796232876712329",
+          "as_of_block": 155263359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T11:00:00Z",
+      "last_block": 155265169,
+      "batch_id": 17822,
+      "materialization_key": "183f65f921f0e13306124f9793e8e8abe9816b2d815d987b36190c10943748b1",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T11:02:45Z",
+        "age_seconds": 120005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1419,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27124739368874",
+      "collateral_usd": "152727375216135",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049802226027397261",
+          "as_of_block": 155265159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T12:00:00Z",
+      "last_block": 155266969,
+      "batch_id": 17834,
+      "materialization_key": "1b16268cdfa3d5c8f08e0a514e25b47ff90cdb329c666722572460c145c78cfc",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T12:02:45Z",
+        "age_seconds": 116405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1422,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27194311389415",
+      "collateral_usd": "153125621305355",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049808219178082192",
+          "as_of_block": 155266959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T13:00:00Z",
+      "last_block": 155268769,
+      "batch_id": 17846,
+      "materialization_key": "dd7ff105dc21a465ace27d307f6fc60d50836bc0de08199c7eeb602094d18735",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T13:02:45Z",
+        "age_seconds": 112805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1424,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27222140197632",
+      "collateral_usd": "152666106587024",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049814212328767124",
+          "as_of_block": 155268759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T14:00:00Z",
+      "last_block": 155270569,
+      "batch_id": 17858,
+      "materialization_key": "4607a8cac699370a4163d08ca75c680bb4005c5eb439cfb28d5538c02fd9c9e5",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T14:02:45Z",
+        "age_seconds": 109205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1421,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27286146456531",
+      "collateral_usd": "152666106587024",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049820205479452055",
+          "as_of_block": 155270559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T15:00:00Z",
+      "last_block": 155272369,
+      "batch_id": 17870,
+      "materialization_key": "3c03db422a981bb572022944d9b1fc6545de2fc6a5c99265999c54d3f43bce74",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T15:02:45Z",
+        "age_seconds": 105605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1419,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27330672549678",
+      "collateral_usd": "153018401204411",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049826198630136987",
+          "as_of_block": 155272359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T16:00:00Z",
+      "last_block": 155274169,
+      "batch_id": 17882,
+      "materialization_key": "52022ca7e1e6497f7dafcadfe545ab7cb414bfe654e07769b72ebd5481c92503",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T16:02:45Z",
+        "age_seconds": 102005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1423,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27425290497615",
+      "collateral_usd": "152895863946190",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049832191780821918",
+          "as_of_block": 155274159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T17:00:00Z",
+      "last_block": 155275969,
+      "batch_id": 17894,
+      "materialization_key": "552ff447eeb1f4964444cdf9cac3cc728f458093b322eb88fb1f0b8fc27eb536",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T17:02:45Z",
+        "age_seconds": 98405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1423,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27492079637335",
+      "collateral_usd": "153340061507243",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049838184931506850",
+          "as_of_block": 155275959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T18:00:00Z",
+      "last_block": 155277769,
+      "batch_id": 17906,
+      "materialization_key": "fb6c446b7e87911ec25a3e0a74c3fe7c8629fd6ceffab08de53b7d73aae09f3d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T18:02:45Z",
+        "age_seconds": 94805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1422,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27592263346915",
+      "collateral_usd": "152727375216135",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049844178082191781",
+          "as_of_block": 155277759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T19:00:00Z",
+      "last_block": 155279569,
+      "batch_id": 17918,
+      "materialization_key": "61d06f6b71c8c8aa52eecb4d40fca1d555e865a1fcfe631da1444240334e55b6",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T19:02:45Z",
+        "age_seconds": 91205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1424,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27647920963349",
+      "collateral_usd": "152267860497803",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049850171232876713",
+          "as_of_block": 155279559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T20:00:00Z",
+      "last_block": 155281369,
+      "batch_id": 17930,
+      "materialization_key": "fd7386e6bc065387121d0756858cdcf336eb0d9abddb38e581739bbec81fcd18",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T20:02:45Z",
+        "age_seconds": 87605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1429,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27661835367457",
+      "collateral_usd": "152803961002523",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049856164383561644",
+          "as_of_block": 155281359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T21:00:00Z",
+      "last_block": 155283169,
+      "batch_id": 17942,
+      "materialization_key": "115ee9eabd3cf9ff0aedf048569957bbfe41a2e2942884a84fed249894078348",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T21:02:45Z",
+        "age_seconds": 84005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1425,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27684098414030",
+      "collateral_usd": "152788643845246",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049862157534246576",
+          "as_of_block": 155283159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T22:00:00Z",
+      "last_block": 155284969,
+      "batch_id": 17954,
+      "materialization_key": "352c5138030d5fccce85c057196e7e183f5ee28e3c937b916fbe21040b060810",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T22:02:45Z",
+        "age_seconds": 80405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1429,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27748104672929",
+      "collateral_usd": "152574203643357",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049868150684931507",
+          "as_of_block": 155284959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-07T23:00:00Z",
+      "last_block": 155286769,
+      "batch_id": 17966,
+      "materialization_key": "afb4e300515a4f8a998e306672383c92c6dcf5b685ef170d8fb96754494a1c72",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-07T23:02:45Z",
+        "age_seconds": 76805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1425,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27753670434572",
+      "collateral_usd": "152742692373412",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049874143835616439",
+          "as_of_block": 155286759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T00:00:00Z",
+      "last_block": 155288569,
+      "batch_id": 17978,
+      "materialization_key": "b89e0c2fd5dd7b06d02fce4b824b1861f03d64a28c08c7da1d71086fe82a1a19",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T00:02:45Z",
+        "age_seconds": 73205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1422,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27672966890744",
+      "collateral_usd": "152298494812359",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049880136986301370",
+          "as_of_block": 155288559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T01:00:00Z",
+      "last_block": 155290369,
+      "batch_id": 17990,
+      "materialization_key": "fe18cd5ab6ee68b1482ae3e8d0621b157f2545b645f6caffbc1ee50bc6889772",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T01:02:45Z",
+        "age_seconds": 69605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1421,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27667401129100",
+      "collateral_usd": "152865229631634",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049886130136986302",
+          "as_of_block": 155290359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T02:00:00Z",
+      "last_block": 155292169,
+      "batch_id": 18002,
+      "materialization_key": "acc5f01833d6857cb3a6cc4a57ca2d2521a963f47d37b7b938c5585962ccb048",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T02:02:45Z",
+        "age_seconds": 66005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1419,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27681315533209",
+      "collateral_usd": "152712058058857",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049892123287671233",
+          "as_of_block": 155292159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T03:00:00Z",
+      "last_block": 155293969,
+      "batch_id": 18014,
+      "materialization_key": "48baacfa2a012f0505ce571ba6a94207ab69a0442727fc2cf064819381239865",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T03:02:45Z",
+        "age_seconds": 62405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1417,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27595046227737",
+      "collateral_usd": "153217524249022",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049898116438356165",
+          "as_of_block": 155293959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T04:00:00Z",
+      "last_block": 155295769,
+      "batch_id": 18026,
+      "materialization_key": "34ab718dd7831f08ee1e161d84472900cc55d3f62ec1fc678e1ae76b4543404a",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T04:02:45Z",
+        "age_seconds": 58805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1416,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27631223678419",
+      "collateral_usd": "153539184551854",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049904109589041096",
+          "as_of_block": 155295759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T05:00:00Z",
+      "last_block": 155297569,
+      "batch_id": 18038,
+      "materialization_key": "ca0f42890e89dfe38c2e572158e011a16c8edf9b71ef1d564c1ff19c7103b0ca",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T05:02:45Z",
+        "age_seconds": 55205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1417,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27556085896233",
+      "collateral_usd": "153232841406299",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049910102739726028",
+          "as_of_block": 155297559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T06:00:00Z",
+      "last_block": 155299369,
+      "batch_id": 18050,
+      "materialization_key": "59b061beaa05ef5db5921ff85fe90624fcfff2d2599060aea0017a652680788d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T06:02:45Z",
+        "age_seconds": 51605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1419,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27583914704450",
+      "collateral_usd": "152895863946190",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049916095890410959",
+          "as_of_block": 155299359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T07:00:00Z",
+      "last_block": 155301169,
+      "batch_id": 18062,
+      "materialization_key": "f69825bc8c22406fe01c89574b96adca067f37ab3bab053384bd3c2268043f12",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T07:02:45Z",
+        "age_seconds": 48005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1417,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27689664175674",
+      "collateral_usd": "152436349227858",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049922089041095891",
+          "as_of_block": 155301159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T08:00:00Z",
+      "last_block": 155302969,
+      "batch_id": 18074,
+      "materialization_key": "2c27f4e2a9e7e12dd11af16f64b7b43b6ce399e19ab381ef675adb1d579af74e",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T08:02:45Z",
+        "age_seconds": 44405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1412,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27800979408541",
+      "collateral_usd": "152114688925026",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049928082191780822",
+          "as_of_block": 155302959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T09:00:00Z",
+      "last_block": 155304769,
+      "batch_id": 18086,
+      "materialization_key": "6dfd852d065918c9113f13c638f035969c0402ded902d396711aa214fbf2e35d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T09:02:45Z",
+        "age_seconds": 40805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1413,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27862202786618",
+      "collateral_usd": "152421032070580",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049934075342465754",
+          "as_of_block": 155304759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T10:00:00Z",
+      "last_block": 155306569,
+      "batch_id": 18098,
+      "materialization_key": "e7b9191bc68e9e6003afce78664280654cf1531f8342ab5b718f22907f0dc086",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T10:02:45Z",
+        "age_seconds": 37205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1412,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27839939740044",
+      "collateral_usd": "152574203643357",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049940068493150685",
+          "as_of_block": 155306559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T11:00:00Z",
+      "last_block": 155308369,
+      "batch_id": 18110,
+      "materialization_key": "d8e4966431076cf2b0222bc98a40371f18836501ab76c62224adf8b2ea037471",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T11:02:45Z",
+        "age_seconds": 33605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1417,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27942906330446",
+      "collateral_usd": "152849912474356",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049946061643835617",
+          "as_of_block": 155308359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T12:00:00Z",
+      "last_block": 155310169,
+      "batch_id": 18122,
+      "materialization_key": "a5c74b34fefef78abe961b151339e073882180c2c3b4e49fc1bb6a2574024da5",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T12:02:45Z",
+        "age_seconds": 30005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1412,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27915077522229",
+      "collateral_usd": "153340061507243",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049952054794520548",
+          "as_of_block": 155310159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T13:00:00Z",
+      "last_block": 155311969,
+      "batch_id": 18134,
+      "materialization_key": "935f1683fc25af7f05da70c362733b8e847d714a291c48950e45cf8e66e663e8",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T13:02:45Z",
+        "age_seconds": 26405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1408,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27906728879764",
+      "collateral_usd": "153753624753742",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049958047945205480",
+          "as_of_block": 155311959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T14:00:00Z",
+      "last_block": 155313769,
+      "batch_id": 18146,
+      "materialization_key": "7ba013a1cd8ec6f0c06363a80034cf02c41a8303cd0073fdddfcb3a542028948",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T14:02:45Z",
+        "age_seconds": 22805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1403,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27934557687981",
+      "collateral_usd": "153876162011964",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049964041095890411",
+          "as_of_block": 155313759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T15:00:00Z",
+      "last_block": 155315569,
+      "batch_id": 18158,
+      "materialization_key": "da2c8e3e3713d7cc3fd9ecdd70fcc07e3c17bcc0a70f6ad07fa60448286a7b0f",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T15:02:45Z",
+        "age_seconds": 19205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1408,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27845505501688",
+      "collateral_usd": "153477915922743",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049970034246575343",
+          "as_of_block": 155315559,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T16:00:00Z",
+      "last_block": 155317369,
+      "batch_id": 18170,
+      "materialization_key": "70775aa7a3175db1d4b9d28fea393f6c8011150ebdce93259f3ac346bb6ec54f",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T16:02:45Z",
+        "age_seconds": 15605,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1406,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27817676693471",
+      "collateral_usd": "153906796326519",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049976027397260274",
+          "as_of_block": 155317359,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T17:00:00Z",
+      "last_block": 155319169,
+      "batch_id": 18182,
+      "materialization_key": "ad1b92721830922e3781c051b2f113e6f6021b872d54910c6fce8a2ee81ae46a",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T17:02:45Z",
+        "age_seconds": 12005,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1408,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27764801957859",
+      "collateral_usd": "153937430641074",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049982020547945206",
+          "as_of_block": 155319159,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T18:00:00Z",
+      "last_block": 155320969,
+      "batch_id": 18194,
+      "materialization_key": "920664371461451eb55103aba38dca44c73a8e6a2b582f1a4f60902f38d2f70a",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T18:02:45Z",
+        "age_seconds": 8405,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1411,
+      "refused_positions": 6,
+      "liquidatable_positions": 48,
+      "debt_usd": "27814893812649",
+      "collateral_usd": "153631087495520",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049988013698630137",
+          "as_of_block": 155320959,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T19:00:00Z",
+      "last_block": 155322769,
+      "batch_id": 18206,
+      "materialization_key": "f4b5d98d42fa23807bf69ba76f21015413fa830937281625387c674b02818e1d",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T19:02:45Z",
+        "age_seconds": 4805,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1407,
+      "refused_positions": 6,
+      "liquidatable_positions": 50,
+      "debt_usd": "27845505501688",
+      "collateral_usd": "153600453180965",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1049994006849315069",
+          "as_of_block": 155322759,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-08-08T20:00:00Z",
+      "last_block": 155323444,
+      "batch_id": 18251,
+      "materialization_key": "ebc8e056d83e4019a1feac9acfb3365eb8d30f2b7452ab515d8855f81e1f2139",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
+      "sweep_recorded": true,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-08-08T20:02:45Z",
+        "age_seconds": 1205,
+        "generation": 4,
+        "generation_open": false
+      },
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 1412,
+      "refused_positions": 6,
+      "liquidatable_positions": 49,
+      "debt_usd": "27828808216758",
+      "collateral_usd": "153171572777189",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "symbol": "USDC",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1050000000000000000",
+          "as_of_block": 155323434,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "a withheld bucket carries NULL totals and names its refusal code: a rollup that rendered an unproven book as zero debt would fabricate the exact reassurance this surface exists to withhold."
+  ]
+}

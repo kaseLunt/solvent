@@ -273,6 +273,15 @@ const CENSUS: Record<string, number> = {
   "demo/run-book-demo-eth_minus_30.json": 2,
   "demo/run-book-set-demo.json": 2,
   "demo/stress-demo-near.json": 2,
+  // The History and Activity demo dataset (`generate-demo-secondary.mjs`, plan 4
+  // Task 2, which imports the law, refuses to write a body it fails, and pins
+  // these same counts in its `CLOCK_TRIOS`). The debt_manager series carries
+  // no batch: it is 166 points (165 captured, 1 withheld) whose sweep stamps
+  // each state an age over `max_updated_at` — one trio per point, the withheld
+  // point included, because the stamp is capture-time evidence. The Aave
+  // series' sweep is the contract's "no sweeper" null on every point and the
+  // feed page carries no clock, so neither is here.
+  "demo/observatory-demo-dm.json": 166,
   // THREE since p1a-9: batch age over computed_at, the debt_manager
   // watermark's sweep over max_updated_at, AND the same sweep stamp on the
   // debt_manager row of the new `engines` aggregate roster (the schema's
@@ -317,7 +326,10 @@ const CENSUS: Record<string, number> = {
 // + the Inspector demo dataset (4 × 4 address bodies + 2 history + 2 stress),
 // plan 2 Task 10: 77 + 20 = 97.
 // + the Scenarios demo dataset (2 run-book + 2 set run), plan 3 Task 10: 97 + 4 = 101.
-const CENSUS_TOTAL = 101;
+// + the History demo series (166 sweep trios on the debt_manager series; the
+//   Aave series has no sweeper and the feed page no clock), plan 4 Task 2:
+//   101 + 166 = 267.
+const CENSUS_TOTAL = 267;
 
 // --- the generators' own pins, read out of their source ---------------------
 //
@@ -642,6 +654,9 @@ test.describe("the clock census", () => {
     // history and the stress (plan 2 Task 10); events and params carry no batch: 32 + 6 = 38.
     // + the two batch-bearing Scenarios demo bodies — the run-book and the set
     // run (plan 3 Task 10); the listing carries no batch: 38 + 2 = 40.
+    // The three History/Activity demo bodies (plan 4 Task 2) carry no batch
+    // envelope: a series point names its `batch_id`, and the debt_manager
+    // series is the second clock-bearing file with no batch behind it.
     expect(fixtureFiles.filter((name) => isBatchBearing(readFixture(name)))).toHaveLength(40);
   });
 });
