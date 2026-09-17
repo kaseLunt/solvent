@@ -6,6 +6,7 @@ import type { LabReading } from "../../lib/lab-reading";
 import type { RunRecord, SetRecord } from "../../lib/lab-library";
 import { deriveLabView, readEngine } from "../../lib/lab-view";
 import { failureHeadline } from "../../lib/lab-headline";
+import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
 import { SCENARIOS } from "../fixtures/lab-book";
 import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, transitionsOf, type Engine } from "./helpers/run-book-engine";
 
@@ -233,4 +234,27 @@ test("a held result's own condition is said beside the failure that left it stan
   expect(v.book.heldCondition).toBe("stale-input");
   expect(v.book.skew).toEqual(["path assumption"]);
   expect(v.book.rerunFailure).toEqual(failureHeadline("not-served", {}));
+});
+
+/** The demo set answering an ask: its results for the asked ids, the echo the ask itself, the evaluated count agreeing. */
+const demoSetFor = (ids: readonly string[]): typeof DEMO_RUN_BOOK_SET => {
+  const results = DEMO_RUN_BOOK_SET.results.filter((r) => ids.includes(r.scenario_id));
+  return { ...DEMO_RUN_BOOK_SET, requested_scenario_ids: [...ids], results, evaluation: { ...DEMO_RUN_BOOK_SET.evaluation, scenarios_evaluated: results.length } };
+};
+
+test("compare: a set is read only when it answers the request — the asked ids are the authority, and a body naming more is refused whole with every fault named", () => {
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  const answered: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "ok", response: demoSetFor(asked) }, at: 2 };
+  const ok = deriveLabView(reading({ set: answered }), ui()).compare;
+  expect(ok.kind).toBe("ok");
+  if (ok.kind === "ok") expect(ok.cash.rows.map((r) => r.id)).toEqual(["eth_minus_30", "ethfi_minus_50"]);
+  const unasked: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "ok", response: DEMO_RUN_BOOK_SET }, at: 2 };
+  const failed = deriveLabView(reading({ set: unasked }), ui()).compare;
+  expect(failed.kind).toBe("failed");
+  if (failed.kind !== "failed") return;
+  expect(failed.headline.emphasis).toBe("The set does not answer the request.");
+  expect(failed.headline.tone).toBe("refused");
+  expect(failed.headline.dek).toBe(
+    "Asked 2 ids, the response names 4; weeth_market_depeg_oracles_held is named in requested_scenario_ids and was not dispatched; dm_rate_horizon_plus_200bps is named in requested_scenario_ids and was not dispatched. Nothing from it is drawn.",
+  );
 });

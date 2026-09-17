@@ -11,20 +11,11 @@ import type { CompareState } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import { useMeasuredWidth } from "@/lib/useMeasuredWidth";
 import styles from "./lab.module.css";
+import { LegacyCompare, PLOT_MEASURE } from "./LegacyCompare";
 
-/** One engine's words. A share is of that engine's own book, and the plot never lends one engine's name to the other's figure. */
-interface BookWords {
-  readonly share: string;
-  readonly notCovered: string;
-}
-const CASH_WORDS: BookWords = {
-  share: "of the Cash book",
-  notCovered: "not modelled for Cash",
-};
-const LEGACY_WORDS: BookWords = {
-  share: "of the legacy book",
-  notCovered: "not modelled for the legacy market",
-};
+/** The not-covered word names the engine; the share's denominator is the caption's word, never the row's. */
+const CASH_NOT_COVERED = "not modelled for Cash";
+const LEGACY_NOT_COVERED = "not modelled for the legacy market";
 
 type Refusal = Exclude<CompareKind, "point">;
 const KIND_WORD: Record<Exclude<Refusal, "not-covered">, string> = {
@@ -35,34 +26,34 @@ const KIND_WORD: Record<Exclude<Refusal, "not-covered">, string> = {
   unreadable: "unreadable",
 };
 
-/** A refusal's word, the wire's reason in brackets unless it is the word itself. Not covered is said for the engine, once. */
-function noteOf(
-  kind: Refusal,
-  reason: string | null,
-  words: BookWords,
-): string {
-  if (kind === "not-covered") return words.notCovered;
-  const word = KIND_WORD[kind];
-  return reason === null || reason === word ? word : `${word} (${reason})`;
+/**
+ * A refusal's word, the wire's reason in brackets unless it is the word itself;
+ * not covered is said for the engine, once. A refusal of the share is not a
+ * refusal of the figure: where the wire gave a delta, it stands beside the word.
+ */
+function noteOf(r: CompareRow, kind: Refusal, notCovered: string): string {
+  const word = kind === "not-covered" ? notCovered : KIND_WORD[kind];
+  const reason =
+    kind === "not-covered" || r.reason === null || r.reason === word
+      ? ""
+      : ` (${r.reason})`;
+  const delta = r.deltaUsd === null ? "" : ` · ${r.deltaText}`;
+  return `${word}${reason}${delta}`;
 }
 
-/** The figures beside a dot: the share of the engine's book, the delta, and the engine's own flip count where it speaks one. */
-function figures(r: CompareRow, words: BookWords): string {
-  const newly =
-    r.newly === null
-      ? ""
-      : ` · ${groupInt(r.newly)} account${r.newly === 1 ? "" : "s"}`;
-  return `${r.shareText} ${words.share} · ${r.deltaText}${newly}`;
-}
+/** The figures beside a dot: the share, then the absolute delta. */
+const figures = (r: CompareRow): string => `${r.shareText} · ${r.deltaText}`;
 
 /** One plot row per compare row: a point is a signed dot toned by its sign; every other kind is a dashed track with its word and no value. */
-function rowsOf(view: CompareView, words: BookWords): DotPlotRow[] {
+function rowsOf(view: CompareView, notCovered: string): DotPlotRow[] {
   return view.rows.map((r): DotPlotRow => {
-    const base = { key: r.id, label: r.label, valueText: figures(r, words) };
     if (r.kind !== "point") {
+      const note = noteOf(r, r.kind, notCovered);
       return {
-        ...base,
-        note: noteOf(r.kind, r.reason, words),
+        key: r.id,
+        label: r.label,
+        valueText: note,
+        note,
         tenths: null,
         tone: "refused",
       };
@@ -70,13 +61,23 @@ function rowsOf(view: CompareView, words: BookWords): DotPlotRow[] {
     const tenths = r.shareTenths;
     // A point carries its share by the lib's construction; a row without one is a track, never a dot at zero.
     if (tenths === null) {
-      return { ...base, note: "no share", tenths: null, tone: "refused" };
+      return {
+        key: r.id,
+        label: r.label,
+        valueText: "no share",
+        note: "no share",
+        tenths: null,
+        tone: "refused",
+      };
     }
+    // More liquidatable debt is the critical sign; less, and a measured zero, are ok.
     return {
-      ...base,
+      key: r.id,
+      label: r.label,
+      valueText: figures(r),
       note: null,
       tenths,
-      tone: tenths > 0n ? "crit" : tenths < 0n ? "ok" : "warn",
+      tone: tenths > 0n ? "crit" : "ok",
     };
   });
 }
@@ -96,8 +97,6 @@ const FRESHNESS_PILL: Record<
   newest_is_older: "newest is older",
   none_servable: "none servable",
 };
-
-const MEASURE = { min: 480, max: 1280, fallback: 880 };
 
 function finding(state: CompareState): string {
   switch (state.kind) {
@@ -119,13 +118,10 @@ function finding(state: CompareState): string {
  * their own book. The state is the view's; nothing is classified here.
  */
 export function CompareCard({ state }: { state: CompareState }) {
-  const { ref: cashRef, width: cashWidth } =
-    useMeasuredWidth<HTMLDivElement>(MEASURE);
-  const { ref: legacyRef, width: legacyWidth } =
-    useMeasuredWidth<HTMLDivElement>(MEASURE);
+  const { ref, width } = useMeasuredWidth<HTMLDivElement>(PLOT_MEASURE);
   const ok = state.kind === "ok" ? state : null;
-  const legacyPoints =
-    ok !== null && ok.legacy.rows.some((r) => r.kind === "point");
+  const legacyRows = ok === null ? [] : rowsOf(ok.legacy, LEGACY_NOT_COVERED);
+  const legacyPoints = legacyRows.some((r) => r.tenths !== null);
   return (
     <ChartCard
       title="Compare scenarios"
@@ -136,7 +132,7 @@ export function CompareCard({ state }: { state: CompareState }) {
         </span>
       }
     >
-      <div ref={cashRef} className={styles.plotFrame}>
+      <div ref={ref} className={styles.plotFrame}>
         {ok !== null ? (
           <>
             {ok.cash.freshness !== "still_newest" && (
@@ -148,17 +144,16 @@ export function CompareCard({ state }: { state: CompareState }) {
                 <StatusPill tone="warn">
                   {FRESHNESS_PILL[ok.cash.freshness]}
                 </StatusPill>{" "}
-                evaluated on batch {groupInt(ok.cash.batchId)}; the newest
-                servable batch is{" "}
+                evaluated on batch {groupInt(ok.cash.batchId)};{" "}
                 {ok.cash.newestServable === null
-                  ? "not stated"
-                  : groupInt(ok.cash.newestServable)}
+                  ? "no batch was servable at probe time"
+                  : `the newest servable batch is ${groupInt(ok.cash.newestServable)}`}
                 .
               </p>
             )}
             <DotPlot
-              rows={rowsOf(ok.cash, CASH_WORDS)}
-              width={cashWidth}
+              rows={rowsOf(ok.cash, CASH_NOT_COVERED)}
+              width={width}
               axisLabel="change in liquidatable Cash debt, percent of the Cash book"
               testId="lab-dotplot"
               rowTestIdPrefix="lab-compare-row"
@@ -174,29 +169,7 @@ export function CompareCard({ state }: { state: CompareState }) {
           </p>
         )}
       </div>
-      {ok !== null && legacyPoints && (
-        <details
-          className={`${styles.legacy} ${styles.legacyInCard}`}
-          data-testid="lab-compare-legacy"
-        >
-          <summary>Legacy · Aave v3 market, on its own book</summary>
-          <div className={styles.legacyBody}>
-            <div ref={legacyRef} className={styles.plotFrame}>
-              <DotPlot
-                rows={rowsOf(ok.legacy, LEGACY_WORDS)}
-                width={legacyWidth}
-                axisLabel="change in liquidatable legacy debt, percent of the legacy book"
-                testId="lab-dotplot-legacy"
-                rowTestIdPrefix="lab-compare-legacy-row"
-              />
-            </div>
-            <p className={styles.dim}>
-              Shares of the legacy book, in its own unit. The two books are
-              never added together.
-            </p>
-          </div>
-        </details>
-      )}
+      {legacyPoints && <LegacyCompare rows={legacyRows} />}
     </ChartCard>
   );
 }

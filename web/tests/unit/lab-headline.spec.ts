@@ -12,6 +12,7 @@ import {
   notRunHeadline,
   resultHeadline,
   runningHeadline,
+  setMembershipHeadline,
   signedUsd,
   withheldHeadline,
 } from "../../lib/lab-headline";
@@ -142,5 +143,14 @@ test("the failure arms name themselves; a retry is stated only when the service 
     rest: "",
     tone: "refused",
     dek: "Rate limited (429), retry after 30s. Nothing can run until the listing answers.",
+  });
+});
+
+test("the set-membership refusal: every fault in one sentence, the dashed tone, nothing drawn", () => {
+  expect(setMembershipHeadline(["asked 2 ids, the response names 4", "x is named in requested_scenario_ids and was not dispatched"])).toEqual({
+    emphasis: "The set does not answer the request.",
+    rest: "",
+    tone: "refused",
+    dek: "Asked 2 ids, the response names 4; x is named in requested_scenario_ids and was not dispatched. Nothing from it is drawn.",
   });
 });

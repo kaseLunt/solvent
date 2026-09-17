@@ -45,6 +45,8 @@ interface Mocks {
   set?: unknown;
   setStatus?: number;
   setDelayMs?: number;
+  /** A set body answered exactly as given, never shaped to the ask: the membership pins. */
+  setVerbatim?: unknown;
   address?: unknown;
   addressStatus?: number;
   stress?: unknown;
@@ -58,6 +60,26 @@ interface Counts {
   /** The set-run request bodies, in dispatch order. */
   posted: () => readonly string[];
 }
+
+type SetBody = typeof DEMO_RUN_BOOK_SET;
+/** The ids a set-run request body asked for; none when the body is not the contract's. */
+const askedIdsOf = (body: string): string[] => {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    const ids = typeof parsed === "object" && parsed !== null ? (parsed as { scenario_ids?: unknown }).scenario_ids : undefined;
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+};
+/** A set fixture answering an ask (the contract's membership law): the results the ask named, in ask order; the echo the ask itself; the evaluated count agreeing. */
+const shapeSet = (set: SetBody, ids: readonly string[]): SetBody => {
+  const results = ids.flatMap((id) => set.results.filter((r) => r.scenario_id === id));
+  return { ...set, requested_scenario_ids: [...ids], results, evaluation: { ...set.evaluation, scenarios_evaluated: results.length } };
+};
+/** A body with results is shaped to the ask; a body without (an error envelope) passes as it is. */
+const answerSet = (body: unknown, ids: readonly string[]): unknown =>
+  typeof body === "object" && body !== null && "results" in body ? shapeSet(body as SetBody, ids) : body;
 
 /** Every route the page can issue is answered; `*` never crosses `/`, so the listing route does not swallow the run routes. */
 async function mockLab(page: Page, m: Mocks = {}): Promise<Counts> {
@@ -79,9 +101,11 @@ async function mockLab(page: Page, m: Mocks = {}): Promise<Counts> {
   await page.route("**/v1/scenarios/run-book-set", async (route) => {
     if (route.request().method() === "OPTIONS") return preflight(route);
     sets += 1;
-    posted.push(route.request().postData() ?? "");
+    const body = route.request().postData() ?? "";
+    posted.push(body);
     if (m.setDelayMs !== undefined) await new Promise((r) => setTimeout(r, m.setDelayMs));
-    return json(route, m.set ?? DEMO_RUN_BOOK_SET, m.setStatus ?? 200, POST_CORS);
+    // The set answers the request: the fixture shaped to the asked ids, unless a pin asks for a body answered as given.
+    return json(route, m.setVerbatim ?? answerSet(m.set ?? DEMO_RUN_BOOK_SET, askedIdsOf(body)), m.setStatus ?? 200, POST_CORS);
   });
   await page.route("**/v1/scenarios/*/run-book", async (route) => {
     if (route.request().method() === "OPTIONS") return preflight(route);
@@ -684,7 +708,7 @@ test("a failed re-run over a held result keeps the held result's own condition b
   await expect(row(page, "eth_minus_30")).not.toContainText("+$1.2M");
 });
 
-test("compare: two ticks enable the button, one POST posts exactly those ids, the dots rank as compareRows ranks the demo set, the legacy fold is its own book, and 390 wide has no horizontal overflow", async ({ page }) => {
+test("compare: two ticks enable the button, one POST posts exactly those ids, the set answers them and only them, the dots rank as compareRows ranks the answered set, no label clips, each plot measures its own frame, and 390 wide scrolls the frame rather than the page", async ({ page }) => {
   const counts = await mockLab(page);
   await page.goto("/lab");
   const button = page.getByTestId("lab-compare");
@@ -706,32 +730,50 @@ test("compare: two ticks enable the button, one POST posts exactly those ids, th
   expect(counts.posted()[0]).toBe('{"scenario_ids":["eth_minus_30","ethfi_minus_50"]}');
   await expect(page.getByTestId("lab-compare-state")).toContainText("batch 18,251 (still the newest)");
   await expect(page.getByTestId("lab-compare-superseded")).toHaveCount(0);
-  // The rows are the set's own, in the order compareRows ranks the demo set: |share|, then |Δ|, then wire order.
-  const expected = compareRows(DEMO_RUN_BOOK_SET, "debt_manager").rows;
+  // The rows are the answered set's own — the two asked ids and no other — in the order compareRows ranks them: |share|, then |Δ|, then wire order.
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  const expected = compareRows(shapeSet(DEMO_RUN_BOOK_SET, asked), "debt_manager").rows;
   const ids = await page.locator("[data-testid^='lab-compare-row-']").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-testid")));
   expect(ids).toEqual(expected.map((r) => `lab-compare-row-${r.id}`));
-  expect(ids).toEqual(["lab-compare-row-eth_minus_30", "lab-compare-row-ethfi_minus_50", "lab-compare-row-weeth_market_depeg_oracles_held", "lab-compare-row-dm_rate_horizon_plus_200bps"]);
+  expect(ids).toEqual(["lab-compare-row-eth_minus_30", "lab-compare-row-ethfi_minus_50"]);
   for (const r of expected) await expect(page.getByTestId(`lab-compare-row-${r.id}`)).toHaveAttribute("data-kind", r.kind === "point" ? "point" : "refused");
   await expect(page.getByTestId("lab-dotplot").locator("circle")).toHaveCount(expected.filter((r) => r.kind === "point").length);
-  // The demo figures, to the character: the share of the Cash book, the delta, the engine's own flip count.
-  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% of the Cash book · +$1.2M · 118 accounts");
-  await expect(page.getByTestId("lab-compare-row-ethfi_minus_50")).toContainText("+<0.1% of the Cash book · +$9,800 · 2 accounts");
-  await expect(page.getByTestId("lab-compare-row-weeth_market_depeg_oracles_held")).toContainText("0% of the Cash book · +$0 · 0 accounts");
+  // The demo figures, to the character: the share, then the absolute delta; the book is the caption's word, not the row's.
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).not.toContainText("Cash book");
+  await expect(page.getByTestId("lab-compare-row-ethfi_minus_50")).toContainText("+<0.1% · +$9,800");
+  // No label clips: the value column ends inside the plot's own box.
+  const plotBox = await page.getByTestId("lab-dotplot").boundingBox();
+  const valueBox = await page.getByTestId("lab-compare-row-eth_minus_30").locator("css=text").last().boundingBox();
+  if (plotBox === null || valueBox === null) throw new Error("the plot has no box");
+  expect(valueBox.x + valueBox.width).toBeLessThanOrEqual(plotBox.x + plotBox.width);
   // The legacy market's shares fold below on their own book; the Cash plot never names it.
   await expect(page.getByTestId("lab-dotplot")).not.toContainText("legacy");
   const legacy = page.getByTestId("lab-compare-legacy");
   await expect(legacy).toBeVisible();
+  // At 1024 wide each plot's width is its own frame's content box, clamped to the plot's budget — the legacy plot's too: a fold that mounts later still measures.
+  await page.setViewportSize({ width: 1024, height: 800 });
   await legacy.locator("summary").click();
+  const clamp = (w: number) => String(Math.round(Math.min(Math.max(w, 480), 1280)));
+  const frameOf = (id: string) => page.getByTestId(id).locator("xpath=..");
+  const cashFrameW = await frameOf("lab-dotplot").evaluate((n) => n.clientWidth);
+  await expect(page.getByTestId("lab-dotplot")).toHaveAttribute("width", clamp(cashFrameW));
+  const legacyFrameW = await frameOf("lab-dotplot-legacy").evaluate((n) => n.clientWidth);
+  expect(legacyFrameW).toBeGreaterThan(0);
+  expect(clamp(legacyFrameW)).not.toBe("880");
+  await expect(page.getByTestId("lab-dotplot-legacy")).toHaveAttribute("width", clamp(legacyFrameW));
   await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toHaveAttribute("data-kind", "point");
-  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toContainText("+0.3% of the legacy book · +$6,000");
-  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).not.toContainText("account");
+  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toContainText("+0.3% · +$6,000");
   await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toHaveAttribute("data-kind", "refused");
   await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toContainText("not modelled for the legacy market");
   await expect(legacy).toContainText("never added together");
   // The set is Compare's; the workspace itself has run nothing.
   await expect(surface(page)).toHaveAttribute("data-state", "not-run");
   expect(counts.runs()).toBe(0);
+  // 390 wide: the plot keeps its 480 minimum, its frame scrolls, and the page does not.
   await page.setViewportSize({ width: 390, height: 800 });
+  await expect(page.getByTestId("lab-dotplot")).toHaveAttribute("width", "480");
+  await expect.poll(() => frameOf("lab-dotplot").evaluate((n) => n.scrollWidth > n.clientWidth)).toBe(true);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
@@ -754,7 +796,7 @@ test("compare: a scenario the set withheld for Cash is a dashed row with its wor
   // Ranked after every point, and the points keep their figures.
   const ids = await page.locator("[data-testid^='lab-compare-row-']").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-testid")));
   expect(ids[ids.length - 1]).toBe("lab-compare-row-ethfi_minus_50");
-  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% of the Cash book");
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
 });
 
 test("compare: a busy evaluator fails the set by name and frees the button; a second Compare during a set is ignored; a superseded evaluation is labelled", async ({ page }) => {
@@ -803,5 +845,26 @@ test("compare: one-address mode has no Compare, and the ticks and the result sur
   await page.getByTestId("lab-mode-book").click();
   await expect(page.getByTestId("lab-compare")).toHaveText("Compare 2 scenarios");
   await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
-  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% of the Cash book");
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
+});
+
+test("compare: a set that answers ids nobody asked for is refused whole, every fault named, nothing drawn, the button freed", async ({ page }) => {
+  // The demo body verbatim: four results for a two-id ask.
+  const counts = await mockLab(page, { setVerbatim: DEMO_RUN_BOOK_SET });
+  await page.goto("/lab");
+  await page.getByTestId("lab-library-check-eth_minus_30").check();
+  await page.getByTestId("lab-library-check-ethfi_minus_50").check();
+  await page.getByTestId("lab-compare").click();
+  const state = page.getByTestId("lab-compare-state");
+  await expect(state).toHaveAttribute("data-kind", "failed");
+  await expect(state).toContainText("The set does not answer the request.");
+  await expect(state).toContainText("2 ids, the response names 4");
+  await expect(state).toContainText("weeth_market_depeg_oracles_held is named in requested_scenario_ids and was not dispatched");
+  await expect(state).toContainText("dm_rate_horizon_plus_200bps is named in requested_scenario_ids and was not dispatched");
+  await expect(state).toContainText("Nothing from it is drawn.");
+  await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
+  await expect(page.locator("[data-testid^='lab-compare-row-']")).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText("+4.5%");
+  await expect(page.getByTestId("lab-compare")).toBeEnabled();
+  expect(counts.sets()).toBe(1);
 });

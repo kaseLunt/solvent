@@ -147,3 +147,46 @@ export function compareRows(set: RunBookSetResponse, engine: string): CompareVie
     servedAt: set.served_at,
   };
 }
+
+/**
+ * The set answers the request, or nothing in it may be read (the contract's
+ * "one line to check"; the old Lab's R57 gate). The ids this client posted are
+ * the only authority on what was asked: the body's `requested_scenario_ids` is
+ * its own claim, so the two must be the same set, and the results must name
+ * each requested id exactly once. Every fault is named. A duplicated id refuses
+ * before any set question is posed, because a list naming an id twice is not a
+ * set and no set-equality question is well-posed of it.
+ */
+export function setMembership(asked: readonly string[], set: RunBookSetResponse): string[] {
+  const faults: string[] = [];
+  const counts = new Map<string, number>();
+  for (const id of set.requested_scenario_ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+  for (const [id, n] of counts) {
+    if (n > 1) faults.push(`${id} appears ${String(n)} times in requested_scenario_ids; a set names each id once`);
+  }
+  if (faults.length > 0) return faults;
+  if (asked.length !== set.requested_scenario_ids.length) {
+    faults.push(`asked ${String(asked.length)} id${asked.length === 1 ? "" : "s"}, the response names ${String(set.requested_scenario_ids.length)}`);
+  }
+  const requested = new Set(set.requested_scenario_ids);
+  const dispatched = new Set(asked);
+  for (const id of asked) {
+    if (!requested.has(id)) faults.push(`${id} was dispatched and is not named in requested_scenario_ids`);
+  }
+  for (const id of requested) {
+    if (!dispatched.has(id)) faults.push(`${id} is named in requested_scenario_ids and was not dispatched`);
+  }
+  const seen = new Set<string>();
+  for (const r of set.results) {
+    if (seen.has(r.scenario_id)) faults.push(`${r.scenario_id} appears in more than one result`);
+    seen.add(r.scenario_id);
+    if (!requested.has(r.scenario_id)) faults.push(`${r.scenario_id} was answered and was not requested`);
+  }
+  for (const id of requested) {
+    if (!seen.has(id)) faults.push(`${id} was requested and has no result`);
+  }
+  if (set.evaluation.scenarios_evaluated !== set.results.length) {
+    faults.push(`evaluation.scenarios_evaluated is ${String(set.evaluation.scenarios_evaluated)} against ${String(set.results.length)} results`);
+  }
+  return unique(faults);
+}

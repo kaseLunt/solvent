@@ -155,6 +155,10 @@ export function failureHeadline(kind: FailureKind, d: FailureDetail): LabHeadlin
   }
 }
 
+/** A set whose membership does not answer the request: every fault in one sentence, the dashed tone, nothing drawn. */
+export const setMembershipHeadline = (faults: readonly string[]): LabHeadline =>
+  refused("The set does not answer the request.", `${sentence(faults.join("; "))} Nothing from it is drawn.`);
+
 export const LISTING_LOADING: LabHeadline = refused(
   "Loading the committed scenarios…",
   "The library is the committed, versioned set this deployment serves. Nothing runs until it is listed.",

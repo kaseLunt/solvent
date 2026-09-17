@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { compareRows, shareTenths, type RunBookSetResponse, type SetRunEngineSummary, type SetRunScenarioResult } from "../../lib/lab-compare";
+import { compareRows, setMembership, shareTenths, type RunBookSetResponse, type SetRunEngineSummary, type SetRunScenarioResult } from "../../lib/lab-compare";
 
 const BASE = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/run-book-set.json", import.meta.url)), "utf8")) as RunBookSetResponse;
 const TEMPLATE_ENGINE = BASE.results[0]!.engines[0]!;
@@ -130,4 +130,32 @@ test("a result whose three engine parts do not partition covered_engines is cont
   // Every clause at once, each id named once.
   const all = compareRows(setOf([result("all", "All", { covered_engines: ["aave_v3_etherfi"], withheld_engines: ["debt_manager"], engines: [summary({})] })]), "debt_manager").rows[0]!;
   expect(all.reason).toBe(`${CENSUS_BREAK}; extra: debt_manager; missing: aave_v3_etherfi; overlap: debt_manager`);
+});
+
+/** A set that answers its own results: the echo is the results' ids and the evaluated count agrees. */
+const answering = (results: SetRunScenarioResult[]): RunBookSetResponse => ({ ...setOf(results), evaluation: { ...BASE.evaluation, scenarios_evaluated: results.length } });
+
+test("setMembership: the asked ids are the authority; a set that answers them passes in any order", () => {
+  expect(setMembership(["b_two", "a_one"], answering([result("a_one", "A", {}), result("b_two", "B", {})]))).toEqual([]);
+});
+
+test("setMembership: a body naming an id nobody posted, and a body omitting a posted id, each fail with the count and the id named", () => {
+  const two = answering([result("a_one", "A", {}), result("b_two", "B", {})]);
+  expect(setMembership(["a_one"], two)).toEqual(["asked 1 id, the response names 2", "b_two is named in requested_scenario_ids and was not dispatched"]);
+  expect(setMembership(["a_one", "b_two", "c_three"], two)).toEqual(["asked 3 ids, the response names 2", "c_three was dispatched and is not named in requested_scenario_ids"]);
+});
+
+test("setMembership: an echo that matches the ask while the results do not — an unrequested result, a hole, a result twice — and the evaluated count must agree", () => {
+  const two = answering([result("a_one", "A", {}), result("b_two", "B", {})]);
+  const extra = { ...two, results: [...two.results, result("z_nine", "Z", {})] };
+  expect(setMembership(["a_one", "b_two"], extra)).toEqual(["z_nine was answered and was not requested", "evaluation.scenarios_evaluated is 2 against 3 results"]);
+  const hole = { ...two, results: two.results.slice(0, 1) };
+  expect(setMembership(["a_one", "b_two"], hole)).toEqual(["b_two was requested and has no result", "evaluation.scenarios_evaluated is 2 against 1 results"]);
+  const twice = { ...two, results: [...two.results, result("a_one", "A", {})] };
+  expect(setMembership(["a_one", "b_two"], twice)).toEqual(["a_one appears in more than one result", "evaluation.scenarios_evaluated is 2 against 3 results"]);
+});
+
+test("setMembership: a duplicated id in requested_scenario_ids refuses before any set question is posed", () => {
+  const set = { ...answering([result("a_one", "A", {})]), requested_scenario_ids: ["a_one", "a_one"] };
+  expect(setMembership(["a_one"], set)).toEqual(["a_one appears 2 times in requested_scenario_ids; a set names each id once"]);
 });

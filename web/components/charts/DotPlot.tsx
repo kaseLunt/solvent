@@ -22,7 +22,7 @@ export interface DotPlotProps {
 
 const ROW_H = 26;
 const AXIS_H = 22;
-const VALUE_W = 120;
+const VALUE_W = 120; // the value column's floor; it grows to fit its longest text
 const CHAR_W = 7; // 12px mono ≈ 7px per character: the label column is sized to the longest label
 const DOT_CLASS = {
   crit: styles.dotCrit,
@@ -45,7 +45,17 @@ export function DotPlot({
       rows.reduce((m, r) => Math.max(m, r.label.length), 0) * CHAR_W + 8,
     ),
   );
-  const plotW = Math.max(120, width - LABEL_W - VALUE_W);
+  // The value column fits its longest text, never narrower than VALUE_W. When
+  // the columns outgrow the width asked for, the chart is wider than asked and
+  // its frame scrolls; a label is never clipped.
+  const valueW = Math.max(
+    VALUE_W,
+    rows.reduce((m, r) => Math.max(m, (r.note ?? r.valueText).length), 0) *
+      CHAR_W +
+      16,
+  );
+  const plotW = Math.max(120, width - LABEL_W - valueW);
+  const svgWidth = LABEL_W + plotW + valueW;
   const scale = dotPlotScale(
     rows.map((r) => r.tenths),
     plotW,
@@ -57,7 +67,7 @@ export function DotPlot({
   return (
     <svg
       className={styles.chart}
-      width={width}
+      width={svgWidth}
       height={height}
       role="img"
       aria-label={axisLabel}

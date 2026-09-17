@@ -7,7 +7,7 @@ import type { ReceivedAt } from "./freshness";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import type { LoadPhase } from "./inspector-view";
-import { compareRows, type CompareView } from "./lab-compare";
+import { compareRows, setMembership, type CompareView } from "./lab-compare";
 import { readEngine, type EngineReading } from "./lab-engine";
 import {
   contradictoryHeadline,
@@ -20,6 +20,7 @@ import {
   notRunHeadline,
   resultHeadline,
   runningHeadline,
+  setMembershipHeadline,
   withheldHeadline,
   type LabHeadline,
 } from "./lab-headline";
@@ -231,8 +232,12 @@ function compareOf(reading: LabReading): CompareState {
   if (set.phase === "running") return { kind: "running", ids: set.ids };
   const o = set.outcome;
   switch (o.kind) {
-    case "ok":
+    case "ok": {
+      // The asked ids are the authority on what was asked: a body that does not answer them is refused whole, every fault named.
+      const faults = setMembership(set.ids, o.response);
+      if (faults.length > 0) return { kind: "failed", headline: setMembershipHeadline(faults) };
       return { kind: "ok", cash: compareRows(o.response, CASH), legacy: compareRows(o.response, LEGACY) };
+    }
     case "busy":
       return { kind: "failed", headline: failureHeadline("busy", { message: o.message, inFlight: o.inFlight, maxInFlight: o.maxInFlight }) };
     case "not-served":
