@@ -159,10 +159,6 @@ test("(10) the adjudicated intros render — Observatory, Feed, Proof, Developer
       "by the build or persisted by a batch.",
   );
 
-  await page.goto("/developers");
-  await expect(page.locator("main")).toContainText(
-    "The committed API contract, rendered from its own examples: read-only JSON, no auth, " +
-      "every money value a decimal string. If a handler disagrees with this page, that is a " +
-      "failure, not documentation lag.",
-  );
+  // The API arm is RETIRED with the API convergence (plan 2026-09-16, Task 6): the intro is
+  // drawer doctrine now (R3), pinned verbatim in tests/e2e/api.spec.ts; the dek keeps its closing clause.
 });

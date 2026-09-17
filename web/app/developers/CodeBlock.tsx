@@ -1,11 +1,11 @@
 "use client";
 
-// A copyable code block (W6): the mockup's .term treatment with the standard
-// copy affordance in the corner. The copied text is the VERBATIM code —
-// rendering may highlight, the clipboard never differs.
+// A copyable code block: the terminal treatment with the standard copy
+// affordance in the corner. The copied text is the VERBATIM code — rendering
+// may highlight, the clipboard never differs.
 
 import { CopyChip } from "../proof/CopyChip";
-import styles from "./developers.module.css";
+import styles from "./api.module.css";
 
 export interface CodeBlockProps {
   /** The verbatim code — rendered AND copied. */

@@ -723,8 +723,8 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       // Generated verbatim from the contract; the error vocabulary renders
       // including the 409 supersession envelope.
-      await expect(page.getByTestId("endpoint-getEvidence")).toBeVisible();
-      await expect(page.getByTestId("error-BatchSuperseded")).toBeVisible();
+      await expect(page.getByTestId("api-endpoint-getEvidence")).toBeVisible();
+      await expect(page.getByTestId("api-error-BatchSuperseded")).toBeVisible();
     },
   },
 ];

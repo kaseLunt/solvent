@@ -18,7 +18,8 @@ const SURFACES = [
   { path: "/observatory", label: "History", h1: "Observatory" },
   { path: "/feed", label: "Activity", h1: "Feed" },
   { path: "/proof", label: "Verification", h1: "Proof" },
-  { path: "/developers", label: "API", h1: "Developers" },
+  // The API page is static: its H1 is the contract's own operation count, API or no API.
+  { path: "/developers", label: "API", h1: /read-only operations, every money value a decimal string\.$/ },
 ] as const;
 
 /** Pages whose rebuild has not landed yet; their H1 pins are fixme until it does. */
