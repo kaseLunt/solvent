@@ -10,6 +10,11 @@
 .legacy { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--panel); }
 .legacy > summary { cursor: pointer; font-size: var(--type-body); font-weight: var(--w-medium); color: var(--ink); }
 .legacyBody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+.legacyInCard { margin-top: 12px; }
+/* A chart's budget is this frame's content box; below the chart's minimum the frame scrolls rather than the chart shrinking. */
+.plotFrame { width: 100%; min-width: 0; overflow-x: auto; }
+/* The dot plot has no viewBox and renders 1:1; the kit's max-width would clip it where this frame is meant to scroll. */
+.plotFrame > svg { max-width: none; }
 .tilesPair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .method { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; font-size: var(--type-body); color: var(--ink); }
 .method h3 { margin: 8px 0 0; font-size: var(--type-card); }

@@ -24,6 +24,7 @@ import { useMetaConstants } from "@/lib/meta";
 import { resultReceipt } from "@/lib/resultIdentity";
 import { AddressWorkspace } from "./AddressWorkspace";
 import { AssumptionsDrawer } from "./AssumptionsDrawer";
+import { CompareCard } from "./CompareCard";
 import styles from "./lab.module.css";
 import { LabTiles } from "./LabTiles";
 import { LegacyResult } from "./LegacyResult";
@@ -244,7 +245,19 @@ export function LabSurface() {
                 }
               : undefined
           }
-          compare={null}
+          compare={
+            mode === "book"
+              ? {
+                  label:
+                    view.checked.length >= 2
+                      ? `Compare ${String(view.checked.length)} scenarios`
+                      : "Compare…",
+                  disabled:
+                    view.checked.length < 2 || view.compare.kind === "running",
+                  onCompare: () => reading.runSet(view.checked),
+                }
+              : null
+          }
           emptyText={
             book.state === "listing-loading"
               ? "Loading the committed scenarios…"
@@ -305,6 +318,9 @@ export function LabSurface() {
             />
             <TransitionCard reading={book.cash} engine={CASH} />
             {cashResult !== null && <MoversTable table={cashResult.movers} />}
+            {(view.compare.kind !== "idle" || view.checked.length >= 2) && (
+              <CompareCard state={view.compare} />
+            )}
             {book.legacy !== null && <LegacyResult reading={book.legacy} />}
             <AssumptionsDrawer
               open={drawerOpen}

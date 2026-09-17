@@ -7,6 +7,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { compareRows } from "../../lib/lab-compare";
 import {
   DEMO_ADDRESS_NEAR,
   DEMO_EVENTS_NEAR,
@@ -43,6 +44,7 @@ interface Mocks {
   runBookDelayMs?: number;
   set?: unknown;
   setStatus?: number;
+  setDelayMs?: number;
   address?: unknown;
   addressStatus?: number;
   stress?: unknown;
@@ -74,10 +76,11 @@ async function mockLab(page: Page, m: Mocks = {}): Promise<Counts> {
     lookups += 1;
     return json(route, m.address ?? DEMO_ADDRESS_NEAR, m.addressStatus ?? 200);
   });
-  await page.route("**/v1/scenarios/run-book-set", (route) => {
+  await page.route("**/v1/scenarios/run-book-set", async (route) => {
     if (route.request().method() === "OPTIONS") return preflight(route);
     sets += 1;
     posted.push(route.request().postData() ?? "");
+    if (m.setDelayMs !== undefined) await new Promise((r) => setTimeout(r, m.setDelayMs));
     return json(route, m.set ?? DEMO_RUN_BOOK_SET, m.setStatus ?? 200, POST_CORS);
   });
   await page.route("**/v1/scenarios/*/run-book", async (route) => {
@@ -679,4 +682,126 @@ test("a failed re-run over a held result keeps the held result's own condition b
   await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
   await expect(row(page, "eth_minus_30")).toContainText("Not served");
   await expect(row(page, "eth_minus_30")).not.toContainText("+$1.2M");
+});
+
+test("compare: two ticks enable the button, one POST posts exactly those ids, the dots rank as compareRows ranks the demo set, the legacy fold is its own book, and 390 wide has no horizontal overflow", async ({ page }) => {
+  const counts = await mockLab(page);
+  await page.goto("/lab");
+  const button = page.getByTestId("lab-compare");
+  await expect(button).toHaveText("Compare…");
+  await expect(button).toBeDisabled();
+  await expect(page.getByTestId("lab-compare-card")).toHaveCount(0);
+  await page.getByTestId("lab-library-check-eth_minus_30").check();
+  await expect(button).toBeDisabled();
+  await page.getByTestId("lab-library-check-ethfi_minus_50").check();
+  await expect(button).toHaveText("Compare 2 scenarios");
+  await expect(button).toBeEnabled();
+  // Two ticks stand the card up, idle; nothing is dispatched until Compare is pressed.
+  await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "idle");
+  await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
+  expect(counts.sets()).toBe(0);
+  await button.click();
+  await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
+  expect(counts.sets()).toBe(1);
+  expect(counts.posted()[0]).toBe('{"scenario_ids":["eth_minus_30","ethfi_minus_50"]}');
+  await expect(page.getByTestId("lab-compare-state")).toContainText("batch 18,251 (still the newest)");
+  await expect(page.getByTestId("lab-compare-superseded")).toHaveCount(0);
+  // The rows are the set's own, in the order compareRows ranks the demo set: |share|, then |Δ|, then wire order.
+  const expected = compareRows(DEMO_RUN_BOOK_SET, "debt_manager").rows;
+  const ids = await page.locator("[data-testid^='lab-compare-row-']").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-testid")));
+  expect(ids).toEqual(expected.map((r) => `lab-compare-row-${r.id}`));
+  expect(ids).toEqual(["lab-compare-row-eth_minus_30", "lab-compare-row-ethfi_minus_50", "lab-compare-row-weeth_market_depeg_oracles_held", "lab-compare-row-dm_rate_horizon_plus_200bps"]);
+  for (const r of expected) await expect(page.getByTestId(`lab-compare-row-${r.id}`)).toHaveAttribute("data-kind", r.kind === "point" ? "point" : "refused");
+  await expect(page.getByTestId("lab-dotplot").locator("circle")).toHaveCount(expected.filter((r) => r.kind === "point").length);
+  // The demo figures, to the character: the share of the Cash book, the delta, the engine's own flip count.
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% of the Cash book · +$1.2M · 118 accounts");
+  await expect(page.getByTestId("lab-compare-row-ethfi_minus_50")).toContainText("+<0.1% of the Cash book · +$9,800 · 2 accounts");
+  await expect(page.getByTestId("lab-compare-row-weeth_market_depeg_oracles_held")).toContainText("0% of the Cash book · +$0 · 0 accounts");
+  // The legacy market's shares fold below on their own book; the Cash plot never names it.
+  await expect(page.getByTestId("lab-dotplot")).not.toContainText("legacy");
+  const legacy = page.getByTestId("lab-compare-legacy");
+  await expect(legacy).toBeVisible();
+  await legacy.locator("summary").click();
+  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toHaveAttribute("data-kind", "point");
+  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toContainText("+0.3% of the legacy book · +$6,000");
+  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).not.toContainText("account");
+  await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toHaveAttribute("data-kind", "refused");
+  await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toContainText("not modelled for the legacy market");
+  await expect(legacy).toContainText("never added together");
+  // The set is Compare's; the workspace itself has run nothing.
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  expect(counts.runs()).toBe(0);
+  await page.setViewportSize({ width: 390, height: 800 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test("compare: a scenario the set withheld for Cash is a dashed row with its word — no dot, no zero, no money", async ({ page }) => {
+  const withheld = {
+    ...DEMO_RUN_BOOK_SET,
+    results: DEMO_RUN_BOOK_SET.results.map((r) => (r.scenario_id === "ethfi_minus_50" ? { ...r, withheld_engines: ["debt_manager"], engines: [] } : r)),
+  };
+  await mockLab(page, { set: withheld });
+  await page.goto("/lab?scenarios=eth_minus_30,ethfi_minus_50");
+  await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
+  const row = page.getByTestId("lab-compare-row-ethfi_minus_50");
+  await expect(row).toHaveAttribute("data-kind", "refused");
+  await expect(row.locator("circle")).toHaveCount(0);
+  // The value column says only the word: not a share, not a dollar.
+  await expect(row.locator("css=text").last()).toHaveText("withheld");
+  await expect(row).not.toContainText("%");
+  await expect(row).not.toContainText("$");
+  // Ranked after every point, and the points keep their figures.
+  const ids = await page.locator("[data-testid^='lab-compare-row-']").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-testid")));
+  expect(ids[ids.length - 1]).toBe("lab-compare-row-ethfi_minus_50");
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% of the Cash book");
+});
+
+test("compare: a busy evaluator fails the set by name and frees the button; a second Compare during a set is ignored; a superseded evaluation is labelled", async ({ page }) => {
+  const busy = await mockLab(page, { set: { error: { code: "set_run_busy", message: "another evaluation holds the slot", max_in_flight: 1, in_flight: 1 } }, setStatus: 503 });
+  await page.goto("/lab");
+  await page.getByTestId("lab-library-check-eth_minus_30").check();
+  await page.getByTestId("lab-library-check-ethfi_minus_50").check();
+  const button = page.getByTestId("lab-compare");
+  const state = page.getByTestId("lab-compare-state");
+  await button.click();
+  await expect(state).toHaveAttribute("data-kind", "failed");
+  await expect(state).toHaveText("The evaluator is busy. Another evaluation holds the slot. 1 of 1 slots in use.");
+  await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
+  await expect(button).toBeEnabled();
+  expect(busy.sets()).toBe(1);
+
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const slow = await mockLab(page, {
+    set: { ...DEMO_RUN_BOOK_SET, evaluation: { ...DEMO_RUN_BOOK_SET.evaluation, freshness: "superseded", newest_servable_batch_id: 18252 } },
+    setDelayMs: 600,
+  });
+  await page.goto("/lab");
+  await page.getByTestId("lab-library-check-eth_minus_30").check();
+  await page.getByTestId("lab-library-check-ethfi_minus_50").check();
+  await button.click();
+  await expect(state).toHaveAttribute("data-kind", "running");
+  await expect(state).toHaveText("Evaluating 2 scenarios…");
+  await expect(button).toBeDisabled();
+  await button.click({ force: true });
+  await expect(state).toHaveAttribute("data-kind", "ok");
+  expect(slow.sets()).toBe(1);
+  const superseded = page.getByTestId("lab-compare-superseded");
+  await expect(superseded).toHaveAttribute("data-freshness", "superseded");
+  await expect(superseded).toContainText("evaluated on batch 18,251; the newest servable batch is 18,252");
+  await expect(state).toContainText("batch 18,251 (since superseded)");
+});
+
+test("compare: one-address mode has no Compare, and the ticks and the result survive the round trip back to the book", async ({ page }) => {
+  await mockLab(page);
+  await page.goto("/lab?scenarios=eth_minus_30,ethfi_minus_50");
+  await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
+  await page.getByTestId("lab-mode-address").click();
+  await expect(surface(page)).toHaveAttribute("data-mode", "address");
+  await expect(page.getByTestId("lab-compare")).toHaveCount(0);
+  await expect(page.getByTestId("lab-compare-card")).toHaveCount(0);
+  await page.getByTestId("lab-mode-book").click();
+  await expect(page.getByTestId("lab-compare")).toHaveText("Compare 2 scenarios");
+  await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% of the Cash book");
 });

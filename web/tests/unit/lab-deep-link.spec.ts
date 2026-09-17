@@ -32,7 +32,6 @@ test.describe("the deep-link decision", () => {
       filteredIds: [],
       overCap: false,
       notice: null,
-      dispatchNotice: null,
     });
   });
 

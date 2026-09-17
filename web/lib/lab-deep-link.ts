@@ -32,14 +32,6 @@ export type DeepLinkDecision =
        * dispatched.
        */
       notice: string | null;
-      /**
-       * The same disclosure in dispatch-time past tense, the one that travels
-       * into the run's stored dispatch record. A settled surface
-       * describes what the dispatch omitted, and a listing refresh that later
-       * publishes a filtered id must not flip that record into a false
-       * present-tense statement about the current deployment.
-       */
-      dispatchNotice: string | null;
     };
 
 /** "a, b and c" — the house list vocabulary. */
@@ -90,8 +82,8 @@ export function deepLinkDecision(
   const filteredIds = askedIds.filter((id) => !listed.has(id));
   const overCap = runIds.length > MAX_SET_RUN_SCENARIOS;
 
-  // The tense-stable clauses, shared by both notices: the wildcard refusal and
-  // the cap refusal state facts that do not age.
+  // The tense-stable clauses: the wildcard refusal and the cap refusal state
+  // facts that do not age.
   const wildcardClause = filteredIds.includes("*")
     ? "A * is never expanded: a link whose meaning changes when the committed set changes is a link that " +
       "lies to whoever opens it tomorrow, so this surface has no implicit all."
@@ -118,19 +110,6 @@ export function deepLinkDecision(
   if (wildcardClause !== null) clauses.push(wildcardClause);
   if (overCapClause !== null) clauses.push(overCapClause);
 
-  // The dispatch-time account of the same filtering, past tense throughout: it
-  // describes the request that ran, never the listing on screen.
-  const dispatchClauses: string[] = [];
-  if (filteredIds.length > 0) {
-    dispatchClauses.push(
-      `You asked for ${String(askedIds.length)} scenario(s). This deployment did not publish these ` +
-        `ids when the set was dispatched: ${listWords(filteredIds)}.` +
-        dispatchedTail,
-    );
-  }
-  if (wildcardClause !== null) dispatchClauses.push(wildcardClause);
-  if (overCapClause !== null) dispatchClauses.push(overCapClause);
-
   return {
     kind: "set",
     askedIds,
@@ -138,6 +117,5 @@ export function deepLinkDecision(
     filteredIds,
     overCap,
     notice: clauses.length === 0 ? null : clauses.join(" "),
-    dispatchNotice: dispatchClauses.length === 0 ? null : dispatchClauses.join(" "),
   };
 }
