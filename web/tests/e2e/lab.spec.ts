@@ -638,3 +638,45 @@ test("not covered: a scenario that models only the legacy market does not model 
   // The retired law: not covered never looks like withheld.
   await expect(page.locator("main")).not.toContainText(/withheld/i);
 });
+
+test("a failed re-run over a held result keeps the held result's own condition beside the failure, and never shows a retained body whose definition changed", async ({ page }) => {
+  // A result under a drifted path assumption, then a failed re-run: both sentences, the figures kept.
+  const drifted = { ...DEMO_SCENARIOS, scenarios: DEMO_SCENARIOS.scenarios.map((s) => (s.id === "eth_minus_30" ? { ...s, path_assumption: "a different path" } : s)) };
+  await mockLab(page, { scenarios: drifted });
+  await page.goto("/lab");
+  await runIt(page);
+  await expect(surface(page)).toHaveAttribute("data-banner", "stale-input");
+  await page.route("**/v1/scenarios/*/run-book", (route) =>
+    route.request().method() === "OPTIONS" ? preflight(route) : json(route, fixture("error-not-found.json"), 404, POST_CORS),
+  );
+  await page.getByTestId("lab-run").click();
+  const banner = page.getByTestId("lab-banner");
+  await expect(banner).toHaveAttribute("data-kind", "rerun-failed");
+  await expect(banner).toHaveAttribute("data-held", "stale-input");
+  await expect(banner).toContainText("Run again failed — Book-wide stress is not served by this deployment.");
+  await expect(banner).toContainText("the listing's path assumption changed since this run.");
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  await expect(tile(page, "newly")).toContainText("118");
+
+  // A result under another version, then a failed re-run: the request's own failure, the retained batch disclosed, nothing shown.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const rev = { ...DEMO_SCENARIOS, scenarios: DEMO_SCENARIOS.scenarios.map((s) => (s.id === "eth_minus_30" ? { ...s, version: "v2" } : s)) };
+  await mockLab(page, { scenarios: rev });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "definition-changed");
+  await page.route("**/v1/scenarios/*/run-book", (route) =>
+    route.request().method() === "OPTIONS" ? preflight(route) : json(route, fixture("error-not-found.json"), 404, POST_CORS),
+  );
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "not-served");
+  await expect(headline(page)).toHaveText("Book-wide stress is not served by this deployment.");
+  await expect(surface(page)).toHaveAttribute("data-banner", "retained-refused");
+  await expect(banner).toContainText("A result for batch 18,251 is retained but not shown: the definition's version changed since it was computed.");
+  await expect(banner).toContainText("The failure above is this request's own.");
+  await expect(tile(page, "newly")).toContainText("—");
+  await expect(tile(page, "newly")).not.toContainText("118");
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expect(row(page, "eth_minus_30")).toContainText("Not served");
+  await expect(row(page, "eth_minus_30")).not.toContainText("+$1.2M");
+});

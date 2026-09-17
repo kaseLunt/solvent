@@ -56,13 +56,22 @@ export type BookState =
   | "busy"
   | "unreachable"
   | "failed";
-export type Banner = "stale-input" | "superseded" | "rerun-failed" | null;
+export type Banner = "stale-input" | "superseded" | "rerun-failed" | "retained-refused" | null;
+/** The held result's own condition, said beside the failure that left it standing. */
+export type HeldCondition = "stale-input" | "superseded" | null;
+/** A retained body the page does not show: its definition changed since it was computed. */
+export interface Retained {
+  readonly batchId: number;
+  readonly skew: readonly string[];
+}
 
 export interface BookWorkspace {
   readonly state: BookState;
   readonly banner: Banner;
   /** The failure a re-run met while a computed result is held below it; the banner names it. */
   readonly rerunFailure: LabHeadline | null;
+  readonly heldCondition: HeldCondition;
+  readonly retained: Retained | null;
   readonly kicker: string;
   readonly headline: LabHeadline;
   readonly chips: LabChip[];
@@ -100,6 +109,8 @@ const emptyBook = (state: BookState, headline: LabHeadline, definition: Scenario
   state,
   banner: null,
   rerunFailure: null,
+  heldCondition: null,
+  retained: null,
   kicker: definition === null ? "Scenarios · Cash book" : `${definition.label} · Cash book`,
   headline,
   chips,
@@ -143,7 +154,7 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
     enginesChip(run, cash),
     { label: "Config", value: run.scenario_config_version, tone: skew.includes("config version") ? "warn" : undefined },
   ];
-  const base = { kicker, chips, identity, receivedAt, definition: def, run, cash, legacy, skew, rerunFailure: null };
+  const base = { kicker, chips, identity, receivedAt, definition: def, run, cash, legacy, skew, rerunFailure: null, heldCondition: null, retained: null };
   // Precedence: a version skew is its own state before any reading is consulted; on a
   // result, a superseded batch outranks a stale input as the banner, and a banner sits
   // on the result state rather than replacing it.
@@ -184,12 +195,19 @@ function bookOf(listing: ScenariosResponse, def: ScenarioDefinition, record: Run
   const o = record.outcome;
   if (o.kind === "ok") return resultBook(def, listing.scenario_config_version, o.response, { wallMs: record.at, monotonicMs: record.atMonotonicMs });
   const failure = failureOf(o);
+  const chips = definitionChips(def, listing.scenario_config_version);
   if (record.held !== null) {
-    // A result already computed is never replaced by a failed re-run: it stands for the batch it names, the failure named beside it.
     const held = resultBook(def, listing.scenario_config_version, record.held.response, { wallMs: record.held.at, monotonicMs: record.held.atMonotonicMs });
-    return { ...held, banner: "rerun-failed", rerunFailure: failure.headline };
+    // A retained body whose definition changed is disclosed, never shown as this request's answer: the attempt's own failure is the state.
+    if (held.state === "definition-changed") {
+      return { ...emptyBook(failure.state, failure.headline, def, chips), banner: "retained-refused", retained: { batchId: record.held.response.batch.id, skew: held.skew } };
+    }
+    // A result already computed is never replaced by a failed re-run: it stands for the batch it names, the failure named
+    // beside it — and so is the held result's own condition, which the failure does not cancel.
+    const heldCondition: HeldCondition = held.banner === "superseded" || held.banner === "stale-input" ? held.banner : null;
+    return { ...held, banner: "rerun-failed", heldCondition, rerunFailure: failure.headline };
   }
-  return emptyBook(failure.state, failure.headline, def, definitionChips(def, listing.scenario_config_version));
+  return emptyBook(failure.state, failure.headline, def, chips);
 }
 
 function failureOf(o: Exclude<RunBookOutcome, { kind: "ok" }>): { state: BookState; headline: LabHeadline } {

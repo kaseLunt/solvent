@@ -209,3 +209,28 @@ test("a failed re-run never replaces a computed result: the held figures stand u
   expect(first.book.banner).toBeNull();
   expect(first.book.rerunFailure).toBeNull();
 });
+
+test("a held result whose definition changed is disclosed, not shown: the failed request's own state, the retained batch named", () => {
+  const otherVersion = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], { ...ETH_DEF, version: "v2" });
+  const failure = { kind: "not-served" } as const;
+  const runs = new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: failure, at: 2, atMonotonicMs: 2, held: { response: otherVersion, at: 1, atMonotonicMs: 1 } }]]);
+  const v = deriveLabView(reading({ runs }), ui());
+  expect(v.book.state).toBe("not-served");
+  expect(v.book.banner).toBe("retained-refused");
+  expect(v.book.retained).toEqual({ batchId: otherVersion.batch.id, skew: ["version"] });
+  expect(v.book.cash).toBeNull();
+  expect(v.book.run).toBeNull();
+  expect(v.book.headline).toEqual(failureHeadline("not-served", {}));
+  expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Not served", tone: "refused" });
+});
+
+test("a held result's own condition is said beside the failure that left it standing", () => {
+  const drifted = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], { ...ETH_DEF, path_assumption: "a different path" });
+  const runs = new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "not-served" }, at: 2, atMonotonicMs: 2, held: { response: drifted, at: 1, atMonotonicMs: 1 } }]]);
+  const v = deriveLabView(reading({ runs }), ui());
+  expect(v.book.state).toBe("result");
+  expect(v.book.banner).toBe("rerun-failed");
+  expect(v.book.heldCondition).toBe("stale-input");
+  expect(v.book.skew).toEqual(["path assumption"]);
+  expect(v.book.rerunFailure).toEqual(failureHeadline("not-served", {}));
+});

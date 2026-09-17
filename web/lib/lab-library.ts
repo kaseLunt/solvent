@@ -35,7 +35,7 @@ export type SetRecord =
   | { readonly phase: "running"; readonly ids: readonly string[]; readonly startedAt: number }
   | { readonly phase: "settled"; readonly ids: readonly string[]; readonly outcome: SetRunOutcome; readonly at: number };
 
-export type LibraryOutcomeKey = "not-run" | "running" | "result" | "withheld" | "not-covered" | "failed";
+export type LibraryOutcomeKey = "not-run" | "running" | "result" | "withheld" | "not-covered" | "failed" | "definition-changed";
 export type LibraryOutcomeTone = "crit" | "warn" | "ok" | "refused" | "dim";
 export interface LibraryOutcome {
   readonly key: LibraryOutcomeKey;
@@ -70,18 +70,22 @@ const FAILURE_WORD: Record<Exclude<RunBookOutcome["kind"], "ok" | "failed">, str
 const failed = (text: string): LibraryOutcome => ({ key: "failed", text, tone: "refused" });
 
 /** The row's one word. A settled result is the Cash reading of `lab-engine` — the workspace's own — said in a word, never a second judgement of the same body. */
-export function outcomeLine(record: RunRecord | undefined, definition: ScenarioDefinition): LibraryOutcome {
+export function outcomeLine(record: RunRecord | undefined, definition: ScenarioDefinition, configVersion: string): LibraryOutcome {
   if (record === undefined) return { key: "not-run", text: "Not run yet", tone: "dim" };
   if (record.phase === "running") return { key: "running", text: "Running…", tone: "dim" };
   const o = record.outcome;
-  if (o.kind === "ok") return cashOutcome(o.response, definition);
-  // A failed re-run leaves the held result's word: the page keeps those figures, its banner names the failure.
-  if (record.held !== null) return cashOutcome(record.held.response, definition);
+  if (o.kind === "ok") return cashOutcome(o.response, definition, configVersion);
+  // A failed re-run leaves the held result's word while the page keeps those figures; a retained body the page
+  // does not show (its definition changed) leaves the row to the request's own failure.
+  const held = record.held === null ? null : cashOutcome(record.held.response, definition, configVersion);
+  if (held !== null && held.key !== "definition-changed") return held;
   if (o.kind === "failed") return failed(`Failed ${String(o.status)}`);
   return failed(FAILURE_WORD[o.kind]);
 }
 
-function cashOutcome(response: LabRunBook, definition: ScenarioDefinition): LibraryOutcome {
+function cashOutcome(response: LabRunBook, definition: ScenarioDefinition, configVersion: string): LibraryOutcome {
+  // A result computed under another version of the definition is not this definition's result.
+  if (definitionSkew(definition, configVersion, response).includes("version")) return { key: "definition-changed", text: "Definition changed", tone: "refused" };
   const r = readEngine(response, CASH, definition);
   switch (r.kind) {
     case "not-covered":
@@ -112,7 +116,7 @@ export function libraryRows(listing: ScenariosResponse | null, records: Readonly
     description: def.description,
     engines: joinAnd(def.engines.map(engineName)),
     coversCash: def.engines.includes(CASH),
-    outcome: outcomeLine(records.get(def.id), def),
+    outcome: outcomeLine(records.get(def.id), def, listing.scenario_config_version),
     checked: checked.has(def.id),
     selected: def.id === selectedId,
   }));

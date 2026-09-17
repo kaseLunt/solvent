@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import styles from "./kit.module.css";
 
 export type LibraryOutcomeKey =
-  "not-run" | "running" | "result" | "withheld" | "not-covered" | "failed";
+  "not-run" | "running" | "result" | "withheld" | "not-covered" | "failed" | "definition-changed";
 export type LibraryOutcomeTone = "crit" | "warn" | "ok" | "refused" | "dim";
 
 export interface LibraryItem {

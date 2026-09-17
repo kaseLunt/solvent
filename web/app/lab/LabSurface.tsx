@@ -292,6 +292,8 @@ export function LabSurface() {
                 skew={book.skew}
                 batchId={book.run?.batch.id ?? null}
                 failure={book.rerunFailure}
+                heldCondition={book.heldCondition}
+                retained={book.retained}
                 onRerun={() => reading.run(definition.id)}
                 rerunDisabled={running}
               />
