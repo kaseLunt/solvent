@@ -18,7 +18,15 @@ const COLUMNS = [
 /** The one-address workspace: the Inspector's tiles for before and after the selected scenario, and every scenario's row (plan R8, R15). */
 export function AddressWorkspace({ space, kicker }: { space: Space; kicker: ReactNode }) {
   const money = accountMoney(space.decimals);
-  const chips = space.batchId === null ? [] : [{ label: "Result for batch", value: groupInt(space.batchId) }, ...(space.selected === null ? [] : [{ label: "Scenario", value: space.selected.id }])];
+  const crossBatch = space.batchId !== null && space.stressBatchId !== null && space.stressBatchId !== space.batchId;
+  const chips =
+    space.batchId === null
+      ? []
+      : [
+          { label: "Result for batch", value: groupInt(space.batchId) },
+          ...(crossBatch && space.stressBatchId !== null ? [{ label: "Stress for batch", value: groupInt(space.stressBatchId), tone: "warn" as const }] : []),
+          ...(space.selected === null ? [] : [{ label: "Scenario", value: space.selected.id }]),
+        ];
   const t = space.tiles;
   const tile = (key: string, side: "before" | "after", label: string, v: AddressTile | undefined) => (
     <KpiTile testId={`lab-address-kpi-${key}-${side}`} label={label} value={v?.value ?? "—"} tone={v?.tone ?? "refused"} pending={space.state === "loading"} />
@@ -90,7 +98,10 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
         </div>
       </div>
       <section data-testid="lab-address-section">
-        <SectionHead title="Every committed scenario" qualifier="applied to this account · shocked figures are projections, not readings" />
+        <SectionHead
+          title="Every committed scenario"
+          qualifier={crossBatch && space.stressBatchId !== null ? `applied to this account at batch ${groupInt(space.stressBatchId)} · the position above is batch ${groupInt(space.batchId ?? 0)} · shocked figures are projections, not readings` : "applied to this account · shocked figures are projections, not readings"}
+        />
         <KitTable columns={COLUMNS} rows={rows} testId="lab-address-table" emptyText={space.state === "rows" ? "No scenario applies to this address." : space.headline.emphasis} />
       </section>
     </>

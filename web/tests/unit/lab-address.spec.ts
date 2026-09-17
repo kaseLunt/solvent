@@ -357,3 +357,19 @@ test("rowVerdictWord and sideRoomWords: the table's cells are the lib's own word
   expect(sideRoomWords(eth.after, null)).toBe("unreadable scale");
   expect(sideRoomWords(eth.after, 6)).not.toContain("−");
 });
+
+test("a stress result for another batch than the position is not compared: both batches named, the tiles refused, the rows kept", () => {
+  const other = { ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: DEMO_STRESS_NEAR.batch.id + 1 } };
+  const w = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(other), selectedId: "eth_minus_30" });
+  expect(w.state).toBe("rows");
+  expect(w.batchId).toBe(DEMO_STRESS_NEAR.batch.id);
+  expect(w.stressBatchId).toBe(DEMO_STRESS_NEAR.batch.id + 1);
+  expect(w.tiles).toBeNull();
+  expect(w.rows.length).toBeGreaterThan(0);
+  expect(w.headline.tone).toBe("refused");
+  expect(w.headline.emphasis).toBe(`Cannot say — the stress result is for batch ${(DEMO_STRESS_NEAR.batch.id + 1).toLocaleString("en-US")}; the position above is batch ${DEMO_STRESS_NEAR.batch.id.toLocaleString("en-US")}.`);
+  // The same batch on both sides compares as before.
+  const same = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(DEMO_STRESS_NEAR), selectedId: "eth_minus_30" });
+  expect(same.stressBatchId).toBe(same.batchId);
+  expect(same.tiles).not.toBeNull();
+});

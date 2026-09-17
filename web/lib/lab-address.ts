@@ -9,6 +9,7 @@ import type { CashStatus } from "./inspector-position";
 import type { InspectorView } from "./inspector-view";
 import { refused, sentence, UNREADABLE_SCALE, type LabHeadline } from "./lab-headline";
 import type { LibraryOutcome } from "./lab-library";
+import { groupInt } from "./prose";
 import { isWireScale } from "./wireGuard";
 
 export type AddressWorkspaceState = "idle" | "invalid" | "loading" | "unavailable" | "no-position" | "withheld" | "rows";
@@ -35,6 +36,8 @@ export interface AddressWorkspace {
   readonly headline: LabHeadline;
   readonly tiles: AddressTiles | null;
   readonly batchId: number | null;
+  /** The stress response's own batch; when it differs from the position's the comparison is refused and both are named. */
+  readonly stressBatchId: number | null;
   readonly decimals: number | null;
   readonly cause: string | null;
 }
@@ -43,7 +46,7 @@ const REFUSED_TILE: AddressTile = { value: "—", tone: "refused" };
 const NOT_COMPUTED: AddressTile = { value: "Not computed", tone: "refused" };
 
 function empty(state: AddressWorkspaceState, address: string, headline: LabHeadline, cause: string | null = null): AddressWorkspace {
-  return { state, address, rows: [], selected: null, headline, tiles: null, batchId: null, decimals: null, cause };
+  return { state, address, rows: [], selected: null, headline, tiles: null, batchId: null, stressBatchId: null, decimals: null, cause };
 }
 
 const STATUS_WORD: Record<CashStatus, AddressTile> = {
@@ -211,6 +214,7 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   const stress = view.stress;
   if (stress === null) return empty("loading", address, refused(`Running the committed scenarios for ${short}…`, "One evaluation per scenario against this batch; nothing is written."));
   const batchId = view.batchId;
+  const stressBatchId = view.stressBatchId;
   if (stress.kind === "no-position") {
     return empty("no-position", address, refused(`No Cash position for ${short} in batch ${batchId === null ? "?" : String(batchId)}.`, "The lookup is complete: there is nothing to stress."));
   }
@@ -220,8 +224,13 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   const rows = stress.rows;
   const selected = rows.find((r) => r.id === selectedId) ?? rows[0] ?? null;
   const decimals = view.decimals !== null && isWireScale(view.decimals) ? view.decimals : null;
-  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, selected, headline, tiles: null, batchId, decimals, cause: null });
+  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, selected, headline, tiles: null, batchId, stressBatchId, decimals, cause: null });
   if (selected === null) return bare(refused(`No scenario applies to ${short}.`, "The stress response carried no scenario for this account."));
+  // A stress result computed for another batch than the position is not compared with it: the rows are the stress
+  // result's own, at its batch; the tiles would set two batches side by side, so they are refused and both are named.
+  if (batchId !== null && stressBatchId !== null && stressBatchId !== batchId) {
+    return bare(refused(`Cannot say — the stress result is for batch ${groupInt(stressBatchId)}; the position above is batch ${groupInt(batchId)}.`, "The scenarios below are the stress result's own. A position and a stress result from different batches are not compared."));
+  }
   // Rows beside no Cash position are two responses disagreeing; a position at a scale the guard refused prints no figure.
   // Neither is the scenarios' doing, so neither borrows their sentence. The position is asked before its scale: no
   // position has no scale, and the disagreement is the truer sentence. A withheld Cash book is asked first of all: the
@@ -255,7 +264,7 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
     roomAfter: after === null ? REFUSED_TILE : roomTile(after.room, decimals, roomToneAfter),
     statusAfter,
   };
-  return { state: "rows", address, rows, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, decimals, cause: null };
+  return { state: "rows", address, rows, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, stressBatchId, decimals, cause: null };
 }
 
 /**
