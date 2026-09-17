@@ -1,5 +1,5 @@
 import type { components } from "@solvent/client";
-import { PUBLIC_ENDPOINTS } from "./copy";
+import { pipelineSteps, type PipelineStep } from "@/lib/verification-view";
 import styles from "./overview.module.css";
 
 type Schemas = components["schemas"];
@@ -11,70 +11,70 @@ export interface PipelineProps {
   cashAccounts: number | null;
 }
 
-const UNAVAILABLE = "unavailable";
-const n = (value: number | null | undefined): string =>
-  typeof value === "number" ? value.toLocaleString("en-US") : UNAVAILABLE;
+/** The front door's own words for each step; the number and its qualifier are the shared law's (lib/verification-view). */
+const STEP_COPY: Record<PipelineStep["key"], { num: string; name: string; description: string }> = {
+  index: {
+    num: "01 · INDEX",
+    name: "Reorg-safe indexer",
+    description:
+      "Raw logs from OP Mainnet and Ethereum into Postgres. Verified-ancestor rewind handles forks of any depth; every derived table rebuilds from raw logs.",
+  },
+  compute: {
+    num: "02 · COMPUTE",
+    name: "Risk engine",
+    description:
+      "Each batch recomputes every account with its engine's own rule — Cash's borrow cap, Aave's health factor — using RedStone prices with a freshness budget.",
+  },
+  verify: {
+    num: "03 · VERIFY",
+    name: "Reconciled to chain",
+    description:
+      "Positions are re-derived against live contract reads; drift is pinned as a proof. What can't be verified is refused and shown as refused.",
+  },
+  serve: {
+    num: "04 · SERVE",
+    name: "Public API + this UI",
+    description:
+      "Read-only JSON, every money value a decimal string, a typed TypeScript client, and a live stream. This site is a client of the same API.",
+  },
+};
+
+/** Whether the number leads its noun ("87/87 gated rows exact", "17 endpoints") or follows it ("OP block 154,796,552", "batch 1"). */
+const VALUE_LEADS: Record<PipelineStep["key"], boolean> = { index: false, compute: false, verify: true, serve: true };
+
+/** The step's line: its number in bold beside its noun, then the second figure — `sub` is "unit · context" by the law's contract. */
+function StepValue({ step }: { step: PipelineStep }) {
+  const [unit = "", ...rest] = step.sub.split(" · ");
+  const context = rest.join(" · ");
+  const value = <b>{step.value}</b>;
+  return (
+    <div className={styles.stepV}>
+      {VALUE_LEADS[step.key] ? (
+        <>
+          {value} {unit}
+        </>
+      ) : (
+        <>
+          {unit} {value}
+        </>
+      )}
+      {context === "" ? null : <> · {context}</>}
+    </div>
+  );
+}
 
 /** How it works — four steps, each carrying a live number or an honest "unavailable". */
 export function Pipeline({ meta, evidence, book, cashAccounts }: PipelineProps) {
-  const dm = meta?.watermark_vector.find((w) => w.engine === "debt_manager") ?? null;
-  const eth = meta?.watermark_vector.find((w) => w.engine === "aave_v3_etherfi") ?? null;
-  const recon = evidence?.reconcile ?? null;
-  const indexValue = dm === null ? UNAVAILABLE : n(dm.last_block);
-  const verifyValue = recon === null ? UNAVAILABLE : `${n(recon.gated_exact)}/${n(recon.gated_rows)}`;
   return (
     <div className={styles.pipe}>
-      <div className={styles.step} data-testid="pipeline-index" data-value={indexValue}>
-        <div className={styles.stepNum}>01 · INDEX</div>
-        <div className={styles.stepN}>Reorg-safe indexer</div>
-        <div className={styles.stepD}>
-          Raw logs from OP Mainnet and Ethereum into Postgres. Verified-ancestor rewind handles forks of any depth;
-          every derived table rebuilds from raw logs.
+      {pipelineSteps(meta, evidence, book, cashAccounts).map((step) => (
+        <div key={step.key} className={styles.step} data-testid={`pipeline-${step.key}`} data-value={step.value}>
+          <div className={styles.stepNum}>{STEP_COPY[step.key].num}</div>
+          <div className={styles.stepN}>{STEP_COPY[step.key].name}</div>
+          <div className={styles.stepD}>{STEP_COPY[step.key].description}</div>
+          <StepValue step={step} />
         </div>
-        <div className={styles.stepV}>
-          OP block <b>{indexValue}</b> · Ethereum block <b>{eth === null ? UNAVAILABLE : n(eth.last_block)}</b>
-        </div>
-      </div>
-      <div className={styles.step} data-testid="pipeline-compute" data-value={book === null ? UNAVAILABLE : n(book.batch.id)}>
-        <div className={styles.stepNum}>02 · COMPUTE</div>
-        <div className={styles.stepN}>Risk engine</div>
-        <div className={styles.stepD}>
-          Each batch recomputes every account with its engine&apos;s own rule — Cash&apos;s borrow cap, Aave&apos;s
-          health factor — using RedStone prices with a freshness budget.
-        </div>
-        <div className={styles.stepV}>
-          {book === null ? (
-            <b>{UNAVAILABLE}</b>
-          ) : (
-            <>
-              batch <b>{n(book.batch.id)}</b> · <b>{n(cashAccounts)}</b> Cash accounts
-            </>
-          )}
-        </div>
-      </div>
-      <div className={styles.step} data-testid="pipeline-verify" data-value={verifyValue}>
-        <div className={styles.stepNum}>03 · VERIFY</div>
-        <div className={styles.stepN}>Reconciled to chain</div>
-        <div className={styles.stepD}>
-          Positions are re-derived against live contract reads; drift is pinned as a proof. What can&apos;t be
-          verified is refused and shown as refused.
-        </div>
-        <div className={styles.stepV}>
-          <b>{verifyValue}</b> gated rows exact
-          {recon === null ? "" : <> · drift <b>{n(recon.gated_drift)}</b></>}
-        </div>
-      </div>
-      <div className={styles.step} data-testid="pipeline-serve" data-value={String(PUBLIC_ENDPOINTS.length)}>
-        <div className={styles.stepNum}>04 · SERVE</div>
-        <div className={styles.stepN}>Public API + this UI</div>
-        <div className={styles.stepD}>
-          Read-only JSON, every money value a decimal string, a typed TypeScript client, and a live stream. This
-          site is a client of the same API.
-        </div>
-        <div className={styles.stepV}>
-          <b>{String(PUBLIC_ENDPOINTS.length)}</b> endpoints · typed TypeScript client
-        </div>
-      </div>
+      ))}
     </div>
   );
 }

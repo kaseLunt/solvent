@@ -9,24 +9,4 @@ export const HERO_DEK_TAIL =
   ", and anything it can't defend renders as a named refusal — never a guess, never a zero.";
 export const FOOTER_STACK = "Built with Go · PostgreSQL · Next.js · TypeScript · OP Mainnet + Ethereum · RedStone";
 export const FOOTER_NOTE = "a portfolio project, not affiliated with ether.fi";
-
-/** Mirror of the API page's route list; the pipeline card prints this list's length. */
-export const PUBLIC_ENDPOINTS = [
-  "GET /v1/book",
-  "GET /v1/positions",
-  "GET /v1/address/{addr}",
-  "GET /v1/address/{addr}/stress",
-  "GET /v1/address/{addr}/history",
-  "GET /v1/observatory",
-  "GET /v1/observatory/series",
-  "GET /v1/events",
-  "GET /v1/params",
-  "GET /v1/prices/{asset}",
-  "GET /v1/scenarios",
-  "POST /v1/scenarios/{id}/run-book",
-  "POST /v1/scenarios/run-book-set",
-  "GET /v1/evidence",
-  "GET /v1/batches/{id}",
-  "GET /v1/stream",
-  "GET /v1/meta",
-] as const;
+// The public route list the pipeline's Serve step counts lives with the step law: lib/verification-view.ts (`PUBLIC_ENDPOINTS`).
