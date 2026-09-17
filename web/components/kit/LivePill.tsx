@@ -28,12 +28,14 @@ export function LivePill() {
       ? null
       : { ageSeconds: batch.age_seconds, receiptId: posture.batchReceiptId },
   );
+  // While the age is unresolved its number is a floor, not an age: the pill says "age unknown" rather than dropping the clause.
   const ageSeconds = age.unresolved ? null : age.seconds;
   const words = livePillWords({
     streamState: posture.streamState,
     hasBase: posture.hasBase,
     batchId: batch?.id ?? null,
     ageSeconds,
+    ageUnresolved: age.unresolved,
     tier: ageSeconds === null ? null : freshnessTier(ageSeconds, meta.constants),
   });
   const dotClass = words.tone === "ok" ? styles.dotOk : words.tone === "warn" ? styles.dotWarn : "";

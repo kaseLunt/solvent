@@ -34,4 +34,10 @@ test.describe("humanUsd — compact money, truncating, bigint only", () => {
   test("decimals of zero", () => {
     expect(humanUsd(6840n, 0)).toBe("$6,840");
   });
+  test("a scale the guard refuses throws by name — -0 never multiplies into $239.6M, a negative never throws a nameless RangeError", () => {
+    expect(() => humanUsd(239_603_961n, -0)).toThrow(/decimals is not a wire scale.*got -0/);
+    expect(() => humanUsd(1n, -1)).toThrow(/got -1/);
+    expect(() => humanUsd(1n, 1.5)).toThrow(/got 1\.5/);
+    expect(() => humanUsd(1n, 1001)).toThrow(/got 1001/);
+  });
 });

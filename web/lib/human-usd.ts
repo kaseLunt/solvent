@@ -4,6 +4,8 @@
  * rounded up. Exact strings stay on the exact layer (ExactValue); this is
  * layer 1 only.
  */
+import { isWireScale, WireIntegerError } from "./wireGuard";
+
 export const DUST_DISPLAY = "<$0.01";
 export const MINUS = "−";
 
@@ -24,6 +26,14 @@ function oneDecimal(cents: bigint, unitCents: bigint, suffix: string): string {
 }
 
 export function humanUsd(value: bigint, decimals: number): string {
+  // A scale is validated before anything is formatted at it: -0 would multiply
+  // instead of divide, a negative would throw a nameless RangeError, a large
+  // one would never return.
+  if (!isWireScale(decimals)) {
+    throw new WireIntegerError(
+      `decimals is not a wire scale (an integer in [0, 1000], never -0): got ${Object.is(decimals, -0) ? "-0" : String(decimals)} — refused before formatting`,
+    );
+  }
   if (value < 0n) return `${MINUS}${humanUsd(-value, decimals)}`;
   if (value === 0n) return "$0";
   const cents = scaleDown(value, decimals - 2);

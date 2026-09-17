@@ -4,10 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { KitTable, SmallToggle, StatusPill, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import type { CashRow, SizedCashRow } from "@/lib/cash-rows";
-import type { CashSummary } from "@/lib/cash-summary";
+import { notComputedCause, type CashRow, type SizedCashRow } from "@/lib/cash-rows";
+import { attentionEmptyText, type CashSummary } from "@/lib/cash-summary";
 import { humanUsd } from "@/lib/human-usd";
-import { plainCause } from "@/lib/refusal-phrasebook";
 import styles from "./book.module.css";
 
 const DEFAULT_ROWS = 8;
@@ -56,7 +55,7 @@ function refusedRow(r: CashRow): KitRow {
       room: "—",
       debt: r.debt === null ? "—" : humanUsd(r.debt, r.decimals),
       status: (
-        <StatusPill tone="refused" title={r.refusal === null ? undefined : `${plainCause(r.refusal.code, r.refusal.detail)} · ${r.refusal.code}`}>
+        <StatusPill tone="refused" title={notComputedCause(r)}>
           Not computed
         </StatusPill>
       ),
@@ -96,7 +95,7 @@ export function NeedsAttention({ summary, rows, walkFailure, onRetry }: NeedsAtt
           { key: "status", header: "Status", align: "right" },
         ]}
         rows={shown}
-        emptyText={summary.settled ? "No account needs attention." : "Walking the book…"}
+        emptyText={attentionEmptyText(summary)}
       />
       {walkFailure !== null && (
         <p className={styles.walkFailure} role="alert" data-testid="book-walk-failure">

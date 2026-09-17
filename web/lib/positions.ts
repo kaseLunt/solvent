@@ -554,6 +554,16 @@ export type PositionsFailure =
       /** Transport / server-side failure: the ONE case a retry button is honest. */
       register: "transport";
       message: string;
+    }
+  | {
+      /**
+       * A 200 whose body breaks the contract — a foreign engine's rows, a census
+       * the pages never deliver, a row that cannot be decoded. Named, never
+       * rendered as an empty book; the identical request cannot be expected to
+       * answer differently, so no retry button.
+       */
+      register: "invalid-response";
+      message: string;
     };
 
 /**

@@ -60,8 +60,19 @@ export function BookMethodology({ open, onClose, book }: BookMethodologyProps) {
             <code>{book.batch.producer}</code>; served <code>{book.served_at}</code>. Coverage:{" "}
             {String(readWirePopulation(book.coverage.in_book, "coverage.in_book"))} of{" "}
             {String(readWirePopulation(book.coverage.batch_positions, "coverage.batch_positions"))} positions on the wire,{" "}
-            {String(readWirePopulation(book.coverage.refused_in_batch, "coverage.refused_in_batch"))} refused.
+            {String(readWirePopulation(book.coverage.refused_in_batch, "coverage.refused_in_batch"))} refused,{" "}
+            {String(readWirePopulation(book.coverage.excluded_by_this_layer, "coverage.excluded_by_this_layer"))} excluded
+            from the stress arithmetic.
           </p>
+        )}
+        {book !== null && book.coverage.excluded.length > 0 && (
+          <ul data-testid="book-methodology-excluded">
+            {book.coverage.excluded.map((e) => (
+              <li key={`${e.engine}:${e.account}`}>
+                <code>{e.account}</code> ({e.engine}) — {plainCause(e.code, e.reason)} · <code>{e.code}</code>
+              </li>
+            ))}
+          </ul>
         )}
         <p>
           Exact evidence and the reconcile receipt: <Link href="/proof">Verification</Link>. Every endpoint this

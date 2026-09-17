@@ -4,11 +4,11 @@ import { useState } from "react";
 import { BandBars, ChartCard, KpiTile, SectionHead, VerdictHeader, type Band } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { useCashBook } from "@/lib/cash-book";
-import { deriveCashView } from "@/lib/cash-view";
+import { deriveCashView, deriveLegacyView, malformedSub, moneyText } from "@/lib/cash-view";
 import { humanUsd } from "@/lib/human-usd";
+import { MATERIAL_LINE_USD } from "@/lib/materiality";
 import { useMetaConstants } from "@/lib/meta";
 import { plainCause } from "@/lib/refusal-phrasebook";
-import { readWirePopulation } from "@/lib/wireGuard";
 import { BookLegacy } from "./BookLegacy";
 import { BookMethodology } from "./BookMethodology";
 import { NeedsAttention } from "./NeedsAttention";
@@ -27,10 +27,9 @@ export function BookSurface() {
   const meta = useMetaConstants();
   const [methodOpen, setMethodOpen] = useState(false);
   const view = deriveCashView(reading, meta.constants);
-  const { summary, decimals, refusedTiles, walking } = view;
+  const { summary, decimals, refusedTiles, walking, walkStopped } = view;
   const cash = reading.cash;
 
-  const money = (v: string | null | undefined): string => (v == null ? "—" : humanUsd(BigInt(v), decimals));
   const bands: Band[] = (summary?.bands ?? []).map((b) => ({
     id: b.id,
     label: bandLabel(b.id, b.label),
@@ -40,25 +39,39 @@ export function BookSurface() {
   }));
   const nearTenPct = (summary?.bands ?? []).filter((b) => NEAR_BANDS.has(b.id)).reduce((s, b) => s + b.debt, 0n);
   const refusalKey = cash.engine?.refusals[0]?.key;
-  const badDebt = refusedTiles ? null : cash.badDebt;
-  const badDebtValue = badDebt?.current_bad_debt_usd == null ? null : BigInt(badDebt.current_bad_debt_usd);
-  const insolvent =
-    badDebt === null || badDebt.insolvent_positions === null
-      ? null
-      : readWirePopulation(badDebt.insolvent_positions, "bad_debt[debt_manager].insolvent_positions");
+  const badDebt = view.badDebt;
   const walkFailure =
     cash.walkFailure === null
       ? null
       : { message: cash.walkFailure.message, retryable: cash.walkFailure.register === "transport" };
   const notComputedLine = refusedTiles ? "Not computed." : "Loading…";
-  const walkNote = walking ? " · walking the book, figures are a lower bound" : "";
+  const walkNote = walking
+    ? " · walking the book, figures are a lower bound"
+    : walkStopped !== null
+      ? " · the walk stopped, figures are a lower bound"
+      : "";
   const withheldCause = view.withheld === null ? null : plainCause(view.withheld.code, view.withheld.detail);
+  // A walk-derived zero is a finding only once the walk is complete: until
+  // then the tile shows a dash, and a positive figure is a lower bound.
+  const unsettled = summary !== null && !summary.settled;
+  const boundNote = walkStopped !== null ? " · lower bound, walk stopped" : unsettled ? " · lower bound, walking" : "";
+  const notComputedSub =
+    withheldCause ??
+    (view.refusedPositions === null
+      ? refusedTiles
+        ? "not computed"
+        : "loading…"
+      : refusalKey !== undefined
+        ? plainCause(refusalKey)
+        : view.refusedPositions === 0
+          ? "nothing refused"
+          : "cause not stated");
 
   return (
     <div className={styles.page} aria-busy={walking ? "true" : undefined}>
       <VerdictHeader
         testId="book-verdict"
-        kicker={`Cash book · right now${walking ? " · walking" : ""}`}
+        kicker={`Cash book · right now${walking ? " · walking" : walkStopped !== null ? " · walk stopped" : ""}`}
         emphasis={view.headline.emphasis}
         rest={view.headline.rest}
         tone={view.headline.tone}
@@ -84,66 +97,108 @@ export function BookSurface() {
         <KpiTile
           testId="book-kpi-debt"
           label="Debt outstanding"
-          value={refusedTiles ? "—" : money(cash.engine?.total_debt)}
-          sub={refusedTiles ? "not computed" : `against ${money(cash.engine?.total_collateral)} collateral`}
-          tone={refusedTiles ? "refused" : "neutral"}
+          value={moneyText(view.debt)}
+          sub={
+            refusedTiles
+              ? "not computed"
+              : view.debt.kind === "malformed"
+                ? malformedSub(view.debt.field)
+                : view.collateral.kind === "malformed"
+                  ? `collateral unreadable: ${malformedSub(view.collateral.field)}`
+                  : `against ${moneyText(view.collateral)} collateral`
+          }
+          tone={refusedTiles || view.debt.kind !== "value" ? "refused" : "neutral"}
         />
         <KpiTile
           testId="book-kpi-liquidatable"
           label="Liquidatable · material"
-          value={summary === null ? "—" : humanUsd(summary.material.sum, decimals)}
+          value={
+            summary === null
+              ? "—"
+              : summary.material.count > 0 || summary.settled
+                ? humanUsd(summary.material.sum, decimals)
+                : "—"
+          }
           sub={
             summary === null
               ? refusedTiles
                 ? "not computed"
                 : ""
-              : `${plural(summary.material.count, "account")} · ${String(summary.belowLine.count)} more under $100`
+              : `${plural(summary.material.count, "account")} · ${String(summary.belowLine.count)} more under $${MATERIAL_LINE_USD.toString()}${boundNote}`
           }
-          tone={refusedTiles ? "refused" : summary !== null && summary.material.count > 0 ? "crit" : "neutral"}
-          pending={walking && (summary?.liquidatable.material.length ?? 0) === 0}
+          tone={
+            refusedTiles
+              ? "refused"
+              : summary !== null && summary.material.count > 0
+                ? "crit"
+                : walkStopped !== null
+                  ? "refused"
+                  : "neutral"
+          }
+          pending={walking && (summary?.material.count ?? 0) === 0}
         />
         <KpiTile
           testId="book-kpi-near"
           label="Near cap · <10% room"
-          value={summary === null ? "—" : humanUsd(summary.nearCap.sum, decimals)}
-          sub={summary === null ? (refusedTiles ? "not computed" : "") : `${String(summary.nearCap.count)} accounts`}
-          tone={refusedTiles ? "refused" : summary !== null && summary.nearCap.count > 0 ? "warn" : "neutral"}
+          value={
+            summary === null
+              ? "—"
+              : summary.nearCap.count > 0 || summary.settled
+                ? humanUsd(summary.nearCap.sum, decimals)
+                : "—"
+          }
+          sub={summary === null ? (refusedTiles ? "not computed" : "") : `${String(summary.nearCap.count)} accounts${boundNote}`}
+          tone={
+            refusedTiles
+              ? "refused"
+              : summary !== null && summary.nearCap.count > 0
+                ? "warn"
+                : walkStopped !== null
+                  ? "refused"
+                  : "neutral"
+          }
           pending={walking}
         />
         <KpiTile
           testId="book-kpi-median"
           label="Median room"
-          value={summary?.percentiles.median ?? "—"}
+          value={summary === null || walkStopped !== null ? "—" : (summary.percentiles.median ?? "—")}
           sub={
-            summary?.percentiles.p10 == null
+            summary === null
               ? refusedTiles
                 ? "not computed"
                 : "of borrow cap"
-              : `of borrow cap · 10th pct ${summary.percentiles.p10}`
+              : walkStopped !== null
+                ? "walk stopped"
+                : summary.percentiles.p10 === null
+                  ? "of borrow cap"
+                  : `of borrow cap · 10th pct ${summary.percentiles.p10}`
           }
-          tone={refusedTiles ? "refused" : "neutral"}
+          tone={refusedTiles || walkStopped !== null ? "refused" : "neutral"}
           pending={walking}
         />
         <KpiTile
           testId="book-kpi-baddebt"
           label="Standing bad debt"
-          value={badDebt === null || badDebtValue === null ? "—" : humanUsd(badDebtValue, badDebt.usd_decimals)}
+          value={badDebt === null ? "—" : moneyText(badDebt.reading)}
           sub={
             badDebt === null
               ? refusedTiles
                 ? "not computed"
                 : "not reported"
-              : insolvent === null
-                ? "accounts unknown"
-                : plural(insolvent, "account")
+              : badDebt.reading.kind === "malformed"
+                ? malformedSub(badDebt.reading.field)
+                : (badDebt.cause ?? (badDebt.insolvent === null ? "accounts unknown" : plural(badDebt.insolvent, "account")))
           }
-          tone={badDebt === null || badDebtValue === null ? "refused" : badDebtValue > 0n ? "warn" : "neutral"}
+          tone={
+            badDebt === null || badDebt.reading.kind !== "value" ? "refused" : badDebt.reading.value > 0n ? "warn" : "neutral"
+          }
         />
         <KpiTile
           testId="book-kpi-notcomputed"
           label="Not computed"
           value={view.refusedPositions === null ? "—" : String(view.refusedPositions)}
-          sub={withheldCause ?? (refusalKey === undefined ? "nothing refused" : plainCause(refusalKey))}
+          sub={notComputedSub}
           tone="refused"
         />
       </div>
@@ -182,14 +237,18 @@ export function BookSurface() {
 
       {reading.book !== null && (
         <div className={kit.grid}>
-          <StressPreview preview={withheldCause === null ? view.preview : { kind: "refused", reason: withheldCause }} />
+          <StressPreview preview={view.preview} />
           <ChartCard
             title="Bad debt on the book"
             testId="book-baddebt"
             finding={
-              badDebt === null || badDebtValue === null
+              badDebt === null
                 ? notComputedLine
-                : `${humanUsd(badDebtValue, badDebt.usd_decimals)} of debt is no longer covered by collateral, across ${insolvent === null ? "an unknown number of accounts" : plural(insolvent, "account")}.`
+                : badDebt.reading.kind === "malformed"
+                  ? `Standing bad debt is unreadable: ${malformedSub(badDebt.reading.field)}.`
+                  : badDebt.reading.kind === "absent"
+                    ? (badDebt.cause === null ? notComputedLine : `Standing bad debt withheld: ${badDebt.cause}.`)
+                    : `${badDebt.reading.text} of debt is no longer covered by collateral, across ${badDebt.insolvent === null ? "an unknown number of accounts" : plural(badDebt.insolvent, "account")}.`
             }
           >
             <p className={styles.note}>
@@ -199,7 +258,7 @@ export function BookSurface() {
         </div>
       )}
 
-      <BookLegacy engine={reading.legacy.engine} badDebt={reading.legacy.badDebt} histogram={reading.legacy.histogram} />
+      <BookLegacy view={deriveLegacyView(reading.legacy)} />
       <BookMethodology open={methodOpen} onClose={() => setMethodOpen(false)} book={reading.book} />
     </div>
   );

@@ -8,7 +8,7 @@ import { IdentityChips } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import { useCashBook } from "@/lib/cash-book";
-import { deriveCashView } from "@/lib/cash-view";
+import { deriveCashView, moneyText } from "@/lib/cash-view";
 import { isAddress } from "@/lib/format";
 import { humanUsd } from "@/lib/human-usd";
 import { useMetaConstants } from "@/lib/meta";
@@ -54,20 +54,12 @@ export function OverviewSurface() {
 
   const view = deriveCashView(reading, metaConstants.constants);
   const { summary, decimals, headline } = view;
-  const cash = reading.cash;
   const showLoading = reading.phase === "loading";
-  const money = (v: string | null | undefined): string =>
-    view.refusedTiles || v == null ? "—" : humanUsd(BigInt(v), decimals);
-  const previewLine =
-    view.withheld === null && view.preview !== null && view.preview.kind === "view"
-      ? (view.preview.lines.find((l) => l.shock === "ETH −30%")?.text ?? view.preview.lines[0]?.text ?? "Committed scenarios")
-      : "Committed scenarios";
   const nearest = summary?.liquidatable.material[0] ?? summary?.nearCapRows[0] ?? null;
   const nearestLine =
     nearest === null || nearest.room === null
       ? "Try any 0x address"
       : `Try ${shortAddress(nearest.account)} — ${nearest.room < 0n ? "liquidatable now" : `${humanUsd(nearest.room, decimals)} from its cap`}`;
-  const bookLine = summary === null ? "Live figures" : `${humanUsd(summary.nearCap.sum, decimals)} within 10% of cap${view.walking ? " · walking" : ""}`;
 
   const inspect = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -145,11 +137,11 @@ export function OverviewSurface() {
         <div className={styles.liveStats}>
           <div>
             <div className={styles.liveStatL}>Cash debt outstanding</div>
-            <div className={styles.liveStatV}>{money(cash.engine?.total_debt)}</div>
+            <div className={styles.liveStatV}>{moneyText(view.debt)}</div>
           </div>
           <div>
             <div className={styles.liveStatL}>Collateral</div>
-            <div className={styles.liveStatV}>{money(cash.engine?.total_collateral)}</div>
+            <div className={styles.liveStatV}>{moneyText(view.collateral)}</div>
           </div>
           <div>
             <div className={styles.liveStatL}>Accounts</div>
@@ -166,7 +158,7 @@ export function OverviewSurface() {
             The whole Cash lending book: what&apos;s liquidatable, what&apos;s close, what backs it, and where the bad
             debt sits.
           </div>
-          <div className={styles.entryS}>{bookLine}</div>
+          <div className={styles.entryS}>{view.bookEntryLine}</div>
         </Link>
         <Link
           href={nearest === null ? "/inspector" : `/inspector/${nearest.account}`}
@@ -187,7 +179,7 @@ export function OverviewSurface() {
           <div className={styles.entryD}>
             Committed, versioned shocks run against the live book. Every shocked number is labeled a projection.
           </div>
-          <div className={styles.entryS}>{previewLine}</div>
+          <div className={styles.entryS}>{view.previewLine}</div>
         </Link>
       </div>
 

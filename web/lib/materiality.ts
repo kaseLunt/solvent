@@ -1,4 +1,5 @@
 import { humanUsd } from "./human-usd";
+import { isWireScale, WireIntegerError } from "./wireGuard";
 
 /** Whole dollars. A DISPLAY rule (spec 2026-09-15 §3.3): counts and Σ always exist in full. */
 export const MATERIAL_LINE_USD = 100n;
@@ -11,6 +12,12 @@ export interface Sized {
 }
 
 function lineInBaseUnits(lineUsd: bigint, decimals: number): bigint {
+  // The line is compared in the engine's own unit: a scale the contract would not have produced is refused, never exponentiated.
+  if (!isWireScale(decimals)) {
+    throw new WireIntegerError(
+      `decimals is not a wire scale (an integer in [0, 1000], never -0): got ${Object.is(decimals, -0) ? "-0" : String(decimals)} — refused before the materiality line is placed`,
+    );
+  }
   return lineUsd * 10n ** BigInt(decimals);
 }
 

@@ -8,11 +8,14 @@ const PHRASEBOOK: ReadonlyMap<string, string> = new Map([
   ["STALE_PRICE", "price input past its freshness ceiling"],
   ["PRICE_STALE", "price input past its freshness ceiling"],
   ["NO_COMPARATOR", "no liquidation rule applies to this position"],
+  ["API_RECONSTRUCTION_MISMATCH", "could not be rebuilt for the stress arithmetic"],
 ]);
 
 export function plainCause(code: string, detail?: string | null): string {
   const known = PHRASEBOOK.get(code);
   if (known !== undefined) return known;
   if (typeof detail === "string" && detail.trim().length > 0) return detail.trim();
+  // A refusal that names no code is still a refusal; it is said as such, never as "refused ()".
+  if (code.trim().length === 0) return "the engine gave no reason";
   return `refused (${code})`;
 }

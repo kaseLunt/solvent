@@ -1,7 +1,8 @@
 // web/lib/cash-rows.ts
-import type { components } from "@solvent/client";
+import type { RefinedPositionsResponse, components } from "@solvent/client";
 import { HEADROOM_BANDS, headroomBand, headroomPercent, headroomTenths } from "./headroom";
-import { isWireDecimal } from "./wireGuard";
+import { plainCause } from "./refusal-phrasebook";
+import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
 type Schemas = components["schemas"];
 type Verdict = "liquidatable" | "not-liquidatable" | "unknowable";
@@ -39,10 +40,20 @@ export function readCashRow(row: CashWireRow): CashRow {
       : { code: row.refusal.code, detail: row.refusal.detail ?? null };
   const debt = wireInt(row.total_debt);
   const collateral = wireInt(row.total_collateral);
-  const cap = row.health_factor === null ? null : wireInt(row.health_factor.num);
-  const borrowings = row.health_factor === null ? null : wireInt(row.health_factor.den);
+  // A health factor the wire omitted is an absence, never a dereference.
+  const hf = row.health_factor ?? null;
+  const cap = hf === null ? null : wireInt(hf.num);
+  const borrowings = hf === null ? null : wireInt(hf.den);
+  // A computed row carries a KNOWN verdict. An unknowable verdict on a row the
+  // engine calls computed is a withheld verdict, and a withheld verdict is
+  // never a negative: the row is not near cap, not liquidatable, not cleared.
   const computed =
-    row.status === "computed" && refusal === null && debt !== null && cap !== null && borrowings !== null;
+    row.status === "computed" &&
+    refusal === null &&
+    row.liquidation_verdict !== "unknowable" &&
+    debt !== null &&
+    cap !== null &&
+    borrowings !== null;
   if (!computed || debt === null || cap === null || borrowings === null) {
     return {
       account: row.account, decimals: row.value_decimals, debt, collateral, cap: null, room: null,
@@ -63,6 +74,118 @@ export function readCashRow(row: CashWireRow): CashRow {
     refusal,
     computed: true,
   };
+}
+
+/** Why a not-computed row is not computed, in reader words: the wire's refusal, or the verdict the engine withheld without one. */
+export function notComputedCause(row: CashRow): string {
+  if (row.refusal !== null) return `${plainCause(row.refusal.code, row.refusal.detail)} · ${row.refusal.code}`;
+  if (row.verdict === "unknowable") return "the engine served no liquidation verdict for this account";
+  return "the engine served no readable figures for this account";
+}
+
+/** What one page of the Cash walk must agree with: the book it is walked for. */
+export interface CashPageExpectation {
+  readonly engine: string;
+  /** The engine's own scale from `/v1/book`. Every row must be at it, or a sum would add unlike units. */
+  readonly decimals: number;
+  /** The engine's population from `/v1/book`, or null when the aggregate stated none the guard admits. */
+  readonly census: number | null;
+}
+
+export type CashPageReading =
+  | { readonly kind: "rows"; readonly rows: CashRow[]; readonly last: boolean; readonly total: number }
+  /** The positions endpoint withheld the engine's whole book: a refusal with its cause, never an empty book. */
+  | { readonly kind: "refused"; readonly code: string | null; readonly detail: string | null }
+  /** A 200 whose body breaks the contract: named, and nothing derived from it. */
+  | { readonly kind: "malformed"; readonly fault: string };
+
+/** A field read as the untyped JSON it really is — the type system saw a cast, not a contract check. */
+function field(value: object, key: string): unknown {
+  return (value as Record<string, unknown>)[key];
+}
+
+function describe(value: unknown): string {
+  if (Object.is(value, -0)) return "-0";
+  if (typeof value === "string") return JSON.stringify(value);
+  return String(value);
+}
+
+/**
+ * Read one positions page for the Cash walk, or refuse it by name. The page
+ * is judged BEFORE any row is derived: a foreign engine's rows never enter the
+ * Cash walk (the two engines never share an axis); a refused page is a refusal,
+ * not an empty book; a row at another scale never enters a sum at the book's;
+ * a row the contract would not have produced is a malformed page, not a throw.
+ * The batch identity is the caller's law — it decides a reload, not a reading.
+ */
+export function readCashPage(page: RefinedPositionsResponse, expect: CashPageExpectation): CashPageReading {
+  const refused = field(page, "refused");
+  if (typeof refused !== "boolean") {
+    return { kind: "malformed", fault: `refused is not a boolean (got ${describe(refused)})` };
+  }
+  if (refused) {
+    const refusal = page.refusal ?? null;
+    return { kind: "refused", code: refusal?.code ?? null, detail: refusal?.detail ?? null };
+  }
+  if (page.engine !== expect.engine) {
+    return { kind: "malformed", fault: `the page answers for engine ${describe(page.engine)}, not ${expect.engine}` };
+  }
+  const total = field(page, "total_positions");
+  if (!isWirePopulation(total)) {
+    return {
+      kind: "malformed",
+      fault: `total_positions is not a wire population on a page that is not refused (got ${describe(total)})`,
+    };
+  }
+  if (expect.census !== null && total !== expect.census) {
+    return {
+      kind: "malformed",
+      fault: `the page advertises ${String(total)} rows; the book's aggregate counts ${String(expect.census)}`,
+    };
+  }
+  const positions = field(page, "positions");
+  if (!Array.isArray(positions)) {
+    return { kind: "malformed", fault: `positions is not an array (got ${describe(positions)})` };
+  }
+  const cursor = field(page, "next_cursor");
+  if (cursor !== null && typeof cursor !== "string") {
+    return { kind: "malformed", fault: `next_cursor is neither a string nor null (got ${describe(cursor)})` };
+  }
+  const rows: CashRow[] = [];
+  for (const [index, raw] of positions.entries()) {
+    const at = `positions[${String(index)}]`;
+    if (typeof raw !== "object" || raw === null) return { kind: "malformed", fault: `${at} is not a row` };
+    const row: object = raw;
+    const account = field(row, "account");
+    if (typeof account !== "string") return { kind: "malformed", fault: `${at}.account is not a string` };
+    const engine = field(row, "engine");
+    if (engine !== expect.engine) {
+      return {
+        kind: "malformed",
+        fault: `${at} (${account}) belongs to engine ${describe(engine)}; a foreign row never enters the Cash walk`,
+      };
+    }
+    const status = field(row, "status");
+    if (status !== "computed" && status !== "refused") {
+      return { kind: "malformed", fault: `${at}.status is neither computed nor refused (got ${describe(status)})` };
+    }
+    const decimals = field(row, "value_decimals");
+    if (!isWireScale(decimals)) {
+      return { kind: "malformed", fault: `${at}.value_decimals is not a wire scale (got ${describe(decimals)})` };
+    }
+    if (decimals !== expect.decimals) {
+      return {
+        kind: "malformed",
+        fault: `${at} (${account}) is at ${String(decimals)} decimals; the book is at ${String(expect.decimals)}`,
+      };
+    }
+    const hf = field(row, "health_factor");
+    if (hf !== null && (typeof hf !== "object" || hf === undefined)) {
+      return { kind: "malformed", fault: `${at}.health_factor is neither null nor an object (got ${describe(hf)})` };
+    }
+    rows.push(readCashRow(raw as CashWireRow));
+  }
+  return { kind: "rows", rows, last: cursor === null, total };
 }
 
 export type SizedCashRow = CashRow & { readonly debt: bigint };

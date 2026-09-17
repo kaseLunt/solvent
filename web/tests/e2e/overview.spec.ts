@@ -85,6 +85,54 @@ test("a withheld Cash engine refuses the strip and the entry cards carry no walk
   await expect(page.locator("body")).not.toContainText("liquidatable now");
 });
 
+test("while the walk runs the strip is pending and the Book entry says so — never '$0 within 10% of cap'", async ({ page }) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, BOOK));
+  await page.route("**/v1/positions*", () => new Promise<void>(() => undefined));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_MANIFEST));
+  await page.goto("/");
+  await expect(page.getByTestId("overview-live-headline")).toHaveText("Walking the Cash book…");
+  await expect(page.getByTestId("overview-live")).toHaveAttribute("data-variant", "pending");
+  await expect(page.getByTestId("overview-entry-book")).toContainText("Walking the book…");
+  await expect(page.locator("body")).not.toContainText("within 10% of cap");
+  await expect(page.locator("body")).not.toContainText("Nothing material");
+});
+
+test("a refused stress preview is named on the Scenarios entry — never 'Committed scenarios'", async ({ page }) => {
+  if (BOOK.waterfall === null) throw new Error("fixture invariant: the committed book serves a waterfall");
+  const book = {
+    ...BOOK,
+    waterfall: {
+      ...BOOK.waterfall,
+      excluded_engines: [{ engine: "debt_manager", code: "SWEEP_FAILED", detail: "", note: "" }],
+      points: BOOK.waterfall.points.map((p) => ({ ...p, engines: p.engines.filter((e) => e.engine !== "debt_manager") })),
+    },
+  };
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, book));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_MANIFEST));
+  await page.goto("/");
+  await expect(page.getByTestId("overview-entry-scenarios")).toContainText("Preview withheld: collateral sweep failed");
+  await expect(page.getByTestId("overview-entry-scenarios")).not.toContainText("Committed scenarios");
+});
+
+test("a malformed Cash debt on the strip is a dash, never $0", async ({ page }) => {
+  const book = { ...BOOK, engines: BOOK.engines.map((e) => (e.engine === "debt_manager" ? { ...e, total_debt: "" } : e)) };
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, book));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_MANIFEST));
+  await page.goto("/");
+  const strip = page.getByTestId("overview-live");
+  await expect(strip).toContainText("Cash debt outstanding");
+  await expect(strip).toContainText("—");
+  await expect(strip).not.toContainText("$0");
+});
+
 test("the address field refuses a non-address inline and routes a real one to the Inspector", async ({ page }) => {
   await mockAll(page);
   await page.route("**/v1/address/**", (route) => route.abort());

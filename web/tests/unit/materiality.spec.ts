@@ -19,6 +19,12 @@ test("the lines are $100 and $1, tiers are closed at the top", () => {
   expect(materialityTier(100_00000000n, 8)).toBe("material");
 });
 
+test("the line is placed only at a scale the guard admits: -0 and a negative refuse by name", () => {
+  expect(() => materialityTier(1n, -0)).toThrow(/decimals is not a wire scale.*got -0/);
+  expect(() => materialityTier(1n, -6)).toThrow(/got -6/);
+  expect(() => partitionByMateriality([{ debt: 1n }], 1.5)).toThrow(/got 1\.5/);
+});
+
 test("partition keeps every row, sums by tier, and belowLine = small + dust", () => {
   const rows = [
     { account: "a", debt: usd6(4620) },

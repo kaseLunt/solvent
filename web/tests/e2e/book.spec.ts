@@ -2,7 +2,7 @@
 // semantic invariant against the running production build with the API
 // mocked from committed fixtures; strings come from lib/book-headline.ts.
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { BATCH_SUPERSEDED, BOOK, BOOK_ERROR_UNAVAILABLE, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
+import { BATCH_SUPERSEDED, BOOK, BOOK_ENGINE_REFUSED, BOOK_ERROR_UNAVAILABLE, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { DEMO_BOOK, DEMO_META, DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2 } from "../fixtures/demo";
 import { META } from "../fixtures/meta";
 
@@ -154,6 +154,9 @@ test("no servable batch (503): the load-failure headline names the reason", asyn
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be loaded.");
   await expect(page.getByTestId("book-verdict-dek")).toContainText(BOOK_ERROR_UNAVAILABLE.error.message.slice(1, 20));
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("—");
+  // A book that could not be read refused nothing and computed nothing: the tile says so, never "nothing refused".
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("not computed");
+  await expect(page.getByTestId("book-kpi-notcomputed")).not.toContainText("nothing refused");
 });
 
 test("a 409 during the walk restarts it on the reloaded book", async ({ page }) => {
@@ -187,6 +190,15 @@ test("a transport failure mid-walk is stated with a retry that re-walks", async 
   await page.goto("/book");
   const failure = page.getByTestId("book-walk-failure");
   await expect(failure).toBeVisible();
+  // A walk that stopped on page one has read nothing: the headline names the stop and no tile prints a zero.
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be fully read this batch.");
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("book-kpi-near")).toContainText("—");
+  await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("data-tone", "refused");
+  await expect(page.getByTestId("book-kpi-median")).toContainText("walk stopped");
+  await expect(page.getByTestId("book-attention")).toContainText("no account is cleared");
+  await expect(page.locator("body")).not.toContainText("Nothing material");
+  await expect(page.locator("body")).not.toContainText("No account is within 10%");
   await failure.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(2);
   await expect(failure).toHaveCount(0);
@@ -207,6 +219,179 @@ test("a -0 population on /v1/book refuses the route — never a printed zero", a
   await expect(page.getByTestId("route-refusal")).toBeVisible();
   await expect(page.getByTestId("route-refusal")).toContainText("computed_positions");
   await expect(page.locator("body")).not.toContainText("-0 computed");
+});
+
+async function mockWith(page: Page, book: unknown, positions: unknown) {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/book", (route) => json(route, book));
+  await page.route("**/v1/positions*", (route) => json(route, positions));
+}
+
+const cashEngineOf = (book: typeof BOOK, over: Partial<(typeof BOOK)["engines"][number]>) => ({
+  ...book,
+  engines: book.engines.map((e) => (e.engine === "debt_manager" ? { ...e, ...over } : e)),
+});
+
+test("while the walk is still running the verdict is pending — never 'Nothing material', never a near-cap negative", async ({ page }) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/book", (route) => json(route, BOOK));
+  await page.route("**/v1/positions*", () => new Promise<void>(() => undefined));
+  await page.goto("/book");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("Walking the Cash book…");
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("book-kpi-liquidatable")).toHaveAttribute("aria-busy", "true");
+  await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("aria-busy", "true");
+  await expect(page.getByTestId("book-attention")).toContainText("Walking the book…");
+  await expect(page.locator("body")).not.toContainText("Nothing material");
+  await expect(page.locator("body")).not.toContainText("No account is within 10%");
+  await expect(page.locator("body")).not.toContainText("No account needs attention");
+});
+
+test("a refused positions page is the engine's refusal — never an empty, healthy book", async ({ page }) => {
+  const refused = {
+    ...POSITIONS_DM_PAGE_1,
+    refused: true,
+    refusal: { engine: "debt_manager", code: "SWEEP_FAILED", detail: "collateral sweep failed", note: "" },
+    total_positions: null,
+    positions: [],
+    next_cursor: null,
+  };
+  await mockWith(page, BOOK, refused);
+  await page.goto("/book");
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be computed this batch.");
+  await expect(page.getByTestId("book-verdict-dek")).toHaveText("Collateral sweep failed.");
+  for (const id of ["debt", "liquidatable", "near", "median"]) {
+    await expect(page.getByTestId(`book-kpi-${id}`)).toHaveAttribute("data-tone", "refused");
+    await expect(page.getByTestId(`book-kpi-${id}`)).toContainText("—");
+  }
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("collateral sweep failed");
+  await expect(page.getByTestId("book-attention")).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText("No account needs attention");
+  await expect(page.locator("body")).not.toContainText("Nothing material");
+});
+
+test("a terminal page short of the advertised census stops the walk by name — the positive it read stands, no negative is claimed", async ({ page }) => {
+  await mockWith(page, cashEngineOf(BOOK, { positions: 3 }), { ...POSITIONS_DM_PAGE_1, total_positions: 3 });
+  await page.goto("/book");
+  await expect(page.getByTestId("book-walk-failure")).toContainText("the walk delivered 2 of the 3 rows the wire advertised");
+  await expect(page.getByTestId("book-walk-failure").getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "crit");
+  await expect(page.getByTestId("book-verdict-dek")).toContainText("The walk stopped before the last page");
+  await expect(page.getByTestId("book-verdict-dek")).not.toContainText("No account is within 10%");
+  await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("lower bound, walk stopped");
+  await expect(page.getByTestId("book-kpi-near")).toContainText("—");
+  await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("data-tone", "refused");
+  await expect(page.getByTestId("book-kpi-median")).toContainText("walk stopped");
+});
+
+test("a positions page from another engine never enters the Cash walk", async ({ page }) => {
+  const foreign = {
+    ...POSITIONS_DM_PAGE_1,
+    engine: "aave_v3_etherfi",
+    positions: POSITIONS_DM_PAGE_1.positions.map((p) => ({ ...p, engine: "aave_v3_etherfi" })),
+  };
+  await mockWith(page, BOOK, foreign);
+  await page.goto("/book");
+  await expect(page.getByTestId("book-walk-failure")).toContainText("aave_v3_etherfi");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be fully read this batch.");
+  await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(1);
+  await expect(page.getByTestId("book-attention")).toContainText("no account is cleared");
+  const counts = await page
+    .getByTestId("book-bands")
+    .locator("[data-count]")
+    .evaluateAll((els) => els.reduce((n, el) => n + Number(el.getAttribute("data-count")), 0));
+  expect(counts).toBe(0);
+});
+
+test("a liquidatable position under the $100 line is hidden by the display rule, and the table says so — never 'No account needs attention'", async ({ page }) => {
+  const [liquidatable] = POSITIONS_DM_PAGE_1.positions;
+  if (liquidatable === undefined || liquidatable.health_factor === null) throw new Error("fixture invariant");
+  const small = {
+    ...POSITIONS_DM_PAGE_1,
+    total_positions: 1,
+    positions: [{ ...liquidatable, total_debt: "50000000", health_factor: { ...liquidatable.health_factor, num: "32000000", den: "50000000" } }],
+  };
+  const book = cashEngineOf(BOOK, { positions: 1, computed_positions: 1, refused_positions: 0, refusals: [] });
+  await mockWith(page, book, small);
+  await page.goto("/book");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("Nothing material is liquidatable on the Cash book right now.");
+  await expect(page.getByTestId("book-verdict-dek")).toContainText("1 more position is technically liquidatable but totals $50");
+  await expect(page.getByTestId("book-attention")).toContainText(
+    "Nothing material needs attention; 1 liquidatable position under $100 ($50) is behind the small & dust toggle.",
+  );
+  await expect(page.locator("body")).not.toContainText("No account needs attention");
+  await page.getByTestId("book-dust-toggle").click();
+  await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(1);
+  await expect(page.getByTestId("book-attention").locator("tbody tr").first()).toContainText("Liquidatable");
+});
+
+test("the legacy engine withheld whole: its cause is named, no population, no histogram — never '0 positions'", async ({ page }) => {
+  await mockWith(page, BOOK_ENGINE_REFUSED, POSITIONS_DM_PAGE_1);
+  await page.goto("/book");
+  const legacy = page.getByTestId("book-legacy");
+  await expect(legacy).toHaveAttribute("data-withheld", "true");
+  await expect(legacy.locator("summary")).toContainText("withheld this batch: collateral-flag custody unproven");
+  await expect(legacy.locator("summary")).not.toContainText("0 positions");
+  await expect(legacy.locator("summary")).not.toContainText("0 liquidatable");
+  await expect(page.getByTestId("book-legacy-bands")).toHaveCount(0);
+  await expect(page.getByTestId("book-legacy-withheld")).toContainText("collateral-flag custody unproven");
+  // The Cash book beside it serves normally.
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("$4,200 of Cash debt is liquidatable right now, across 1 account.");
+});
+
+test("a malformed wire money string is named, never coerced: '' is not $0", async ({ page }) => {
+  await mockWith(page, cashEngineOf(BOOK, { total_debt: "" }), POSITIONS_DM_PAGE_1);
+  await page.goto("/book");
+  const tile = page.getByTestId("book-kpi-debt");
+  await expect(tile).toContainText("—");
+  await expect(tile).toContainText("engines[debt_manager].total_debt is not a wire decimal");
+  await expect(tile).toHaveAttribute("data-tone", "refused");
+  await expect(tile).not.toContainText("$0");
+});
+
+test("a fractional legacy bucket count refuses the route by name — never a bar", async ({ page }) => {
+  // The first `"count":0` in the serialized book is the legacy histogram's first bucket.
+  const body = JSON.stringify(BOOK).replace('"count":0', '"count":1.5');
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/book", (route) =>
+    route.fulfill({ status: 200, headers: CORS, contentType: "application/json", body }),
+  );
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.goto("/book");
+  await expect(page.getByTestId("route-refusal")).toBeVisible();
+  await expect(page.getByTestId("route-refusal")).toContainText("buckets[0].count");
+  await expect(page.getByTestId("book-legacy-bands")).toHaveCount(0);
+});
+
+test("positions the stress arithmetic excluded are named beside the preview and counted in the drawer", async ({ page }) => {
+  const book = {
+    ...BOOK,
+    coverage: {
+      ...BOOK.coverage,
+      excluded_by_this_layer: 1,
+      stress_coverage_is_full: false,
+      excluded: [
+        {
+          engine: "debt_manager",
+          account: "0xEEee000000000000000000000000000000000005",
+          code: "API_RECONSTRUCTION_MISMATCH",
+          reason: "the position could not be rebuilt from its legs",
+        },
+      ],
+    },
+  };
+  await mockWith(page, book, POSITIONS_DM_PAGE_1);
+  await page.goto("/book");
+  await expect(page.getByTestId("book-stress-unmeasured")).toContainText("1 position on this engine is excluded from the stress arithmetic");
+  await page.getByTestId("book-methodology").click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("1 excluded from the stress arithmetic");
+  await expect(page.getByTestId("book-methodology-excluded")).toContainText("0xEEee000000000000000000000000000000000005");
+  await expect(page.getByTestId("book-methodology-excluded")).toContainText("API_RECONSTRUCTION_MISMATCH");
 });
 
 test("first viewport at 1440×900 holds the verdict, the tiles and the top of the grid", async ({ page }) => {
