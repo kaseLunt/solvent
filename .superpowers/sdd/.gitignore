@@ -34,3 +34,4 @@
 # archives above. Diffs and review packages inside stay ignored (`*.diff` is not `*.md`).
 !2026-09-15-ui-kit-overview-book/
 !2026-09-15-ui-inspector/
+!2026-09-15-ui-scenarios/

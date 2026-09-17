@@ -1,0 +1,75 @@
+# Task 1 review — kit: ScenarioLibrary, Heatmap, DotPlot, .k-lib/.k-heat CSS, geometry
+
+Base 9b7158f · Head b3a9308 · diff `review-9b7158f..b3a9803.diff` (8 files, +371)
+
+### Spec Compliance
+- ❌ Issues found — the brief's Steps 1–9 are transcribed verbatim (every file, prop, test id, CSS rule and export present; the report's claims all check out against the diff), but three of the brief's own lines break a plan-level constraint or a markup law, and the plan's transcription rule ("token substitution only") is broken once:
+  - `web/components/kit/kit.module.css:162` `.libRowOn { background: var(--panel-2) }` for the mockup's `#1b262b` (`pages-console.html:121`); the kit's precedent for that hex as an "on" surface is `--chip-bg` (`kit.module.css:14` ← mockup `:27`), and the sibling `.libRow` maps the same hex to `--chip-bg` at `:160`.
+  - `web/components/kit/kit.module.css:157–158` the active-mode color is dead CSS (specificity, below).
+  - `web/components/kit/Heatmap.tsx:47–83` `role="table"` with no `role="row"` children.
+- ⚠️ Cannot verify from diff: the rendered look of any part (nothing mounts them until Task 11); stylelint's acceptance of `color-mix(...)` and the `.dotPlotRow text` type selector (the report says `lint:css` is clean; not re-run).
+
+Test-id contract, checked line by line: `lab-library-row-{id}` + `data-outcome` (`ScenarioLibrary.tsx:63–64`); `lab-library-check-{id}` only in book mode (`:67–75`); `lab-mode-book` / `lab-mode-address` (`:49`, `:53`); `lab-run` (`:91`); `lab-compare` absent when `compare === null` (`:93–96`); heat grid `data-merged` (`Heatmap.tsx:46`); cells `{prefix}-{r}-{c}` (`:40`, `:68`, `:74`) with `data-count` (`:67`, `:75`) and `data-movement` (`:76`); dot rows `{prefix}-{key}` with `data-kind ∈ point · refused` (`DotPlot.tsx:40–42`).
+
+Laws, checked: no float is printed — `intensity` reaches only the `--heat` custom property (`Heatmap.tsx:71`), `scale.x` only `cx` (`DotPlot.tsx:48`), the count prints through `groupInt` (`Heatmap.tsx:78`), the axis edge through `formatTenths` on the bigint (`DotPlot.tsx:32`). A null value draws a dashed track and no circle (`DotPlot.tsx:46–50`); an empty cell stays a cell with `data-count="0"` (`Heatmap.tsx:67`); `unmeasured` is a dashed border with `::before { background: none }` (`kit.module.css:192–193`). Every `font-size` is `var(--type-body|small|floor)` (`kit.module.css:154–178`, `:183–184`; `charts.module.css:453`), none under 12px.
+
+CSS transcription, rule by rule against `pages-console.html:117–132`: `.lib` ← `:117` (+ `align-self: start`, needed because the aside is the grid item the mockup wrapped in a div); `.libHead` ← `:118` (+ `align-items: baseline; gap; color`); `.libMode` ← `:119` (`400` → `--w-medium`, see Minor); `.libRow` ← `:120` exact; `.libRowOn` ← `:121` (wrong token, Important); `.libCheck` ← `:122` size and margin, the painted box replaced by a native checkbox with `accent-color`; `.libName` ← `:124` (13.5px → `--type-body`); `.libDesc` ← `:125` (the 2px margin became the body's 2px grid gap); `.libOutcome` ← `:126` (4px = 2px gap + 2px margin, preserved); `.libCrit`/`.libDim` ← `:127` → `--crit-text`/`--ink-3`; `.libFoot` ← `:128` (+ `flex-wrap`); `.heat` ← `:129` (the `repeat(5, 1fr)` correctly moved inline and derived from `bands.length`); `.heatLabel` ← `:130` exact; `.heatCell` ← `:131` + the `position/overflow/tabular-nums` the `::before` layer needs; `.heatHead` ← `:132` (`height: auto` → `align-self: end`). `.libWarn/.libOk/.libRefused/.libEngines/.libEmpty/.libNote/.libAddress`, the tints and `.heatUnmeasured` have no mockup rule; they are the brief's additions for states the mockup does not show.
+
+Other checks: every `var()` referenced exists in `web/app/tokens.css:23–92`; `.chart .axisLabel .dotOk .dotWarn .dotCrit .dotDim .baseline .valueLabel` exist in `charts.module.css:4, 33, 83, 90, 96, 100, 300, 307`; `groupInt(number | bigint)` (`lib/prose.ts:14`) and `formatTenths(bigint)` (`lib/percent.ts:12`) match their call sites; `box-sizing: border-box` is global (`web/app/globals.css:10`) so the unmeasured cell's 1px border keeps the 34px height; the chart canon already sets words in mono (`WaterfallSteps.tsx:155` `.stepLabel`; `charts.module.css:1–2` "mono axis labels"), so DotPlot's mono row label is chart-consistent, not a type-law breach.
+
+### Strengths
+- The tint lives on `::before` and the count on a sibling `span` at `position: relative` (`kit.module.css:186–187`), so the number is never faded with the cell. Worst case (intensity 1) contrast of `--ink` on the tint over `--panel`: crit 55% → 5.6:1 dark / 6.8:1 light; ok 45% → 5.3:1 / 8.9:1. Legible at every intensity in both themes.
+- Floats stay geometry end to end: `lab-geometry.ts:1–3` states the law, and the two consumers honor it (`Heatmap.tsx:71`, `DotPlot.tsx:48`).
+- `heatIntensity` refuses NaN, a zero max and an over-max count to 0 or 1 (`lab-geometry.ts:7–8`); `dotPlotScale` survives a 10px width and an all-null domain (`:27–29`); both pinned in `tests/unit/lab-geometry.spec.ts`.
+- The mockup's painted `.cb` span became a native `<input type="checkbox">` with an accessible name (`ScenarioLibrary.tsx:68–75`); the checkbox and the row button are siblings, never nested (`:68–83`); `aria-pressed` on the mode pair (`:49`, `:53`) and on the row body (`:77`).
+- Column count derives from `bands.length` (`Heatmap.tsx:45`) instead of the mockup's hard-coded five — the merged seven-band grid Task 12 pins needs exactly this.
+- Keys are stable: headers by `h-{key}`, row fragments by `r-{key}`, cells by `col.key` within a row (`Heatmap.tsx:56, 60, 68, 73`).
+- No `any`, no non-null assertion; the one cast (`Heatmap.tsx:71 as CSSProperties`) is the standard custom-property bridge. Every prop of all three components is consumed.
+
+### Issues
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+1. **Plan-mandated.** `web/components/kit/kit.module.css:162` — `.libRowOn { background: var(--panel-2) }` transcribes the mockup's `#1b262b` (`pages-console.html:121`) to the wrong token. The kit already maps that hex, in the same "on" role, to `--chip-bg` (`kit.module.css:14` ← mockup `:27`), and `.libRow`'s hairline two lines up maps the same hex to `--chip-bg` (`:160`). In dark, `--panel-2` (#0f171a) is darker than `--panel` (#131c20) while `#1b262b` is lighter: the selected row sinks instead of lifts, the opposite of the mockup. `.heatEmpty` (`:188`) has the same substitution for the mockup's `#1b262b` cells (`:307–308`). Fix: `var(--chip-bg)` in both.
+2. **Plan-mandated.** `web/components/kit/kit.module.css:157–158` — `.libMode button { ... color: inherit }` has specificity (0,1,1) and outranks `.libModeOn { color: var(--ink) }` at (0,1,0), regardless of source order. The active mode never turns `--ink`; only the underline survives. The design's "on" color is dead CSS. Fix: `.libMode .libModeOn { color: var(--ink); ... }` (or `button.libModeOn`).
+3. **Plan-mandated.** `web/components/kit/Heatmap.tsx:47` — `role="table"` whose direct children are `columnheader` (`:56`), `rowheader` (`:62`) and `cell` (`:70`, `:80`) with no `role="row"` anywhere. ARIA requires `row` (or `rowgroup`) children of `table`; axe's `aria-required-children` fails and a screen reader announces no rows. Fix: wrap the header run and replace each `<Fragment>` (`:60`) with `<div role="row" style={{ display: "contents" }}>` — `display: contents` keeps the grid placement intact.
+
+#### Minor (Nice to Have)
+4. `web/components/kit/Heatmap.tsx:66–67` — the empty branch drops `data-movement` and `title` for any zero cell, including a present `unmeasured` cell. A zero unmeasured cell is honestly a zero, but the attribute loss means Task 12's pin (`task-12-brief.md:177` `toHaveAttribute("data-movement", "unmeasured")`) holds only while the fixture's unmeasured count is nonzero. Keep `data-movement={cell?.movement}` on the empty branch when the cell is present; styling stays empty.
+5. `web/components/charts/DotPlot.tsx:61, 64` — tick labels placed by magic offsets (`- 4`, `- 34`). "+12.5%" at 12px mono is ~43px wide and runs past the track's right edge. Use `textAnchor="middle"` at `zeroX` and `textAnchor="end"` at `right`.
+6. `web/components/charts/DotPlot.tsx:24, 43` — the row label has no width guard at `LABEL_W = 220`. The mockup's own "weETH depeg to 0.95, oracles held" is ~34 mono chars ≈ 245px at 12px and runs into the track's left pad. A per-row `<clipPath>`, `textLength`/`lengthAdjust`, or a `labelWidth` prop the page can widen.
+7. `web/components/charts/DotPlot.tsx:9–12, 26` — `DotPlotRow` permits `{ tenths: 12n, tone: "refused" }`, which draws a dim dot at a value while `data-kind` says `point`; `tone` and `data-kind` can disagree. A discriminated union (`{ tenths: bigint; tone: "crit" | "ok" | "warn" } | { tenths: null; tone: "refused" }`) removes the impossible state and the `refused → dotDim` entry only that state reaches.
+8. `web/lib/lab-geometry.ts:27` → `web/components/charts/DotPlot.tsx:32, 58–66` — an all-null row set prints a synthetic ±1% axis (the default `10n`). The rows are honest (all dashed); the axis is not: ticks for a domain nothing occupies. Omit the edge ticks when no row has a value, or let the page decline to draw the plot.
+9. `web/components/kit/kit.module.css:152, 182` — the comments cite `pages-console.html:278-286` and `302-309`, which are the markup; the rules transcribed are at `:117–128` and `:129–132`. Inherited from the brief. A wrong pointer is worse than none.
+10. `web/components/kit/kit.module.css:156` — `.libMode { font-weight: var(--w-medium) }` for the mockup's `font-weight: 400` (`:119`). No regular-weight token exists so this is the nearest, but it is a step up, not a substitution; `font-weight: 400` would be the literal transcription (the `.libHead` 600 has to be reset somehow).
+11. `web/components/kit/ScenarioLibrary.tsx:99` / `kit.module.css:178` — the footnote sits inside the bordered panel; the mockup's sits below it, outside `.k-lib` (`pages-console.html:287`). Plan text; note only.
+12. `web/lib/lab-geometry.ts:1`, `web/tests/unit/lab-geometry.spec.ts:1` — a `// web/lib/lab-geometry.ts` path comment at the top of each file; no other file in the tree carries its own path.
+
+### Assessment
+**Task quality:** Needs fixes
+**Reasoning:** The implementer transcribed the brief exactly and every contract and law the plan binds holds (test ids, no printed float, refusals dashed, type tokens), but three defects ride in from the brief's own text — a wrong surface token that inverts the selected row in dark mode, an active-mode color that CSS specificity makes dead, and a `role="table"` with no rows — and each is a one-line fix worth landing before Task 11 mounts the parts.
+
+## Re-review 1 (ff534e9)
+
+Scope: `git show ff534e9` only (parent b8b7cd3; six files, +269/−105 — most of the line count is a Prettier reflow of the three components to multi-line props with no logic change). The fix report's claims were checked against the diff, not taken from it.
+
+**RE-REVIEW: closed.**
+
+Important findings:
+1. ADDRESSED — `kit.module.css:163` `.libRowOn { background: var(--chip-bg) }`, `:190` `.heatEmpty { background: var(--chip-bg) }`. Both now agree with `.nav a.on` (`:14`) and `.libRow`'s hairline (`:161`) on what the mockup's `#1b262b` is.
+2. ADDRESSED — `kit.module.css:158` `.libMode .libModeOn` is (0,2,0) and outranks `.libMode button` (0,1,1) at `:157`; the active mode's `--ink` now applies. lint:css reported clean (no-descending-specificity not tripped, per the report; not re-run).
+3. ADDRESSED — `Heatmap.tsx:66–79` wraps the corner and the column headers in `<div role="row">`, and `:81` replaces each `Fragment` with `<div role="row">`; `kit.module.css:186` `.heatRow { display: contents }` keeps the grid placement (the cells still land in the `.heat` grid, columns unchanged). `role="table"` now has only `row` children, each with `rowheader`/`columnheader` and `cell` descendants. The `Fragment` import is gone with its last use (`:1`).
+
+Minors:
+4. ADDRESSED — `Heatmap.tsx:90–98` the empty branch carries `title={cell?.title}` and `data-movement={cell?.movement}` when the cell is present; an absent cell still has neither. Residual, by design: a present zero `unmeasured` cell carries the word but not the dash (it is `.heatEmpty`, flat, untinted). Task 12's fixture must keep the unmeasured count above zero to pin the dashed rendering; the attribute alone does not imply it.
+5. ADDRESSED — `DotPlot.tsx:117–140` the three ticks sit at `left`/`zeroX`/`right` with `textAnchor` start/middle/end; the `-4`/`-34` offsets are gone.
+6. ADDRESSED — `DotPlot.tsx:41–47` `LABEL_W = min(320, max(160, longest × 7 + 8))`; `CHAR_W` (`:26`) states the 12px-mono estimate it rests on. Nit: `LABEL_W` is now a computed local, and constant-case names it as a constant. A label past ~44 characters still overruns the 320 cap, which is a bound, not a defect.
+7. ADDRESSED — `DotPlot.tsx:6–14` `DotPlotRow` is `{ tenths: bigint; tone: "crit" | "ok" | "warn" } | { tenths: null; tone: "refused" }`; `DOT_CLASS` (`:27–31`) drops `refused`, and the `row.tenths !== null` guard (`:98`) narrows `row.tone` for the lookup. `dotDim` is no longer reachable from this chart, which is right. The report's note that Task 13's `rowsOf` must build this shape is the correct consequence.
+8. ADDRESSED — `DotPlot.tsx:55`, `:63`, `:117` the zero line and the edge ticks render only when some row has a value. The `AXIS_H` band is still reserved in `height` when nothing is drawn there (22px of air under an all-refused plot); cosmetic.
+9. ADDRESSED — `kit.module.css:153`, `:183` cite the rule lines (`:117–128`, `:129–132`) and the markup lines both.
+10. ADDRESSED — `kit.module.css:156` `font-weight: 400`, the literal transcription of mockup `:119`.
+11. ADDRESSED — `ScenarioLibrary.tsx:63`, `:157` the component returns a fragment: the `<aside>` and then the footnote `<p>`; `kit.module.css:178` `.libNote { margin: 10px 0 0 }` matches the mockup's `margin-top: 10px` (`pages-console.html:287`). Contract note for Task 11: the mockup puts both inside one wrapper `<div>` that is the grid item (`:277–288`). Mounted bare as a grid child, the fragment yields two grid items and the footnote lands in the next column, and `.lib`'s `align-self: start` (`:154`) only acts when `.lib` is itself the grid item. Either Task 11 wraps the part in a block (as the mockup does) or the component takes a single root — a `<div>` around both would make the contract self-evident. Not open; recorded so the page task cannot miss it.
+12. ADDRESSED — `lab-geometry.ts:1`, `lab-geometry.spec.ts:1` the path comments are gone; the law comment stays.
+
+New breakage in this diff: none found. Test ids and data attributes are unchanged in all three parts (`ScenarioLibrary.tsx:99–100, 110, 118, 128, 138; Heatmap.tsx:94–97, 108–111; DotPlot.tsx:86–87`); the grid template still derives from `bands.length` (`Heatmap.tsx:59`); no float reaches a printed string (the only new arithmetic is `LABEL_W`, a coordinate); the empty heat cell keeps `data-count="0"` (`:96`).
