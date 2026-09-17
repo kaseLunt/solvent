@@ -138,12 +138,9 @@ test("(10) the adjudicated intros render — Observatory, Feed, Proof, Developer
   // the Scenarios page answers first (spec §5.4) and carries no intro paragraph.
   await muteStream(page);
 
-  await page.goto("/observatory");
-  await expect(page.locator("main")).toContainText(
-    "How each engine's book has moved, hour by hour, in a record that outlives batch " +
-      "retention. An hour with no complete batch renders as a hole, which is never smoothed " +
-      "over and never drawn as a zero; one engine per view, never combined onto one axis.",
-  );
+  // The Observatory arm is RETIRED with the History convergence (plan 2026-09-16, Task 3): the intro is drawer
+  // doctrine now (R3), pinned verbatim in tests/e2e/history.spec.ts; the dek keeps "One engine per view; a missing
+  // hour is a hole, never a zero."
 
   // The Activity arm is RETIRED with the Activity convergence (plan 2026-09-16, Task 4): the intro is
   // drawer doctrine now (R3), pinned verbatim in tests/e2e/activity.spec.ts; the dek keeps the closing clause.

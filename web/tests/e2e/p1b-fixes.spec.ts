@@ -109,20 +109,22 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
     await expect(foot).not.toContainText("types borrow ·");
   });
 
-  test("fix 3: the observatory head states the wire's own served_at verbatim", async ({
+  test("fix 3: the History header states the wire's own served_at verbatim (the Served chip)", async ({
     page,
   }) => {
     // The rollup envelope carries served_at but NO age_seconds (recorded
     // decision): no anchored age exists, no tick runs, and a browser-clock
     // age would violate freshness law 1. The wire's own instant renders
-    // verbatim at the head.
+    // verbatim in the header's identity strip. (Re-pointed from the retired
+    // `observatory-as-of` with the History convergence, plan 2026-09-16
+    // Task 3; the page contract is tests/e2e/history.spec.ts.)
     await page.route("**/v1/stream**", (route) => route.abort());
     await page.route("**/v1/observatory/series*", (route) =>
       route.fulfill({ json: OBSERVATORY_SERIES_AAVE, headers: CORS }),
     );
     await page.goto("/observatory");
-    await expect(page.getByTestId("observatory-as-of")).toHaveText(
-      `as of ${OBSERVATORY_SERIES_AAVE.served_at}`,
-    );
+    await expect(
+      page.getByTestId("history-verdict").locator('[data-chip="Served"]'),
+    ).toContainText(OBSERVATORY_SERIES_AAVE.served_at);
   });
 });

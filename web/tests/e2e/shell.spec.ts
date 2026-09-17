@@ -15,7 +15,8 @@ const SURFACES = [
   { path: "/inspector", label: "Inspector", h1: "Is this address at risk?" },
   // With no API the listing cannot be fetched, and the Scenarios page says so as its H1.
   { path: "/lab", label: "Scenarios", h1: "The committed scenarios could not be listed." },
-  { path: "/observatory", label: "History", h1: "Observatory" },
+  // With no API the series cannot be fetched, and History says so as its H1.
+  { path: "/observatory", label: "History", h1: /could not be fetched\.$/ },
   // With no API the first page cannot be fetched, and Activity says so as its H1.
   { path: "/feed", label: "Activity", h1: /^Page fetch failed: / },
   // With no API the manifest cannot be fetched, and Verification says so as its H1.

@@ -1,0 +1,38 @@
+/* History: one engine's durable record, set in the Console register. Page-local rules only — the header, tiles,
+ * card, table and drawer are the kit's; these are the page grid, the two selector rows (a pressed ghost button
+ * wears the accent), the sparse-window state line, the 1:1 chart frame, the bucket record's key-value grid and
+ * folds, and the drawer body. Tokens throughout; every figure on the page is the wire's or the view model's. */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; }
+
+/* ---- selectors: the engine switcher (one engine per view) and the metric row inside the chart card ---- */
+.controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.metrics { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+.metrics button { font-size: var(--type-small); padding: var(--sp-1) var(--sp-3); }
+.controls button[aria-pressed="true"],
+.metrics button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); background: var(--chip-bg); }
+
+/* ---- the chart: a state line qualifies the visual before it; the frame scrolls below the chart's minimum ---- */
+.state { margin: var(--sp-2) 0 0; color: var(--ink-2); font-size: var(--type-small); }
+.plotFrame { width: 100%; min-width: 0; overflow-x: auto; margin-top: var(--sp-3); }
+
+/* ---- the bucket record: the takeaway, then the wire's own rows ---- */
+.takeaway { margin: var(--sp-2) 0 0; color: var(--ink); font-size: var(--type-body); }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-1) var(--sp-4); margin: var(--sp-3) 0 0; font-size: var(--type-body); }
+.kv dt { color: var(--ink-2); font-size: var(--type-label); align-self: baseline; }
+.kv dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.mono { font-family: var(--mono); font-size: var(--type-mono); }
+.dim { color: var(--ink-3); font-size: var(--type-small); }
+.crit { color: var(--crit-text); }
+.note { margin: var(--sp-3) 0 0; color: var(--ink-3); font-size: var(--type-small); }
+.rates { margin-top: var(--sp-3); overflow-x: auto; }
+.forensics { margin-top: var(--sp-3); border-top: 1px solid var(--line); }
+.forensics > summary { cursor: pointer; padding: var(--sp-2) 0; color: var(--ink-2); font-size: var(--type-small); }
+
+/* ---- drawer body: the doctrine, paragraph by paragraph ---- */
+.method { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); color: var(--ink); font-size: var(--type-body); }
+.method p { margin: 0; }
+
+@media (max-width: 640px) {
+  .kv { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+  .kv dd { margin-bottom: var(--sp-2); }
+}

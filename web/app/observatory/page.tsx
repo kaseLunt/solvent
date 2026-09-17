@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
-import { ObservatorySurface } from "./ObservatorySurface";
+import { HistorySurface } from "./HistorySurface";
 
-export const metadata: Metadata = { title: "Observatory" };
+export const metadata: Metadata = { title: "History" };
 
 /**
- * The Observatory route (W4). All data arrives client-side through
- * lib/observatory-data (the documented C1 seam over GET /v1/observatory/series)
- * — nothing is fetched at build time, so a static shell never bakes in a
- * stale rollup.
+ * History: how each engine's book has moved, hour by hour, in a record that outlives batch retention. All data
+ * arrives client-side through lib/observatory-data (the documented seam over GET /v1/observatory/series) — nothing
+ * is fetched at build time, so a static shell never bakes in a stale rollup.
  */
-export default function ObservatoryPage() {
-  return <ObservatorySurface />;
+export default function HistoryPage() {
+  return <HistorySurface />;
 }

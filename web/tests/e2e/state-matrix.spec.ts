@@ -449,7 +449,8 @@ const MATRIX: Cell[] = [
       await page.route("**/v1/observatory/series*", stall);
     },
     verify: async (page) => {
-      await expect(page.getByTestId("observatory-loading")).toBeVisible();
+      await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "loading");
+      await expect(page.getByTestId("history-kpi-debt")).toHaveAttribute("aria-busy", "true");
     },
   },
   {
@@ -461,13 +462,13 @@ const MATRIX: Cell[] = [
       await mockObservatory(page);
     },
     verify: async (page) => {
-      // The chart states its as-of (the newest bucket's own watermark)…
-      await expect(page.getByTestId("observatory-newest")).toContainText("watermark block");
+      // The record states its as-of (the newest bucket's own watermark)…
+      await expect(page.getByTestId("history-point")).toContainText("watermark block");
       // …and an ABSENT bucket is a NAMED gap on the axis, never interpolated.
       // (toBeAttached: a stroke-only SVG tick has a zero-width box, which
       // Playwright's visibility heuristic reports as hidden.)
       await expect(
-        page.getByTestId("observatory-chart-debt_usd").locator('[data-kind="absent"]').first(),
+        page.getByTestId("history-chart").locator('[data-kind="absent"]').first(),
       ).toBeAttached();
     },
   },
@@ -480,15 +481,16 @@ const MATRIX: Cell[] = [
       await mockObservatory(page);
     },
     act: async (page) => {
-      await page.getByTestId("observatory-engine-debt_manager").click();
+      await page.getByTestId("history-engine-debt_manager").click();
     },
     verify: async (page) => {
       // Severity = color AND form: the withheld gap wears the outlined
-      // warn square, not just a hue.
+      // warn square, not just a hue; the newest bucket's tiles are dashed.
       await expect(page.getByTestId("obs-gap-warn").first()).toBeVisible();
       await expect(
-        page.getByTestId("observatory-chart-debt_usd").locator('[data-kind="withheld"]').first(),
+        page.getByTestId("history-chart").locator('[data-kind="withheld"]').first(),
       ).toBeAttached();
+      await expect(page.getByTestId("history-kpi-debt")).toHaveAttribute("data-tone", "refused");
       await expect(page.locator("body")).not.toContainText("$0");
     },
   },
@@ -503,10 +505,13 @@ const MATRIX: Cell[] = [
       );
     },
     verify: async (page) => {
-      const degraded = page.getByTestId("observatory-degraded");
-      await expect(degraded).toContainText("a named state rather than an empty chart");
+      await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "degraded");
+      const verdict = page.getByTestId("history-verdict");
+      await expect(verdict).toHaveAttribute("data-variant", "refused");
+      await expect(verdict).toContainText("is unavailable.");
       // Never an empty chart, never zeros.
-      await expect(page.getByTestId("observatory-chart-debt_usd")).toHaveCount(0);
+      await expect(page.getByTestId("history-chart")).toHaveCount(0);
+      await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(0);
     },
   },
   {
@@ -520,8 +525,10 @@ const MATRIX: Cell[] = [
       );
     },
     verify: async (page) => {
-      const strip = page.getByRole("alert").filter({ hasText: "SERIES FETCH FAILED" });
-      await expect(strip).toContainText("unavailable, and none of it is being shown as empty");
+      await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "unavailable");
+      await expect(page.getByTestId("history-verdict")).toContainText(
+        "unavailable, and none of it is being shown as empty",
+      );
     },
   },
 
