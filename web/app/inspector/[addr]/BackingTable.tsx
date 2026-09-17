@@ -86,6 +86,11 @@ export function BackingTable({ view, onPrices }: { view: InspectorView; onPrices
       ) : (
         <>
           <KitTable testId="inspector-backing" columns={COLUMNS} rows={rows} />
+          {table.usdRefusal !== null && (
+            <p className={styles.dim} data-testid="inspector-backing-refusal">
+              {table.usdRefusal}
+            </p>
+          )}
           {table.capAgrees === false && (
             <p className={styles.dim}>
               The legs sum to {money(table.sumContribution)}; the engine’s cap is {money(cash?.cap)} — the engine’s figure leads.

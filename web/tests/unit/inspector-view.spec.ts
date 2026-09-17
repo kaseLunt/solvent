@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
-import { deriveInspectorView, historyFinding, historyHead, stressEmptyText } from "../../lib/inspector-view";
+import { deriveInspectorView, drawerEmptyText, historyFinding, historyHead, stressBatchNote, stressEmptyText } from "../../lib/inspector-view";
 import { ADDRESS_FOUND, ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, FOUND_ADDR, HISTORY } from "../fixtures/inspector";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 import { near } from "./helpers/cash-position";
@@ -116,7 +116,9 @@ test("near cap: state, kicker, headline, chips, table, boundary, trust and the r
   expect(view.state).toBe("near");
   expect(view.kicker).toBe("Cash · account 0xAAaA…0001");
   expect(view.headline.emphasis).toBe("Within $190.50 of its borrow cap.");
-  expect(view.headline.dek).toContain("for the last 3 batches (≈2m).");
+  // The history's run ends at its own vantage (2); the lookup is batch 3. The headline speaks for batch 3 alone — the
+  // run is the History card's to state, with its vantage clause — so no "for the last N batches" is claimed here.
+  expect(view.headline.dek).not.toContain("for the last");
   expect(view.chips).toEqual([
     { label: "Batch", value: "3" },
     { label: "Snapshot", value: "42s · fresh", tone: "ok" },
@@ -394,7 +396,7 @@ test("stressEmptyText: loading, error, withheld with its cause, no position, and
   expect(stressEmptyText(withheld)).toBe("Stress withheld: Cash — collateral sweep never ran.");
   expect(stressEmptyText(withStress({ phase: "ready", value: lookup({ ...STRESS_DM, found: false, scenarios: [] }) }))).toBe("No position to stress.");
   const rows = withStress({ phase: "ready", value: lookup({ ...STRESS_DM, scenarios: [] }) });
-  expect(rows.stress).toEqual({ kind: "rows", rows: [] });
+  expect(rows.stress).toEqual({ kind: "rows", rows: [], batchId: 1 });
   expect(stressEmptyText(rows)).toBe("No scenarios.");
 });
 
@@ -436,4 +438,156 @@ test("historyHead: the Trust card's spark head follows the same ladder — loadi
   expect(head({ lookup: cash, history: ready(withheld) })).not.toContain("no Cash history");
   expect(head({ lookup: cash, history: ready(HISTORY) })).toBe("History · no Cash history for this account");
   expect(head({ lookup: cash, history: ready(dmHistory(FOUND_ADDR, 2)) })).toBe("History · room % over the last 3 batches");
+});
+
+test("the headline's streak is the lookup's batch's own: a history whose vantage is an older batch says nothing about this batch, and the History card carries the run with its vantage clause", () => {
+  const nearAt = (batchId: number, history: Schemas["AddressHistoryResponse"]) =>
+    deriveInspectorView(
+      reading({
+        lookup: { phase: "ready", value: found([nearWire()], { batch: { ...ADDRESS_FOUND.batch, id: batchId } }) },
+        history: { phase: "ready", value: lookup(history) },
+      }),
+      TIER_FALLBACK,
+    );
+  // The defect: the history ends at batch 2 (near cap in 0–2), the lookup is batch 4 — the batches between are unknown to this history.
+  const stale = nearAt(4, dmHistory(FOUND_ADDR, 2));
+  expect(stale.state).toBe("near");
+  expect(stale.batchId).toBe(4);
+  expect(stale.historyBatchId).toBe(2);
+  expect(stale.streak?.batches).toBe(3);
+  expect(stale.headline.dek).toBe(
+    "Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, brings this account to its cap.",
+  );
+  expect(stale.headline.dek).not.toContain("for the last");
+  expect(historyFinding(stale)).toBe("Within 10% of its cap for the last 3 batches · history as of batch 2, position as of batch 4 · dashed line: 10% of cap");
+  // The same history at the lookup's own vantage: the run is this batch's, and the headline says it.
+  const current = nearAt(2, dmHistory(FOUND_ADDR, 2));
+  expect(current.headline.dek).toContain("It has been within 10% of its cap for the last 3 batches (≈2m).");
+  expect(historyFinding(current)).toBe("Within 10% of its cap for the last 3 batches · dashed line: 10% of cap");
+});
+
+test("the stress batch is the stress response's own: exposed as stressBatchId, disclosed when it is not the position's, and never read from the lookup", () => {
+  const withStress = (stress: Schemas["StressResponse"], batchId = 100) =>
+    deriveInspectorView(
+      reading({ lookup: { phase: "ready", value: found([nearWire()], { batch: { ...ADDRESS_FOUND.batch, id: batchId } }) }, stress: { phase: "ready", value: lookup(stress) } }),
+      TIER_FALLBACK,
+    );
+  const agreeing = withStress({ ...STRESS_DM, batch: { ...STRESS_DM.batch, id: 100 } });
+  expect(agreeing.batchId).toBe(100);
+  expect(agreeing.stressBatchId).toBe(100);
+  expect(stressBatchNote(agreeing)).toBeNull();
+  // The defect: the lookup answers batch 100, the stress body batch 101 — the page named 100 while the rows read 101's room.
+  const skewed = withStress({ ...STRESS_DM, batch: { ...STRESS_DM.batch, id: 101 } });
+  expect(skewed.batchId).toBe(100);
+  expect(skewed.stressBatchId).toBe(101);
+  expect(skewed.chips.find((c) => c.label === "Batch")).toEqual({ label: "Batch", value: "100" });
+  expect(stressBatchNote(skewed)).toEqual({
+    disclosure: "Stress for batch 101; the position above is batch 100. Each row's before and after are read for batch 101 and are not compared against the position above.",
+    rowLabel: "batch 101",
+  });
+  expect(stressBatchNote(withStress({ ...STRESS_DM, batch: { ...STRESS_DM.batch, id: 18251 } }))?.disclosure).toContain("Stress for batch 18,251; the position above is batch 100.");
+  // The withheld and no-position arms carry the batch too, so the disclosure stands beside the empty words.
+  const withheld = withStress({ ...STRESS_DM, batch: { ...STRESS_DM.batch, id: 101 }, lookup_complete: false, withheld_engines: [{ engine: "debt_manager", code: "SWEEP_NEVER", detail: "", note: "" }] });
+  expect(withheld.stress?.kind).toBe("withheld");
+  expect(withheld.stressBatchId).toBe(101);
+  expect(stressBatchNote(withheld)?.rowLabel).toBe("batch 101");
+  // A stress body naming no readable batch is disclosed as such — its rows are tied to no batch, never silently to the position's.
+  const unreadable = withStress({ ...STRESS_DM, batch: { ...STRESS_DM.batch, id: -1 } });
+  expect(unreadable.stressBatchId).toBeNull();
+  expect(stressBatchNote(unreadable)).toEqual({
+    disclosure: "The stress response names no readable batch; the position above is batch 100. Its rows are not compared against the position above.",
+    rowLabel: "batch not readable",
+  });
+  // No stress answer yet: nothing to disclose.
+  const pending = deriveInspectorView(reading({ lookup: { phase: "ready", value: found([nearWire()]) } }), TIER_FALLBACK);
+  expect(pending.stressBatchId).toBeNull();
+  expect(stressBatchNote(pending)).toBeNull();
+});
+
+test("drawerEmptyText speaks the view's state: a withheld book in the headline's own words — never 'no position'; only the definitive negative and legacy-only say no Cash position", () => {
+  const withheld = deriveInspectorView(reading({ lookup: { phase: "ready", value: lookup(ADDRESS_UNKNOWABLE) } }), TIER_FALLBACK);
+  expect(withheld.state).toBe("cannot-compute");
+  expect(withheld.cashWire).toBeNull();
+  expect(drawerEmptyText(withheld)).toBe("Cannot say — the Cash book is withheld this batch. A withheld book is never “no position”; there is no calculation to show.");
+  expect(drawerEmptyText(withheld)).not.toContain("No Cash position");
+  // A withheld Cash book under found (a legacy position beside it) is the same refusal.
+  const cashWithheld = deriveInspectorView(
+    reading({
+      lookup: {
+        phase: "ready",
+        value: found([ADDRESS_FOUND.positions[0]!], { lookup_complete: false, withheld_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }] }),
+      },
+    }),
+    TIER_FALLBACK,
+  );
+  expect(drawerEmptyText(cashWithheld)).toContain("Cannot say — the Cash book is withheld this batch.");
+  expect(drawerEmptyText(deriveInspectorView(reading({ lookup: { phase: "ready", value: lookup(ADDRESS_NOT_FOUND) } }), TIER_FALLBACK))).toBe(
+    "No Cash position in this batch; nothing to calculate.",
+  );
+  expect(drawerEmptyText(deriveInspectorView(reading({ lookup: { phase: "ready", value: found([ADDRESS_FOUND.positions[0]!]) } }), TIER_FALLBACK))).toBe(
+    "No Cash position in this batch; nothing to calculate.",
+  );
+  expect(drawerEmptyText(deriveInspectorView(reading({ lookup: { phase: "error", message: "rate limited (429), retry after 30s" } }), TIER_FALLBACK))).toBe(
+    "The lookup could not be completed. There is no calculation to show.",
+  );
+  expect(drawerEmptyText(deriveInspectorView(reading({}), TIER_FALLBACK))).toBe("Looking up this address… nothing to calculate yet.");
+});
+
+test("historyFinding speaks from the streak and the newest point's own kind: a one-batch near-cap run says so, a lone zero cap is a refusal — neither is 'above the line'", () => {
+  /** A Cash history at the given vantage whose points are the given (batch, cap, debt) triples. */
+  const cashHistory = (batchId: number, points: readonly [id: number, cap: string, debt: string][]): Schemas["AddressHistoryResponse"] => ({
+    ...HISTORY,
+    batch: { ...HISTORY.batch, id: batchId },
+    engines: [
+      {
+        engine: "debt_manager",
+        value_decimals: 6,
+        withheld_batch_ids: [],
+        note: "",
+        points: points.map(([id, cap, debt]) => ({
+          batch_id: id,
+          computed_at: `2026-07-29T10:0${String(id)}:00Z`,
+          balances_block: 1000 + id,
+          sweep_block: 900 + id,
+          status: "computed" as const,
+          refusal: null,
+          health_factor: { wad: null, num: cap, den: debt, infinite: false, note: "" },
+          liquidatable: false,
+          total_collateral_base: "0",
+          total_debt_base: debt,
+        })),
+      },
+    ],
+  });
+  const withHistory = (history: Schemas["AddressHistoryResponse"], batchId: number) =>
+    deriveInspectorView(
+      reading({ lookup: { phase: "ready", value: found([nearWire()], { batch: { ...ADDRESS_FOUND.batch, id: batchId } }) }, history: { phase: "ready", value: lookup(history) } }),
+      TIER_FALLBACK,
+    );
+  // The defect: rooms 20% then 5% — a one-batch run under the line — rendered "Room has stayed above the 10% line in the newest batch."
+  const oneBatch = withHistory(cashHistory(2, [[2, "100000000", "95000000"], [1, "100000000", "80000000"]]), 2);
+  expect(oneBatch.streak).toEqual({ batches: 1, spanSeconds: null, newestKind: "computed" });
+  expect(historyFinding(oneBatch)).toBe("Within 10% of its cap in the newest batch; the batch before was above the line · dashed line: 10% of cap");
+  expect(historyFinding(oneBatch)).not.toContain("above the 10% line");
+  // The run of one ended by a gap says the gap (a withheld batch 2 between two computed points); a lone point says it is the only batch.
+  const twoPoints = cashHistory(3, [[3, "100000000", "95000000"], [1, "100000000", "80000000"]]);
+  const gapBefore = { ...twoPoints, engines: twoPoints.engines.map((e) => ({ ...e, withheld_batch_ids: [2] })) };
+  expect(historyFinding(withHistory(gapBefore, 3))).toBe("Within 10% of its cap in the newest batch; the batch before is withheld, so no longer run can be read · dashed line: 10% of cap");
+  expect(historyFinding(withHistory(cashHistory(1, [[1, "100000000", "95000000"]]), 1))).toBe("Within 10% of its cap in the newest batch — the only batch in the window · dashed line: 10% of cap");
+  // A lone zero-cap point: known, past the cap, no room percent to place — a refusal, never "above the line".
+  const zeroCap = withHistory(cashHistory(1, [[1, "0", "95000000"]]), 1);
+  expect(zeroCap.streak).toEqual({ batches: 1, spanSeconds: null, newestKind: "zero-cap" });
+  expect(historyFinding(zeroCap)).toBe(
+    "The newest batch carries a zero cap — debt with no counted collateral, past the cap; no room percent to read · dashed line: 10% of cap",
+  );
+  expect(historyFinding(zeroCap)).not.toContain("above the 10% line");
+  // A zero cap heading a longer run says the run.
+  const zeroCapRun = withHistory(cashHistory(2, [[2, "0", "95000000"], [1, "100000000", "95000000"]]), 2);
+  expect(historyFinding(zeroCapRun)).toBe(
+    "The newest batch carries a zero cap — debt with no counted collateral, past the cap; no room percent to read; under the 10% line for the last 2 batches · dashed line: 10% of cap",
+  );
+  // Above the line is still said of a computed newest point outside any run.
+  expect(historyFinding(withHistory(cashHistory(2, [[2, "100000000", "80000000"], [1, "100000000", "95000000"]]), 2))).toBe(
+    "Room has stayed above the 10% line in the newest batch · dashed line: 10% of cap",
+  );
 });

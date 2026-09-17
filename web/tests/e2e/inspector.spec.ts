@@ -306,3 +306,107 @@ test("first viewport at 1440×900 holds the toolbar, the verdict, the tiles and 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+/** The demo stress body with the projection's horizons rewritten at one index; null is the wire's "no verdict for the horizon". */
+function projected(index: number, becomes: boolean | null): typeof DEMO_STRESS_NEAR {
+  return {
+    ...DEMO_STRESS_NEAR,
+    scenarios: DEMO_STRESS_NEAR.scenarios.map((s) =>
+      s.id !== "dm_rate_horizon_plus_200bps"
+        ? s
+        : {
+            ...s,
+            results: s.results.map((r) =>
+              r.projection === null
+                ? r
+                : { ...r, projection: { ...r.projection, horizons: r.projection.horizons.map((h, i) => (i === index ? { ...h, becomes_liquidatable: becomes } : h)) } },
+            ),
+          },
+    ),
+  };
+}
+
+test("stress: an unknowable horizon is a cannot-say that names it — never 'No'; a projection that holds says so only through its longest horizon", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR, stress: projected(0, null) });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  const table = page.getByTestId("inspector-stress-table");
+  await expect(table.locator("tbody tr")).toHaveCount(3);
+  const cell = table.locator("tbody tr").nth(2).locator("td").last();
+  await expect(cell.locator("[data-tone='refused']")).toHaveText("Cannot say");
+  await expect(cell.locator("[data-tone='refused']")).toHaveAttribute("title", "the 30d horizon carries no verdict");
+  await expect(cell).not.toContainText("No");
+  // The batches agree, so no batch note is printed.
+  await expect(page.getByTestId("inspector-stress-batch")).toHaveCount(0);
+  // The demo body as served: both horizons hold, and the row says through which horizon — a projection never answers a bare "No".
+  await page.unroute("**/v1/address/*/stress*");
+  await page.route("**/v1/address/*/stress*", (route) => json(route, DEMO_STRESS_NEAR));
+  await page.reload();
+  await expect(table.locator("tbody tr").nth(2).locator("td").last()).toHaveText("Not within 90d");
+  await expect(table.locator("tbody tr").nth(0).locator("td").last()).toHaveText("Yes");
+});
+
+test("the drawer, open across a refresh that withholds the book, speaks the withheld state — never 'no position'", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "near");
+  await page.getByTestId("inspector-drawer").click();
+  const body = page.getByTestId("inspector-drawer-body");
+  await expect(body).toContainText("Room = cap − debt");
+  // The resume repair lands a lookup that withholds the Cash book for this same address (the reading is keyed by the route's address).
+  let addressRequests = 0;
+  await page.unroute("**/v1/address/*");
+  await page.route("**/v1/address/*", (route) => {
+    addressRequests += 1;
+    return json(route, { ...ADDRESS_UNKNOWABLE, address: DEMO_NEAR_ADDR });
+  });
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  await expect.poll(() => addressRequests).toBe(1);
+  await expect(surface(page)).toHaveAttribute("data-state", "cannot-compute");
+  await expect(headline(page)).toHaveText("Cannot say — the Cash book is withheld this batch.");
+  await expect(body).toBeVisible();
+  await expect(page.getByTestId("inspector-drawer-empty")).toHaveText(
+    "Cannot say — the Cash book is withheld this batch. A withheld book is never “no position”; there is no calculation to show.",
+  );
+  await expect(body).not.toContainText("No Cash position");
+  await expect(body).not.toContainText("nothing to calculate");
+});
+
+test("stress answering for another batch: the section discloses both batches, each row wears the stress batch, the rows still read for their own batch", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR, stress: { ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: DEMO_STRESS_NEAR.batch.id + 1 } } });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  await expect(page.getByTestId("inspector-verdict-identity")).toContainText("Batch 18,251");
+  const note = page.getByTestId("inspector-stress-batch");
+  await expect(note).toHaveAttribute("role", "note");
+  await expect(note).toContainText("Stress for batch 18,252; the position above is batch 18,251.");
+  await expect(note).toContainText("not compared against the position above");
+  const table = page.getByTestId("inspector-stress-table");
+  await expect(table.locator("tbody tr")).toHaveCount(3);
+  for (const k of [0, 1, 2]) await expect(table.locator("tbody tr").nth(k).locator("td").first()).toContainText("batch 18,252");
+  // "Room today" is the stress body's own before, for its own batch.
+  await expect(table.locator("tbody tr").nth(0).locator("td").nth(1)).toHaveText("$190.50");
+  await expect(table.locator("tbody tr").nth(0).locator("td").last()).toHaveText("Yes");
+});
+
+test("activity: a refused 'Load more' is stated on its own line beside the rows it could not extend — the rows stand, the button remains", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.unroute("**/v1/events*");
+  await page.route("**/v1/events*", (route) =>
+    route.request().url().includes("cursor=") ? json(route, BOOK_ERROR_UNAVAILABLE, 503) : json(route, { ...DEMO_EVENTS_NEAR, next_cursor: "page-2" }),
+  );
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  const table = page.getByTestId("inspector-activity");
+  await expect(table.locator("tbody tr")).toHaveCount(6);
+  await expect(page.getByTestId("inspector-activity-error")).toHaveCount(0);
+  await expect(page.getByTestId("inspector-activity-takeaway")).toContainText("more exist behind the cursor");
+  await page.getByTestId("inspector-activity-more").click();
+  const line = page.getByTestId("inspector-activity-error");
+  await expect(line).toHaveAttribute("role", "status");
+  await expect(line).toContainText("More activity could not be loaded: 503 unavailable: no complete risk batch is available");
+  await expect(line).toContainText("The rows above stand; nothing beyond them was read.");
+  await expect(table.locator("tbody tr")).toHaveCount(6);
+  await expect(table).not.toContainText("Activity unavailable");
+  await expect(page.getByTestId("inspector-activity-more")).toBeVisible();
+  await expect(page.getByTestId("inspector-activity-more")).toBeEnabled();
+});

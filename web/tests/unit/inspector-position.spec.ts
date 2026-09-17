@@ -282,6 +282,36 @@ test("collateralTable: a leg or price-input scale the wire guard refuses prints 
   expect(collateralTable(noAmount, readCashPosition(noAmount)).legs[0]?.amount).toBeNull();
 });
 
+test("collateralTable: a refused value_decimals refuses every USD figure of the position — value, contribution, LTV and the sums — named once; the legs' own scales still read", () => {
+  const base = near();
+  const leg = base.legs[0];
+  if (leg === undefined) throw new Error("fixture");
+  // The wire's digits would make "50%" if the ratio were taken: it is not, because the scale they share is not licensed.
+  const p = near({ value_decimals: -2, legs: [{ ...leg, value_usd: "100", max_borrow_contribution: "50" }, ...base.legs.slice(1)] });
+  const cash = readCashPosition(p);
+  expect(cash.decimals).toBeNull();
+  const table = collateralTable(p, cash);
+  expect(table.legs).toHaveLength(2);
+  for (const l of table.legs) {
+    expect(l.value).toBeNull();
+    expect(l.contribution).toBeNull();
+    expect(l.ltv).toBeNull();
+  }
+  expect(table.sumValue).toBeNull();
+  expect(table.sumContribution).toBeNull();
+  expect(table.capAgrees).toBeNull();
+  expect(table.collateralAgrees).toBeNull();
+  expect(table.usdRefusal).toBe(
+    "USD figures withheld: the engine published an unreadable value scale (value_decimals) for this account, so no value, contribution or LTV is read from it.",
+  );
+  // The token amount and the price input carry their own scales and are untouched by the position's.
+  expect(table.legs[0]?.amount).toBe("2.1");
+  expect(table.legs[0]?.price).toBe("$4,000.00");
+  // A licensed scale names no refusal.
+  expect(collateralTable(near(), readCashPosition(near())).usdRefusal).toBeNull();
+  expect(collateralTable(near(), readCashPosition(near())).legs[0]?.ltv).toBe("50%");
+});
+
 test("oldestPriceAge: an age the population guard refuses is no age; with none measured the chip says 'age unknown', never 0s", () => {
   const [weeth, ethfi] = near().price_inputs;
   if (weeth === undefined || ethfi === undefined) throw new Error("fixture");

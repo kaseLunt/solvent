@@ -126,3 +126,19 @@ export function activityTakeaway(timed: number, untimed: number, hasMore: boolea
     `order that is not chronology${more}.`
   );
 }
+
+/** The table's words when it holds no rows: the load phase, then a failure in its own words, then the proven-empty sentence. */
+export function activityEmptyText(loading: boolean, error: Error | null): string {
+  if (loading) return "Loading activity…";
+  if (error !== null) return `Activity unavailable: ${error.message}`;
+  return "No custodied actions for this account.";
+}
+
+/**
+ * A page fetch that failed beside rows already loaded. The rows stand — each answered for itself — and the failure
+ * is stated on its own line in its own words; it is never folded into the table's empty words, which print only
+ * when there are no rows to show, so a refused "Load more" would otherwise vanish.
+ */
+export function activityFailureText(error: Error): string {
+  return `More activity could not be loaded: ${error.message}. The rows above stand; nothing beyond them was read.`;
+}

@@ -88,6 +88,12 @@ export interface InspectorView {
   readonly historyLoad: LoadPhase;
   /** The committed scenarios read for this account; null until the stress lookup has answered. */
   readonly stress: StressReading | null;
+  /**
+   * The batch the STRESS response answers for — its own envelope, never the lookup's. The two are separate requests
+   * and may answer different batches; null until the stress lookup has answered, or when its body names no readable
+   * batch. When it differs from `batchId` the stress section says so and its figures are read for their own batch.
+   */
+  readonly stressBatchId: number | null;
   readonly stressLoad: LoadPhase;
   readonly refusedTiles: boolean;
   readonly floor: string | null;
@@ -107,7 +113,7 @@ function empty(state: InspectorState, kicker: string, headline: InspectorHeadlin
   return {
     state, kicker, headline, chips, batchId: null, decimals: null, cash: null, cashWire: null, legacy: null, table: null, boundary: null,
     trust: null, room: null, streak: null, legacySeries: null, historyBatchId: null, historyOutcome: null, ...loads, stress: null,
-    refusedTiles: true, floor: null, tier: null, ageSeconds: null,
+    stressBatchId: null, refusedTiles: true, floor: null, tier: null, ageSeconds: null,
   };
 }
 
@@ -201,6 +207,12 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
   }
   const streak = room === null ? null : nearCapStreak(room);
   const stress = reading.stress.phase === "ready" ? stressReading(reading.stress.value, reading.address) : null;
+  // The stress body's own batch, never the lookup's: the two answer for themselves.
+  const stressBatchId = stress?.batchId ?? null;
+  // A streak is asserted OF the lookup's batch only when the history's vantage IS that batch: a history read at an
+  // older vantage ends before this batch, and its run says nothing about the batches between. Then the headline states
+  // the current batch alone and the History card's vantage clause carries the rest.
+  const streakOfThisBatch = historyBatchId !== null && historyBatchId === batchId ? streak : null;
 
   const sweep = batch.watermarks.find((w) => w.engine === CASH)?.sweep ?? null;
   const trust = cashWire === null ? null : trustChecklist({ position: cashWire, batchId, sweep, reconcile: reading.evidence?.reconcile ?? null });
@@ -252,7 +264,7 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
     headline = withFloor(notComputedHeadline(notComputedCause(cash, cashWire), lastDebt));
   } else {
     state = cash.status;
-    headline = cashHeadline(cash, { streak, floor });
+    headline = cashHeadline(cash, { streak: streakOfThisBatch, floor });
   }
 
   return {
@@ -275,6 +287,7 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
     historyOutcome,
     ...loads,
     stress,
+    stressBatchId,
     refusedTiles: cash === null || !isComputedCash(cash),
     floor,
     tier,
@@ -296,7 +309,9 @@ const NEAR_LINE_NOTE = " · dashed line: 10% of cap";
 /**
  * The History card's finding, one sentence per state: the load phase first, then the history's own outcome (a
  * withheld history is never "no history"), then what the room series says about the newest batch. The vantage
- * clause prints only when the history's batch is not the position's.
+ * clause prints only when the history's batch is not the position's. The room sentence speaks from the NEWEST
+ * POINT'S OWN KIND and the run it heads — a zero cap or an unreadable point is a refusal, a one-batch run says it is
+ * one batch, and "above the line" is said only of a computed point the run does not include.
  */
 export function historyFinding(view: InspectorView): string {
   if (view.historyLoad.phase === "loading") return "Loading history…";
@@ -311,11 +326,30 @@ export function historyFinding(view: InspectorView): string {
     view.historyBatchId !== null && view.batchId !== null && view.historyBatchId !== view.batchId
       ? ` · history as of batch ${groupInt(view.historyBatchId)}, position as of batch ${groupInt(view.batchId)}`
       : "";
-  const newestKind = view.streak?.newestKind ?? null;
-  if (newestKind !== null && newestKind !== "computed" && newestKind !== "zero-cap") {
-    return `The newest batch is ${KIND_WORD[newestKind]}; the streak cannot be read${vantage}${NEAR_LINE_NOTE}`;
+  const newest = view.room.newest;
+  const streak = view.streak;
+  // A series with no point has nothing to say about a newest batch (unreachable: the vantage batch is always a point).
+  if (newest === null || streak === null) return `The history holds no batch to read${vantage}${NEAR_LINE_NOTE}`;
+  const run = String(streak.batches);
+  if (newest.kind === "zero-cap") {
+    // Known and past the cap, with no room percent to place on the line: never "above the line", and the run it heads is said.
+    const under = streak.batches >= 2 ? `; under the 10% line for the last ${run} batches` : "";
+    return `The newest batch carries a zero cap — debt with no counted collateral, past the cap; no room percent to read${under}${vantage}${NEAR_LINE_NOTE}`;
   }
-  if (view.streak !== null && view.streak.batches >= 2) return `Within 10% of its cap for the last ${String(view.streak.batches)} batches${vantage}${NEAR_LINE_NOTE}`;
+  if (newest.kind !== "computed") return `The newest batch is ${KIND_WORD[newest.kind]}; the streak cannot be read${vantage}${NEAR_LINE_NOTE}`;
+  if (streak.batches >= 2) return `Within 10% of its cap for the last ${run} batches${vantage}${NEAR_LINE_NOTE}`;
+  if (streak.batches === 1) {
+    // One batch under the line: what ended the run is said — the batch before was above it, was not readable, or there is none.
+    const prior = view.room.points[view.room.points.length - 2];
+    const before =
+      prior === undefined
+        ? " — the only batch in the window"
+        : prior.kind === "computed"
+          ? "; the batch before was above the line"
+          : `; the batch before is ${KIND_WORD[prior.kind]}, so no longer run can be read`;
+    return `Within 10% of its cap in the newest batch${before}${vantage}${NEAR_LINE_NOTE}`;
+  }
+  // A computed newest point the run excludes is at or above the line by the streak's own rule.
   return `Room has stayed above the 10% line in the newest batch${vantage}${NEAR_LINE_NOTE}`;
 }
 
@@ -338,4 +372,48 @@ export function stressEmptyText(view: InspectorView): string {
   if (view.stress?.kind === "withheld") return `Stress withheld: ${view.stress.cause}.`;
   if (view.stress?.kind === "no-position") return "No position to stress.";
   return "No scenarios.";
+}
+
+/**
+ * The stress section's batch note: the position lookup and the stress lookup are separate requests, and each answers
+ * for the batch its own envelope names. When the two differ the section says so, and every row is labelled with the
+ * stress body's batch — its before and after are read for that batch and are never compared against the position
+ * above. A stress body naming no readable batch is disclosed the same way. Null when the two agree, or while either
+ * is still unknown.
+ */
+export function stressBatchNote(view: InspectorView): { readonly disclosure: string; readonly rowLabel: string } | null {
+  if (view.stress === null || view.batchId === null) return null;
+  if (view.stressBatchId === null) {
+    return {
+      disclosure: `The stress response names no readable batch; the position above is batch ${groupInt(view.batchId)}. Its rows are not compared against the position above.`,
+      rowLabel: "batch not readable",
+    };
+  }
+  if (view.stressBatchId === view.batchId) return null;
+  const stressBatch = groupInt(view.stressBatchId);
+  return {
+    disclosure: `Stress for batch ${stressBatch}; the position above is batch ${groupInt(view.batchId)}. Each row's before and after are read for batch ${stressBatch} and are not compared against the position above.`,
+    rowLabel: `batch ${stressBatch}`,
+  };
+}
+
+/**
+ * The drawer's words when there is no Cash calculation to show. The view's STATE speaks, in the headline's own words
+ * for that state: a withheld book is "Cannot say — … withheld", never "no position"; only the definitive negative and
+ * the legacy-only account say there is no Cash position. The drawer can be open while the lookup is refreshed, so the
+ * wire's absent Cash row is never read as absence on its own.
+ */
+export function drawerEmptyText(view: InspectorView): string {
+  switch (view.state) {
+    case "no-position":
+    case "legacy-only":
+      return "No Cash position in this batch; nothing to calculate.";
+    case "cannot-compute":
+      return `${view.headline.emphasis} A withheld book is never “no position”; there is no calculation to show.`;
+    case "loading":
+      return "Looking up this address… nothing to calculate yet.";
+    default:
+      // unavailable, invalid, and (unreachably) a Cash state whose wire row is missing: the headline's own sentence, no calculation.
+      return `${view.headline.emphasis} There is no calculation to show.`;
+  }
 }

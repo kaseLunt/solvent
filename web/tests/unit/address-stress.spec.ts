@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
-import { horizonLabel, stressReading } from "../../lib/address-stress";
+import { horizonLabel, stressReading, stressVerdict, stressVerdictWords, UNREADABLE_HORIZON, type StressHorizon, type StressRow } from "../../lib/address-stress";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const load = <T,>(name: string): T => JSON.parse(readFileSync(path.join(here, "..", "fixtures", name), "utf8")) as T;
@@ -134,4 +134,116 @@ test("horizonLabel: integer arithmetic only — hours under a day, whole days, a
   expect(horizonLabel(59)).toBe("<1m");
   expect(horizonLabel(1)).toBe("<1m");
   expect(horizonLabel(60)).toBe("1m");
+});
+
+test("horizonLabel: a duration the population guard refuses prints the refused word, never a plausible length — 60.5 is not '1m', -1 is not '<1m'", () => {
+  expect(UNREADABLE_HORIZON).toBe("—");
+  expect(horizonLabel(60.5)).toBe(UNREADABLE_HORIZON);
+  expect(horizonLabel(-1)).toBe(UNREADABLE_HORIZON);
+  expect(horizonLabel(-0)).toBe(UNREADABLE_HORIZON);
+  expect(horizonLabel(Number.NaN)).toBe(UNREADABLE_HORIZON);
+  expect(horizonLabel(Number.POSITIVE_INFINITY)).toBe(UNREADABLE_HORIZON);
+  expect(horizonLabel(2 ** 53)).toBe(UNREADABLE_HORIZON);
+  expect(horizonLabel(0)).toBe("<1m");
+});
+
+/** The demo-shaped projection row: an applicable rate step whose spot sides are not liquidatable, judged by its horizons. */
+function projectionRow(horizons: readonly { seconds: number; verdict: StressHorizon["verdict"] }[]): StressRow {
+  const side = { debt: 4822000000n, cap: 5012500000n, room: 190500000n, verdict: "not-liquidatable" as const };
+  return {
+    id: "dm_rate_horizon_plus_200bps",
+    label: "Debt Manager borrow APY +200bps (PROJECTION)",
+    applicable: true,
+    reason: null,
+    before: side,
+    after: side,
+    flips: false,
+    projection: horizons.map((h) => ({ seconds: h.seconds, extraInterest: 7926575n, verdict: h.verdict })),
+    projectionNote: "DELTA-ONLY",
+    marketRealization: null,
+  };
+}
+
+test("stressVerdict: an unknowable horizon is a cannot-say that names it — never 'No'; a liquidatable one names the first horizon it happens within; otherwise inside through the longest", () => {
+  // The defect: before/after not liquidatable, the 30d horizon refined to unknowable, the 90d one not-liquidatable — rendered "No".
+  const unknowable = stressVerdict(projectionRow([{ seconds: 2_592_000, verdict: "unknowable" }, { seconds: 7_776_000, verdict: "not-liquidatable" }]));
+  expect(unknowable).toEqual({ kind: "cannot-say", horizon: { seconds: 2_592_000, extraInterest: 7926575n, verdict: "unknowable" } });
+  expect(stressVerdictWords(unknowable)).toEqual({ text: "Cannot say", tone: "refused", title: "the 30d horizon carries no verdict" });
+  // The unknowable horizon refuses the row even when a later horizon would flip it: no verdict word is earned past an unknown.
+  const unknownThenFlip = stressVerdict(projectionRow([{ seconds: 2_592_000, verdict: "unknowable" }, { seconds: 7_776_000, verdict: "liquidatable" }]));
+  expect(unknownThenFlip.kind).toBe("cannot-say");
+  const within = stressVerdict(projectionRow([{ seconds: 2_592_000, verdict: "not-liquidatable" }, { seconds: 7_776_000, verdict: "liquidatable" }]));
+  expect(within).toMatchObject({ kind: "liquidatable", within: { seconds: 7_776_000 }, already: false });
+  expect(stressVerdictWords(within)).toEqual({ text: "Within 90d", tone: "warn", title: null });
+  // The first horizon it happens within, in wire order, not the longest.
+  const first = stressVerdict(projectionRow([{ seconds: 7_776_000, verdict: "liquidatable" }, { seconds: 2_592_000, verdict: "liquidatable" }]));
+  expect(first).toMatchObject({ kind: "liquidatable", within: { seconds: 7_776_000 } });
+  const inside = stressVerdict(projectionRow([{ seconds: 2_592_000, verdict: "not-liquidatable" }, { seconds: 7_776_000, verdict: "not-liquidatable" }]));
+  expect(inside).toMatchObject({ kind: "inside", through: { seconds: 7_776_000 } });
+  expect(stressVerdictWords(inside)).toEqual({ text: "Not within 90d", tone: null, title: "a projection speaks only through its longest horizon" });
+  // A side missing or unknowable gates the row before its horizons are consulted.
+  const sideUnknown = { ...projectionRow([{ seconds: 2_592_000, verdict: "liquidatable" }]), flips: null };
+  expect(stressVerdict(sideUnknown)).toEqual({ kind: "cannot-say", horizon: null });
+  expect(stressVerdictWords(stressVerdict(sideUnknown))).toEqual({ text: "Cannot say", tone: "refused", title: "one side of the comparison is withheld or unknowable" });
+  // Spot shocks: a flip is Yes; liquidatable on both sides is said, never "No"; a non-flip is No; not applicable prints its reason.
+  const spot = { ...projectionRow([]), projection: null, projectionNote: null };
+  expect(stressVerdictWords(stressVerdict({ ...spot, flips: true }))).toEqual({ text: "Yes", tone: "crit", title: null });
+  const already = { ...spot, before: { ...spot.before!, verdict: "liquidatable" as const }, after: { ...spot.after!, verdict: "liquidatable" as const }, flips: false };
+  expect(stressVerdict(already)).toEqual({ kind: "liquidatable", within: null, already: true });
+  expect(stressVerdictWords(stressVerdict(already))).toEqual({ text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" });
+  expect(stressVerdictWords(stressVerdict(spot))).toEqual({ text: "No", tone: null, title: null });
+  expect(stressVerdictWords(stressVerdict({ ...spot, applicable: false, reason: "not evaluated for this account", flips: null }))).toEqual({
+    text: "not evaluated for this account",
+    tone: null,
+    title: null,
+  });
+});
+
+test("a horizon whose duration fails the population guard is an unknowable horizon: its verdict is refused whatever the wire said, and the row is a cannot-say that says the duration is unreadable", () => {
+  const scenario = STRESS_DM.scenarios[0];
+  const result = scenario?.results[0];
+  if (scenario === undefined || result === undefined || result.before === null || result.after === null || result.projection === null) throw new Error("fixture shape");
+  const malformed = {
+    ...STRESS_DM,
+    scenarios: [
+      {
+        ...scenario,
+        results: [
+          {
+            ...result,
+            before: { ...result.before, liquidatable: false, debt_usd: "3000000000" },
+            after: { ...result.after, liquidatable: false, debt_usd: "3000000000" },
+            projection: { ...result.projection, horizons: [{ ...result.projection.horizons[0]!, horizon_seconds: 60.5, becomes_liquidatable: false }, { ...result.projection.horizons[1]!, becomes_liquidatable: false }] },
+          },
+        ],
+      },
+    ],
+  };
+  const r = stressReading(lookup(malformed), STRESS_DM.address);
+  if (r.kind !== "rows") throw new Error(r.kind);
+  const row = r.rows[0];
+  if (row === undefined) throw new Error("row");
+  expect(row.projection?.map((h) => [h.seconds, h.verdict])).toEqual([
+    [60.5, "unknowable"],
+    [7776000, "not-liquidatable"],
+  ]);
+  const verdict = stressVerdict(row);
+  expect(verdict).toMatchObject({ kind: "cannot-say", horizon: { seconds: 60.5, verdict: "unknowable" } });
+  expect(stressVerdictWords(verdict)).toEqual({ text: "Cannot say", tone: "refused", title: "a horizon with an unreadable duration carries no verdict" });
+  // A negative duration is the same refusal; a whole one keeps the wire's verdict.
+  const negative = { ...malformed, scenarios: [{ ...scenario, results: [{ ...malformed.scenarios[0]!.results[0]!, projection: { ...result.projection, horizons: [{ ...result.projection.horizons[0]!, horizon_seconds: -1, becomes_liquidatable: false }] } }] }] };
+  const n = stressReading(lookup(negative), STRESS_DM.address);
+  if (n.kind !== "rows") throw new Error(n.kind);
+  expect(n.rows[0]?.projection?.[0]?.verdict).toBe("unknowable");
+  expect(stressVerdict(n.rows[0]!).kind).toBe("cannot-say");
+});
+
+test("the reading carries the stress response's own batch on every arm; an id the population guard refuses names no batch", () => {
+  expect(stressReading(lookup(STRESS_DM), STRESS_DM.address).batchId).toBe(1);
+  expect(stressReading(lookup({ ...STRESS_DM, batch: { ...STRESS_DM.batch, id: 101 } }), STRESS_DM.address).batchId).toBe(101);
+  expect(stressReading(lookup({ ...STRESS_DM, found: false, scenarios: [] }), STRESS_DM.address)).toEqual({ kind: "no-position", batchId: 1 });
+  expect(stressReading(lookup(STRESS_UNKNOWABLE), STRESS_UNKNOWABLE.address).batchId).toBe(1);
+  for (const id of [-1, 1.5, -0, Number.NaN]) {
+    expect(stressReading(lookup({ ...STRESS_DM, batch: { ...STRESS_DM.batch, id } }), STRESS_DM.address).batchId).toBeNull();
+  }
 });

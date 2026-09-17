@@ -2,7 +2,7 @@
 
 import { KitTable, SectionHead, StatusPill, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { activityRows, activityTakeaway, type ActivityScale } from "@/lib/activity-rows";
+import { activityEmptyText, activityFailureText, activityRows, activityTakeaway, type ActivityScale } from "@/lib/activity-rows";
 import { useAddressActivity } from "@/lib/address-lookup";
 import styles from "../inspector.module.css";
 
@@ -55,15 +55,16 @@ export function ActivityTable({ addr, valid, scale }: { addr: string; valid: boo
         ),
     },
   }));
-  const emptyText = activity.loading
-    ? "Loading activity…"
-    : activity.error !== null
-      ? `Activity unavailable: ${activity.error.message}`
-      : "No custodied actions for this account.";
   return (
     <section>
       <SectionHead title="Activity" qualifier="this account's chain actions · custodied times, newest first" />
-      <KitTable testId="inspector-activity" columns={COLUMNS} rows={kitRows} emptyText={emptyText} />
+      <KitTable testId="inspector-activity" columns={COLUMNS} rows={kitRows} emptyText={activityEmptyText(activity.loading, activity.error)} />
+      {/* The table's empty words print only with no rows; a page failure beside loaded rows has its own line, so it is never lost. */}
+      {activity.error !== null && rows.length > 0 && (
+        <p className={styles.note} role="status" data-testid="inspector-activity-error">
+          {activityFailureText(activity.error)}
+        </p>
+      )}
       {rows.length > 0 && (
         <p className={styles.note} data-testid="inspector-activity-takeaway">
           {activityTakeaway(timed, rows.length - timed, activity.hasMore)}

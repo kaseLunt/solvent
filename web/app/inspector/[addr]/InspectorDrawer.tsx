@@ -5,7 +5,7 @@ import { Drawer } from "@/components/Drawer";
 import type { AddressReading } from "@/lib/address-lookup";
 import { formatBlock, renderBlockTime } from "@/lib/format";
 import { isComputedCash, sourceDisplay, symbolFor } from "@/lib/inspector-position";
-import type { InspectorView } from "@/lib/inspector-view";
+import { drawerEmptyText, type InspectorView } from "@/lib/inspector-view";
 import { plainCause } from "@/lib/refusal-phrasebook";
 import styles from "../inspector.module.css";
 import { wireExact, wirePrice } from "./money";
@@ -24,7 +24,7 @@ export function InspectorDrawer({ open, onClose, view, reading }: { open: boolea
     <Drawer open={open} onClose={onClose} title="Inputs · Calculation · Provenance">
       <div className={styles.method} data-testid="inspector-drawer-body">
         {p === null || cash === null ? (
-          <p>No Cash position in this batch; nothing to calculate.</p>
+          <p data-testid="inspector-drawer-empty">{drawerEmptyText(view)}</p>
         ) : (
           <>
             <h3>Calculation</h3>

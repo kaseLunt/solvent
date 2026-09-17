@@ -134,7 +134,16 @@ export interface CollateralTable {
   /** Σ contribution === max_borrow_lt (null when either side is unreadable). */
   readonly capAgrees: boolean | null;
   readonly collateralAgrees: boolean | null;
+  /**
+   * Why no USD figure of this position is read, said once for the whole table: the position's shared scale
+   * (`value_decimals`) failed the guard, so every value, contribution, LTV and sum is null. Null when the scale is licensed.
+   */
+  readonly usdRefusal: string | null;
 }
+
+/** The one sentence the table says when the position's USD scale is refused — the same cause the headline names. */
+const USD_SCALE_REFUSED =
+  "USD figures withheld: the engine published an unreadable value scale (value_decimals) for this account, so no value, contribution or LTV is read from it.";
 
 /** The repo's word for a wire figure whose scale was not licensed — its digits are never printed as a number. */
 const UNREADABLE = "unreadable";
@@ -144,9 +153,13 @@ function isCollateralLeg(leg: RefinedLeg): boolean {
 }
 
 export function collateralTable(position: RefinedPosition, cash: CashPosition): CollateralTable {
+  // The legs' USD figures share the position's one scale, and the reader already judged it: null means the guard
+  // refused `value_decimals`. A ratio or a sum of figures at a scale nothing may print is still a figure at that
+  // scale, so none is read — the LTV included — and the refusal is named once for the table.
+  const usdReadable = cash.decimals !== null;
   const legs = position.legs.filter(isCollateralLeg).map((leg): CollateralLeg => {
-    const value = wireInt(leg.value_usd);
-    const contribution = wireInt(leg.max_borrow_contribution);
+    const value = usdReadable ? wireInt(leg.value_usd) : null;
+    const contribution = usdReadable ? wireInt(leg.max_borrow_contribution) : null;
     const amount = wireInt(leg.amount);
     const input = priceInputFor(position, leg.asset);
     const priceValue = input === null ? null : wireInt(input.value);
@@ -175,6 +188,7 @@ export function collateralTable(position: RefinedPosition, cash: CashPosition): 
     sumContribution,
     capAgrees: sumContribution === null || cash.cap === null ? null : sumContribution === cash.cap,
     collateralAgrees: sumValue === null || cash.collateral === null ? null : sumValue === cash.collateral,
+    usdRefusal: usdReadable ? null : USD_SCALE_REFUSED,
   };
 }
 

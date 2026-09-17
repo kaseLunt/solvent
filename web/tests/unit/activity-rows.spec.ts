@@ -1,6 +1,17 @@
 import { expect, test } from "@playwright/test";
 import { EVENTS } from "../fixtures/inspector";
-import { actionLabel, activityRows, activityTakeaway } from "../../lib/activity-rows";
+import { actionLabel, activityEmptyText, activityFailureText, activityRows, activityTakeaway } from "../../lib/activity-rows";
+
+// A page failure beside loaded rows is its own line: the table's empty words print only with no rows, so a
+// refused "Load more" folded into them would never show. The rows stand; the failure speaks in its own words.
+test("activityEmptyText and activityFailureText: the load phase, the failure's own words, the proven-empty sentence; a failure beside rows keeps the rows", () => {
+  const error = new Error("503 unavailable: no complete risk batch is available (http://x/v1/events?cursor=p2)");
+  expect(activityEmptyText(true, null)).toBe("Loading activity…");
+  expect(activityEmptyText(true, error)).toBe("Loading activity…");
+  expect(activityEmptyText(false, error)).toBe(`Activity unavailable: ${error.message}`);
+  expect(activityEmptyText(false, null)).toBe("No custodied actions for this account.");
+  expect(activityFailureText(error)).toBe(`More activity could not be loaded: ${error.message}. The rows above stand; nothing beyond them was read.`);
+});
 
 test("rows: a custodied time renders; a null block_time falls back to the block number and is untimed", () => {
   const rows = activityRows(EVENTS.events);
