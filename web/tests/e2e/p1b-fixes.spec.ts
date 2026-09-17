@@ -81,11 +81,12 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
     });
 
     await page.goto("/feed");
-    const foot = page.getByTestId("feed-foot");
+    // The filter echo is the Activity header's own chip now (the page converged onto the kit); the law is unchanged.
+    const foot = page.getByTestId("activity-verdict").locator('[data-chip="Filter echo"]');
     // The initial cross-engine walk settles first (its own echo: types all).
     await expect(foot).toContainText("types all");
 
-    const chips = page.getByTestId("type-chips");
+    const chips = page.getByTestId("activity-types");
     // Filter change ONE: walk A (types=borrow) — its page is HELD by the shim.
     const requestA = page.waitForRequest(
       (request) => request.url().includes("types=borrow") && !request.url().includes("%2C"),

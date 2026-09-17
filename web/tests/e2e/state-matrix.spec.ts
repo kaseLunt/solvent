@@ -535,11 +535,12 @@ const MATRIX: Cell[] = [
       await page.route("**/v1/events*", (route) => fulfillJson(route, FEED_CROSS_PAGE_1));
     },
     verify: async (page) => {
-      await expect(page.getByTestId("feed-row")).toHaveCount(2);
+      const rows = page.locator('[data-testid^="activity-row-"]');
+      await expect(rows).toHaveCount(2);
       // No fake freshness: the untimed row renders its BLOCK, never an
-      // invented timestamp, and the tail boundary is DISCLOSED.
-      await expect(page.getByTestId("untimed-divider")).toHaveCount(1);
-      await expect(page.getByTestId("feed-time").nth(1)).toHaveText("block 154,796,490");
+      // invented timestamp, and the tail is DISCLOSED as the dim row.
+      await expect(rows.nth(1)).toHaveClass(/dim/);
+      await expect(rows.nth(1).locator("td").first()).toHaveText("block 154,796,490");
     },
   },
   {
@@ -551,10 +552,10 @@ const MATRIX: Cell[] = [
       await page.route("**/v1/events*", (route) => fulfillJson(route, FEED_EMPTY));
     },
     verify: async (page) => {
-      const empty = page.getByTestId("feed-empty");
+      const empty = page.getByTestId("activity-table");
       await expect(empty).toContainText("no custodied chain actions match this filter");
       await expect(empty).toContainText("a real answer");
-      await expect(page.getByTestId("feed-row")).toHaveCount(0);
+      await expect(page.locator('[data-testid^="activity-row-"]')).toHaveCount(0);
     },
   },
   {
@@ -571,14 +572,14 @@ const MATRIX: Cell[] = [
       });
     },
     act: async (page) => {
-      await expect(page.getByTestId("feed-row")).toHaveCount(2);
-      await page.getByTestId("feed-load-more").click();
+      await expect(page.locator('[data-testid^="activity-row-"]')).toHaveCount(2);
+      await page.getByTestId("activity-load-more").click();
     },
     verify: async (page) => {
       // The refusal renders the envelope's own words; loaded rows survive.
-      await expect(page.getByTestId("feed-refusal")).toBeVisible();
-      await expect(page.getByTestId("feed-restart")).toBeVisible();
-      await expect(page.getByTestId("feed-row")).toHaveCount(2);
+      await expect(page.getByTestId("activity-refusal")).toBeVisible();
+      await expect(page.getByTestId("activity-restart")).toBeVisible();
+      await expect(page.locator('[data-testid^="activity-row-"]')).toHaveCount(2);
     },
   },
   {
@@ -592,7 +593,7 @@ const MATRIX: Cell[] = [
       );
     },
     verify: async (page) => {
-      await expect(page.getByTestId("feed-error")).toContainText("rate limit");
+      await expect(page.getByTestId("activity-error")).toContainText("rate limit");
     },
   },
   {
@@ -604,7 +605,7 @@ const MATRIX: Cell[] = [
       await page.route("**/v1/events*", (route) => fulfillJson(route, FEED_ERROR_INTERNAL, 500));
     },
     verify: async (page) => {
-      await expect(page.getByTestId("feed-error")).toContainText("failed to build the response");
+      await expect(page.getByTestId("activity-error")).toContainText("failed to build the response");
     },
   },
   {
@@ -617,8 +618,8 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       // Nothing is pretended: no snapshot means no batch strip at all.
-      await expect(page.getByTestId("feed-live-none")).toContainText("nothing is pretended");
-      await expect(page.getByTestId("feed-live-batch")).toHaveCount(0);
+      await expect(page.getByTestId("activity-live-none")).toContainText("nothing is pretended");
+      await expect(page.getByTestId("activity-live-batch")).toHaveCount(0);
     },
   },
   {
@@ -631,10 +632,10 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       // Live posture renders the batch's REAL watermark vector…
-      await expect(page.getByTestId("feed-live-batch")).toContainText("batch #1");
-      await expect(page.getByTestId("feed-live-batch")).toContainText("@25,635,618");
+      await expect(page.getByTestId("activity-live-batch")).toContainText("batch #1");
+      await expect(page.getByTestId("activity-live-batch")).toContainText("@25,635,618");
       // …and stays labeled live-only: posture is never conflated with history.
-      await expect(page.getByTestId("feed-live-strip")).toContainText("current connection only");
+      await expect(page.getByTestId("activity-live")).toContainText("current connection only");
     },
   },
 

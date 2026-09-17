@@ -16,7 +16,8 @@ const SURFACES = [
   // With no API the listing cannot be fetched, and the Scenarios page says so as its H1.
   { path: "/lab", label: "Scenarios", h1: "The committed scenarios could not be listed." },
   { path: "/observatory", label: "History", h1: "Observatory" },
-  { path: "/feed", label: "Activity", h1: "Feed" },
+  // With no API the first page cannot be fetched, and Activity says so as its H1.
+  { path: "/feed", label: "Activity", h1: /^Page fetch failed: / },
   // With no API the manifest cannot be fetched, and Verification says so as its H1.
   { path: "/proof", label: "Verification", h1: /^Evidence unavailable: / },
   // The API page is static: its H1 is the contract's own operation count, API or no API.

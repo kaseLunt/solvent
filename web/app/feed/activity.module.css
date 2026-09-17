@@ -1,0 +1,71 @@
+/* Activity: the paged record set in the Console register. Page-local rules only — the header, tiles, table, pills
+ * and buttons are the kit's; these are the walk's own controls (engine · view · type · since-block), the live strip
+ * (a separate instrument, labelled as such), the honest state strips, the table's unit and tx cells, and the foot.
+ * Every sentence on the page is lib/activity-view.ts's or the surface's own state machine's; the styling only
+ * sets it. */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+
+/* ---- live posture strip: the CURRENT connection only, never history ---- */
+.live { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-2); }
+.liveLabel { letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.liveChip { display: inline-flex; align-items: center; gap: 6px; letter-spacing: 0.06em; text-transform: uppercase; }
+.liveChip i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block; }
+/* A proven connection is ACCENT — connection is posture, not health, and no socket is green. */
+.liveAccent { color: var(--accent-text); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .liveAccent i { animation: livePulse 2.4s ease-in-out infinite; }
+
+  @keyframes livePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+}
+
+/* Open with NO base frame — the unknown register: measured ink, hollow dot, no posture color. */
+.liveUnknown { color: var(--ink-2); }
+.liveUnknown i { background: transparent; border: 1px dashed currentColor; }
+.liveWarn { color: var(--warn-text); }
+.liveDown { color: var(--crit-text); }
+.live b { color: var(--ink); font-weight: var(--w-semibold); }
+.liveLaw { flex-basis: 100%; color: var(--ink-3); }
+
+/* ---- controls: the kit's ghost buttons at chip size; a pressed one takes the accent ---- */
+.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.groupLabel { font-size: var(--type-small); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); margin-right: 4px; }
+.controls .chipBtn { padding: 4px 10px; font-size: var(--type-small); color: var(--ink-2); }
+.controls .chipBtn:hover { border-color: var(--accent); color: var(--accent-text); }
+.controls .chipBtn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.sinceInput { font-family: var(--mono); font-size: var(--type-mono-sm); width: 130px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+.sinceInput::placeholder { color: var(--ink-3); }
+.applied { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-3); }
+/* A stated impossibility (cross-engine since_block) or the ledger's pinned type — dim, not an error. */
+.impossible { font-size: var(--type-small); color: var(--ink-3); max-width: 520px; }
+
+/* ---- the order note beneath the list's head ---- */
+.order { margin: 0; font-size: var(--type-small); color: var(--ink-3); }
+
+/* ---- honest state strips: a notice and a failed fetch warn; a refusal is dashed ---- */
+.strip { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 8px 12px; border-radius: 8px; font-size: var(--type-body); color: var(--ink); }
+.strip b { letter-spacing: 0.04em; font-weight: var(--w-semibold); }
+.stripWarn { border: 1px solid var(--warn); background: var(--warn-bg); }
+.stripWarn b { color: var(--warn-text); }
+.stripRefused { border: 1px dashed var(--crit); background: var(--refused-bg); }
+.stripRefused b { color: var(--crit-text); }
+
+/* ---- the table's cells: the unit tag beside the amount, the type word, the tx link ---- */
+.unit { margin-left: 6px; font-size: var(--type-floor); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); }
+.type { font-size: var(--type-small); color: var(--ink-2); }
+.tx { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-3); text-decoration: none; }
+.tx:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---- foot: the walk's continuation or its end ---- */
+.foot { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; padding: 4px 2px; font-size: var(--type-small); color: var(--ink-3); }
+
+/* ---- drawer body: the doctrine, paragraph by paragraph ---- */
+.method { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--type-body); color: var(--ink); }
+.method p { margin: 0; }
+
+@media (max-width: 640px) { .tiles { grid-template-columns: 1fr; } }

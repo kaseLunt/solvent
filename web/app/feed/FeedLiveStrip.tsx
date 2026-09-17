@@ -18,7 +18,7 @@
 import { usePosture } from "@/lib/posture";
 import { formatBlock } from "@/lib/format";
 import { isWirePopulation } from "@/lib/wireGuard";
-import styles from "./feed.module.css";
+import styles from "./activity.module.css";
 
 /**
  * p1b-14: every envelope integer this live instrument prints passes the
@@ -67,15 +67,15 @@ export function FeedLiveStrip() {
   const live = posture.streamState === "open" && posture.hasBase;
 
   return (
-    <div className={styles.liveStrip} data-testid="feed-live-strip" role="status">
+    <div className={styles.live} data-testid="activity-live" role="status">
       <span className={styles.liveLabel}>live posture</span>
-      <span className={`${styles.liveChip} ${chip.tone}`} data-testid="feed-live-state">
+      <span className={`${styles.liveChip} ${chip.tone}`} data-testid="activity-live-state">
         <i aria-hidden />
         {chip.label}
       </span>
 
       {posture.unavailable !== null ? (
-        <span data-testid="feed-live-unavailable">
+        <span data-testid="activity-live-unavailable">
           no servable batch
           {posture.unavailable.staleSinceSeconds !== null && (
             <>
@@ -91,7 +91,7 @@ export function FeedLiveStrip() {
           )}
         </span>
       ) : posture.batch !== null ? (
-        <span data-testid="feed-live-batch">
+        <span data-testid="activity-live-batch">
           batch <b>#{wireCount(posture.batch.id)}</b> · {wireCount(posture.batch.position_count)}{" "}
           positions · {wireCount(posture.batch.refused_count)} refused
           {posture.batch.supersession.superseded && (
@@ -109,13 +109,13 @@ export function FeedLiveStrip() {
           ))}
         </span>
       ) : (
-        <span data-testid="feed-live-none">
+        <span data-testid="activity-live-none">
           no batch delivered on this connection, and nothing is pretended
         </span>
       )}
 
       {posture.degradation !== null && posture.degradation.refused_engines.length > 0 && (
-        <span className="warnt" data-testid="feed-live-degraded">
+        <span className="warnt" data-testid="activity-live-degraded">
           withheld:{" "}
           {posture.degradation.refused_engines
             .map((refusal) => `${refusal.engine} (${refusal.code})`)

@@ -546,7 +546,7 @@ test.describe("p1a-9 · the codex round", () => {
       `event: snapshot\ndata: ${JSON.stringify(FEED_POSTURE_SNAPSHOT)}\n\n`,
       async () => {
         await page.goto("/feed");
-        const chip = page.getByTestId("feed-live-state");
+        const chip = page.getByTestId("activity-live-state");
         await expect(chip).toHaveText("streaming");
         const color = await chip.evaluate((el) => getComputedStyle(el).color);
         // ACCENT — connection is posture, not health (the appbar's own law,
@@ -566,14 +566,14 @@ test.describe("p1a-9 · the codex round", () => {
     // comment: streamState is "open", hasBase is false.
     await withHeldOpenStream(page, ": heartbeat 1753783205\n\n", async () => {
       await page.goto("/feed");
-      const chip = page.getByTestId("feed-live-state");
+      const chip = page.getByTestId("activity-live-state");
       // THE MUTATION KILL: a strip that ignores hasBase renders "streaming"
       // over this connection and dies here.
       await expect(chip).toHaveText("awaiting base");
       const color = await chip.evaluate((el) => getComputedStyle(el).color);
       expect(color).toBe(await resolveAppbarToken(page, "--ink-2"));
       // And the batch line pretends nothing: no base means no batch strip.
-      await expect(page.getByTestId("feed-live-none")).toContainText("nothing is pretended");
+      await expect(page.getByTestId("activity-live-none")).toContainText("nothing is pretended");
     });
   });
 });

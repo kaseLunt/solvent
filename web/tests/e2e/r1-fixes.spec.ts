@@ -74,8 +74,8 @@ test("(4) a DM amount is scaled by the engine's OWN value_decimals, with separat
   await page.goto("/feed");
 
   // The fixture's DM borrow is 1199403000 normalized-debt units.
-  await expect(page.getByTestId("feed-amount").filter({ hasText: "1,199.403" })).toBeVisible();
-  await expect(page.getByTestId("feed-amount").filter({ hasText: "1199403000" })).toHaveCount(0);
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "1,199.403" })).toBeVisible();
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "1199403000" })).toHaveCount(0);
 });
 
 test("(4) an aave_scaled amount with no leg decimals stays RAW and is TAGGED as such", async ({
@@ -88,9 +88,10 @@ test("(4) an aave_scaled amount with no leg decimals stays RAW and is TAGGED as 
   // The ray-scaled aToken amount is NOT divided by the engine's base-currency
   // decimals — a different unit entirely.
   await expect(
-    page.getByTestId("feed-amount").filter({ hasText: "1500000000000000000" }),
+    page.getByTestId("activity-amount").filter({ hasText: "1500000000000000000" }),
   ).toBeVisible();
-  await expect(page.getByTestId("feed-amount-raw").first()).toHaveText("raw units");
+  // The tag is part of the unit named beside the amount (the Activity table's one unit cell per row).
+  await expect(page.getByTestId("activity-unit").filter({ hasText: "aave-scaled" })).toContainText("raw units");
 });
 
 // ---------------------------------------------------------------------------
@@ -144,12 +145,8 @@ test("(10) the adjudicated intros render — Observatory, Feed, Proof, Developer
       "over and never drawn as a zero; one engine per view, never combined onto one axis.",
   );
 
-  await page.goto("/feed");
-  await expect(page.locator("main")).toContainText(
-    "Chain actions as recorded: borrows, repays, supplies, withdrawals, liquidations. The " +
-      "live strip shows the stream's posture now; the list below pages through durable " +
-      "history. The two never blend.",
-  );
+  // The Activity arm is RETIRED with the Activity convergence (plan 2026-09-16, Task 4): the intro is
+  // drawer doctrine now (R3), pinned verbatim in tests/e2e/activity.spec.ts; the dek keeps the closing clause.
 
   // The Proof arm is RETIRED with the Verification convergence (plan 2026-09-16, Task 5): the intro is drawer
   // doctrine now (R3), pinned verbatim in tests/e2e/verification.spec.ts; the dek keeps "Two subjects, never one:
