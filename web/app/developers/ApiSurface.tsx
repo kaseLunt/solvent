@@ -98,7 +98,7 @@ export function ApiSurface() {
       <SectionHead
         title="Endpoints"
         qualifier={`${String(OPERATIONS.length)} operations, ${CONTRACT_META.sourcePath} verbatim`}
-        link={{ href: "/proof", label: "this deployment's evidence manifest → Verification" }}
+        link={{ href: "/proof", label: "Verification →" }}
       />
       {OPERATIONS.map((op) => (
         <EndpointCard key={op.operationId} op={op} baseUrl={baseUrl} />

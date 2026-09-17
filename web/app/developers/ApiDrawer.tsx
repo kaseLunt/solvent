@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Drawer } from "@/components/Drawer";
+import { Drawer } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import styles from "./api.module.css";
 
