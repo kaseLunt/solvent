@@ -23,11 +23,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KpiTile, SectionHead, VerdictHeader } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { ACTIVITY_LIST_TITLE, deriveActivityView } from "@/lib/activity-view";
+import {
+  ACTIVITY_LIST_TITLE,
+  END_OF_FEED,
+  deriveActivityView,
+  notABlockNumberNotice,
+  sinceBlockDroppedNotice,
+} from "@/lib/activity-view";
 import { solventBaseUrl } from "@/lib/api";
 import {
   InspectorFetchError,
-  SINCE_BLOCK_IMPOSSIBILITY,
   fetchFeedPage,
   feedOrderMode,
   type EventDisplayType,
@@ -161,11 +166,7 @@ export function ActivitySurface() {
       setSinceBlock(null);
       setSinceDraft("");
       restartWalk();
-      setNotice(
-        candidate === null
-          ? `since_block ${String(sinceBlock)} dropped: ${SINCE_BLOCK_IMPOSSIBILITY}`
-          : `since_block ${String(sinceBlock)} dropped: block heights are chain-scoped, and ${candidate} lives on a different chain`,
-      );
+      setNotice(sinceBlockDroppedNotice(sinceBlock, candidate));
       return;
     }
     restartWalk();
@@ -196,7 +197,7 @@ export function ActivitySurface() {
       return;
     }
     if (!/^[0-9]+$/.test(trimmed)) {
-      setNotice(`"${trimmed.slice(0, 32)}" is not a block number, so nothing was requested`);
+      setNotice(notABlockNumberNotice(trimmed));
       return;
     }
     setSinceBlock(Number(trimmed));
@@ -333,7 +334,7 @@ export function ActivitySurface() {
             {loading ? "Loading…" : "Load more"}
           </button>
         ) : (
-          <span data-testid="activity-end">end of the filtered feed</span>
+          <span data-testid="activity-end">{END_OF_FEED}</span>
         )}
       </div>
     </div>

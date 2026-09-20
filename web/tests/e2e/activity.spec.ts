@@ -172,16 +172,45 @@ test("the ledger view pins the type to liquidation: the request says so, three r
   const pills = page.getByTestId("activity-table").locator('[data-tone="crit"]');
   await expect(pills).toHaveCount(3);
   await expect(pills).toHaveText(["liquidation", "liquidation", "liquidation"]);
-  // The typed extract, verbatim numbers: an unestablished bonus is an em dash, never an estimate.
-  await expect(pills.first()).toHaveAttribute("title", /liquidator 0xBBbB/);
-  await expect(pills.first()).toHaveAttribute("title", /seized 0\.65625 weETH/);
-  await expect(pills.first()).toHaveAttribute("title", /bonus realized — \/ configured 500 bps/);
+  // The typed extract is VISIBLE beneath every pill — no click, no hover: an unestablished bonus is an em dash
+  // read on the page, never an estimate; the configured figure is the wire's bps; the liquidator opens the Inspector.
+  const extracts = page.getByTestId("activity-liquidation");
+  await expect(extracts).toHaveCount(3);
+  await expect(extracts.first()).toBeVisible();
+  await expect(extracts.first()).toContainText("seized 0.65625 weETH");
+  await expect(extracts.first()).toContainText("bonus realized — / configured 500 bps");
+  await expect(extracts.first().getByTestId("activity-liquidator")).toHaveAttribute(
+    "href",
+    "/inspector/0xBBbB000000000000000000000000000000000002",
+  );
+  // The DM extracts carry no configured bonus: a dash, never a zero.
+  await expect(extracts.nth(1)).toContainText("bonus realized — / configured —");
+  await expect(extracts.nth(2)).toContainText("bonus realized — / configured —");
+  await expect(extracts.nth(1)).not.toContainText("configured 0");
   await expect(headline(page)).toHaveText(feedTakeaway(LEDGER_PAGE.events, "cross-engine", false));
 
   // Back to every action: the walk restarts from the demo page, the vocabulary returns.
   await page.getByTestId("activity-view-all").click();
   await expect(rows(page)).toHaveCount(50);
   await expect(page.getByTestId("activity-types")).toBeVisible();
+});
+
+test("all-actions view: an UNESTABLISHED extract is visible on cold load — the em dash never waits behind a fold or a hover", async ({ page }) => {
+  await muteStream(page);
+  // The committed cross page's liquidation carries realized_bonus_bps null — the exact field a closed fold once hid.
+  await mockEvents(page, (params, route) => fulfillJson(route, FEED_CROSS_PAGE_1));
+  await page.goto("/feed");
+  await expect(rows(page)).toHaveCount(2);
+
+  const extract = page.getByTestId("activity-liquidation");
+  await expect(extract).toHaveCount(1);
+  await expect(extract).toBeVisible();
+  await expect(extract).toContainText("realized —");
+  await expect(extract).toContainText("configured 500 bps");
+  await expect(extract.getByTestId("activity-liquidator")).toHaveAttribute("href", /^\/inspector\/0x/);
+  // The extract sits inside its own row, beneath the crit pill.
+  await expect(rows(page).first().locator('[data-tone="crit"]')).toHaveText("liquidation");
+  await expect(rows(page).first().getByTestId("activity-liquidation")).toBeVisible();
 });
 
 test("since_block: a stated impossibility cross-engine, a real numeric control engine-scoped (Enter applies), dropped with a notice when the engine changes; a cursor never crosses modes and the bound never crosses chains", async ({ page }) => {

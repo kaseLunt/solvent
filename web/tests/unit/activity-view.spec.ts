@@ -12,9 +12,13 @@ import {
   ACTIVITY_LIST_TITLE,
   ACTIVITY_METHOD,
   ACTIVITY_TAIL_NOTE,
+  END_OF_FEED,
   deriveActivityView,
+  notABlockNumberNotice,
+  sinceBlockDroppedNotice,
   type ActivityInput,
 } from "../../lib/activity-view";
+import { SINCE_BLOCK_IMPOSSIBILITY } from "../../lib/feed-data";
 import { RAW_UNITS_TAG, feedTakeaway } from "../../lib/feed-view";
 import { EM_DASH } from "../../lib/format";
 import { DEMO_FEED_PAGE_1 } from "../fixtures/demo";
@@ -65,14 +69,33 @@ test("rows: three liquidations, each the crit tone with its typed extract behind
   expect(crit.every((r) => r.type === "liquidation" || r.type === "deficit_created")).toBe(true);
   expect(v.rows.filter((r) => r.type !== "liquidation" && r.type !== "deficit_created").every((r) => r.tone === "info")).toBe(true);
   expect(v.rows.filter((r) => r.type !== "liquidation").every((r) => r.detail === null)).toBe(true);
-  const aave = liquidations[0];
-  expect(aave?.detail).toContain("liquidator 0xBBbB000000000000000000000000000000000002");
-  expect(aave?.detail).toContain("debt repaid 2,500 0xA0b86991…");
-  expect(aave?.detail).toContain("seized 0.65625 weETH");
-  // An unestablished bonus is an em dash, never an estimate; the configured one prints in bps.
-  expect(aave?.detail).toContain(`bonus realized ${EM_DASH} / configured 500 bps`);
-  expect(aave?.detail).toContain("never estimated");
-  expect(liquidations[1]?.detail).toContain(`bonus realized ${EM_DASH} / configured ${EM_DASH}`);
+  // The extract as parts the table prints visibly: the liquidator with its Inspector link, the amounts in the
+  // extract's own units, an unestablished bonus an em dash (never an estimate), the configured one in bps.
+  expect(liquidations[0]?.detail).toEqual({
+    liquidator: "0xBBbB000000000000000000000000000000000002",
+    liquidatorHref: "/inspector/0xBBbB000000000000000000000000000000000002",
+    repaid: "2,500",
+    repaidAsset: "0xA0b86991…",
+    seized: "0.65625 weETH",
+    bonusRealized: EM_DASH,
+    bonusConfigured: "500 bps",
+    note: expect.stringContaining("never estimated"),
+  });
+  // The DM extracts carry no debt asset and no configured bonus: null is a dash, never "0".
+  expect(liquidations[1]?.detail).toMatchObject({ repaidAsset: null, bonusRealized: EM_DASH, bonusConfigured: EM_DASH });
+  expect(liquidations[1]?.detail?.bonusConfigured).not.toContain("0");
+  expect(liquidations[2]?.detail?.liquidatorHref).toBe(`/inspector/${ROWS[37]?.liquidation?.liquidator ?? ""}`);
+});
+
+test("the surface's notices and the foot's word come from here: the since-block drop (cross-engine and one engine), the not-a-block-number quote at most 32 characters, the end of the feed", () => {
+  expect(sinceBlockDroppedNotice(25635600, null)).toBe(`since_block 25635600 dropped: ${SINCE_BLOCK_IMPOSSIBILITY}`);
+  expect(sinceBlockDroppedNotice(25635600, "aave_v3_etherfi")).toBe(
+    "since_block 25635600 dropped: block heights are chain-scoped, and aave_v3_etherfi lives on a different chain",
+  );
+  expect(notABlockNumberNotice("abc")).toBe('"abc" is not a block number, so nothing was requested');
+  expect(notABlockNumberNotice("x".repeat(40))).toBe(`"${"x".repeat(32)}" is not a block number, so nothing was requested`);
+  expect(END_OF_FEED).toBe("end of the filtered feed");
+  expect(deriveActivityView(base({ hasMore: false })).tiles.rows.sub).toBe(END_OF_FEED);
 });
 
 test("rows: amounts follow the feed's unit law — DM scaled by the wire's own value_decimals, Aave raw and tagged, a record-only row its own word; the unit's hover survives", () => {

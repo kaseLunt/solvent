@@ -22,6 +22,7 @@
 
 import { groupDecimalString } from "./book-format";
 import {
+  SINCE_BLOCK_IMPOSSIBILITY,
   splitUntimedTail,
   txExplorerUrl,
   type EventDisplayType,
@@ -73,6 +74,25 @@ export interface ActivityInput {
   readonly valueDecimals: Readonly<Record<string, number>>;
 }
 
+/**
+ * A liquidation's typed extract, as parts the table prints visibly beneath the pill: the liquidator (with its
+ * Inspector link), the repaid debt and the seized legs in each asset's own units, both bonus figures as renderBps
+ * gives them — every unestablished field an em dash, never an estimate and never behind a hover — and the wire's note.
+ */
+export interface ActivityLiquidation {
+  readonly liquidator: string;
+  readonly liquidatorHref: string;
+  /** The repaid debt at the extract's own decimals, or an em dash when the wire carried none. */
+  readonly repaid: string;
+  /** The debt asset, shortened, or null when the wire carried none. */
+  readonly repaidAsset: string | null;
+  /** Every seizure leg as `amount symbol`, comma-joined; the no-legs statement when none was carried. */
+  readonly seized: string;
+  readonly bonusRealized: string;
+  readonly bonusConfigured: string;
+  readonly note: string;
+}
+
 export interface ActivityRow {
   /** The event's own chain coordinates (feedRowKey); the row's test id hangs on it. */
   readonly key: string;
@@ -95,8 +115,8 @@ export interface ActivityRow {
   readonly txLabel: string;
   /** The full hash with the row's chain coordinates (log always, block beside a time, seq when nonzero). */
   readonly txTitle: string;
-  /** A liquidation's typed extract in one line; every unestablished field an em dash. Null for every other type. */
-  readonly detail: string | null;
+  /** A liquidation's typed extract; null for every other type. */
+  readonly detail: ActivityLiquidation | null;
 }
 
 export interface ActivityTile {
@@ -161,6 +181,24 @@ const EXHAUSTED_WORDS =
 
 const LOADING_WORDS = "loading the feed…";
 
+/** The foot's word and the rows tile's sub once the cursor is spent: one sentence, printed from here alone. */
+export const END_OF_FEED = "end of the filtered feed";
+
+/**
+ * The notice when an engine change drops the since-block bound: a height bound is chain-scoped, so the same number
+ * across chains means nothing and on another chain means something else — never silently re-meant.
+ */
+export function sinceBlockDroppedNotice(sinceBlock: number, candidate: FeedEngine | null): string {
+  return candidate === null
+    ? `since_block ${String(sinceBlock)} dropped: ${SINCE_BLOCK_IMPOSSIBILITY}`
+    : `since_block ${String(sinceBlock)} dropped: block heights are chain-scoped, and ${candidate} lives on a different chain`;
+}
+
+/** The notice when the since-block draft is not a block number: the draft quoted (at most 32 characters), and nothing requested. */
+export function notABlockNumberNotice(draft: string): string {
+  return `"${draft.slice(0, 32)}" is not a block number, so nothing was requested`;
+}
+
 function echoTypes(types: readonly string[] | null): string {
   return types === null || types.length === 0 ? "all" : types.join(",");
 }
@@ -175,13 +213,12 @@ function filterEcho(envelope: ActivityEnvelope): string {
   return `engine ${envelope.filter.engine ?? EM_DASH} · types ${echoTypes(envelope.filter.types)} · since_block ${since} · limit ${limit}`;
 }
 
-/** The typed extract in one line: liquidator, repaid debt, seized legs, both bonus figures, the wire's note. An unestablished field is an em dash, never an estimate. */
-function liquidationDetail(detail: NonNullable<FeedChainEvent["liquidation"]>): string {
+/** The typed extract as parts: liquidator, repaid debt, seized legs, both bonus figures, the wire's note. An unestablished field is an em dash, never an estimate. */
+function liquidationDetail(detail: NonNullable<FeedChainEvent["liquidation"]>): ActivityLiquidation {
   const repaid =
     detail.debt_repaid === null
       ? EM_DASH
       : groupDecimalString(renderNullableDecimal(detail.debt_repaid, { decimals: detail.debt_decimals ?? undefined }));
-  const asset = detail.debt_asset === null ? "" : ` ${detail.debt_asset.slice(0, 10)}…`;
   const seized =
     detail.seized.length === 0
       ? `${EM_DASH} (no seizure legs carried)`
@@ -191,10 +228,16 @@ function liquidationDetail(detail: NonNullable<FeedChainEvent["liquidation"]>): 
               `${groupDecimalString(renderNullableDecimal(leg.amount, { decimals: leg.decimals }))} ${leg.symbol ?? `${leg.asset.slice(0, 8)}…`}`,
           )
           .join(", ");
-  return (
-    `liquidator ${detail.liquidator} · debt repaid ${repaid}${asset} · seized ${seized} · ` +
-    `bonus realized ${renderBps(detail.realized_bonus_bps)} / configured ${renderBps(detail.configured_bonus_bps)} · ${detail.note}`
-  );
+  return {
+    liquidator: detail.liquidator,
+    liquidatorHref: `/inspector/${detail.liquidator}`,
+    repaid,
+    repaidAsset: detail.debt_asset === null ? null : `${detail.debt_asset.slice(0, 10)}…`,
+    seized,
+    bonusRealized: renderBps(detail.realized_bonus_bps),
+    bonusConfigured: renderBps(detail.configured_bonus_bps),
+    note: detail.note,
+  };
 }
 
 function activityRow(
@@ -281,7 +324,7 @@ function tilesFor(state: ActivityState, input: ActivityInput): ActivityView["til
   }
   const liquidations = rows.filter((event) => event.type === "liquidation").length;
   return {
-    rows: { value: groupInt(rows.length), sub: hasMore ? "more available" : "end of the filtered feed", tone: "neutral" },
+    rows: { value: groupInt(rows.length), sub: hasMore ? "more available" : END_OF_FEED, tone: "neutral" },
     liquidations: { value: groupInt(liquidations), sub: mode, tone: "neutral" },
   };
 }
