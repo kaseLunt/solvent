@@ -11,7 +11,7 @@
 // visibility is asserted, never containment (toContainText passes on text hidden
 // inside a closed fold).
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { BOOK, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
+import { BOOK, BOOK_ERROR_UNAVAILABLE, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { META } from "../fixtures/meta";
 import { EVIDENCE_MANIFEST, EVIDENCE_NO_BATCH, EVIDENCE_NO_RECEIPT, EVIDENCE_PROOF_FAILED } from "../fixtures/proof";
 
@@ -148,8 +148,11 @@ test("a missing receipt is a first-class state: data-receipt none, warn, the ser
   await expect(page.getByTestId("verification-subject-proof")).toContainText("no committed receipt artifact is present in this deployment");
   await expect(page.getByTestId("verification-receipt")).toHaveText("No reconcile receipt: no committed receipt artifact is present in this deployment");
   await expect(page.getByTestId("verification-receipt")).toHaveAttribute("data-tone", "refused");
-  await expect(page.getByTestId("verification-kpi-verify")).toContainText("unavailable");
+  // The wire stated the absence, so the tile and its sentence may say so — this is not an unread receipt.
+  await expect(page.getByTestId("verification-kpi-verify")).toContainText("—");
+  await expect(page.getByTestId("verification-kpi-verify")).toContainText("no committed receipt");
   await expect(page.getByTestId("verification-kpi-verify")).toHaveAttribute("data-tone", "refused");
+  await expect(page.getByTestId("verification-step-verify")).toContainText("No reconcile receipt is committed; nothing is verified against the chain.");
   await expect(page.getByText("PROOF · EXACT @")).toHaveCount(0);
   await expect(page.getByTestId("verification-live-status")).toHaveText("SERVING · WATERMARKED");
 });
@@ -159,6 +162,8 @@ test("a missing batch renders loudly, refuses the live chips and fabricates NO m
   await page.goto("/proof");
   await expect(surface(page)).toHaveAttribute("data-receipt", "exact");
   await expect(headline(page)).toContainText("receipt ACCEPTED at pin 5f0b3e2a; NO SERVABLE BATCH.");
+  // A sentence that ends in NO SERVABLE BATCH is not green.
+  await expect(verdict(page)).toHaveAttribute("data-variant", "warn");
   await expect(chip(page, "Live batch")).toContainText("none");
   await expect(chip(page, "Live batch")).toHaveClass(/chipRefused/);
   await expect(chip(page, "Key")).toContainText("—");
@@ -190,39 +195,66 @@ test("evidence unavailable: state unavailable, the refused header with the retry
   await expect(page.getByTestId("verification-subject-proof")).toHaveCount(0);
   await expect(page.getByTestId("verification-subject-live")).toHaveCount(0);
   await expect(page.getByTestId("verification-probes")).toHaveCount(0);
-  // The architecture still prints what meta and the book answered; only Verify is unavailable.
+  // The architecture still prints what meta and the book answered; only Verify is unread — the dash, the word, never an absence.
   await expect(page.getByTestId("verification-kpi-index")).toContainText(dm.last_block.toLocaleString("en-US"));
   await expect(page.getByTestId("verification-kpi-compute")).toContainText("1");
+  await expect(page.getByTestId("verification-kpi-verify")).toContainText("—");
   await expect(page.getByTestId("verification-kpi-verify")).toContainText("unavailable");
   await expect(page.getByTestId("verification-kpi-verify")).toHaveAttribute("data-tone", "refused");
+  await expect(page.getByTestId("verification-step-verify")).toHaveText(/The receipt could not be read\.$/);
   await expect(page.getByTestId("verification-receipt")).toContainText("the evidence manifest could not be fetched");
 });
 
-test("with the whole API unreachable every step but Serve is unavailable, and nothing reads as a zero", async ({ page }) => {
+test("with the whole API unreachable every step but Serve is unavailable — unread, never an absence, never a zero", async ({ page }) => {
   await page.route("**/v1/**", (route) => route.abort());
   await page.goto("/proof");
   await expect(surface(page)).toHaveAttribute("data-state", "unavailable");
   for (const key of ["index", "compute", "verify"]) {
+    await expect(page.getByTestId(`verification-kpi-${key}`)).toContainText("—");
     await expect(page.getByTestId(`verification-kpi-${key}`)).toContainText("unavailable");
     await expect(page.getByTestId(`verification-kpi-${key}`)).toHaveAttribute("data-tone", "refused");
   }
   await expect(page.getByTestId("verification-kpi-serve")).toContainText("17");
-  await expect(page.getByTestId("verification-step-compute")).toHaveText(/No batch is servable; nothing is computed\.$/);
+  await expect(page.getByTestId("verification-step-compute")).toHaveText(/The batch could not be read\.$/);
+  await expect(page.getByTestId("verification-step-verify")).toHaveText(/The receipt could not be read\.$/);
+  await expect(page.locator("body")).not.toContainText("No batch is servable");
+  await expect(page.locator("body")).not.toContainText("No reconcile receipt is committed");
   await expect(page.locator("body")).not.toContainText("0 gated rows");
+});
+
+test("an absence the wire stated is worded as one: a 503 no-batch book on the Compute tile, a manifest with no receipt on the Verify tile", async ({
+  page,
+}) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, BOOK_ERROR_UNAVAILABLE, 503));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_NO_RECEIPT));
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-state", "ok");
+  const compute = page.getByTestId("verification-kpi-compute");
+  await expect(compute).toContainText("—");
+  await expect(compute).toContainText("no servable batch");
+  await expect(compute).toHaveAttribute("data-tone", "refused");
+  await expect(page.getByTestId("verification-step-compute")).toHaveText(/No batch is servable; nothing is computed\.$/);
+  const verify = page.getByTestId("verification-kpi-verify");
+  await expect(verify).toContainText("—");
+  await expect(verify).toContainText("no committed receipt");
+  await expect(page.getByTestId("verification-step-verify")).toHaveText(/No reconcile receipt is committed; nothing is verified against the chain\.$/);
+  // The meta answered: the Index tile keeps its number beside the two absences.
+  await expect(page.getByTestId("verification-kpi-index")).toContainText(dm.last_block.toLocaleString("en-US"));
 });
 
 test("the Overview's \"Architecture & verification →\" lands on the architecture section", async ({ page }) => {
   await mockAll(page);
   await page.goto("/");
   await page.getByRole("link", { name: "Architecture & verification →" }).click();
-  await expect(page).toHaveURL(/\/proof#architecture$/);
-  const section = page.locator("#architecture");
-  await expect(section).toHaveAttribute("data-testid", "verification-architecture");
-  await expect(section).toBeVisible();
-  // The anchor is scrolled to, clear of the 56px app bar (scroll-margin-top 72px).
-  const top = await section.evaluate((el) => el.getBoundingClientRect().top);
-  expect(top).toBeGreaterThanOrEqual(0);
-  expect(top).toBeLessThanOrEqual(120);
+  await expect(page).toHaveURL(/#architecture$/);
+  const section = page.getByTestId("verification-architecture");
+  await expect(section).toHaveAttribute("id", "architecture");
+  // Once the manifest has answered the page has its height and the named section is scrolled to; the assertion retries until it is.
+  await expect(surface(page)).toHaveAttribute("data-state", "ok");
+  await expect(section).toBeInViewport();
 });
 
 test("the drawer: the doctrine from the header; a subject's explain puts its evidence chain first — PROVEN on the proof, OPERATIONAL on the live", async ({

@@ -15,6 +15,7 @@ import {
   PROBE_COLUMNS,
   PROBES_EMPTY,
   probesSummary,
+  VERIFICATION_COPY,
   type EvidenceState,
 } from "@/lib/verification-view";
 import styles from "./verification.module.css";
@@ -42,7 +43,8 @@ const CLOSED: DrawerState = { open: false, descriptor: null };
  * Verification: the verdict header, the architecture strip the Overview shares,
  * the two subjects, the committed probe records, the raw wire body. The manifest
  * is fetched through lib/proof-data; the steps' live numbers come from the meta
- * and book readers the Overview uses, so both pages print one derivation.
+ * and book readers the Overview uses, so both pages print one derivation. Every
+ * word is the view model's; this component prints.
  */
 export function VerificationSurface() {
   const [state, setState] = useState<EvidenceState>({ phase: "loading" });
@@ -85,8 +87,18 @@ export function VerificationSurface() {
     };
   }, []);
 
+  // A deep link lands on what it names. The browser's own hash scroll ran on the
+  // loading tree, which may be shorter than the viewport; once the manifest has
+  // answered and the page has its height, the named element is scrolled to.
+  useEffect(() => {
+    if (state.phase === "loading") return;
+    const id = window.location.hash.slice(1);
+    if (id === "") return;
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  }, [state.phase]);
+
   const cash = deriveCashView(reading, metaConstants.constants);
-  const view = deriveVerificationView({ state, meta: meta.value, book: reading.book, cashAccounts: cash.positions });
+  const view = deriveVerificationView({ state, meta: meta.value, book: reading, cashAccounts: cash.positions });
   const manifest = state.phase === "ok" ? state.manifest : null;
   const probeRows: KitRow[] = view.probes.map((row, index) => ({
     key: row.key,
@@ -121,7 +133,7 @@ export function VerificationSurface() {
             onClick={() => setDrawer({ open: true, descriptor: null })}
             data-testid="verification-drawer"
           >
-            Methodology &amp; evidence
+            {VERIFICATION_COPY.drawerButton}
           </button>
         }
       />
@@ -136,9 +148,9 @@ export function VerificationSurface() {
           <VerificationSubjects manifest={manifest} onExplain={(descriptor) => setDrawer({ open: true, descriptor })} />
           <section data-testid="verification-probes-section">
             <SectionHead
-              title="Committed probe records"
+              title={VERIFICATION_COPY.probesTitle}
               qualifier={probesSummary(manifest)}
-              link={{ href: "/developers", label: "the contract and its samples → API" }}
+              link={{ href: "/developers", label: VERIFICATION_COPY.probesLink }}
             />
             <KitTable testId="verification-probes" columns={[...PROBE_COLUMNS]} rows={probeRows} emptyText={PROBES_EMPTY} />
           </section>
@@ -150,7 +162,7 @@ export function VerificationSurface() {
               aria-pressed={showRaw}
               data-testid="verification-raw"
             >
-              {showRaw ? "Hide raw JSON" : "Raw JSON"}
+              {showRaw ? VERIFICATION_COPY.rawHide : VERIFICATION_COPY.rawShow}
             </button>
           </div>
           {showRaw && (

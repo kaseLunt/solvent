@@ -1,9 +1,11 @@
 // One view model for the Verification page (spec §5.5; plan R1–R5). The
 // surface reads it and prints it; the pins read it and check it; nothing below
-// it decides a sentence twice. Every figure is the evidence manifest's, the
-// meta's or the book's own: a step whose input has not answered prints
-// "unavailable", never a zero. The four architecture steps are the Overview's
-// pipeline law, derived here once and rendered by both pages
+// it decides a sentence twice, and no component composes one. Every figure is
+// the evidence manifest's, the meta's or the book's own. A reader that has not
+// answered prints "unavailable" — never a zero, and never an absence the wire
+// did not state; only the wire's own arms (no servable batch, no committed
+// receipt) are worded as absences. The four architecture steps are the
+// Overview's pipeline law, derived here once and rendered by both pages
 // (app/overview/Pipeline.tsx and app/proof/VerificationArchitecture.tsx).
 import type { components } from "@solvent/client";
 import {
@@ -12,6 +14,7 @@ import {
   proofPin,
   proofSubjectStatus,
   proofTakeaway,
+  type EvidenceDescriptor,
 } from "./evidence";
 import { EM_DASH } from "./format";
 import { CASH, LEGACY } from "./inspector-position";
@@ -23,6 +26,17 @@ import { isWirePopulation, readWirePopulation } from "./wireGuard";
 type Schemas = components["schemas"];
 export type MetaResponse = Schemas["MetaResponse"];
 export type BookResponse = Schemas["BookResponse"];
+
+/**
+ * The book reader's answer as the steps read it: its phase, the book when it
+ * answered, the failure when it did not. The Overview's `useCashBook` reading
+ * satisfies it — "no-batch" is the wire's own 503, the one absence it states.
+ */
+export interface BookReading {
+  readonly phase: "loading" | "ok" | "no-batch" | "error";
+  readonly book: BookResponse | null;
+  readonly failure: { readonly message: string; readonly retryAfterSeconds: number | null } | null;
+}
 
 /**
  * The public route list the Serve step counts. A mirror of the API page's
@@ -64,6 +78,27 @@ const LIVE_CAPTION =
   "Live subject — the currently-serving batch's identity: watermarked, operational, and NOT reconcile-welded. Exactness lives on the proof subject, at its pin.";
 const NO_SUBSTITUTE =
   "The manifest could not be fetched, and nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.";
+
+/** The page's chrome, every word of it: what the components print between the view's figures. */
+export const VERIFICATION_COPY = {
+  drawerButton: "Methodology & evidence",
+  drawerTitle: "Methodology & evidence",
+  doctrineHeading: "Methodology",
+  thisNumber: "this number",
+  comparatorHeading: "Comparator · verbatim",
+  markerHeading: "Operational vs proven",
+  architectureTitle: "Architecture & verification",
+  architectureQualifier: "Index · Compute · Verify · Serve",
+  probesTitle: "Committed probe records",
+  probesLink: "the contract and its samples → API",
+  rawShow: "Raw JSON",
+  rawHide: "Hide raw JSON",
+} as const;
+
+/** The marker line beneath a subject's comparator: OPERATIONAL or PROVEN, then the descriptor's own note. */
+export function markerLine(descriptor: Pick<EvidenceDescriptor, "marker" | "markerNote">): string {
+  return `${descriptor.marker === "operational" ? "OPERATIONAL" : "PROVEN"} · ${descriptor.markerNote}`;
+}
 
 const UNAVAILABLE = "unavailable";
 const n = (value: number | null | undefined): string =>
@@ -119,78 +154,320 @@ function receiptReadable(receipt: ManifestReconcile): boolean {
 // The four steps — the Overview's pipeline law.
 // ---------------------------------------------------------------------------
 
+/** The Overview's line for a step, its figure marked: `{before}{figure}{after}`; the figure is the step's number or "unavailable" (its `data-value`). */
+export interface PipelineLine {
+  readonly before: string;
+  readonly figure: string;
+  readonly after: string;
+}
+
 export interface PipelineStep {
   readonly key: "index" | "compute" | "verify" | "serve";
   readonly label: string;
-  /** The step's number — the Overview's `data-value`, the tile's value; "unavailable" when its input has not answered. */
+  /** "01 · INDEX" — the step's ordinal, as both pages head it. */
+  readonly ordinal: string;
+  /** The tile's value: the step's number, or the dash when there is none to print. */
   readonly value: string;
-  /** "unit · context": the value's own noun first, then the step's second figure, so the tile and the Overview's line read from one string. */
+  /** Beside a number, "unit · context"; beside the dash, the refused word — "unavailable" for a reader that has not answered, the absence the wire stated otherwise. */
   readonly sub: string;
   readonly tone: "neutral" | "ok" | "warn" | "refused";
   readonly sentence: string;
+  readonly line: PipelineLine;
 }
 
+const ORDINAL: Record<PipelineStep["key"], string> = {
+  index: "01 · INDEX",
+  compute: "02 · COMPUTE",
+  verify: "03 · VERIFY",
+  serve: "04 · SERVE",
+};
+
 const INDEX_SENTENCE = "Chain heights indexed per engine, ahead of every batch.";
+const COMPUTE_UNREAD = "The batch could not be read.";
 const COMPUTE_ABSENT = "No batch is servable; nothing is computed.";
+const VERIFY_UNREAD = "The receipt could not be read.";
 const VERIFY_ABSENT = "No reconcile receipt is committed; nothing is verified against the chain.";
 
 /** The Overview's four numbers, unchanged in law: the OP block, the batch, the gated tally, the endpoint count. */
 export function pipelineSteps(
   meta: MetaResponse | null,
   evidence: EvidenceResponse | null,
-  book: BookResponse | null,
+  reading: BookReading,
   cashAccounts: number | null,
 ): readonly PipelineStep[] {
   const dm = meta?.watermark_vector.find((w) => w.engine === CASH) ?? null;
   const eth = meta?.watermark_vector.find((w) => w.engine === LEGACY) ?? null;
+  const ethBlock = eth === null ? UNAVAILABLE : n(eth.last_block);
+  const index: PipelineStep =
+    dm === null
+      ? {
+          key: "index",
+          label: "Index",
+          ordinal: ORDINAL.index,
+          value: EM_DASH,
+          sub: meta === null ? UNAVAILABLE : "no OP Mainnet watermark",
+          tone: "refused",
+          sentence: INDEX_SENTENCE,
+          line: { before: "OP block ", figure: UNAVAILABLE, after: ` · Ethereum block ${ethBlock}` },
+        }
+      : {
+          key: "index",
+          label: "Index",
+          ordinal: ORDINAL.index,
+          value: n(dm.last_block),
+          sub: `OP block · Ethereum block ${ethBlock}`,
+          tone: "neutral",
+          sentence: INDEX_SENTENCE,
+          line: { before: "OP block ", figure: n(dm.last_block), after: ` · Ethereum block ${ethBlock}` },
+        };
+
+  const book = reading.phase === "ok" ? reading.book : null;
+  const compute: PipelineStep =
+    book === null
+      ? {
+          key: "compute",
+          label: "Compute",
+          ordinal: ORDINAL.compute,
+          value: EM_DASH,
+          sub: reading.phase === "no-batch" ? "no servable batch" : UNAVAILABLE,
+          tone: "refused",
+          sentence: reading.phase === "no-batch" ? COMPUTE_ABSENT : COMPUTE_UNREAD,
+          line: { before: "", figure: UNAVAILABLE, after: "" },
+        }
+      : {
+          key: "compute",
+          label: "Compute",
+          ordinal: ORDINAL.compute,
+          value: n(book.batch.id),
+          sub: `batch · ${n(cashAccounts)} Cash accounts`,
+          tone: "neutral",
+          sentence: `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; every position's health from the wire's own integers.`,
+          line: { before: "batch ", figure: n(book.batch.id), after: ` · ${n(cashAccounts)} Cash accounts` },
+        };
+
   const recon = evidence?.reconcile ?? null;
-  const verifyTone: PipelineStep["tone"] =
+  const verify: PipelineStep =
     evidence === null || recon === null
-      ? "refused"
-      : receiptReadable(recon) && receiptState(evidence) === "exact"
-        ? "ok"
-        : "warn";
+      ? {
+          key: "verify",
+          label: "Verify",
+          ordinal: ORDINAL.verify,
+          value: EM_DASH,
+          sub: evidence === null ? UNAVAILABLE : "no committed receipt",
+          tone: "refused",
+          sentence: evidence === null ? VERIFY_UNREAD : VERIFY_ABSENT,
+          line: { before: "", figure: UNAVAILABLE, after: " gated rows exact" },
+        }
+      : {
+          key: "verify",
+          label: "Verify",
+          ordinal: ORDINAL.verify,
+          value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
+          sub: `gated rows exact · drift ${n(recon.gated_drift)}`,
+          tone: receiptReadable(recon) && receiptState(evidence) === "exact" ? "ok" : "warn",
+          sentence: `${n(recon.gated_exact)} gated rows reconciled exact against the chain; ${n(recon.gated_drift)} drift named.`,
+          line: {
+            before: "",
+            figure: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
+            after: ` gated rows exact · drift ${n(recon.gated_drift)}`,
+          },
+        };
+
   const endpoints = String(PUBLIC_ENDPOINTS.length);
-  return [
-    {
-      key: "index",
-      label: "Index",
-      value: dm === null ? UNAVAILABLE : n(dm.last_block),
-      sub: `OP block · Ethereum block ${eth === null ? UNAVAILABLE : n(eth.last_block)}`,
-      tone: dm === null ? "refused" : "neutral",
-      sentence: INDEX_SENTENCE,
-    },
-    {
-      key: "compute",
-      label: "Compute",
-      value: book === null ? UNAVAILABLE : n(book.batch.id),
-      sub: book === null ? "batch" : `batch · ${n(cashAccounts)} Cash accounts`,
-      tone: book === null ? "refused" : "neutral",
-      sentence:
-        book === null
-          ? COMPUTE_ABSENT
-          : `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; every position's health from the wire's own integers.`,
-    },
-    {
-      key: "verify",
-      label: "Verify",
-      value: recon === null ? UNAVAILABLE : `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
-      sub: recon === null ? "gated rows exact" : `gated rows exact · drift ${n(recon.gated_drift)}`,
-      tone: verifyTone,
-      sentence:
-        recon === null
-          ? VERIFY_ABSENT
-          : `${n(recon.gated_exact)} gated rows reconciled exact against the chain; ${n(recon.gated_drift)} drift named.`,
-    },
-    {
-      key: "serve",
-      label: "Serve",
-      value: endpoints,
-      sub: "endpoints · typed TypeScript client",
-      tone: "neutral",
-      sentence: `${endpoints} read-only endpoints, every money value a decimal string.`,
-    },
+  const serve: PipelineStep = {
+    key: "serve",
+    label: "Serve",
+    ordinal: ORDINAL.serve,
+    value: endpoints,
+    sub: "endpoints · typed TypeScript client",
+    tone: "neutral",
+    sentence: `${endpoints} read-only endpoints, every money value a decimal string.`,
+    line: { before: "", figure: endpoints, after: " endpoints · typed TypeScript client" },
+  };
+
+  return [index, compute, verify, serve];
+}
+
+// ---------------------------------------------------------------------------
+// The two subjects — every word of both cards.
+// ---------------------------------------------------------------------------
+
+export type CardTone = "default" | "ok" | "warn" | "crit" | "dim";
+
+export interface CardRow {
+  readonly label: string;
+  readonly value: string;
+  readonly tone: CardTone;
+  /** The contract id's suffix (`verification-{id}`) where a pin names the row. */
+  readonly id?: string;
+  /** The value is an identifier copied whole; this is the copy affordance's accessible name. */
+  readonly copy?: string;
+}
+
+export interface CardSection {
+  readonly title: string | null;
+  readonly rows: readonly CardRow[];
+}
+
+/**
+ * A subject card in three layers: the status and the answer rows stay visible
+ * (a hazard — a digest gap, a fingerprint mismatch, a publishability refusal —
+ * is an answer row, never a fold row); provenance folds behind a counted summary.
+ */
+export interface SubjectCard {
+  readonly title: string;
+  readonly status: { readonly text: string; readonly tone: "ok" | "crit" | "refused" };
+  /** The explain affordance's accessible name; it opens the drawer on this subject's evidence chain. */
+  readonly explain: string;
+  readonly takeaway: string | null;
+  readonly rows: readonly CardRow[];
+  readonly fold: { readonly summary: string; readonly sections: readonly CardSection[] } | null;
+}
+
+function foldOf(sections: readonly CardSection[]): SubjectCard["fold"] {
+  const count = sections.reduce((sum, section) => sum + section.rows.length, 0);
+  return count === 0 ? null : { summary: `${String(count)} provenance row(s)`, sections };
+}
+
+function proofCard(manifest: EvidenceResponse): SubjectCard {
+  const status = proofSubjectStatus(manifest);
+  const service = manifest.service;
+  const feeds = manifest.feeds_registry;
+  const welded = feeds.registry_fingerprint === service.registry_fingerprint;
+  const reconcile = status.kind === "unavailable" ? null : status.reconcile;
+  // Every artifact-derived string destined for the fold is checked here; a refused one is a hazard and hoists out.
+  const artifact = reconcile === null ? null : publishable(reconcile.artifact_path);
+  const receiptNote = reconcile === null ? null : publishable(reconcile.note);
+  const feedsPath = publishable(feeds.path);
+
+  const rows: CardRow[] = [
+    status.kind === "accepted"
+      ? { label: "status", value: "ACCEPTED · every gated row welded exact", tone: "ok" }
+      : status.kind === "rejected"
+        ? { label: "status", value: `REJECTED · ${status.detail}`, tone: "crit" }
+        : { label: "status", value: `UNAVAILABLE · ${pub(status.reason)}`, tone: "crit" },
   ];
+  if (reconcile !== null) {
+    rows.push({
+      label: "gated rows",
+      value: `${String(reconcile.gated_exact)}/${String(reconcile.gated_rows)} exact · drift ${String(reconcile.gated_drift)}`,
+      tone: reconcile.gated_drift === 0 ? "ok" : "crit",
+    });
+    for (const weld of reconcile.welds) {
+      rows.push({
+        label: `weld · ${weld.engine}`,
+        value: `${String(weld.rows_exact)}/${String(weld.rows_compared)} exact`,
+        tone: weld.rows_exact === weld.rows_compared ? "ok" : "crit",
+        id: `weld-${weld.engine}`,
+      });
+    }
+  }
+  rows.push({
+    label: "fingerprint weld",
+    value: welded
+      ? "identical to service fingerprint, by construction"
+      : "MISMATCH against service fingerprint, which the contract says are identical by construction",
+    tone: welded ? "ok" : "crit",
+  });
+  if (artifact !== null && !artifact.ok) rows.push({ label: "artifact", value: artifact.refusal, tone: "warn", id: "proof-artifact-refused" });
+  if (receiptNote !== null && !receiptNote.ok) rows.push({ label: "receipt note", value: receiptNote.refusal, tone: "warn", id: "proof-note-refused" });
+  if (!feedsPath.ok) rows.push({ label: "feeds registry path", value: feedsPath.refusal, tone: "warn", id: "feeds-path-refused" });
+
+  const sections: CardSection[] = [];
+  if (reconcile !== null) {
+    const receiptRows: CardRow[] = [
+      { label: "result · exit", value: `${reconcile.result} · ${String(reconcile.exit_code)}`, tone: "default" },
+      { label: "finished_at", value: reconcile.finished_at, tone: "default" },
+      { label: "advisory rows", value: String(reconcile.advisory_rows), tone: "dim" },
+      { label: "comparison sha256", value: reconcile.comparison_sha256, tone: "default", copy: "copy comparison sha256" },
+    ];
+    if (artifact?.ok === true) receiptRows.push({ label: "artifact", value: artifact.text, tone: "default" });
+    if (receiptNote?.ok === true) receiptRows.push({ label: "receipt note", value: receiptNote.text, tone: "dim" });
+    sections.push({ title: "Receipt · committed artifact", rows: receiptRows });
+  }
+  sections.push({
+    title: "Build · config identity",
+    rows: [
+      manifest.commit === null
+        ? { label: "commit", value: `${EM_DASH} (no build stamp, and never guessed)`, tone: "dim" }
+        : { label: "commit", value: manifest.commit, tone: "default", copy: "copy commit" },
+      { label: "service", value: `${service.name} · ${service.version}`, tone: "default" },
+      { label: "schema version", value: String(service.schema_version), tone: "default" },
+      { label: "algorithm revision", value: String(service.algorithm_revision), tone: "default" },
+      { label: "scenario config", value: service.scenario_config_version, tone: "default" },
+      { label: "seizure model", value: service.seizure_model, tone: "dim" },
+    ],
+  });
+  const feedsRows: CardRow[] = [];
+  if (feedsPath.ok) feedsRows.push({ label: "path", value: feedsPath.text, tone: "default" });
+  feedsRows.push(
+    { label: "registry fingerprint", value: feeds.registry_fingerprint, tone: "default", copy: "copy registry fingerprint" },
+    { label: "file sha256", value: feeds.file_sha256, tone: "default", copy: "copy feeds file sha256" },
+  );
+  sections.push({ title: "Feeds registry", rows: feedsRows });
+
+  return {
+    title: "Proof subject",
+    status:
+      status.kind === "accepted"
+        ? { text: `PROOF · EXACT @ ${proofPin(status.reconcile)}`, tone: "ok" }
+        : status.kind === "rejected"
+          ? { text: "RECEIPT REJECTED", tone: "crit" }
+          : { text: "NO COMMITTED RECEIPT", tone: "refused" },
+    explain: "explain proof subject",
+    takeaway: null,
+    rows,
+    fold: foldOf(sections),
+  };
+}
+
+function liveCard(manifest: EvidenceResponse): SubjectCard {
+  const status = liveSubjectStatus(manifest);
+  if (status.kind === "no-batch") {
+    return {
+      title: "Live subject",
+      status: { text: "NO SERVABLE BATCH", tone: "crit" },
+      explain: "explain live subject",
+      takeaway: null,
+      rows: [
+        { label: "reason", value: pub(status.reason), tone: "crit" },
+        { label: "materialization key", value: `${EM_DASH} · no batch, no key; never fabricated`, tone: "dim", id: "key" },
+      ],
+      fold: null,
+    };
+  }
+  const substrate = status.substrate;
+  const note = publishable(substrate.note);
+  // The digest's predates-custody gap and a refused identity note are hazards: answer rows, never fold rows.
+  const digestGap = substrate.substrate_digest === "";
+  const rows: CardRow[] = [
+    { label: "materialization key", value: substrate.materialization_key, tone: "default", id: "key", copy: "copy materialization key" },
+  ];
+  if (digestGap) {
+    rows.push({
+      label: "substrate digest",
+      value: `${EM_DASH} (predates substrate-digest custody, so this is an honest gap rather than a digest)`,
+      tone: "dim",
+      id: "live-digest-gap",
+    });
+  }
+  if (!note.ok) rows.push({ label: "identity note", value: note.refusal, tone: "warn", id: "live-note-refused" });
+  const foldRows: CardRow[] = [];
+  if (!digestGap) foldRows.push({ label: "substrate digest", value: substrate.substrate_digest, tone: "default", copy: "copy substrate digest" });
+  if (note.ok) foldRows.push({ label: "identity note", value: note.text, tone: "dim" });
+  return {
+    title: "Live subject",
+    status: { text: "SERVING · WATERMARKED", tone: "ok" },
+    explain: "explain live subject",
+    takeaway: `serving batch #${String(substrate.batch_id)} · watermarked, operational — never the proof`,
+    rows,
+    fold: foldOf([{ title: null, rows: foldRows }]),
+  };
+}
+
+/** Both subjects' cards, every word decided here. */
+export function subjectCards(manifest: EvidenceResponse): { readonly proof: SubjectCard; readonly live: SubjectCard } {
+  return { proof: proofCard(manifest), live: liveCard(manifest) };
 }
 
 // ---------------------------------------------------------------------------
@@ -306,8 +583,11 @@ function receiptLine(manifest: EvidenceResponse, receipt: ReceiptState): string 
   switch (receipt) {
     case "exact":
       return `Reconcile receipt: ${exact} gated rows exact, ${drift} drift`;
-    case "drift":
-      return `Reconcile receipt: ${exact} of ${rows} gated rows exact, ${drift} drift — drift named, the proof badge refused`;
+    case "drift": {
+      // A weld short with no gated drift names its fault; otherwise the drift is the fault.
+      const fault = r.gated_drift === 0 && proof.kind === "rejected" ? proof.detail : "drift named";
+      return `Reconcile receipt: ${exact} of ${rows} gated rows exact, ${drift} drift — ${fault}, the proof badge refused`;
+    }
     case "failed":
       return `Reconcile receipt failed: ${proof.kind === "rejected" ? proof.detail : "the receipt did not pass"} — ${exact} of ${rows} gated rows exact, ${drift} drift`;
     case "none":
@@ -338,7 +618,7 @@ export type EvidenceState =
 export interface VerificationInput {
   readonly state: EvidenceState;
   readonly meta: MetaResponse | null;
-  readonly book: BookResponse | null;
+  readonly book: BookReading;
   readonly cashAccounts: number | null;
 }
 
@@ -392,12 +672,13 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
   }
   const manifest = state.manifest;
   const receipt = receiptState(manifest);
+  const serving = liveSubjectStatus(manifest).kind === "serving";
   return {
     state: "ok",
     receipt,
     kicker: VERIFICATION_KICKER,
-    // R2: the page's own computed sentence; ok only for an unqualified pass, warn while the receipt drifts, fails or is absent.
-    headline: { emphasis: proofTakeaway(manifest), rest: "", tone: receipt === "exact" ? "ok" : "warn", dek: VERIFICATION_DEK },
+    // R2: the page's own computed sentence; ok only when the receipt passed unqualified AND a batch serves — a sentence that ends in NO SERVABLE BATCH is not green.
+    headline: { emphasis: proofTakeaway(manifest), rest: "", tone: receipt === "exact" && serving ? "ok" : "warn", dek: VERIFICATION_DEK },
     chips: chips(manifest, receipt),
     steps,
     receiptLine: receiptLine(manifest, receipt),
