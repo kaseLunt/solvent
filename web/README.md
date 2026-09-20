@@ -20,9 +20,9 @@ Governing documents:
 | `app/layout.tsx` | Root shell: pre-paint theme init, `PostureProvider`, `AppHeader`, `DegradationBanner`. |
 | `app/{book,inspector,lab,observatory,feed,developers}` | The six routes (W0: honest placeholders naming their feeds and landing wave). |
 | `app/styleguide` | Dev-only component showcase (SPECIMEN-labeled). Visible under `next dev`; compiled into a production build only when `NEXT_PUBLIC_SHOW_STYLEGUIDE=1` at build time (CI sets it). |
-| `components/` | Base components (see the styleguide for all of them live). |
+| `components/` | The kit (`components/kit`: `VerdictHeader`, `IdentityChips`, `KpiTile`, `StatusPill`, `KitTable`, `Drawer`) and the shared components beside it (see the styleguide for them live). |
 | `lib/api.ts` | `SolventClient` provider; base URL from `NEXT_PUBLIC_SOLVENT_API_URL` (default `http://localhost:8080`). |
-| `lib/posture.tsx` | Global SSE posture context over the client's `SolventStream` (base-frame deadline + reconnect laws live in the client; this only projects state). Feeds the Ribbon + degradation banner. |
+| `lib/posture.tsx` | Global SSE posture context over the client's `SolventStream` (base-frame deadline + reconnect laws live in the client; this only projects state). Feeds the header's live pill + degradation banner. |
 | `lib/format.ts` / `lib/severity.ts` | The truth primitives: three-valued found rendering, null-never-zero decimals, block-time honesty, the crit-only-from-verdict severity law. Pinned by `tests/unit/honest-render.spec.ts`. |
 | `lib/pagination.ts` | `useCursorPages` — batch-stable cursor pagination with `reset()` for 409 `BATCH_SUPERSEDED` restarts. |
 
@@ -78,13 +78,14 @@ dependency lives one level up).
    `found: null` is NEVER "no position".
 2. Render every `NullableDecimal` via `renderNullableDecimal` — null is an em
    dash, never 0.
-3. Severity: crit ONLY from the engine's sealed verdict (`SeverityHF`); the
-   warn band is presentation-only.
-4. Refusals are first-class UI: `RefusedTag` with the NAMED reason, rows kept
-   visible, counts kept in aggregates.
-5. Freshness: per-input as-ofs (`MarksStamp`, Ribbon watermark vector) — never
-   one global timestamp, never DB insert time.
+3. Severity: crit ONLY from the engine's sealed verdict (`StatusPill
+   tone="crit"`); the warn band is presentation-only.
+4. Refusals are first-class UI: `StatusPill tone="refused"` with the NAMED
+   reason, rows kept visible (the dim `KitTable` row, its figures "—"), counts
+   kept in aggregates (the dashed refused `KpiTile`).
+5. Freshness: per-input as-ofs (`IdentityChips`' Batch · Snapshot, the
+   drawer's as-of line) — never one global timestamp, never DB insert time.
 6. Live posture ≠ posture history: the posture context is current-connection
    truth only.
-7. Projections wear `ProjectionBadge`; null `block_time` renders the block
-   number (`renderBlockTime`), never an invented time.
+7. Projections wear `StatusPill tone="projection"`; null `block_time` renders
+   the block number (`renderBlockTime`), never an invented time.

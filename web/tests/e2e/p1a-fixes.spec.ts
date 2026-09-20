@@ -183,8 +183,9 @@ function readChipRegister(chip: ReturnType<Page["getByTestId"]>) {
 // with their exact copy, one specimen chart carries the §11 interaction
 // register, and — since the pre-kit components retired (plan 2026-09-16, R7) —
 // the kit's own primitives are the specimens: VerdictHeader in its four tones,
-// KpiTile, StatusPill, IdentityChips, KitTable with its dim refused row and
-// its small & dust toggle, and the Drawer.
+// KpiTile, StatusPill, IdentityChips, a one-engine KitTable with its dim
+// refused row and its small & dust toggle, and the Drawer with the exact
+// value beside its human figure.
 //
 // STANDING SKIP: like shell.spec's walk, these pins run only when the route
 // was compiled in (NEXT_PUBLIC_SHOW_STYLEGUIDE=1 at build time — CI sets it;
@@ -372,7 +373,7 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     await expect(forbidden.locator("[tabindex]")).toHaveCount(0);
   });
 
-  test("the six states mount with their honest copy — and refused table cells say the word", async ({
+  test("the six states mount with their honest copy — and a refused row prints an em dash under the pill that names it, never 0 and never $0", async ({
     page,
   }) => {
     for (const state of [
@@ -394,47 +395,66 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
       "A late response never overwrites a newer request context.",
     );
 
-    // §9: the refused row's cells print the word in amber — collateral, debt and health factor — never an em
-    // dash that reads as an empty zero.
-    await expect(page.getByTestId("sg-table").getByText("refused", { exact: true })).toHaveCount(3);
+    // The specimen follows the Book's table: a refused row's figures — room and debt — each print an em dash, and
+    // the row's pill names the refusal. No cell of that row is ever a zero: an unknowable figure is not a small one.
+    const refusedRow = page.getByTestId("sg-table-row-refused");
+    const refusedCells = refusedRow.locator("td");
+    await expect(refusedCells).toHaveCount(4);
+    await expect(refusedCells.filter({ hasText: /^—$/ })).toHaveCount(2);
+    for (const text of await refusedCells.allInnerTexts()) {
+      expect(text.trim(), "a refused row never prints a zero").not.toMatch(/^\$?0(\.0+)?$/);
+    }
+    await expect(refusedRow.locator('[data-tone="refused"]')).toHaveText("Not computed");
   });
 
-  test("the kit table: the refused row stays rendered and dimmed, and the small & dust rows fold behind a toggle that names them", async ({
+  test("the kit table: the refused row stays rendered and dimmed, and one engine's small & dust rows fold behind a toggle that names them", async ({
     page,
   }) => {
     const table = page.getByTestId("sg-table-kit");
     const refused = page.getByTestId("sg-table-row-refused");
     await expect(refused).toBeVisible();
 
-    // Dimmed, never dropped: the row's cells take --ink-3; the refused word keeps its amber inside them.
-    const cell = refused.locator("td").nth(2);
-    expect(await cell.evaluate((el) => getComputedStyle(el).color)).toBe(
+    // One engine, as the Book's table is: no Engine column, so no count or sum here can cross engines.
+    await expect(table.locator("thead th")).toHaveText(["Account", "Room", "Debt", "Status"]);
+
+    // Dimmed, never dropped: the dash is a bare text node, so the glyph itself takes the dim row's --ink-3.
+    const dash = refused.locator("td").nth(1);
+    await expect(dash).toHaveText("—");
+    expect(await dash.evaluate((el) => el.childElementCount)).toBe(0);
+    expect(await dash.evaluate((el) => getComputedStyle(el).color)).toBe(
       await resolveAppbarToken(page, "--ink-3"),
     );
-    const word = cell.getByText("refused", { exact: true });
-    expect(await word.evaluate((el) => getComputedStyle(el).color)).toBe(
-      await resolveAppbarToken(page, "--warn-text"),
-    );
 
-    // The status column: the plain cause is the label, the wire code rides in the title.
+    // The status column names the refusal: the label is the state, the title the plain cause then the wire code.
     const pill = refused.locator('[data-tone="refused"]');
     await expect(pill).toHaveText("Not computed");
-    await expect(pill).toHaveAttribute("title", "sweep_failed_no_success");
+    await expect(pill).toHaveAttribute("title", "collateral sweep failed · SWEEP_FAILED");
 
-    // Folded by default — and the toggle names what it hides: the count and the sum.
+    // Folded by default — and the toggle names what it hides: the count and the summed debt of ONE engine's
+    // below-the-line rows ($61.20 + $14.55).
     const toggle = page.getByTestId("sg-table-toggle");
     await expect(toggle).toHaveAttribute("role", "switch");
     await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await expect(toggle).toHaveText("Show 2 small & dust positions ($14.55)");
-    await expect(table.locator("tbody tr")).toHaveCount(3);
-    await expect(page.getByTestId("sg-table-row-dust-liquidatable")).toHaveCount(0);
+    await expect(toggle).toHaveText("Show 2 small & dust positions ($75.75)");
+    await expect(table.locator("tbody tr")).toHaveCount(4);
+    await expect(page.getByTestId("sg-table-row-dust")).toHaveCount(0);
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "true");
-    await expect(table.locator("tbody tr")).toHaveCount(5);
-    await expect(page.getByTestId("sg-table-row-dust-liquidatable")).toBeVisible();
+    await expect(table.locator("tbody tr")).toHaveCount(6);
+    await expect(page.getByTestId("sg-table-row-small")).toContainText("$61.20");
+    await expect(page.getByTestId("sg-table-row-dust")).toContainText("$14.55");
     // The refused row never folds, in either position.
     await expect(refused).toBeVisible();
+  });
+
+  test("the drawer is the exact value's home: the human figure with its exact wire value beside it", async ({
+    page,
+  }) => {
+    await page.getByTestId("sg-drawer-open").click();
+    const exact = page.getByRole("dialog").getByTestId("sg-drawer-exact");
+    await expect(exact).toContainText("$6,840");
+    await expect(exact.locator("code")).toHaveText("6,840.238278");
   });
 
   test("the kit specimens: KpiTile's tones with the dashed refusal and the pending tile, StatusPill's vocabulary, IdentityChips' tones", async ({

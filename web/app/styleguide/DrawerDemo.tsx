@@ -35,6 +35,12 @@ export function DrawerDemo() {
             <dd>bk_specimen</dd>
             <dt>marks</dt>
             <dd>balances ✓ params ✓ sweep ✓</dd>
+            {/* The exact layer's kit home (the Inspector drawer's "Exact wire values"): the headline prints the
+                human figure, and the drawer states the exact wire value it truncates — here the crit header's. */}
+            <dt>liquidatable debt</dt>
+            <dd data-testid="sg-drawer-exact">
+              $6,840 <span className={kit.sub}>· exact wire value</span> <code>6,840.238278</code>
+            </dd>
           </dl>
         </div>
       </Drawer>

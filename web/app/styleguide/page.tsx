@@ -190,15 +190,15 @@ export default function StyleguidePage() {
           <VerdictHeader
             testId="sg-verdict-crit"
             tone="crit"
-            kicker="Book · Cash"
-            emphasis="At risk now: $8.5K of eligible debt"
-            rest="across 3 accounts — 0.04% of the engine's $22.8M book."
-            dek="One account carries $8.5K of the total; the other two are dust. 6 accounts refused — counted below, never folded in."
+            kicker="Cash book · right now"
+            emphasis="$6,840 of Cash debt is liquidatable right now,"
+            rest="across 2 accounts."
+            dek="2 more positions are technically liquidatable but total $75.75 — below the $100 line and not headlined. 1 account is within 10% of its borrow cap, carrying $142K. 1 position could not be computed this batch and is counted, not hidden."
             chips={[
-              { label: "Batch", value: "#18251" },
-              { label: "Snapshot", value: "48s" },
-              { label: "Coverage", value: "2/2 engines" },
-              { label: "Evidence", value: "3 pins" },
+              { label: "Batch", value: "18,251" },
+              { label: "Snapshot", value: "48s · fresh", tone: "ok" },
+              { label: "Coverage", value: "551 / 552 computed" },
+              { label: "Current", value: "not projected" },
             ]}
           />
           <VerdictHeader
@@ -258,6 +258,9 @@ export default function StyleguidePage() {
           the emphasis carries the verdict color in the -text grade; a refused answer wears ink, never
           a tier&apos;s color. The header never renders without identity — an empty chip list renders
           the dashed refusal chip. The page&apos;s drawer button rides the strip&apos;s trailing slot.
+          A header whose data is superseded, refused or partial changes tone and sentence — it never
+          keeps the happy sentence; partial coverage shows as the warn Coverage chip, superseded as
+          the state card.
         </p>
       </section>
 
