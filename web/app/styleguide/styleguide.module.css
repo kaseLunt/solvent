@@ -47,18 +47,6 @@
   margin-bottom: var(--sp-3);
 }
 
-.statrow {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--sp-3);
-}
-
-@media (max-width: 800px) {
-  .statrow {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
 .swatches {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -281,7 +269,45 @@
   max-width: 960px;
 }
 
-/* The pre-canon production-primitives group divider. */
+/* Cursor pagination: what is loaded against what exists, then the control or the word that the walk ended. */
+.pageFoot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-top: 10px;
+  font-size: var(--t-floor);
+  color: var(--ink-2);
+}
+
+/* Key → value rows (the drawer's evidence, the truth primitives): the key is quiet, the value is mono. */
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: var(--t-ui);
+}
+
+.kv dt {
+  color: var(--ink-2);
+}
+
+.kv dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--t-mono);
+  color: var(--ink);
+}
+
+.kv dd.kvWarn {
+  color: var(--warn-text);
+}
+
+.kv dd.kvDim {
+  color: var(--ink-3);
+}
+
+/* The kit group divider. */
 .groupNote {
   font-family: var(--mono);
   font-size: var(--t-floor);

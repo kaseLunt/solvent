@@ -7,7 +7,7 @@ import styles from "./primitives.module.css";
  *
  * When a render throw unmounts a route segment, the boundary renders THIS
  * instead of Next's generic error page: the house refused tone (the dashed
- * register `RefusedTag` carries), a body that claims nothing — an unreadable
+ * warn register), a body that claims nothing — an unreadable
  * value is never rendered as a number — the throw's own words behind a mono
  * evidence disclosure, and a reset affordance.
  *

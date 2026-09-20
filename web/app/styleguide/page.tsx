@@ -3,26 +3,17 @@ import { notFound } from "next/navigation";
 import type { ChipTone } from "@/lib/kit";
 import type { FreshnessTier } from "@/lib/freshnessTiers";
 import { snapshotChipParts } from "@/lib/freshness";
-import { STREAM_CONNECTED, STREAM_RECONNECTING } from "@/lib/stream-posture";
-import { renderLookupOutcome, renderNullableDecimal, renderBlockTime, EM_DASH } from "@/lib/format";
-import { VerdictBanner } from "@/components/VerdictBanner";
+import { renderLookupOutcome, renderNullableDecimal, renderBlockTime } from "@/lib/format";
+import { IdentityChips, KpiTile, StatusPill, VerdictHeader } from "@/components/kit";
+import kit from "@/components/kit/kit.module.css";
 import { ExactValue } from "@/components/ExactValue";
-import { StatusChip, ChipVal, RefusedChip, EngineTag } from "@/components/StatusChip";
+import { StatusChip, ChipVal, RefusedChip } from "@/components/StatusChip";
 import { Skeleton } from "@/components/states/Skeleton";
 import { EmptyDefinitive } from "@/components/states/EmptyDefinitive";
 import { InvalidInput } from "@/components/states/InvalidInput";
 import { RefusedCard } from "@/components/states/RefusedCard";
 import { UnavailableCard } from "@/components/states/UnavailableCard";
 import { SupersededCard } from "@/components/states/SupersededCard";
-import { ProjectionBadge } from "@/components/ProjectionBadge";
-import { StatCard } from "@/components/StatCard";
-import { SeverityHF } from "@/components/SeverityHF";
-import { EngineChip } from "@/components/EngineChip";
-import { AddressMono } from "@/components/AddressMono";
-import { MarksStamp } from "@/components/MarksStamp";
-import { RefusedTag } from "@/components/RefusedTag";
-import { Stampline, StampItem } from "@/components/Stampline";
-import { Ribbon } from "@/components/Ribbon";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { Scatter } from "@/components/charts/Scatter";
 import { WaterfallSteps } from "@/components/charts/WaterfallSteps";
@@ -37,10 +28,12 @@ export const metadata: Metadata = { title: "Styleguide" };
 
 // ---------------------------------------------------------------------------
 // p1a-6 — THE LIVING CANON. The page is structured by the build contract's
-// own section order (§2 palette · §1 type · §4 banner · §5 freshness · §6
-// dimensions · §7 exact · §8 states · §9 table+drawer · §10 appbar · §11
-// charts + interaction register), followed by the production primitives
-// Phase 3 migrates onto the kit. Every value is a static SPECIMEN.
+// own section order (§2 palette · §1 type · §4 the page answer · §5 freshness ·
+// §6 dimensions · §7 exact · §8 states · §9 table + pagination + drawer ·
+// §10 identity · §11 charts + interaction register), followed by the kit's
+// tiles and pills. The pre-kit components retired with the convergence (plan
+// 2026-09-16, R7); every section that showed one shows its kit successor.
+// Every value is a static SPECIMEN.
 // ---------------------------------------------------------------------------
 
 const PALETTE = [
@@ -82,7 +75,10 @@ const TYPE_SCALE: ReadonlyArray<{ token: string; px: string; role: string; mono:
   { token: "--t-stat", px: "21px", role: "KPI value", mono: false },
 ];
 
-/** §6 tier → chip register — the appbar's own recipe (Ribbon TIER_CLASS). */
+/**
+ * §6 tier → chip register. Fresh is quiet, aging is amber, stale is coral outline, critical is the one escalation
+ * fill; the header's live pill obeys the same law (tests/unit/live-pill.spec.ts).
+ */
 const TIER_TONE: Record<FreshnessTier, ChipTone> = {
   fresh: "quiet",
   aging: "warn",
@@ -90,7 +86,7 @@ const TIER_TONE: Record<FreshnessTier, ChipTone> = {
   critical: "crit-fill",
 };
 
-/** A snapshot chip composed exactly as the appbar composes it (p1a-4). */
+/** A snapshot chip: the batch's age and the SLA tier of that age, stated together. */
 function TierChip({
   seconds,
   tier,
@@ -137,8 +133,9 @@ export default function StyleguidePage() {
       <h1 style={{ marginTop: 0 }}>Styleguide</h1>
       <p className={styles.dek}>
         The living canon: the ratified foundation, mounted. Contrast is measured live from the
-        rendered swatches; the nine status dimensions, the banner grammar, and the chart
-        interaction register are the reference implementations Phase 3 copies.
+        rendered swatches; the nine status dimensions and the chart interaction register are the
+        reference implementations; the kit&apos;s header, identity chips, tiles, pills, table and
+        drawer are the primitives every page composes.
       </p>
 
       {/* ---- §2 palette + the live contrast lab -------------------------- */}
@@ -186,90 +183,81 @@ export default function StyleguidePage() {
         </p>
       </section>
 
-      {/* ---- §4 the verdict banner grammar ------------------------------- */}
+      {/* ---- §4 the page answer ------------------------------------------ */}
       <section className={styles.section} data-testid="sg-verdict">
-        <h2>VerdictBanner · answer · qualification · identity strip — five variants</h2>
+        <h2>VerdictHeader · kicker · the computed sentence · dek · identity — four tones</h2>
         <div className={styles.bannerStack}>
-          <VerdictBanner
-            variant="current"
-            testId="sg-verdict-current"
-            answer={
-              <>
-                At risk now: <ExactValue human="$8.5K" exact="$8,468.238278" /> of Aave eligible
-                debt across 3 accounts — 0.04% of that engine&apos;s $22.8M book. Debt Manager: $0.
-              </>
-            }
-            qualification="One account carries $8.5K of the total; the other two are dust (<$0.01 and $0.33). 6 accounts refused per engine — counted below, never folded in."
-            identity={{
-              batch: { text: "CURRENT ·", value: "batch #18251" },
-              age: { text: "SNAPSHOT", value: "48s" },
-              coverage: { text: "COVERAGE", value: "2/2", suffix: "ENGINES" },
-              evidence: { text: "EVIDENCE ·", value: "3 pins", tone: "accent" },
-            }}
+          <VerdictHeader
+            testId="sg-verdict-crit"
+            tone="crit"
+            kicker="Book · Cash"
+            emphasis="At risk now: $8.5K of eligible debt"
+            rest="across 3 accounts — 0.04% of the engine's $22.8M book."
+            dek="One account carries $8.5K of the total; the other two are dust. 6 accounts refused — counted below, never folded in."
+            chips={[
+              { label: "Batch", value: "#18251" },
+              { label: "Snapshot", value: "48s" },
+              { label: "Coverage", value: "2/2 engines" },
+              { label: "Evidence", value: "3 pins" },
+            ]}
           />
-          <VerdictBanner
-            variant="refused"
+          <VerdictHeader
+            testId="sg-verdict-warn"
+            tone="warn"
+            kicker="Verification · this deployment"
+            emphasis="The proof receipt is absent."
+            dek="Two subjects, never one: the pinned proof and the live batch."
+            chips={[
+              { label: "Pinned proof", value: "bk_019fb0a2" },
+              { label: "Live batch", value: "#18251" },
+              { label: "Receipt", value: "absent", tone: "warn" },
+            ]}
+          />
+          <VerdictHeader
+            testId="sg-verdict-ok"
+            tone="ok"
+            kicker="History · Cash"
+            emphasis="Debt held near $9.10M across the last 7 days."
+            dek="One engine per view; a missing hour is a hole, never a zero."
+            chips={[
+              { label: "Engine", value: "debt_manager" },
+              { label: "Window", value: "7d · hourly" },
+              { label: "Holes", value: "2 absent · 1 withheld", tone: "warn" },
+            ]}
+          />
+          <VerdictHeader
             testId="sg-verdict-refused"
-            answer="Verdict unavailable — the engine won't guess."
-            qualification="The Debt Manager sweep failed twice at this batch, so it refuses to value this account rather than serve an unproven number. Chain activity is retained below."
-            identity={{
-              // §5 D5 order holds inside the clause: the plain cause leads,
-              // the wire code rides last in the mono register.
-              currentOrProjected: {
-                text: "REFUSED · sweep failed twice ·",
-                value: "sweep_failed_no_success",
-                tone: "warn",
+            tone="refused"
+            kicker="Inspector · 0x80b3…6e1d"
+            emphasis="Verdict unavailable — the engine won't guess."
+            dek="The Debt Manager sweep failed twice at this batch, so it refuses to value this account rather than serve an unproven number. Chain activity is retained below."
+            chips={[
+              { label: "Batch", value: "#18251" },
+              { label: "Snapshot", value: "48s" },
+              {
+                label: "Refused",
+                value: "sweep failed twice",
+                tone: "refused",
+                title: "sweep_failed_no_success",
               },
-              age: { text: "SNAPSHOT", value: "48s" },
-            }}
+            ]}
           />
-          <VerdictBanner
-            variant="superseded"
-            testId="sg-verdict-superseded"
-            answer="Results for previous input."
-            qualification="Bound to 0x80b3…6e1d · batch #18251 · eth_-20 v3 · computed 04:11:07Z. The address field has changed; run again for the new address. A late response never overwrites a newer request context."
-            identity={{
-              currentOrProjected: {
-                text: "SUPERSEDED · PROJECTION ·",
-                value: "ETH −20% v3",
-                tone: "warn",
-              },
-              batch: { text: "", value: "batch #18251" },
-            }}
-          />
-          <VerdictBanner
-            variant="empty"
-            testId="sg-verdict-empty"
-            answer="No position — definitively."
-            qualification="Both engines cover this address and both report no balances at batch #18251. Absence is a computed answer, not a failed lookup."
-            identity={{
-              age: { text: "SNAPSHOT", value: "48s" },
-              coverage: { text: "COVERAGE", value: "2/2" },
-            }}
-          />
-          <VerdictBanner
-            variant="partial"
-            testId="sg-verdict-partial"
-            answer="Partial answer: 1 of 2 engines."
-            qualification="Aave answered; the Debt Manager withheld (missing observation). Findings below cover the Aave book only — no figure on this page includes Debt Manager values."
-            identity={{
-              batch: { text: "CURRENT ·", value: "batch #18251" },
-              coverage: { text: "COVERAGE", value: "1/2", suffix: "· DM WITHHELD", tone: "warn" },
-            }}
-          />
-          {/* THE RATIFIED LAW, demonstrated: a banner composed WITHOUT its
-              identity strip renders a warn-register structural refusal that
-              names the omission — never the happy sentence. */}
-          <VerdictBanner
-            variant="current"
-            testId="sg-verdict-refusal-law"
-            answer="(specimen) this banner was composed without its identity strip on purpose"
-            identity={null}
+          {/* THE LAW, demonstrated: a header composed with an EMPTY chip list
+              renders the dashed refusal chip that names the omission — the
+              answer never stands without its identity. */}
+          <VerdictHeader
+            testId="sg-verdict-identity-law"
+            tone="ok"
+            kicker="specimen · the identity law"
+            emphasis="This header was composed with an empty chip list on purpose."
+            dek="The strip below is the kit's own refusal, not a chip this page passed."
+            chips={[]}
           />
         </div>
         <p className={styles.note}>
-          the banner never renders without its identity strip; a banner whose data is superseded,
-          refused, or partial switches variant — it never silently keeps the happy sentence.
+          the emphasis carries the verdict color in the -text grade; a refused answer wears ink, never
+          a tier&apos;s color. The header never renders without identity — an empty chip list renders
+          the dashed refusal chip. The page&apos;s drawer button rides the strip&apos;s trailing slot.
         </p>
       </section>
 
@@ -399,7 +387,7 @@ export default function StyleguidePage() {
             <StatusChip tone="quiet">
               CURRENT · <ChipVal>batch #18251</ChipVal>
             </StatusChip>
-            <ProjectionBadge label="PROJECTION · ETH −20% v3" />
+            <StatusPill tone="projection">Projection · ETH −20% v3</StatusPill>
           </div>
         </div>
 
@@ -464,7 +452,7 @@ export default function StyleguidePage() {
             <StatusChip tone="quiet">
               SNAPSHOT <ChipVal>48s</ChipVal>
             </StatusChip>
-            <ProjectionBadge label="PROJECTION · ETH −20% v3" />
+            <StatusPill tone="projection">Projection · ETH −20% v3</StatusPill>
           </div>
           <p className={styles.compRead}>
             A comfortable projected verdict — the projection rides as a dashed badge naming its
@@ -529,78 +517,54 @@ export default function StyleguidePage() {
         </div>
       </section>
 
-      {/* ---- §9 table pattern + evidence drawer -------------------------- */}
+      {/* ---- §9 table pattern + pagination + drawer ---------------------- */}
       <section className={styles.section} data-testid="sg-table">
-        <h2>table pattern · severity rows; refused cells say the word</h2>
+        <h2>KitTable · a refused row is dimmed, never dropped; small &amp; dust fold behind the toggle</h2>
         <TableSpecimen />
       </section>
 
       <section className={styles.section} data-testid="sg-pagination">
-        <h2>DataTable + useCursorPages (cursor pagination)</h2>
+        <h2>KitTable + useCursorPages · cursor pagination</h2>
         <PaginationDemo />
       </section>
 
       <section className={styles.section} data-testid="sg-drawer">
-        <h2>Drawer · explain this number — layers 2 and 3 live here</h2>
+        <h2>Drawer · methodology &amp; evidence — the doctrine lives here, one click from the answer</h2>
         <DrawerDemo />
       </section>
 
-      {/* ---- §10 the canon appbar ---------------------------------------- */}
-      <section className={styles.section} data-testid="sg-ribbon">
-        <h2>Appbar · each truth its own chip; watermark VECTOR in the popover</h2>
-        {/* p1a-4: the canon appbar — STREAM CONNECTED is an accent chip
-            (posture, not health, never green) and the snapshot chip carries
-            the SLA tier of the age it states. */}
-        <div className={styles.row}>
-          <Ribbon
-            mode="stream"
-            posture={{ label: STREAM_CONNECTED, tone: "accent" }}
-            snapshot={{
-              parts: snapshotChipParts(18251, 48, "fresh"),
-              tier: "fresh",
-              title: "specimen — snapshot freshness of batch #18251",
-            }}
-            batchId={18251}
-            coverage={{ answered: 2, total: 2, withheld: [] }}
-            asOfs={[
-              { label: "aave_v3", value: "@25,641,730" },
-              { label: "debt_manager", value: "@25,641,712" },
-              { label: "debt_manager sweep", value: "age 41s", tone: "dim" },
-            ]}
-          />
-        </div>
-        <div className={styles.row}>
-          <Ribbon
-            mode="stream"
-            posture={{ label: STREAM_CONNECTED, tone: "accent" }}
-            superseded
-            snapshot={{
-              parts: snapshotChipParts(18251, 300, "aging"),
-              tier: "aging",
-              title: "specimen — an AGING snapshot beside a SUPERSEDED flag",
-            }}
-            batchId={18251}
-            asOfs={[{ label: "aave_v3", value: "@25,641,730" }]}
-          />
-        </div>
-        {/* Wave R7 — the SAME retained data under a dead connection. The
-            socket's own word is a chip; the book is not taken away for it. */}
-        <div className={styles.row}>
-          <Ribbon
-            mode="stream"
-            posture={{ label: STREAM_RECONNECTING, tone: "warn" }}
-            snapshot={{
-              parts: snapshotChipParts(18251, 10_930, "critical"),
-              tier: "critical",
-              title: "specimen — critical age under a reconnecting stream",
-            }}
-            batchId={18251}
-            asOfs={[{ label: "aave_v3", value: "@25,641,730" }]}
-          />
-        </div>
-        <div className={styles.row}>
-          <Ribbon mode="proof" pin="bk_019fb0a2" detail="reconcile 12/12 exact" />
-        </div>
+      {/* ---- §10 identity: each truth its own chip ----------------------- */}
+      <section className={styles.section} data-testid="sg-identity">
+        <h2>IdentityChips · each truth its own chip — the strip under every H1</h2>
+        <IdentityChips
+          testId="sg-identity-strip"
+          chips={[
+            { label: "Batch", value: "#18251" },
+            { label: "Snapshot", value: "48s", title: "specimen — snapshot freshness of batch #18251" },
+            { label: "Coverage", value: "2/2 engines" },
+            { label: "Evidence", value: "3 pins" },
+          ]}
+          trailing={<span className={kit.sub}>trailing slot — the page&apos;s drawer button rides here</span>}
+        />
+        <IdentityChips
+          testId="sg-identity-tones"
+          chips={[
+            { label: "Reconcile", value: "12/12 exact", tone: "ok" },
+            { label: "Coverage", value: "1/2 · DM withheld", tone: "warn" },
+            { label: "Snapshot", value: "18h 12m · critical", tone: "crit" },
+            {
+              label: "Refused",
+              value: "sweep failed twice",
+              tone: "refused",
+              title: "sweep_failed_no_success",
+            },
+          ]}
+        />
+        <p className={styles.note}>
+          a label and its value, one truth per chip; the value carries the tone in the -text grade and
+          the border keeps the chroma. The refused chip is dashed and wears no tier&apos;s color; its
+          wire code rides in the title, never as the label.
+        </p>
       </section>
 
       {/* ---- §11 chart conventions + the interaction register ------------ */}
@@ -657,104 +621,82 @@ export default function StyleguidePage() {
         <InteractionRegisterDemo />
       </section>
 
-      {/* ---- production primitives (pre-canon register) ------------------ */}
+      {/* ---- the kit's tiles and pills ----------------------------------- */}
       <p className={styles.groupNote}>
-        production primitives — mounted on live surfaces today; Phase 3 migrates them onto the kit
+        the kit — the primitives every page composes; the pre-kit set retired with the convergence
       </p>
 
-      <section className={styles.section} data-testid="sg-statcard">
-        <h2>StatCard</h2>
-        <div className={styles.statrow}>
-          <StatCard label="Collateral (counted)" value="$23.41M" sub="adapter-output prices only" />
-          <StatCard label="Debt" value="$9.10M" sub="rayMulCeil, chain-exact" />
-          <StatCard
+      <section className={styles.section} data-testid="sg-kpi">
+        <h2>KpiTile · neutral · crit · warn · ok · refused (dashed) · pending</h2>
+        <div className={kit.kpis}>
+          <KpiTile
+            testId="sg-kpi-neutral"
+            label="Collateral (counted)"
+            value="$23.41M"
+            sub="adapter-output prices only"
+          />
+          <KpiTile
+            testId="sg-kpi-crit"
+            tone="crit"
             label="Liquidatable"
-            value={
-              <>
-                <span className="crit-t">3</span> / 70
-              </>
-            }
+            value="3 / 70"
             sub="all dust · $31 total"
           />
-          <StatCard label="Refused" value="3" sub="named reasons, counted" />
-        </div>
-      </section>
-
-      <section className={styles.section} data-testid="sg-severity">
-        <h2>SeverityHF · crit only from the engine&apos;s verdict</h2>
-        <div className={styles.row}>
-          <SeverityHF verdict="not-liquidatable" display="1.539" ratio={1.539} />
-          <SeverityHF verdict="not-liquidatable" display="1.043" ratio={1.043} />
-          <SeverityHF verdict="liquidatable" display="0.963" ratio={0.963} />
-          <SeverityHF verdict="not-liquidatable" display={null} infinite />
-          <SeverityHF verdict="unknowable" display={null} />
+          <KpiTile testId="sg-kpi-warn" tone="warn" label="Near cap" value="7" sub="within 10% of the line" />
+          <KpiTile testId="sg-kpi-ok" tone="ok" label="Reconcile" value="12/12 exact" sub="the receipt matches" />
+          <KpiTile
+            testId="sg-kpi-refused"
+            tone="refused"
+            label="Debt · newest hour"
+            value="withheld"
+            sub="missing observation — never a zero"
+          />
+          <KpiTile
+            testId="sg-kpi-pending"
+            pending
+            label="Accounts walked"
+            value="9,964"
+            sub="the walk is in progress"
+          />
         </div>
         <p className={styles.note}>
-          ok · warn (presentation band &lt; 1.1) · crit (engine comparator verdict) · ∞ (no debt)
-          · {EM_DASH} (unknowable, and never a green light)
+          a refused tile is dashed and prints the gap word in ink — never a tier&apos;s color, never 0;
+          a pending tile prints … and is aria-busy until the walk answers.
         </p>
       </section>
 
-      <section className={styles.section} data-testid="sg-chips">
-        <h2>EngineChip · EngineTag · AddressMono · RefusedTag · ProjectionBadge</h2>
+      <section className={styles.section} data-testid="sg-pills">
+        <h2>StatusPill · the status vocabulary — crit · warn · ok · refused · projection</h2>
         <div className={styles.row}>
-          <EngineChip engine="aave_v3_etherfi" />
-          <EngineChip engine="debt_manager" />
-          <EngineTag engine="aave_v3" />
-          <EngineTag engine="debt_manager" />
-          <AddressMono address="0x71aa00000000000000000000000000000004e200" href="/inspector" />
-          <RefusedTag reason="sweep_failed_no_success" />
-          <ProjectionBadge />
+          <StatusPill tone="crit">Liquidatable</StatusPill>
+          <StatusPill tone="warn">Near cap</StatusPill>
+          <StatusPill tone="ok">Healthy</StatusPill>
+          <StatusPill tone="refused" title="sweep_failed_no_success">
+            Not computed
+          </StatusPill>
+          <StatusPill tone="projection">Projection · ETH −20% v3</StatusPill>
         </div>
         <p className={styles.note}>
-          engine identity is mono wire names only — never a sans AAVE/DM abbreviation. The legacy
-          RefusedTag stays for its 15 production consumers; new surfaces compose the kit&apos;s
-          RefusedChip (plain cause leads).
+          crit only from the engine&apos;s comparator verdict · warn is the presentation band · green is
+          rationed to the comfortable verdict · refused wears no tier&apos;s color, its plain cause is the
+          label and its wire code the title · projection is dashed and never filled.
         </p>
-      </section>
-
-      <section className={styles.section} data-testid="sg-marks">
-        <h2>MarksStamp · B·P·S @block grammar</h2>
-        <div className={styles.row}>
-          <MarksStamp
-            marks={[
-              { letter: "B", block: 25641712 },
-              { letter: "P", block: 25641712 },
-              { letter: "S", block: 25641712 },
-            ]}
-          />
-          <MarksStamp
-            marks={[
-              { letter: "B", block: 25641730 },
-              { letter: "P", block: 25641730 },
-              { letter: "S", block: null },
-            ]}
-          />
-        </div>
-      </section>
-
-      <section className={styles.section} data-testid="sg-stampline">
-        <h2>Stampline</h2>
-        <Stampline>
-          <StampItem label="batch" value="bk_019fb0a2" />
-          <StampItem label="marks" value="balances ✓ params ✓ sweep ✓" tone="ok" />
-          <StampItem label="gate" value="2/2 engines allowed" tone="ok" />
-          <StampItem label="key" value="m9a41c…" note="(deterministic)" />
-        </Stampline>
       </section>
 
       <section className={styles.section} data-testid="sg-truth">
         <h2>truth primitives · the honest-rendering laws</h2>
-        <Stampline>
-          <StampItem label="found:null →" value={renderLookupOutcome("unknowable")} tone="warn" />
-          <StampItem label="found:false →" value={renderLookupOutcome("not-found")} />
-          <StampItem label="null total →" value={renderNullableDecimal(null)} tone="dim" />
-          <StampItem
-            label="null block_time →"
-            value={renderBlockTime(25641730, null)}
-            note="(never an invented time)"
-          />
-        </Stampline>
+        <dl className={styles.kv}>
+          <dt>found:null →</dt>
+          <dd className={styles.kvWarn}>{renderLookupOutcome("unknowable")}</dd>
+          <dt>found:false →</dt>
+          <dd>{renderLookupOutcome("not-found")}</dd>
+          <dt>null total →</dt>
+          <dd className={styles.kvDim}>{renderNullableDecimal(null)}</dd>
+          <dt>null block_time →</dt>
+          <dd>
+            {renderBlockTime(25641730, null)} <span className={kit.sub}>(never an invented time)</span>
+          </dd>
+        </dl>
       </section>
     </>
   );

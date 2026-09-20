@@ -29,8 +29,7 @@ export interface StatusChipProps {
 /**
  * The §5/§6 chip: one dimension per chip, composed with middots by the
  * caller — no dimension may recolor another, and the sentence never
- * collapses into one badge. Class recipes match the landed appbar family
- * (ribbon.module.css) byte-for-byte; the two must stay visually identical.
+ * collapses into one badge. The class recipes are chip.module.css's own.
  */
 export function StatusChip({ tone, children, val, dot = false, title, testId }: StatusChipProps) {
   return (
@@ -65,11 +64,8 @@ export interface RefusedChipProps {
 
 /**
  * The canon refused-tag (§5 D5 + §6): dashed --warn border on --warn-bg,
- * `REFUSED · <plain cause> · <wire code>`. Named RefusedChip because the
- * legacy RefusedTag (primitives.module.css register) stays untouched this
- * phase; page surfaces migrate to this one with their Phase 3 rebuilds.
- * Render order comes verbatim from `refusedChipSegments` — the wire code
- * can never lead (§8 anti-state law).
+ * `REFUSED · <plain cause> · <wire code>`. Render order comes verbatim from
+ * `refusedChipSegments` — the wire code can never lead (§8 anti-state law).
  */
 export function RefusedChip({ cause, code, word = "REFUSED", testId }: RefusedChipProps) {
   const segments = refusedChipSegments(cause, code, word);

@@ -13,15 +13,17 @@
 //        in tests/e2e/lab.spec.ts (the cold load, the not-found arm, the mode
 //        toggle's words);
 //   (6)  no numbered eyebrows anywhere; the nav's two registers sit adjacent
-//        with a divider, not across a void (the Proof H1 arm retired with the
-//        Verification convergence, Plan 4);
+//        with a divider, not across a void (the Verification H1 arm retired
+//        with that page's convergence, Plan 4);
 //   (7)  numeric column HEADERS are right-aligned over their cells;
 //   (8)  section order: map above table, positions above histogram, census
 //        above waterfall;
 //   (9)  the Book dek is COMPUTED from /v1/book;
-//   (10) the adjudicated intros render on Observatory, Feed, Proof and
-//        Developers (the Inspector arm retired under Plan 2; the Lab arm under
-//        Plan 3 — the Scenarios page answers first and has no intro).
+//   (10) RETIRED with the Plan 4 convergence (2026-09-16) — every intro is
+//        drawer doctrine now (R3), pinned verbatim in tests/e2e/history.spec.ts,
+//        activity.spec.ts, verification.spec.ts and api.spec.ts; each page's dek
+//        keeps the one clause the law requires visible. The Inspector arm had
+//        retired under Plan 2 and the Scenarios arm under Plan 3.
 //
 // Items (2), (3), (11), (12) and the Inspector arm of (10) — the old
 // Inspector's badge, freshness line, HF-history vocabulary, DM card and
@@ -95,7 +97,7 @@ test("(4) an aave_scaled amount with no leg decimals stays RAW and is TAGGED as 
 });
 
 // ---------------------------------------------------------------------------
-// (5) — the Lab dead end: retired with the Scenarios rebuild (2026-09-16,
+// (5) — the Scenarios dead end: retired with the Scenarios rebuild (2026-09-16,
 // Plan 3). The laws live in tests/e2e/lab.spec.ts: the cold load runs on the
 // listing alone and no address gates it; a not-found address is a complete
 // answer; the mode toggle names what each mode does.
@@ -103,7 +105,8 @@ test("(4) an aave_scaled amount with no leg decimals stays RAW and is TAGGED as 
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// (6) + (10) — chrome and intros.
+// (6) — chrome. The paths below are the routes; the pages they serve are Book,
+// Inspector, Scenarios, History, Activity, Verification and API.
 // ---------------------------------------------------------------------------
 
 const SURFACES = [
@@ -125,30 +128,13 @@ test("(6) not one numbered eyebrow survives on the seven surfaces", async ({ pag
   }
 });
 
-// (6)'s Proof H1 arm is RETIRED with the Verification convergence (plan 2026-09-16, Task 5): the page's H1 is its
+// (6)'s Verification H1 arm is RETIRED with that page's convergence (plan 2026-09-16, Task 5): the page's H1 is its
 // computed sentence (R2, `proofTakeaway`), and its name is the nav label and the kicker "Verification · this
 // deployment" — pinned in tests/e2e/verification.spec.ts; the shell smoke pins the no-API H1.
 
-test("(10) the adjudicated intros render — Observatory, Feed, Proof, Developers (the Inspector arm retired under Plan 2, the Lab arm under Plan 3)", async ({
-  page,
-}) => {
-  // Re-homed from the retired "(10) the adjudicated intros render, and the
-  // endpoint lines are demoted": the four surviving paragraphs, verbatim.
-  // The Inspector landing's intro is R9's and is pinned by the contract spec;
-  // the Scenarios page answers first (spec §5.4) and carries no intro paragraph.
-  await muteStream(page);
-
-  // The Observatory arm is RETIRED with the History convergence (plan 2026-09-16, Task 3): the intro is drawer
-  // doctrine now (R3), pinned verbatim in tests/e2e/history.spec.ts; the dek keeps "One engine per view; a missing
-  // hour is a hole, never a zero."
-
-  // The Activity arm is RETIRED with the Activity convergence (plan 2026-09-16, Task 4): the intro is
-  // drawer doctrine now (R3), pinned verbatim in tests/e2e/activity.spec.ts; the dek keeps the closing clause.
-
-  // The Proof arm is RETIRED with the Verification convergence (plan 2026-09-16, Task 5): the intro is drawer
-  // doctrine now (R3), pinned verbatim in tests/e2e/verification.spec.ts; the dek keeps "Two subjects, never one:
-  // the pinned proof and the live batch."
-
-  // The API arm is RETIRED with the API convergence (plan 2026-09-16, Task 6): the intro is
-  // drawer doctrine now (R3), pinned verbatim in tests/e2e/api.spec.ts; the dek keeps its closing clause.
-});
+// (10) is RETIRED whole (plan 2026-09-16, Tasks 3–6): each page's intro is drawer doctrine (R3), pinned verbatim
+// in its own contract — History in tests/e2e/history.spec.ts (the dek keeps "One engine per view; a missing hour
+// is a hole, never a zero."), Activity in activity.spec.ts ("The live strip and the paged record never blend."),
+// Verification in verification.spec.ts ("Two subjects, never one: the pinned proof and the live batch."), API in
+// api.spec.ts ("If a handler disagrees with this page, that is a failure, not documentation lag."). The test that
+// held the four arms asserted nothing once the last arm left, so it is gone rather than kept green and empty.

@@ -179,10 +179,12 @@ function readChipRegister(chip: ReturnType<Page["getByTestId"]>) {
 //
 // The /styleguide route is the component kit's first mount and the canon's
 // self-verifying specimen page: swatch contrast is MEASURED live from
-// resolved styles (never printed from a table), the §6 nine dimensions and
-// §4 five banner variants mount with their exact copy, and one specimen
-// chart carries the §11 interaction register — the reference implementation
-// Phase 3 copies.
+// resolved styles (never printed from a table), the §6 nine dimensions mount
+// with their exact copy, one specimen chart carries the §11 interaction
+// register, and — since the pre-kit components retired (plan 2026-09-16, R7) —
+// the kit's own primitives are the specimens: VerdictHeader in its four tones,
+// KpiTile, StatusPill, IdentityChips, KitTable with its dim refused row and
+// its small & dust toggle, and the Drawer.
 //
 // STANDING SKIP: like shell.spec's walk, these pins run only when the route
 // was compiled in (NEXT_PUBLIC_SHOW_STYLEGUIDE=1 at build time — CI sets it;
@@ -236,38 +238,44 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     }
   });
 
-  test("the five banner variants render their identity strips — and the structural refusal names the omission", async ({
+  test("the four VerdictHeader tones render their identity strips — and an empty chip list renders the refusal chip", async ({
     page,
   }) => {
-    for (const variant of ["current", "refused", "superseded", "empty", "partial"] as const) {
-      const banner = page.getByTestId(`sg-verdict-${variant}`);
-      await expect(banner).toBeVisible();
-      await expect(banner).toHaveAttribute("data-variant", variant);
-      // THE RATIFIED LAW, in the DOM: the identity strip exists and is
-      // non-empty on every lawful banner (task-5 carry-in pin).
-      const strip = banner.locator('[data-slot="identity"]');
+    // RE-EXPRESSED from "the five banner variants render their identity strips" when VerdictBanner retired (plan
+    // 2026-09-16, R7). The law is the same one — the answer never stands without its identity — on the kit's header.
+    for (const tone of ["crit", "warn", "ok", "refused"] as const) {
+      const header = page.getByTestId(`sg-verdict-${tone}`);
+      await expect(header).toBeVisible();
+      await expect(header).toHaveAttribute("data-variant", tone);
+      const strip = header.locator('[data-slot="identity"]');
       await expect(strip).toHaveCount(1);
       await expect(strip).toContainText(/\S/);
+
+      // The emphasis carries the verdict color in the -text grade; a refused answer wears ink, never a tier's color.
+      const emphasis = page.getByTestId(`sg-verdict-${tone}-headline`).locator("b");
+      const color = await emphasis.evaluate((el) => getComputedStyle(el).color);
+      expect(color, `${tone} emphasis`).toBe(
+        await resolveAppbarToken(page, tone === "refused" ? "--ink-2" : `--${tone}-text`),
+      );
     }
 
-    // The current banner's value wears the exact affordance (§7 mandatory
-    // wherever human ≠ exact): layer 2 is served via title.
-    await expect(
-      page.getByTestId("sg-verdict-current").locator('[title="$8,468.238278"]'),
-    ).toBeVisible();
+    // The refused header names its cause on a dashed chip; the wire code rides in the title, never as the label.
+    const cause = page.getByTestId("sg-verdict-refused").locator('[data-chip="Refused"]');
+    await expect(cause).toHaveText("Refused sweep failed twice");
+    await expect(cause).toHaveAttribute("title", "sweep_failed_no_success");
+    expect((await readChipRegister(cause)).borderStyle).toBe("dashed");
 
-    // The law's own specimen: a banner composed WITHOUT its strip renders the
-    // warn-register structural refusal — data-variant still names what was
-    // asked for (task-5 carry-in: evaluated and agreed — the refusal render
-    // keeps the requested variant AND wears the refusal marker).
-    const refusal = page.getByTestId("sg-verdict-refusal-law");
-    await expect(refusal).toHaveAttribute("data-identity-refusal", "missing-identity-strip");
-    await expect(refusal).toHaveAttribute("data-variant", "current");
-    await expect(refusal).toContainText("Verdict withheld");
-    await expect(refusal.locator('[data-slot="identity"]')).toHaveCount(0);
+    // The law's own specimen: a header composed with an EMPTY chip list renders the kit's dashed refusal chip —
+    // the strip is still there, and it names the omission.
+    const law = page.getByTestId("sg-verdict-identity-law");
+    const strip = law.locator('[data-slot="identity"]');
+    await expect(strip.locator("[data-chip]")).toHaveCount(1);
+    const missing = strip.locator('[data-chip="Identity"]');
+    await expect(missing).toHaveText("Identity missing");
+    expect((await readChipRegister(missing)).borderStyle).toBe("dashed");
   });
 
-  test("the freshness tier row renders all five states in the appbar recipes", async ({ page }) => {
+  test("the freshness tier row renders all five states, each in its tier's register", async ({ page }) => {
     // FRESH: measured ink, quiet border, NO tier word, no green.
     const fresh = page.getByTestId("sg-tier-fresh");
     await expect(fresh).toHaveText("SNAPSHOT 48s");
@@ -386,9 +394,103 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
       "A late response never overwrites a newer request context.",
     );
 
-    // §9 reskin: the refused row's money cells print the word in amber — no
-    // em dash that reads as an empty zero.
-    await expect(page.getByTestId("sg-table").getByText("refused", { exact: true })).toHaveCount(2);
+    // §9: the refused row's cells print the word in amber — collateral, debt and health factor — never an em
+    // dash that reads as an empty zero.
+    await expect(page.getByTestId("sg-table").getByText("refused", { exact: true })).toHaveCount(3);
+  });
+
+  test("the kit table: the refused row stays rendered and dimmed, and the small & dust rows fold behind a toggle that names them", async ({
+    page,
+  }) => {
+    const table = page.getByTestId("sg-table-kit");
+    const refused = page.getByTestId("sg-table-row-refused");
+    await expect(refused).toBeVisible();
+
+    // Dimmed, never dropped: the row's cells take --ink-3; the refused word keeps its amber inside them.
+    const cell = refused.locator("td").nth(2);
+    expect(await cell.evaluate((el) => getComputedStyle(el).color)).toBe(
+      await resolveAppbarToken(page, "--ink-3"),
+    );
+    const word = cell.getByText("refused", { exact: true });
+    expect(await word.evaluate((el) => getComputedStyle(el).color)).toBe(
+      await resolveAppbarToken(page, "--warn-text"),
+    );
+
+    // The status column: the plain cause is the label, the wire code rides in the title.
+    const pill = refused.locator('[data-tone="refused"]');
+    await expect(pill).toHaveText("Not computed");
+    await expect(pill).toHaveAttribute("title", "sweep_failed_no_success");
+
+    // Folded by default — and the toggle names what it hides: the count and the sum.
+    const toggle = page.getByTestId("sg-table-toggle");
+    await expect(toggle).toHaveAttribute("role", "switch");
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(toggle).toHaveText("Show 2 small & dust positions ($14.55)");
+    await expect(table.locator("tbody tr")).toHaveCount(3);
+    await expect(page.getByTestId("sg-table-row-dust-liquidatable")).toHaveCount(0);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(table.locator("tbody tr")).toHaveCount(5);
+    await expect(page.getByTestId("sg-table-row-dust-liquidatable")).toBeVisible();
+    // The refused row never folds, in either position.
+    await expect(refused).toBeVisible();
+  });
+
+  test("the kit specimens: KpiTile's tones with the dashed refusal and the pending tile, StatusPill's vocabulary, IdentityChips' tones", async ({
+    page,
+  }) => {
+    // KpiTile — every tone declares itself, and the value wears its tone's -text grade.
+    for (const tone of ["neutral", "crit", "warn", "ok", "refused"] as const) {
+      await expect(page.getByTestId(`sg-kpi-${tone}`)).toHaveAttribute("data-tone", tone);
+    }
+    const critValue = page.getByTestId("sg-kpi-crit").getByText("3 / 70", { exact: true });
+    expect(await critValue.evaluate((el) => getComputedStyle(el).color)).toBe(
+      await resolveAppbarToken(page, "--crit-text"),
+    );
+    // A refused tile is dashed and prints the gap word in ink — never a tier's color, never a zero.
+    const refusedTile = page.getByTestId("sg-kpi-refused");
+    expect((await readChipRegister(refusedTile)).borderStyle).toBe("dashed");
+    const gapWord = refusedTile.getByText("withheld", { exact: true });
+    expect(await gapWord.evaluate((el) => getComputedStyle(el).color)).toBe(
+      await resolveAppbarToken(page, "--ink-2"),
+    );
+    // A pending tile prints … and is aria-busy; the value it was handed is not shown as an answer.
+    const pending = page.getByTestId("sg-kpi-pending");
+    await expect(pending).toHaveAttribute("aria-busy", "true");
+    await expect(pending).toContainText("…");
+    await expect(pending).not.toContainText("9,964");
+
+    // StatusPill — the five-word vocabulary; the wire code is the refused pill's title; projection is dashed, unfilled.
+    const pills = page.getByTestId("sg-pills");
+    for (const [tone, label] of [
+      ["crit", "Liquidatable"],
+      ["warn", "Near cap"],
+      ["ok", "Healthy"],
+      ["refused", "Not computed"],
+      ["projection", "Projection · ETH −20% v3"],
+    ] as const) {
+      await expect(pills.locator(`[data-tone="${tone}"]`)).toHaveText(label);
+    }
+    await expect(pills.locator('[data-tone="refused"]')).toHaveAttribute("title", "sweep_failed_no_success");
+    const projection = await readChipRegister(pills.locator('[data-tone="projection"]'));
+    expect(projection.borderStyle).toBe("dashed");
+    expect(projection.bg).toBe("rgba(0, 0, 0, 0)");
+
+    // IdentityChips — one truth per chip; the value carries the tone; the refused chip is dashed.
+    await expect(page.getByTestId("sg-identity-strip").locator("[data-chip]")).toHaveCount(4);
+    const tones = page.getByTestId("sg-identity-tones");
+    for (const [chip, token] of [
+      ["Reconcile", "--ok-text"],
+      ["Coverage", "--warn-text"],
+      ["Snapshot", "--crit-text"],
+    ] as const) {
+      const value = tones.locator(`[data-chip="${chip}"] b`);
+      expect(await value.evaluate((el) => getComputedStyle(el).color), chip).toBe(
+        await resolveAppbarToken(page, token),
+      );
+    }
+    expect((await readChipRegister(tones.locator('[data-chip="Refused"]'))).borderStyle).toBe("dashed");
   });
 
   test("the type scale renders the closed set — all fourteen tokens", async ({ page }) => {

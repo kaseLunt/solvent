@@ -81,9 +81,12 @@ test("styleguide renders every specimen section (when built in)", async ({ page 
   );
 
   await expect(page.getByTestId("specimen-banner")).toBeVisible();
-  // p1a-6 rebuilt the page canon-structured (build-contract §1–§11 order,
-  // then the production primitives Phase 3 migrates onto the kit). The walk's
-  // old→new ledger lives in .superpowers/sdd/progress-ui-overhaul.md §p1a-6.
+  // p1a-6 built the page canon-structured (build-contract §1–§11 order); the pre-kit components retired with the
+  // convergence (plan 2026-09-16, R7), and each section that showed one shows its kit successor, in the same order:
+  // sg-ribbon → sg-identity (IdentityChips), sg-statcard → sg-kpi (KpiTile), sg-severity → sg-pills (StatusPill).
+  // sg-chips, sg-marks and sg-stampline are retired with their components — engine and address identity ride the
+  // table specimen, the refusal and projection registers ride sg-pills, the key → value rows ride sg-drawer and
+  // sg-truth.
   for (const section of [
     "sg-tokens",
     "sg-type",
@@ -95,21 +98,18 @@ test("styleguide renders every specimen section (when built in)", async ({ page 
     "sg-table",
     "sg-pagination",
     "sg-drawer",
-    "sg-ribbon",
+    "sg-identity",
     "sg-charts",
     "sg-interaction",
-    "sg-statcard",
-    "sg-severity",
-    "sg-chips",
-    "sg-marks",
-    "sg-stampline",
+    "sg-kpi",
+    "sg-pills",
     "sg-truth",
   ]) {
     await expect(page.getByTestId(section)).toBeVisible();
   }
 
-  // The drawer opens and closes on Escape.
-  await page.getByRole("button", { name: "OPEN EXPLAIN-THIS-NUMBER DRAWER" }).click();
+  // The drawer opens from the kit's own button and closes on Escape.
+  await page.getByRole("button", { name: "Methodology & evidence" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);

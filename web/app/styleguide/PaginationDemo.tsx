@@ -1,10 +1,14 @@
 "use client";
 
+// Cursor pagination on the kit (plan 2026-09-16, R7): KitTable fed by `useCursorPages`, with the load-more
+// control a kit ghost button. The status line always states what is loaded against what exists, and an
+// exhausted walk says so in words — the control is never simply absent.
+
 import { useCallback, useEffect } from "react";
-import { DataTable, LoadMoreFooter, type Column } from "@/components/DataTable";
+import { KitTable, type KitColumn, type KitRow } from "@/components/kit";
+import kit from "@/components/kit/kit.module.css";
 import { useCursorPages, type CursorPage } from "@/lib/pagination";
-import { AddressMono } from "@/components/AddressMono";
-import { EngineChip } from "@/components/EngineChip";
+import styles from "./styleguide.module.css";
 
 interface SpecimenRow {
   engine: string;
@@ -30,13 +34,30 @@ function fetchSpecimenPage(cursor: number | null): Promise<CursorPage<SpecimenRo
   return Promise.resolve({ rows, nextCursor: next >= TOTAL ? null : next });
 }
 
-const COLUMNS: ReadonlyArray<Column<SpecimenRow>> = [
-  { id: "engine", header: "Engine", cell: (row) => <EngineChip engine={row.engine} /> },
-  { id: "account", header: "Account", cell: (row) => <AddressMono address={row.account} copy={false} /> },
-  { id: "rank", header: "Rank", align: "right", cell: (row) => <span className="mono">{row.rank}</span> },
+const COLUMNS: KitColumn[] = [
+  { key: "engine", header: "Engine" },
+  { key: "account", header: "Account" },
+  { key: "rank", header: "Rank", align: "right" },
 ];
 
-/** SPECIMEN cursor pagination wired through useCursorPages + LoadMoreFooter. */
+const short = (address: string): string => `${address.slice(0, 6)}…${address.slice(-4)}`;
+
+function toRow(row: SpecimenRow): KitRow {
+  return {
+    key: row.account,
+    cells: {
+      engine: <span className={kit.addr}>{row.engine}</span>,
+      account: (
+        <span className={kit.addr} title={row.account}>
+          {short(row.account)}
+        </span>
+      ),
+      rank: row.rank,
+    },
+  };
+}
+
+/** SPECIMEN cursor pagination: `useCursorPages` into a KitTable, load-more as a kit ghost button. */
 export function PaginationDemo() {
   const { rows, hasMore, loading, loadMore } = useCursorPages<SpecimenRow, number>(
     useCallback((cursor) => fetchSpecimenPage(cursor), []),
@@ -47,20 +68,33 @@ export function PaginationDemo() {
   }, [rows.length, loadMore]);
 
   return (
-    <DataTable
-      columns={COLUMNS}
-      rows={rows}
-      rowKey={(row) => row.account}
-      ariaLabel="specimen cursor pagination"
-      empty="loading first specimen page…"
-      footer={
-        <LoadMoreFooter
-          hasMore={hasMore}
-          loading={loading}
-          onLoadMore={loadMore}
-          status={`${String(rows.length)} / ${String(TOTAL)} specimen rows`}
-        />
-      }
-    />
+    <>
+      <KitTable
+        testId="sg-pagination-kit"
+        columns={COLUMNS}
+        rows={rows.map(toRow)}
+        emptyText="loading first specimen page…"
+      />
+      <div className={styles.pageFoot}>
+        <span data-testid="sg-pagination-status">
+          {rows.length} / {TOTAL} specimen rows
+        </span>
+        {hasMore ? (
+          <button
+            type="button"
+            className={`${kit.btn} ${kit.btnGhost}`}
+            onClick={loadMore}
+            disabled={loading}
+            data-testid="sg-pagination-load-more"
+          >
+            {loading ? "Loading…" : "Load more"}
+          </button>
+        ) : (
+          <span className={kit.sub} data-testid="sg-pagination-end">
+            end reached
+          </span>
+        )}
+      </div>
+    </>
   );
 }
