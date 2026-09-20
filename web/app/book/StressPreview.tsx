@@ -10,7 +10,7 @@ export function StressPreview({ preview }: { preview: Preview | null }) {
     <ChartCard
       title="Stress preview"
       finding="The committed ETH shock grid, run against this batch. Every figure below is a projection."
-      link={{ href: "/lab", label: "Scenarios →" }}
+      link={{ href: preview !== null && preview.kind === "view" ? `/lab?scenario=${preview.scenarioId}` : "/lab", label: "Scenarios →" }}
       testId="book-stress-preview"
     >
       {preview === null ? (

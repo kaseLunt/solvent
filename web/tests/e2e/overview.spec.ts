@@ -33,6 +33,7 @@ test("hero, live strip, entries and pipeline render from the fixtures", async ({
   for (const id of ["book", "inspector", "scenarios"]) {
     await expect(page.getByTestId(`overview-entry-${id}`)).toBeVisible();
   }
+  await expect(page.getByRole("link", { name: "Architecture & verification →" })).toHaveAttribute("href", "/proof#architecture");
   const dm = META.watermark_vector.find((w) => w.engine === "debt_manager");
   if (dm === undefined) throw new Error("meta fixture must carry the debt_manager watermark");
   await expect(page.getByTestId("pipeline-index")).toHaveAttribute("data-value", dm.last_block.toLocaleString("en-US"));

@@ -59,6 +59,13 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   await expect(rows.nth(1)).toHaveClass(/dim/);
   await expect(page.getByTestId("book-dust-toggle")).toHaveCount(0); // nothing below the line
 
+  // Cross-page links name their subject: a row opens its own address, the preview opens its own scenario.
+  const rowHref = await rows.nth(0).locator("a").first().getAttribute("href");
+  expect(rowHref).toMatch(/^\/inspector\/0x[0-9a-fA-F]{40}$/);
+  const previewLinks = page.getByTestId("book-stress-preview").locator("a");
+  expect(await previewLinks.count()).toBeGreaterThan(1);
+  for (const link of await previewLinks.all()) await expect(link).toHaveAttribute("href", "/lab?scenario=eth_minus_30");
+
   const legacy = page.getByTestId("book-legacy");
   await expect(legacy).not.toHaveAttribute("open", /.*/);
   await expect(legacy.locator("summary")).toContainText("Legacy · Aave v3 market");
@@ -126,6 +133,8 @@ test("the Cash engine withheld whole: refused headline, refused tiles, nothing r
   await expect(page.getByTestId("book-bands")).toHaveCount(0);
   await expect(page.getByTestId("book-attention")).toHaveCount(0);
   await expect(page.getByTestId("book-stress-preview")).toContainText("Preview withheld");
+  // A withheld preview names no scenario: its link is the workspace, never an id the batch did not publish a view for.
+  await expect(page.getByTestId("book-stress-preview").locator("a")).toHaveAttribute("href", "/lab");
   // No liquidatable pill anywhere, and no "$0" standing in for a figure the engine withheld.
   await expect(page.locator('main [data-tone="crit"]')).toHaveCount(0);
   await expect(page.getByTestId("book-bands-card")).not.toContainText("$0");
