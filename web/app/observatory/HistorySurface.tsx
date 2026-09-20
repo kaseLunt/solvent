@@ -35,7 +35,7 @@ import {
 } from "@/lib/observatory-data";
 import { buildBucketAxis, type BucketAxis, type BucketMetric } from "@/lib/observatory-series";
 import styles from "./history.module.css";
-import { HistoryChart } from "./HistoryChart";
+import { HistoryChart, HistoryMarks } from "./HistoryChart";
 import { HistoryDrawer } from "./HistoryDrawer";
 import { HistoryPoint } from "./HistoryPoint";
 import { HistoryTiles } from "./HistoryTiles";
@@ -148,7 +148,12 @@ function EngineHistory({
           <ChartCard
             title="How the book moved"
             testId="history-chart"
-            finding={<span data-testid="history-chart-finding">{view.finding}</span>}
+            finding={
+              <div className={styles.findingRow}>
+                <span data-testid="history-chart-finding">{view.finding}</span>
+                <HistoryMarks />
+              </div>
+            }
           >
             <HistoryChart
               axis={answered.axis}

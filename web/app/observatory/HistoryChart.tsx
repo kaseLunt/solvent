@@ -16,6 +16,7 @@
 import { ObservatorySeriesChart } from "@/components/charts/ObservatorySeriesChart";
 import chart from "@/components/charts/charts.module.css";
 import kit from "@/components/kit/kit.module.css";
+import { HISTORY_MARKS } from "@/lib/history-view";
 import type { ObservatorySeriesResponse } from "@/lib/observatory-data";
 import {
   buildMetricSeries,
@@ -135,5 +136,27 @@ export function HistoryChart({
         />
       </div>
     </>
+  );
+}
+
+/**
+ * The key to the chart's two hole marks, beside the card's finding line: the same glyphs the plot draws (the dashed
+ * tick; the tick wearing the outlined warn square), the lib's words. The method notes stay in the drawer.
+ */
+export function HistoryMarks() {
+  return (
+    <ul className={styles.marks} data-testid="history-marks" aria-label="marks">
+      {HISTORY_MARKS.map((mark) => (
+        <li key={mark.mark} data-mark={mark.mark}>
+          <svg className={styles.markGlyph} width={12} height={12} viewBox="0 0 12 12" aria-hidden>
+            <line className={chart.gapTick} x1={6} x2={6} y1={1} y2={11} />
+            {mark.mark === "withheld" && (
+              <rect x={3} y={1} width={6} height={6} style={{ fill: "transparent", stroke: "var(--warn)", strokeWidth: 1.5 }} />
+            )}
+          </svg>
+          <span>{mark.label}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

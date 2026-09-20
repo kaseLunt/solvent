@@ -411,7 +411,9 @@ export function sparseCaptureLine(series: BucketMetricSeries): string | null {
  * law (inventory hazard): an hour with no complete batch is an unknowable,
  * and a takeaway that omits it invites reading the series as continuous.
  * A refused newest bucket states the withholding — never the previous
- * bucket's numbers.
+ * bucket's numbers. The sentence is capitalised at its first character HERE,
+ * at the source: every surface that prints it (the History page's H1) prints
+ * this string by identity, never a transformed copy.
  */
 export function observatoryTakeaway(
   response: ObservatorySeriesResponse,
@@ -431,11 +433,11 @@ export function observatoryTakeaway(
   const newest =
     axis.newestPointIndex >= 0 ? (axis.entries[axis.newestPointIndex]?.point ?? null) : null;
   if (newest === null) {
-    return `no bucket in this window is backed by a wire row${gapClause}.`;
+    return `No bucket in this window is backed by a wire row${gapClause}.`;
   }
   if (newest.refused) {
     return (
-      `newest bucket ${newest.bucket_start} withheld (${newest.refusal_code ?? "unnamed"}) — ` +
+      `Newest bucket ${newest.bucket_start} withheld (${newest.refusal_code ?? "unnamed"}) — ` +
       `no numbers served for it${gapClause}.`
     );
   }
@@ -444,7 +446,7 @@ export function observatoryTakeaway(
       ? EM_DASH
       : String(readWirePopulation(newest.accounts, "accounts"));
   return (
-    `debt ${displayMetric(newest, "debt_usd", response.usd_decimals)} across ${accounts} ` +
+    `Debt ${displayMetric(newest, "debt_usd", response.usd_decimals)} across ${accounts} ` +
     `account(s) as of bucket ${newest.bucket_start}${gapClause}.`
   );
 }

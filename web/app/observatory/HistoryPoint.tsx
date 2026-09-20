@@ -1,271 +1,110 @@
-// The selected bucket's FULL record (plan R5: a card, not a list) — provenance
-// on detail, not buried in a tooltip. Every field is the wire's own statement:
-// the bucket's as-of, the engine's balances watermark at capture time, the
-// refusal posture, the exact totals (null renders as an em dash, NEVER 0), and
-// the rate-index snapshot where every index carries its OWN as-of block.
-//
-// An ABSENT bucket gets the same card, stating the absence by name — the
-// rollup captured nothing in that hour, and this card says so instead of
-// pretending the bucket never existed.
+// The selected bucket's FULL record (plan R5: a card, not a list). Every
+// sentence is the lib's (`pointRecord`): this component prints the rows, keeps
+// each hazard row outside the counted fold exactly when the record puts it in
+// the answer, and draws the rate snapshot as the kit's table. Nothing here
+// decides a word.
 
+import { Fragment } from "react";
 import { KitTable, StatusPill, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "@/lib/format";
+import { HISTORY_RATE_COLUMNS, pointRecord, type PointRecord, type RecordRow } from "@/lib/history-view";
 import type { ObservatorySeriesResponse } from "@/lib/observatory-data";
-import { pointDetailTakeaway, type BucketEntry } from "@/lib/observatory-series";
-import { readWirePopulation } from "@/lib/wireGuard";
+import type { BucketEntry } from "@/lib/observatory-series";
 import styles from "./history.module.css";
 
-const RATE_COLUMNS: KitColumn[] = [
-  { key: "kind", header: "rate index" },
-  { key: "asset", header: "asset" },
-  { key: "value", header: "value (raw decimal)", align: "right" },
-  { key: "scale", header: "scale" },
-  { key: "block", header: "its OWN as-of block", align: "right" },
-  { key: "note", header: "note" },
-];
+const RATE_COLUMNS: KitColumn[] = HISTORY_RATE_COLUMNS.map((column) => ({
+  key: column.key,
+  header: column.header,
+  ...(column.align === undefined ? {} : { align: column.align }),
+}));
 
 export function HistoryPoint({ entry, response }: { entry: BucketEntry; response: ObservatorySeriesResponse }) {
+  const record = pointRecord(entry, response);
   return (
     <section
       className={kit.card}
       data-testid="history-point"
-      data-bucket={entry.bucketStart}
-      data-kind={entry.kind}
-      aria-label="bucket record"
+      data-bucket={record.bucket}
+      data-kind={record.kind}
+      aria-label={record.title}
     >
       <div className={kit.cardT}>
         <h3>
-          Bucket record <span className={styles.mono}>{entry.bucketStart}</span>
+          {record.title} <span className={styles.mono}>{record.bucket}</span>
         </h3>
       </div>
-      {/* The record's one-line state — computed, one source. The ABSENT and WITHHELD arms are hazards and never soften. */}
       <p className={styles.takeaway} data-testid="history-point-takeaway">
-        {pointDetailTakeaway(entry)}
+        {record.takeaway}
       </p>
-      {entry.point === null ? (
-        <p className={styles.note}>
-          The rollup captured nothing for this hour, because no complete risk batch existed to observe. Nobody
-          refused it. An absent bucket is a hole in the record, stated by name: nothing is interpolated across it,
-          and it never renders as zero.
-        </p>
-      ) : (
-        <RecordBody entry={entry} response={response} />
+      {record.absentNote !== null && <p className={styles.note}>{record.absentNote}</p>}
+      {record.answer.length > 0 && <Rows rows={record.answer} code={record.refusalCode} />}
+      {record.ratesOutside && <Rates record={record} />}
+      {record.forensicSummary !== null && (
+        <details className={styles.forensics} data-testid="history-point-forensics">
+          <summary>{record.forensicSummary}</summary>
+          <Rows rows={record.forensic} code={record.refusalCode} />
+          {!record.ratesOutside && <Rates record={record} />}
+          <p className={styles.note}>{record.provenance}</p>
+        </details>
       )}
     </section>
   );
 }
 
-function RecordBody({ entry, response }: { entry: BucketEntry; response: ObservatorySeriesResponse }) {
-  const point = entry.point;
-  if (point === null) return null;
-  const usd = (value: string | null) =>
-    renderNullableDecimal(value, { decimals: response.usd_decimals, prefix: "$" });
-  // Non-null counts pass the population guard before the record.
-  const count = (value: number | null) => (value === null ? EM_DASH : String(readWirePopulation(value, "count")));
-
-  // Hazard fences — these three are disclosures, not provenance, and a record carrying one keeps it OUTSIDE the
-  // forensic expandable:
-  //   - unacked reorg epochs at compute;
-  //   - an UNRECORDED sweep stamp (explicitly not "the engine has no sweeper");
-  //   - a rate row whose scale is unstated (kind outside the vocabulary).
-  // Both epoch stamps pass the population guard BEFORE the subtraction that decides (and later renders) the unacked
-  // disclosure.
-  const maxEpochAtCompute = readWirePopulation(point.max_epoch_at_compute, "max_epoch_at_compute");
-  const ackedEpoch = readWirePopulation(point.acked_epoch, "acked_epoch");
-  const unacked = maxEpochAtCompute - ackedEpoch > 0;
-  const sweepUnrecorded = !point.sweep_recorded;
-  const hasUnstatedScale = point.rates.some((rate) => rate.scale === "unstated");
-
-  const reorgRow = (
-    <>
-      <dt>reorg posture at compute</dt>
-      <dd data-testid="history-point-epochs">
-        {!unacked ? (
-          <>none unacked</>
-        ) : (
-          <span className={styles.crit}>
-            {String(maxEpochAtCompute - ackedEpoch)} unacked epoch(s) · acked {String(ackedEpoch)} of{" "}
-            {String(maxEpochAtCompute)}
-          </span>
-        )}{" "}
-        <span className={styles.dim}>(the stamp pair copied from the observed batch&apos;s watermark vector)</span>
-      </dd>
-    </>
+function Rows({ rows, code }: { rows: readonly RecordRow[]; code: string | null }) {
+  return (
+    <dl className={styles.kv}>
+      {rows.map((row) => (
+        <Fragment key={row.key}>
+          <dt>{row.label}</dt>
+          <dd data-testid={row.testId ?? undefined}>
+            {row.tone === "refused" ? (
+              <StatusPill tone="refused" title={code ?? undefined}>
+                {row.value}
+              </StatusPill>
+            ) : (
+              <span className={[row.mono ? styles.mono : "", row.tone === "crit" ? styles.crit : ""].filter(Boolean).join(" ") || undefined}>
+                {row.value}
+              </span>
+            )}
+            {row.note !== null && <span className={styles.dim}>{row.note}</span>}
+          </dd>
+        </Fragment>
+      ))}
+    </dl>
   );
+}
 
-  const sweepRow = (
-    <>
-      <dt>sweep stamp (the count&apos;s collateral clock)</dt>
-      <dd data-testid="history-point-sweep">
-        {!point.sweep_recorded ? (
-          <>
-            {EM_DASH}{" "}
-            <span className={styles.dim}>
-              unrecorded: this point predates migration 00018 and its batch was pruned before the stamp could be
-              recovered. the record is missing here, and it is not a claim that the engine has no sweeper.
-            </span>
-          </>
-        ) : point.sweep === null ? (
-          <>
-            none{" "}
-            <span className={styles.dim}>
-              (recorded: this engine has no collateral sweep, so its balances are event-derived)
-            </span>
-          </>
-        ) : (
-          <>
-            <span className={styles.mono}>
-              {/* Sweep tallies are wire populations, guarded reads. */}
-              {String(readWirePopulation(point.sweep.rows, "sweep.rows"))} swept ·{" "}
-              {String(readWirePopulation(point.sweep.failed, "sweep.failed"))} failed · gen{" "}
-              {String(readWirePopulation(point.sweep.generation, "sweep.generation"))}
-              {point.sweep.generation_open ? " (pass in flight)" : " (pass complete)"}
-            </span>{" "}
-            <span className={styles.dim}>
-              · the observed batch&apos;s own sweep stamp; the liquidatable count above aggregates THIS sweep-cut,
-              not the bucket&apos;s block clock. last successful write{" "}
-              {point.sweep.max_updated_at === null
-                ? `${EM_DASH} (no successful write recorded)`
-                : point.sweep.max_updated_at}
-            </span>
-          </>
-        )}
-      </dd>
-    </>
-  );
-
-  const rateRows: KitRow[] = point.rates.map((rate) => ({
-    key: `${rate.kind}-${rate.asset}`,
+function Rates({ record }: { record: PointRecord }) {
+  if (record.rates.length === 0) {
+    return (
+      <p className={styles.note} data-testid="history-point-rates-empty">
+        {record.ratesEmpty ?? ""}
+      </p>
+    );
+  }
+  const rows: KitRow[] = record.rates.map((rate) => ({
+    key: rate.key,
     cells: {
       kind: <span className={styles.mono}>{rate.kind}</span>,
-      asset: (
+      assetName: (
         <span title={rate.asset}>
-          {rate.symbol ?? truncateAddress(rate.asset)} <span className={styles.dim}>{truncateAddress(rate.asset)}</span>
+          {rate.assetName} <span className={styles.dim}>{rate.assetShort}</span>
         </span>
       ),
       value: <span className={styles.mono}>{rate.value}</span>,
       scale: (
         <span data-testid="history-point-rate-scale">
-          {rate.scale === "unstated" ? (
-            <span className={styles.dim}>unstated · kind outside the known vocabulary</span>
-          ) : (
-            rate.scale
-          )}
+          {rate.scaleStated ? rate.scale : <span className={styles.dim}>{rate.scale}</span>}
         </span>
       ),
-      block: <span className={styles.mono}>{formatBlock(rate.as_of_block)}</span>,
+      block: <span className={styles.mono}>{rate.block}</span>,
       note: <span className={styles.dim}>{rate.note}</span>,
     },
   }));
-
-  const ratesTable =
-    point.rates.length > 0 ? (
-      <div className={styles.rates}>
-        <KitTable testId="history-point-rates" columns={RATE_COLUMNS} rows={rateRows} />
-      </div>
-    ) : (
-      <p className={styles.note} data-testid="history-point-rates-empty">
-        no rate snapshot was captured with this bucket{point.refused ? " (the whole book was withheld)" : ""}.
-      </p>
-    );
-
-  // What the forensic expandable holds, COUNTED in its own summary: pure provenance (watermark, observed batch,
-  // materialization key), plus the reorg/sweep rows and the rates table exactly when they carry no hazard.
-  const forensicRowCount = 4 + (unacked ? 0 : 1) + (sweepUnrecorded ? 0 : 1);
-
   return (
-    <>
-      <dl className={styles.kv}>
-        <dt>state</dt>
-        <dd>
-          {point.refused ? (
-            <>
-              <StatusPill tone="refused" title={point.refusal_code ?? "unnamed"}>
-                withheld
-              </StatusPill>{" "}
-              · {point.refusal_code ?? "unnamed"} · the engine&apos;s whole book was withheld at capture time
-            </>
-          ) : (
-            "captured"
-          )}
-        </dd>
-
-        <dt>debt (usd)</dt>
-        <dd>
-          <span className={styles.mono}>{usd(point.debt_usd)}</span>
-          {point.debt_usd === null && (
-            <span className={styles.dim}>, null because the book was withheld and never zero</span>
-          )}
-        </dd>
-
-        <dt>collateral (usd)</dt>
-        <dd>
-          <span className={styles.mono}>{usd(point.collateral_usd)}</span>
-          {point.collateral_usd === null && (
-            <span className={styles.dim}>, null because the book was withheld and never zero</span>
-          )}
-        </dd>
-
-        <dt>accounts</dt>
-        <dd>{count(point.accounts)}</dd>
-
-        <dt>refused position rows</dt>
-        <dd>{String(readWirePopulation(point.refused_positions, "refused_positions"))}</dd>
-
-        <dt>liquidatable positions</dt>
-        <dd>{count(point.liquidatable_positions)}</dd>
-
-        {/* Hazard rows surface OUTSIDE the expandable, exactly when they bite. */}
-        {unacked && reorgRow}
-        {sweepUnrecorded && sweepRow}
-      </dl>
-
-      {hasUnstatedScale && ratesTable}
-
-      <details className={styles.forensics} data-testid="history-point-forensics">
-        <summary>
-          {String(forensicRowCount)} provenance row(s)
-          {hasUnstatedScale ? "" : point.rates.length > 0 ? " + the rate snapshot" : " + the rate-snapshot note"}
-        </summary>
-        <dl className={styles.kv}>
-          <dt>bucket (its own as-of)</dt>
-          <dd className={styles.mono}>{point.bucket_start}</dd>
-
-          <dt>watermark</dt>
-          <dd>
-            block {formatBlock(point.last_block)}{" "}
-            <span className={styles.dim}>
-              (the engine&apos;s balances watermark at capture, never a chain head observed later)
-            </span>
-          </dd>
-
-          <dt>observed batch</dt>
-          <dd data-testid="history-point-batch">
-            #{String(readWirePopulation(point.batch_id, "batch_id"))}{" "}
-            <span className={styles.dim}>
-              (the COMPLETE batch this bucket observed; the batch itself may since have been pruned by retention)
-            </span>
-          </dd>
-
-          <dt>materialization key</dt>
-          <dd data-testid="history-point-mkey" className={styles.mono}>
-            {point.materialization_key}{" "}
-            <span className={styles.dim}>(copied at write time, so the attribution survives retention)</span>
-          </dd>
-
-          {!unacked && reorgRow}
-          {!sweepUnrecorded && sweepRow}
-        </dl>
-
-        {!hasUnstatedScale && ratesTable}
-
-        <p className={styles.note}>
-          provenance: this point was captured from the newest COMPLETE risk batch in its bucket (the
-          observatory_points rollup law) and survives batch retention. rate values are the wire&apos;s exact decimal
-          strings, rendered verbatim.
-        </p>
-      </details>
-    </>
+    <div className={styles.rates}>
+      <KitTable testId="history-point-rates" columns={RATE_COLUMNS} rows={rows} />
+    </div>
   );
 }

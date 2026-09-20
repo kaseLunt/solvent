@@ -11,6 +11,12 @@
 .controls button[aria-pressed="true"],
 .metrics button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); background: var(--chip-bg); }
 
+/* ---- the finding line and, beside it, the key to the chart's two hole marks (the same glyphs the plot draws) ---- */
+.findingRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-4); }
+.marks { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: 0 0 0 auto; padding: 0; list-style: none; color: var(--ink-2); font-size: var(--type-small); white-space: nowrap; }
+.marks li { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.markGlyph { display: block; flex: none; }
+
 /* ---- the chart: a state line qualifies the visual before it; the frame scrolls below the chart's minimum ---- */
 .state { margin: var(--sp-2) 0 0; color: var(--ink-2); font-size: var(--type-small); }
 .plotFrame { width: 100%; min-width: 0; overflow-x: auto; margin-top: var(--sp-3); }

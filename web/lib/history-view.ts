@@ -7,13 +7,18 @@
 // is formatted; a bucket the rollup withheld or never captured is a dashed
 // tile with the gap's word, never a 0. The surface prints this and decides
 // nothing twice.
-import { EM_DASH } from "./format";
+import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "./format";
 import { humanUsd } from "./human-usd";
 import { engineName } from "./inspector-headline";
 import { LEGACY } from "./inspector-position";
 import { refused, sentence, type LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
-import type { ObservatoryEngine, ObservatorySeriesResponse } from "./observatory-data";
+import type {
+  ObservatoryEngine,
+  ObservatorySeriesPoint,
+  ObservatorySeriesResponse,
+  RateIndex,
+} from "./observatory-data";
 import {
   buildBucketAxis,
   buildMetricSeries,
@@ -22,13 +27,15 @@ import {
   gridReadingLine,
   METRIC_LABELS,
   observatoryTakeaway,
+  pointDetailTakeaway,
   seriesNewestPoint,
   type BucketAxis,
   type BucketEntry,
+  type BucketKind,
   type BucketMetric,
 } from "./observatory-series";
 import { groupInt } from "./prose";
-import { isWirePopulation, isWireScale, wireBigInt } from "./wireGuard";
+import { isWirePopulation, isWireScale, readWirePopulation, wireBigInt } from "./wireGuard";
 
 export type HistoryState = "loading" | "degraded" | "unavailable" | "ok";
 export type HistoryTileKey = "debt" | "collateral" | "accounts" | "liquidatable";
@@ -251,5 +258,274 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
     finding: gridReadingLine(response, axis),
     chartLabel: `${METRIC_LABELS[reading.metric]} for ${engineName(reading.engine)} across rollup buckets`,
     doctrine: [...HISTORY_DOCTRINE, ...response.notes],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The chart's two hole marks and their words — the key beside the finding line
+// maps each glyph the plot draws to its meaning. The six method notes stay in
+// the drawer (R3); this is the one thing no other element on the page states.
+// ---------------------------------------------------------------------------
+
+export interface HistoryMark {
+  readonly mark: "absent" | "withheld";
+  readonly label: string;
+}
+
+export const HISTORY_MARKS: readonly HistoryMark[] = [
+  { mark: "absent", label: "no complete batch this hour" },
+  { mark: "withheld", label: "batch present, figures withheld" },
+];
+
+// ---------------------------------------------------------------------------
+// The bucket record (plan R5: a card, not a list). Every sentence the record
+// prints is decided here; HistoryPoint prints it. Provenance on detail, not
+// buried in a tooltip: the bucket's as-of, the engine's balances watermark at
+// capture time, the refusal posture, the exact totals (null renders as an em
+// dash, NEVER 0), and the rate-index snapshot where every index carries its
+// OWN as-of block. An ABSENT bucket gets the same record, stating the absence
+// by name — the rollup captured nothing in that hour, and the record says so
+// instead of pretending the bucket never existed.
+// ---------------------------------------------------------------------------
+
+export interface RecordRow {
+  readonly key: string;
+  /** The row's name. */
+  readonly label: string;
+  /** The row's leading text. */
+  readonly value: string;
+  /** The dim clause after the value, carrying its own leading separator; null when the value stands alone. */
+  readonly note: string | null;
+  /** refused: the withheld state word (a pill, the wire code as its title); crit: a biting reorg disclosure. */
+  readonly tone: "neutral" | "crit" | "refused";
+  /** The value is an exact figure or identifier, set in mono. */
+  readonly mono: boolean;
+  readonly testId: string | null;
+}
+
+export interface RateRow {
+  readonly key: string;
+  readonly kind: string;
+  /** The asset's full address (the cell's title). */
+  readonly asset: string;
+  /** The wire's symbol, or the truncated address when it named none. */
+  readonly assetName: string;
+  readonly assetShort: string;
+  /** The wire's exact decimal string, verbatim. */
+  readonly value: string;
+  /** The scale from the closed per-kind vocabulary, or the unstated word. */
+  readonly scale: string;
+  readonly scaleStated: boolean;
+  /** The index's OWN as-of block, grouped. */
+  readonly block: string;
+  readonly note: string;
+}
+
+export interface RecordColumn {
+  readonly key: keyof RateRow;
+  readonly header: string;
+  readonly align?: "left" | "right";
+}
+
+/** The rate snapshot's columns, in reading order. */
+export const HISTORY_RATE_COLUMNS: readonly RecordColumn[] = [
+  { key: "kind", header: "rate index" },
+  { key: "assetName", header: "asset" },
+  { key: "value", header: "value (raw decimal)", align: "right" },
+  { key: "scale", header: "scale" },
+  { key: "block", header: "its OWN as-of block", align: "right" },
+  { key: "note", header: "note" },
+];
+
+export interface PointRecord {
+  readonly title: string;
+  readonly bucket: string;
+  readonly kind: BucketKind;
+  /** pointDetailTakeaway(entry) — the record's one-line state. */
+  readonly takeaway: string;
+  /** The absent bucket's paragraph; null when a wire row exists. */
+  readonly absentNote: string | null;
+  /** The wire code behind the withheld state word; null otherwise. */
+  readonly refusalCode: string | null;
+  /** The rows visible without a click: the state, the totals, and every hazard exactly when it bites. */
+  readonly answer: readonly RecordRow[];
+  /** The counted fold's summary; null for an absent bucket (nothing to fold). */
+  readonly forensicSummary: string | null;
+  /** Pure provenance, plus the reorg and sweep rows exactly when they carry no hazard. */
+  readonly forensic: readonly RecordRow[];
+  readonly rates: readonly RateRow[];
+  /** Printed where the rate table would stand when the bucket carries no snapshot; null when it does. */
+  readonly ratesEmpty: string | null;
+  /** True when a rate's scale is unstated: the table is a disclosure and stands OUTSIDE the fold. */
+  readonly ratesOutside: boolean;
+  readonly provenance: string;
+}
+
+export const HISTORY_RECORD_TITLE = "Bucket record";
+
+export const HISTORY_ABSENT_NOTE =
+  "The rollup captured nothing for this hour, because no complete risk batch existed to observe. Nobody refused it. An absent bucket is a hole in the record, stated by name: nothing is interpolated across it, and it never renders as zero.";
+
+export const HISTORY_PROVENANCE =
+  "provenance: this point was captured from the newest COMPLETE risk batch in its bucket (the observatory_points rollup law) and survives batch retention. rate values are the wire's exact decimal strings, rendered verbatim.";
+
+/** The clauses after a value, each carrying the separator it follows the value with. */
+const NULL_TOTAL_CLAUSE = ", null because the book was withheld and never zero";
+const WITHHELD_STATE_CLAUSE = "the engine's whole book was withheld at capture time";
+const WATERMARK_CLAUSE = " (the engine's balances watermark at capture, never a chain head observed later)";
+const BATCH_CLAUSE = " (the COMPLETE batch this bucket observed; the batch itself may since have been pruned by retention)";
+const KEY_CLAUSE = " (copied at write time, so the attribution survives retention)";
+const REORG_CLAUSE = " (the stamp pair copied from the observed batch's watermark vector)";
+const SWEEP_UNRECORDED_CLAUSE =
+  " unrecorded: this point predates migration 00018 and its batch was pruned before the stamp could be recovered. the record is missing here, and it is not a claim that the engine has no sweeper.";
+const SWEEP_NONE_CLAUSE = " (recorded: this engine has no collateral sweep, so its balances are event-derived)";
+const SWEEP_STAMP_CLAUSE =
+  " · the observed batch's own sweep stamp; the liquidatable count above aggregates THIS sweep-cut, not the bucket's block clock. last successful write ";
+const UNSTATED_SCALE = "unstated · kind outside the known vocabulary";
+
+const plain = (key: string, label: string, value: string, note: string | null = null): RecordRow => ({
+  key,
+  label,
+  value,
+  note,
+  tone: "neutral",
+  mono: false,
+  testId: null,
+});
+
+/**
+ * The sweep stamp (the count's collateral clock), three states, each honest:
+ * UNRECORDED (a pre-00018 point whose batch was pruned before the backfill —
+ * the record is missing, which is not a claim that the engine has no sweeper),
+ * recorded NONE (the engine has no collateral sweep and the record says so),
+ * or the observed batch's own stamp. Sweep tallies are wire populations,
+ * guarded reads.
+ */
+function sweepRowOf(point: ObservatorySeriesPoint): RecordRow {
+  const base = { key: "sweep", label: "sweep stamp (the count's collateral clock)", tone: "neutral" as const, testId: "history-point-sweep" };
+  if (!point.sweep_recorded) return { ...base, value: EM_DASH, note: SWEEP_UNRECORDED_CLAUSE, mono: false };
+  if (point.sweep === null) return { ...base, value: "none", note: SWEEP_NONE_CLAUSE, mono: false };
+  const s = point.sweep;
+  const value =
+    `${String(readWirePopulation(s.rows, "sweep.rows"))} swept · ` +
+    `${String(readWirePopulation(s.failed, "sweep.failed"))} failed · ` +
+    `gen ${String(readWirePopulation(s.generation, "sweep.generation"))}` +
+    (s.generation_open ? " (pass in flight)" : " (pass complete)");
+  const lastWrite = s.max_updated_at === null ? `${EM_DASH} (no successful write recorded)` : s.max_updated_at;
+  return { ...base, value, note: `${SWEEP_STAMP_CLAUSE}${lastWrite}`, mono: true };
+}
+
+/** One rate index of the snapshot: the wire's own strings; a scale outside the closed vocabulary is named unstated. */
+function rateRowOf(rate: RateIndex): RateRow {
+  const short = truncateAddress(rate.asset);
+  const stated = rate.scale !== "unstated";
+  return {
+    key: `${rate.kind}-${rate.asset}`,
+    kind: rate.kind,
+    asset: rate.asset,
+    assetName: rate.symbol ?? short,
+    assetShort: short,
+    value: rate.value,
+    scale: stated ? rate.scale : UNSTATED_SCALE,
+    scaleStated: stated,
+    block: formatBlock(rate.as_of_block),
+    note: rate.note,
+  };
+}
+
+/**
+ * The selected bucket's full record. Hazard fences: three rows are
+ * disclosures, not provenance, and a record carrying one keeps it in the
+ * ANSWER, outside the counted fold — unacked reorg epochs at compute, an
+ * UNRECORDED sweep stamp, a rate whose scale is unstated. Both epoch stamps
+ * pass the population guard BEFORE the subtraction that decides (and later
+ * prints) the unacked disclosure; every count passes it before it prints.
+ */
+export function pointRecord(entry: BucketEntry, response: ObservatorySeriesResponse): PointRecord {
+  const base = {
+    title: HISTORY_RECORD_TITLE,
+    bucket: entry.bucketStart,
+    kind: entry.kind,
+    takeaway: pointDetailTakeaway(entry),
+    provenance: HISTORY_PROVENANCE,
+  };
+  const point = entry.point;
+  if (point === null) {
+    return {
+      ...base,
+      absentNote: HISTORY_ABSENT_NOTE,
+      refusalCode: null,
+      answer: [],
+      forensicSummary: null,
+      forensic: [],
+      rates: [],
+      ratesEmpty: null,
+      ratesOutside: false,
+    };
+  }
+  const usd = (value: string | null): string =>
+    renderNullableDecimal(value, { decimals: response.usd_decimals, prefix: "$" });
+  const count = (value: number | null): string => (value === null ? EM_DASH : String(readWirePopulation(value, "count")));
+
+  const maxEpochAtCompute = readWirePopulation(point.max_epoch_at_compute, "max_epoch_at_compute");
+  const ackedEpoch = readWirePopulation(point.acked_epoch, "acked_epoch");
+  const unacked = maxEpochAtCompute - ackedEpoch > 0;
+  const sweepUnrecorded = !point.sweep_recorded;
+  const rates = point.rates.map(rateRowOf);
+  const ratesOutside = rates.some((rate) => !rate.scaleStated);
+
+  const reorgRow: RecordRow = {
+    key: "reorg",
+    label: "reorg posture at compute",
+    value: unacked
+      ? `${String(maxEpochAtCompute - ackedEpoch)} unacked epoch(s) · acked ${String(ackedEpoch)} of ${String(maxEpochAtCompute)}`
+      : "none unacked",
+    note: REORG_CLAUSE,
+    tone: unacked ? "crit" : "neutral",
+    mono: false,
+    testId: "history-point-epochs",
+  };
+  const sweepRow = sweepRowOf(point);
+  const code = point.refusal_code ?? "unnamed";
+  const stateRow: RecordRow = point.refused
+    ? { key: "state", label: "state", value: "withheld", note: ` · ${code} · ${WITHHELD_STATE_CLAUSE}`, tone: "refused", mono: false, testId: null }
+    : plain("state", "state", "captured");
+
+  const answer: RecordRow[] = [
+    stateRow,
+    { ...plain("debt", "debt (usd)", usd(point.debt_usd), point.debt_usd === null ? NULL_TOTAL_CLAUSE : null), mono: true },
+    { ...plain("collateral", "collateral (usd)", usd(point.collateral_usd), point.collateral_usd === null ? NULL_TOTAL_CLAUSE : null), mono: true },
+    plain("accounts", "accounts", count(point.accounts)),
+    plain("refused-rows", "refused position rows", String(readWirePopulation(point.refused_positions, "refused_positions"))),
+    plain("liquidatable", "liquidatable positions", count(point.liquidatable_positions)),
+    // Hazard rows surface in the answer, exactly when they bite.
+    ...(unacked ? [reorgRow] : []),
+    ...(sweepUnrecorded ? [sweepRow] : []),
+  ];
+  const forensic: RecordRow[] = [
+    { ...plain("bucket", "bucket (its own as-of)", point.bucket_start), mono: true },
+    plain("watermark", "watermark", `block ${formatBlock(point.last_block)}`, WATERMARK_CLAUSE),
+    { ...plain("batch", "observed batch", `#${String(readWirePopulation(point.batch_id, "batch_id"))}`, BATCH_CLAUSE), testId: "history-point-batch" },
+    { ...plain("key", "materialization key", point.materialization_key, KEY_CLAUSE), mono: true, testId: "history-point-mkey" },
+    ...(unacked ? [] : [reorgRow]),
+    ...(sweepUnrecorded ? [] : [sweepRow]),
+  ];
+  // What the fold holds, COUNTED in its own summary: pure provenance (bucket, watermark, batch, key) plus the
+  // reorg/sweep rows and the rate table exactly when they carry no hazard.
+  const forensicRowCount = 4 + (unacked ? 0 : 1) + (sweepUnrecorded ? 0 : 1);
+  const ratesSuffix = ratesOutside ? "" : rates.length > 0 ? " + the rate snapshot" : " + the rate-snapshot note";
+  return {
+    ...base,
+    absentNote: null,
+    refusalCode: point.refused ? code : null,
+    answer,
+    forensicSummary: `${String(forensicRowCount)} provenance row(s)${ratesSuffix}`,
+    forensic,
+    rates,
+    ratesEmpty:
+      rates.length > 0
+        ? null
+        : `no rate snapshot was captured with this bucket${point.refused ? " (the whole book was withheld)" : ""}.`,
+    ratesOutside,
   };
 }

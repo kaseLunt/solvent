@@ -21,7 +21,7 @@
 // the error arm; answer before evidence.
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { EM_DASH, formatBlock } from "../../lib/format";
-import { deriveHistoryView, HISTORY_DEK, HISTORY_INTRO, HISTORY_UNAVAILABLE_CLAUSE } from "../../lib/history-view";
+import { deriveHistoryView, HISTORY_DEK, HISTORY_INTRO, HISTORY_MARKS, HISTORY_UNAVAILABLE_CLAUSE } from "../../lib/history-view";
 import { humanUsd } from "../../lib/human-usd";
 import type { ObservatorySeriesResponse } from "../../lib/observatory-data";
 import {
@@ -182,6 +182,13 @@ test("the holes are the chart's own marks, never a zero: two absent ticks, one w
   expect(segments).toBe(3);
   await expect(chart.locator("path")).toHaveCount(segments);
   await expect(page.locator("body")).not.toContainText("$0");
+  // The key beside the finding line maps each glyph to its word — the lib's two labels, the same marks the plot draws.
+  const marks = page.getByTestId("history-marks");
+  await expect(marks.locator("li")).toHaveText(HISTORY_MARKS.map((mark) => mark.label));
+  await expect(marks).toContainText("no complete batch this hour");
+  await expect(marks).toContainText("batch present, figures withheld");
+  await expect(marks.locator('[data-mark="withheld"] rect')).toHaveCount(1);
+  await expect(marks.locator('[data-mark="absent"] rect')).toHaveCount(0);
 
   // The withheld hour: the record names the refusal and keeps its nulls null.
   const withheldIndex = axis.entries.findIndex((e) => e.kind === "withheld");

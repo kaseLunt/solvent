@@ -329,7 +329,7 @@ test.describe("W-3L — observatoryTakeaway", () => {
     if (axis.withheldCount > 0) gaps.push(`${String(axis.withheldCount)} bucket(s) withheld`);
     const gapClause = gaps.length > 0 ? `; ${gaps.join(", ")}` : "";
     expect(observatoryTakeaway(OBSERVATORY_SERIES_AAVE, axis)).toBe(
-      `debt ${displayMetric(newest, "debt_usd", OBSERVATORY_SERIES_AAVE.usd_decimals)} across ` +
+      `Debt ${displayMetric(newest, "debt_usd", OBSERVATORY_SERIES_AAVE.usd_decimals)} across ` +
         `${String(newest.accounts)} account(s) as of bucket ${newest.bucket_start}${gapClause}.`,
     );
     // The exact ledger figure, anchored — a retyped or re-scaled number fails.
@@ -340,7 +340,7 @@ test.describe("W-3L — observatoryTakeaway", () => {
     const axis = buildBucketAxis(OBSERVATORY_SERIES_DM);
     const line = observatoryTakeaway(OBSERVATORY_SERIES_DM, axis);
     expect(line).toBe(
-      `newest bucket ${DM_WITHHELD.bucket_start} withheld (${DM_WITHHELD.refusal_code ?? "unnamed"}) — ` +
+      `Newest bucket ${DM_WITHHELD.bucket_start} withheld (${DM_WITHHELD.refusal_code ?? "unnamed"}) — ` +
         `no numbers served for it; 1 bucket(s) withheld.`,
     );
     expect(line).not.toContain(

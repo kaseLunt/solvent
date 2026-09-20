@@ -9,14 +9,20 @@
 import { expect, test } from "@playwright/test";
 import {
   deriveHistoryView,
+  HISTORY_ABSENT_NOTE,
   HISTORY_DEGRADED_NOTE,
   HISTORY_DEK,
   HISTORY_DOCTRINE,
   HISTORY_INTRO,
+  HISTORY_MARKS,
+  HISTORY_PROVENANCE,
+  HISTORY_RATE_COLUMNS,
   HISTORY_UNAVAILABLE_CLAUSE,
   HISTORY_UNREADABLE_SCALE,
+  pointRecord,
   type HistoryReading,
 } from "../../lib/history-view";
+import { EM_DASH, formatBlock } from "../../lib/format";
 import { humanUsd } from "../../lib/human-usd";
 import { sentence } from "../../lib/lab-headline";
 import type { ObservatorySeriesResponse } from "../../lib/observatory-data";
@@ -24,8 +30,10 @@ import {
   buildBucketAxis,
   describeRange,
   describeStride,
+  displayMetric,
   gridReadingLine,
   observatoryTakeaway,
+  pointDetailTakeaway,
 } from "../../lib/observatory-series";
 import { groupInt } from "../../lib/prose";
 import { WireIntegerError } from "../../lib/wireGuard";
@@ -228,4 +236,167 @@ test("doctrine: the intro, the chart's method notes and the source note verbatim
   // The dek's clause is the intro's law restated in one line; the drawer holds the paragraph, the header the clause.
   expect(HISTORY_INTRO).toContain("one engine per view");
   expect(HISTORY_INTRO).toContain("never drawn as a zero");
+});
+
+test("the headline begins with a capital at its source: observatoryTakeaway's three sentences, and the view prints them by identity", () => {
+  const capital = /^[A-Z]/;
+  expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM)).headline.emphasis).toMatch(capital);
+  expect(deriveHistoryView(ok(OBSERVATORY_SERIES_DM)).headline.emphasis).toMatch(capital);
+  expect(deriveHistoryView(ok({ ...DEMO_OBSERVATORY_DM, points: [] })).headline.emphasis).toMatch(capital);
+  expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM)).headline.emphasis.startsWith("Debt $")).toBe(true);
+  expect(deriveHistoryView(ok(OBSERVATORY_SERIES_DM)).headline.emphasis.startsWith("Newest bucket ")).toBe(true);
+  expect(deriveHistoryView(ok({ ...DEMO_OBSERVATORY_DM, points: [] })).headline.emphasis).toBe(
+    "No bucket in this window is backed by a wire row.",
+  );
+});
+
+test("the chart's mark key: two marks, the lib's words, in the plot's order", () => {
+  expect(HISTORY_MARKS).toEqual([
+    { mark: "absent", label: "no complete batch this hour" },
+    { mark: "withheld", label: "batch present, figures withheld" },
+  ]);
+});
+
+test.describe("pointRecord — the bucket record's rows and sentences", () => {
+  const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
+  const newestEntry = axis.entries[axis.newestPointIndex]!;
+  const newest = newestEntry.point!;
+  const withheldEntry = axis.entries.find((e) => e.kind === "withheld")!;
+  const absentEntry = axis.entries.find((e) => e.kind === "absent")!;
+  const labels = (rows: readonly { label: string }[]) => rows.map((r) => r.label);
+
+  test("the demo's newest bucket: captured; the answer rows in order with the exact ledger strings; the provenance rows behind a counted fold; the rate snapshot inside it", () => {
+    const r = pointRecord(newestEntry, DEMO_OBSERVATORY_DM);
+    expect(r.title).toBe("Bucket record");
+    expect(r.bucket).toBe(newest.bucket_start);
+    expect(r.kind).toBe("captured");
+    expect(r.takeaway).toBe(pointDetailTakeaway(newestEntry));
+    expect(r.absentNote).toBeNull();
+    expect(r.refusalCode).toBeNull();
+    expect(labels(r.answer)).toEqual(["state", "debt (usd)", "collateral (usd)", "accounts", "refused position rows", "liquidatable positions"]);
+    expect(r.answer[0]).toEqual({ key: "state", label: "state", value: "captured", note: null, tone: "neutral", mono: false, testId: null });
+    expect(r.answer[1]).toEqual({ key: "debt", label: "debt (usd)", value: displayMetric(newest, "debt_usd", DEMO_OBSERVATORY_DM.usd_decimals), note: null, tone: "neutral", mono: true, testId: null });
+    expect(r.answer[2]?.value).toBe(displayMetric(newest, "collateral_usd", DEMO_OBSERVATORY_DM.usd_decimals));
+    expect(r.answer[3]?.value).toBe(String(newest.accounts));
+    expect(r.answer[4]?.value).toBe(String(newest.refused_positions));
+    expect(r.answer[5]?.value).toBe(String(newest.liquidatable_positions));
+    // No hazard bites: the reorg and sweep rows live in the fold, after the four provenance rows.
+    expect(labels(r.forensic)).toEqual(["bucket (its own as-of)", "watermark", "observed batch", "materialization key", "reorg posture at compute", "sweep stamp (the count's collateral clock)"]);
+    expect(r.forensic[0]).toMatchObject({ value: newest.bucket_start, mono: true });
+    expect(r.forensic[1]).toEqual({ key: "watermark", label: "watermark", value: `block ${formatBlock(newest.last_block)}`, note: " (the engine's balances watermark at capture, never a chain head observed later)", tone: "neutral", mono: false, testId: null });
+    expect(r.forensic[2]).toEqual({ key: "batch", label: "observed batch", value: `#${String(newest.batch_id)}`, note: " (the COMPLETE batch this bucket observed; the batch itself may since have been pruned by retention)", tone: "neutral", mono: false, testId: "history-point-batch" });
+    expect(r.forensic[3]).toEqual({ key: "key", label: "materialization key", value: newest.materialization_key, note: " (copied at write time, so the attribution survives retention)", tone: "neutral", mono: true, testId: "history-point-mkey" });
+    expect(r.forensic[4]).toEqual({ key: "reorg", label: "reorg posture at compute", value: "none unacked", note: " (the stamp pair copied from the observed batch's watermark vector)", tone: "neutral", mono: false, testId: "history-point-epochs" });
+    const sweep = newest.sweep!;
+    expect(r.forensic[5]).toEqual({
+      key: "sweep",
+      label: "sweep stamp (the count's collateral clock)",
+      value: `${String(sweep.rows)} swept · ${String(sweep.failed)} failed · gen ${String(sweep.generation)} (pass complete)`,
+      note: ` · the observed batch's own sweep stamp; the liquidatable count above aggregates THIS sweep-cut, not the bucket's block clock. last successful write ${sweep.max_updated_at ?? "NEVER"}`,
+      tone: "neutral",
+      mono: true,
+      testId: "history-point-sweep",
+    });
+    expect(r.forensicSummary).toBe("6 provenance row(s) + the rate snapshot");
+    expect(r.ratesOutside).toBe(false);
+    expect(r.ratesEmpty).toBeNull();
+    const rate = newest.rates[0]!;
+    expect(r.rates).toEqual([
+      {
+        key: `${rate.kind}-${rate.asset}`,
+        kind: rate.kind,
+        asset: rate.asset,
+        assetName: rate.symbol ?? "NEVER",
+        assetShort: `${rate.asset.slice(0, 6)}…${rate.asset.slice(-4)}`,
+        value: rate.value,
+        scale: rate.scale,
+        scaleStated: true,
+        block: formatBlock(rate.as_of_block),
+        note: rate.note,
+      },
+    ]);
+    expect(r.provenance).toBe(HISTORY_PROVENANCE);
+    expect(HISTORY_PROVENANCE).toBe(
+      "provenance: this point was captured from the newest COMPLETE risk batch in its bucket (the observatory_points rollup law) and survives batch retention. rate values are the wire's exact decimal strings, rendered verbatim.",
+    );
+    expect(HISTORY_RATE_COLUMNS.map((c) => c.header)).toEqual(["rate index", "asset", "value (raw decimal)", "scale", "its OWN as-of block", "note"]);
+    expect(HISTORY_RATE_COLUMNS.filter((c) => c.align === "right").map((c) => c.key)).toEqual(["value", "block"]);
+  });
+
+  test("the withheld bucket: the state word is refused with its code; the null totals are em dashes with the never-zero clause; no snapshot, and the note says why", () => {
+    const r = pointRecord(withheldEntry, DEMO_OBSERVATORY_DM);
+    expect(r.kind).toBe("withheld");
+    expect(r.takeaway).toBe(pointDetailTakeaway(withheldEntry));
+    expect(r.refusalCode).toBe("FLAG_CUSTODY_UNPROVEN");
+    expect(r.answer[0]).toEqual({ key: "state", label: "state", value: "withheld", note: " · FLAG_CUSTODY_UNPROVEN · the engine's whole book was withheld at capture time", tone: "refused", mono: false, testId: null });
+    expect(r.answer[1]).toMatchObject({ value: EM_DASH, note: ", null because the book was withheld and never zero", mono: true });
+    expect(r.answer[2]).toMatchObject({ value: EM_DASH, note: ", null because the book was withheld and never zero" });
+    expect(r.answer[3]?.value).toBe(EM_DASH);
+    expect(r.answer[5]?.value).toBe(EM_DASH);
+    // The one zero on a withheld record is the wire's own: no position row was refused. Every NULL total above is a dash.
+    expect(r.answer[4]).toMatchObject({ label: "refused position rows", value: String(withheldEntry.point!.refused_positions) });
+    expect(r.answer.some((row) => row.value.includes("$0"))).toBe(false);
+    expect(r.rates).toEqual([]);
+    expect(r.ratesEmpty).toBe("no rate snapshot was captured with this bucket (the whole book was withheld).");
+    expect(r.forensicSummary).toBe("6 provenance row(s) + the rate-snapshot note");
+  });
+
+  test("an absent bucket: the absence stated by name, nothing to fold", () => {
+    const r = pointRecord(absentEntry, DEMO_OBSERVATORY_DM);
+    expect(r.kind).toBe("absent");
+    expect(r.takeaway).toBe(pointDetailTakeaway(absentEntry));
+    expect(r.absentNote).toBe(HISTORY_ABSENT_NOTE);
+    expect(HISTORY_ABSENT_NOTE).toBe(
+      "The rollup captured nothing for this hour, because no complete risk batch existed to observe. Nobody refused it. An absent bucket is a hole in the record, stated by name: nothing is interpolated across it, and it never renders as zero.",
+    );
+    expect(r.answer).toEqual([]);
+    expect(r.forensic).toEqual([]);
+    expect(r.forensicSummary).toBeNull();
+    expect(r.rates).toEqual([]);
+    expect(r.ratesEmpty).toBeNull();
+  });
+
+  test("hazards move to the answer and the fold recounts: unacked epochs (crit), an unrecorded sweep, an unstated scale (the table outside)", () => {
+    const mutate = (change: Partial<typeof newest>) => ({ ...newestEntry, point: { ...newest, ...change } });
+    const unacked = pointRecord(mutate({ max_epoch_at_compute: newest.acked_epoch + 2 }), DEMO_OBSERVATORY_DM);
+    expect(unacked.answer.at(-1)).toMatchObject({ key: "reorg", value: `2 unacked epoch(s) · acked ${String(newest.acked_epoch)} of ${String(newest.acked_epoch + 2)}`, tone: "crit", testId: "history-point-epochs" });
+    expect(labels(unacked.forensic)).not.toContain("reorg posture at compute");
+    expect(unacked.forensicSummary).toBe("5 provenance row(s) + the rate snapshot");
+
+    const unrecorded = pointRecord(mutate({ sweep_recorded: false, sweep: null }), DEMO_OBSERVATORY_DM);
+    expect(unrecorded.answer.at(-1)).toEqual({
+      key: "sweep",
+      label: "sweep stamp (the count's collateral clock)",
+      value: EM_DASH,
+      note: " unrecorded: this point predates migration 00018 and its batch was pruned before the stamp could be recovered. the record is missing here, and it is not a claim that the engine has no sweeper.",
+      tone: "neutral",
+      mono: false,
+      testId: "history-point-sweep",
+    });
+    expect(unrecorded.forensicSummary).toBe("5 provenance row(s) + the rate snapshot");
+
+    const unstated = pointRecord(mutate({ rates: newest.rates.map((rate) => ({ ...rate, scale: "unstated" as const })) }), DEMO_OBSERVATORY_DM);
+    expect(unstated.ratesOutside).toBe(true);
+    expect(unstated.rates[0]).toMatchObject({ scale: "unstated · kind outside the known vocabulary", scaleStated: false });
+    expect(unstated.forensicSummary).toBe("6 provenance row(s)");
+
+    const all = pointRecord(mutate({ max_epoch_at_compute: newest.acked_epoch + 1, sweep_recorded: false, sweep: null, rates: newest.rates.map((rate) => ({ ...rate, scale: "unstated" as const })) }), DEMO_OBSERVATORY_DM);
+    expect(all.forensicSummary).toBe("4 provenance row(s)");
+    expect(labels(all.forensic)).toEqual(["bucket (its own as-of)", "watermark", "observed batch", "materialization key"]);
+  });
+
+  test("the legacy market's sweep is recorded none — the record says so, never an em dash", () => {
+    const aaveAxis = buildBucketAxis(DEMO_OBSERVATORY_AAVE);
+    const r = pointRecord(aaveAxis.entries[aaveAxis.newestPointIndex]!, DEMO_OBSERVATORY_AAVE);
+    const sweep = r.forensic.find((row) => row.key === "sweep");
+    expect(sweep).toEqual({
+      key: "sweep",
+      label: "sweep stamp (the count's collateral clock)",
+      value: "none",
+      note: " (recorded: this engine has no collateral sweep, so its balances are event-derived)",
+      tone: "neutral",
+      mono: false,
+      testId: "history-point-sweep",
+    });
+  });
 });
