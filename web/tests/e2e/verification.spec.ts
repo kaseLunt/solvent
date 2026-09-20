@@ -252,9 +252,10 @@ test("the Overview's \"Architecture & verification →\" lands on the architectu
   await expect(page).toHaveURL(/#architecture$/);
   const section = page.getByTestId("verification-architecture");
   await expect(section).toHaveAttribute("id", "architecture");
-  // Once the manifest has answered the page has its height and the named section is scrolled to; the assertion retries until it is.
+  // Once the manifest has answered the page has its height and the named section is scrolled to, clear of the 56px app bar
+  // (scroll-margin-top 72px). The poll measures the scroll itself: an un-scrolled page leaves the section far lower.
   await expect(surface(page)).toHaveAttribute("data-state", "ok");
-  await expect(section).toBeInViewport();
+  await expect.poll(() => section.evaluate((el) => el.getBoundingClientRect().top)).toBeLessThanOrEqual(120);
 });
 
 test("the drawer: the doctrine from the header; a subject's explain puts its evidence chain first — PROVEN on the proof, OPERATIONAL on the live", async ({
