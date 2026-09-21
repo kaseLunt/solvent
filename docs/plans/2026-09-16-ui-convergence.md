@@ -10,6 +10,79 @@
 
 **Spec:** `docs/specs/2026-09-15-ui-product-register-design.md` — §5.5 (converge, don't rebuild), §4 (the kit and what it replaces), §6 (layout), §7 (test policy), §8 (demo dataset), §10 steps 4–5 (convergence, nav, deep links; QA), §11 (acceptance), §12 (out of scope: no IA rebuild of these pages). Carry-forwards: the "Plan 3 (Scenarios) CLOSES" and "Plan 2 CLOSES" entries in `.superpowers/sdd/progress-ui-overhaul.md`.
 
+## Amendments at the gate and the close (2026-09-20 / 21) — this section SUPERSEDES the lines it names
+
+The plan below is kept as written, for the record of what was planned. Where the gate (Task 11), the fix wave and the
+last round (Task 12) reversed or extended it, THIS section is the contract. Each amendment is a controller ruling under
+the owner's delegation ("go with your best judgement", 2026-09-16); the full reasoning is in the ledger
+(`.superpowers/sdd/2026-09-16-ui-convergence/progress.md`) and the two director rulings beside it
+(`gate-design-ruling.md`, `gate-clarity-ruling.md`).
+
+**Global Constraints / R1 — the H1.** The H1 is the page's computed HEADLINE (emphasis + rest), not its nav label; the
+nav label is the kicker's first word. Kickers: `History · {engine}`, `Activity · all engines` / `Activity · {engine}`,
+`Verification · this deployment`, `API · contract v{version}`.
+
+**R2 — headlines and tone (OVERRULED at the gate).** The four pages' sentences keep their FACTS and speak the Book's
+grammar: emphasis = one finding in ≤ ~8 words, rest = scope and as-of; human money (`humanUsd`), grouped integers, real
+plurals, instants through `humanUtc` (the wire string's own UTC fields, NBSP-joined, never the browser clock) with the
+verbatim ISO kept in a chip, tile sub or cell. **A record is ink; only a verdict wears tone:** History, Activity and
+API answered arms are `neutral`; every non-answer is `refused`; only Verification's PROOF finding wears tone (`ok` when
+the receipt is exact — including an accepted receipt with no servable batch — `warn` otherwise), and the live batch is
+said in ink and in the dek. History's finding states DELTAS ("rose by $1.8M, to $27.8M"), one bigint subtraction on one
+engine at one scale. Every new fact claim was verified against the code, the contract or the Go source before it was
+worded; four ruled sentences were NOT true as written and say what is (an absent hour is "no complete batch was
+OBSERVED"; the untimed tail is ordered "by chain and then block number", said only when the loaded rows show it; the API
+page's CI claim is limited to what `proof-contract-fidelity.spec.ts` compares; "was not re-checked" became "no check
+covers it").
+
+**R3 — deks.** The four doctrine slogans are gone from the deks, which are computed fact sentences (History's dek
+counts its holes: "165 of the 168 hours in this window were recorded. 2 are absent — no complete batch was observed —
+and 1 was withheld; each is a gap on the chart, never a zero."). The doctrine lives in each page's drawer.
+
+**R4 — tiles and defaults.** History OPENS ON CASH (`HISTORY_ENGINES`, Cash first). Activity's tiles: `Rows loaded`
+(sub `more available` / `end of the filtered feed`), `Liquidations` (sub `among the loaded rows`). API's first tile is
+`Endpoints` with the verb census as its sub; every tile carries a sub computed from the page's own data.
+
+**R7 — retirements.** `StatusChip` + `chip.module.css`, `ribbon.module.css` and `primitives.module.css` STAY (the
+state cards, `DegradationBanner` and `RouteRefusal` compose them). `lib/kit.ts`'s verdict-banner model went only after
+its law (no chips → the refusal chip) moved into `headerIdentity`, which `VerdictHeader` calls.
+
+**Out by ruling.** The header `.meta` grid (design B2): it would move the approved Scenarios pins — a header whose
+chips wrap under the action is the kit's accepted behaviour. The zero baseline on History's chart stays (an honest,
+previously ruled law); a level-anchored domain is specified in the design ruling's appendix for the owner.
+
+### The page-test contract as it stands (supersedes the table's History / Activity / Verification / API rows)
+
+| Page | Surface | `data-state` | `data-variant` | Identity chips (`data-chip`) |
+|---|---|---|---|---|
+| History `/observatory` | `history-surface` (+ `data-engine`) | `loading · ok · degraded · unavailable` (a series answering for another engine is `unavailable`, chip `Record: wrong engine`) | `neutral · refused` | answered `Engine · Stride · Range · Hours · Served` (`Stride` value `hourly`, its method sentence in `title`; `Hours` value `N recorded · N withheld · N absent`, `N recorded (M with an unreadable figure) · …` in warn); loading `Engine · Hours` (`pending`, no tone); degraded `Engine · Rollup`; unavailable `Engine · Record` |
+| Activity `/feed` | `activity-surface` (+ `data-mode`) | `loading · ok · refused · error` | `neutral · refused` | `Scope · View · Order · Newest · Filter echo` (`Rows` retired; `Newest` and `Filter echo` conditional) |
+| Verification `/proof` | `verification-surface` (+ `data-receipt` ∈ `exact · empty · drift · failed · none · pending`) | `loading · ok · unavailable` | `ok · warn · refused` | `Proof pin · Live batch · Receipt · Batch key` (`pending`, no tone, while the read is in flight) |
+| API `/developers` | `api-surface` | static | `neutral` | `Contract · Base URL · Source` (`Operations` retired; the `api-base-url` strip retired) |
+
+Ids and attributes ADDED since the table was written — History: `history-tiles`, `history-marks` (absent on a window
+with no hole), `history-chart-finding`, `history-chart-sparse`, `history-point-{title,takeaway,forensics,rates,
+rates-empty,rate-scale,epochs,sweep,batch,mkey}`, `obs-gap-unreadable`, `obs-zero-label`, `obs-ymax-label[data-place=
+peak|edge]`, `obs-gap[data-kind]` and `history-marks li[data-mark]` gain `unreadable`, the record's clause spans carry
+`data-note=caption|state`. Activity: `activity-{order,tail,drift,retry,foot,end,account,tx,amount,unit,liquidation,
+liquidation-note,liquidator,live-state,live-unavailable,live-batch,live-none,live-degraded,types,types-note,
+since-apply,since-applied}`; `activity-foot[data-foot=more|end|none]`; `activity-load-more` and `activity-end` are
+absent while `data-state="refused"`. Verification: `verification-retry` (only while `unavailable`);
+`verification-receipt` absent while `unavailable`; the proof card's and the drawer's row value spans carry `data-tone`;
+`verification-kpi-*` are `data-tone="neutral"` + `aria-busy` while in flight. API: `api-error-sample-{name}`.
+Elsewhere — Book: `book-section-cash`, `book-bands-note`; the `Coverage` chip can read `withheld`. Overview:
+`overview-live-accounts`; `pipeline-{index,compute,verify,serve}` carry `data-tone` (CSS acts on `refused`, `warn`) and,
+while a read is in flight, `aria-busy="true"` with `data-value="pending"`. Inspector: the Trust item `reconcile` is
+labelled `Pinned reconcile run matched the chain` ONLY when `receiptState` says `exact`, else `Pinned reconcile run`;
+its `data-state` gains `pending` ("receipt pending" while `/v1/evidence` is in flight; "receipt unavailable" only after
+a failure). Scenarios: see `docs/plans/2026-09-15-ui-scenarios.md` — `lab-surface[data-state]` gains `refused-locally`
+and `listing-unreadable`; + `lab-address-fallback`; a selection writes `?scenario=` to the URL, an opened link is never
+rewritten. Keyboard: `web/tests/e2e/keyboard.spec.ts` pins the drawer's focus cycle on seven pages, Tab order through
+every row link, and the library's Space / Enter. Styleguide: `sg-verdict-neutral`; `sg-table-row-{near-1,small-1,
+small-2}`; five tones in the tone loop; real wire codes throughout.
+
+---
+
 ## Global Constraints
 
 - Preservation boundary: no backend, API-contract or calculation change; `packages/client-ts` untouched; existing `web/lib/**` loaders and their unit specs stay green (new view models are added beside them).
