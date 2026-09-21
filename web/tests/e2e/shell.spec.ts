@@ -18,11 +18,11 @@ const SURFACES = [
   // With no API the series cannot be fetched, and History says so as its H1.
   { path: "/observatory", label: "History", h1: /could not be fetched\.$/ },
   // With no API the first page cannot be fetched, and Activity says so as its H1.
-  { path: "/feed", label: "Activity", h1: /^Page fetch failed: / },
+  { path: "/feed", label: "Activity", h1: /^Recorded chain actions could not be fetched\.$/ },
   // With no API the manifest cannot be fetched, and Verification says so as its H1.
-  { path: "/proof", label: "Verification", h1: /^Evidence unavailable: / },
+  { path: "/proof", label: "Verification", h1: /^The verification record could not be fetched\.$/ },
   // The API page is static: its H1 is the contract's own operation count, API or no API.
-  { path: "/developers", label: "API", h1: /read-only operations, every money value a decimal string\.$/ },
+  { path: "/developers", label: "API", h1: /read-only endpoints, every money value an exact decimal string\.$/ },
 ] as const;
 
 /** Pages whose rebuild has not landed yet; their H1 pins are fixme until it does. */

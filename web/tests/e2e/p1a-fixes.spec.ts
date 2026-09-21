@@ -695,7 +695,7 @@ test.describe("p1a-9 · the codex round", () => {
       const color = await chip.evaluate((el) => getComputedStyle(el).color);
       expect(color).toBe(await resolveAppbarToken(page, "--ink-2"));
       // And the batch line pretends nothing: no base means no batch strip.
-      await expect(page.getByTestId("activity-live-none")).toContainText("nothing is pretended");
+      await expect(page.getByTestId("activity-live-none")).toContainText("nothing live is shown");
     });
   });
 });

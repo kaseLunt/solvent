@@ -461,6 +461,10 @@ const MATRIX: Cell[] = [
       await muteStream(page);
       await mockObservatory(page);
     },
+    // The page opens on Cash; the contract's absent hour lives in the legacy engine's series.
+    act: async (page) => {
+      await page.getByTestId("history-engine-aave_v3_etherfi").click();
+    },
     verify: async (page) => {
       // The record states its as-of (the newest bucket's own watermark)…
       await expect(page.getByTestId("history-point")).toContainText("watermark block");
@@ -508,7 +512,8 @@ const MATRIX: Cell[] = [
       await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "degraded");
       const verdict = page.getByTestId("history-verdict");
       await expect(verdict).toHaveAttribute("data-variant", "refused");
-      await expect(verdict).toContainText("is unavailable.");
+      // The route's one source of `unavailable` is a rollup that was never migrated: a fact about the deployment, in the refused register.
+      await expect(verdict).toContainText("on this deployment yet.");
       // Never an empty chart, never zeros.
       await expect(page.getByTestId("history-chart")).toHaveCount(0);
       await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(0);
@@ -560,7 +565,7 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       const empty = page.getByTestId("activity-table");
-      await expect(empty).toContainText("no custodied chain actions match this filter");
+      await expect(empty).toContainText("no recorded chain action matches this filter");
       await expect(empty).toContainText("a real answer");
       await expect(page.locator('[data-testid^="activity-row-"]')).toHaveCount(0);
     },
@@ -625,7 +630,7 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       // Nothing is pretended: no snapshot means no batch strip at all.
-      await expect(page.getByTestId("activity-live-none")).toContainText("nothing is pretended");
+      await expect(page.getByTestId("activity-live-none")).toContainText("nothing live is shown");
       await expect(page.getByTestId("activity-live-batch")).toHaveCount(0);
     },
   },
@@ -639,10 +644,10 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       // Live posture renders the batch's REAL watermark vector…
-      await expect(page.getByTestId("activity-live-batch")).toContainText("batch #1");
-      await expect(page.getByTestId("activity-live-batch")).toContainText("@25,635,618");
+      await expect(page.getByTestId("activity-live-batch")).toContainText("Batch 1");
+      await expect(page.getByTestId("activity-live-batch")).toContainText("at block 25,635,618");
       // …and stays labeled live-only: posture is never conflated with history.
-      await expect(page.getByTestId("activity-live")).toContainText("current connection only");
+      await expect(page.getByTestId("activity-live")).toContainText("this connection only");
     },
   },
 

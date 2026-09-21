@@ -304,7 +304,7 @@ test("since-block: a stated impossibility with no single engine — short form, 
   await expect(chip(page, "Scope")).toContainText("Aave v3 market (legacy)");
   await expect(chip(page, "Order")).toContainText("by block number");
   await expect(chip(page, "Newest")).toContainText("block 25,635,601");
-  await expect(page.getByTestId("activity-order")).toContainText("newest first, by block number on the legacy Aave v3 market's chain · loads 50 at a time");
+  await expect(page.getByTestId("activity-order")).toContainText("newest first, by block number on the legacy Aave v3 market's chain · loads 2 at a time"); // the envelope's own limit echo, never an assumed page size
   await expect(page.getByTestId("activity-tail")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(2);
   await expect(headline(page)).toHaveText(
@@ -544,7 +544,10 @@ test("the live strip: no base frame → said, never pretended, on ONE plain line
   await page.goto("/feed");
   const batch = page.getByTestId("activity-live-batch");
   await expect(batch).toBeVisible();
-  await expect(batch).toHaveText("Batch 1 · 4 positions, 2 not computed · Aave v3 market (legacy) at block 25,635,618 · Cash at block 154,796,552");
+  // A fulfilled SSE body ends the connection after its one frame: the snapshot stands, named as an earlier connection's — a dead stream never reads as fresh.
+  await expect(batch).toHaveText(
+    "Batch 1 · 4 positions, 2 not computed · received on an earlier connection · Aave v3 market (legacy) at block 25,635,618 · Cash at block 154,796,552",
+  );
   await expect(batch).not.toContainText("#");
   await expect(page.getByTestId("activity-live")).toContainText(ACTIVITY_LIVE_LABEL);
   // Mono is for ids and numbers alone: the figures are set apart from the prose around them.
@@ -553,7 +556,7 @@ test("the live strip: no base frame → said, never pretended, on ONE plain line
   expect(figureFamily).not.toBe(await batch.evaluate((el) => getComputedStyle(el).fontFamily));
 });
 
-test("before the first page answers NOTHING is counted: the headline names the load under the dashed tone and prints no digit, the dek says what will be here, the tiles are dashes — never a zero", async ({ page }) => {
+test("before the first page answers NOTHING is counted: the headline names the load under the dashed tone and prints no digit, the dek says what will be here, the tiles are pending — never a zero", async ({ page }) => {
   await muteStream(page);
   let release: () => void = () => undefined;
   const held = new Promise<void>((resolve) => {
@@ -571,9 +574,12 @@ test("before the first page answers NOTHING is counted: the headline names the l
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
   await expect(page.getByTestId("activity-verdict-dek")).toHaveText(ACTIVITY_LOADING_DEK);
   await expect(chip(page, "Newest")).toHaveCount(0);
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("—");
+  // A tile still being computed wears the kit's pending register: the ellipsis under aria-busy, never a digit.
+  await expect(page.getByTestId("activity-kpi-rows")).toHaveAttribute("aria-busy", "true");
+  await expect(page.getByTestId("activity-kpi-rows")).toContainText("…");
   await expect(page.getByTestId("activity-kpi-rows")).not.toContainText("0");
-  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("—");
+  await expect(page.getByTestId("activity-kpi-liquidations")).toHaveAttribute("aria-busy", "true");
+  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("…");
   await expect(page.getByTestId("activity-kpi-liquidations")).not.toContainText("0");
 
   release();
