@@ -29,9 +29,12 @@
 .kv dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
 .mono { font-family: var(--mono); font-size: var(--type-mono); }
 .dim { color: var(--ink-3); font-size: var(--type-small); }
+/* A clause that states WHY a figure is missing, withheld or unreadable is a state, and a state is never set in the
+ * caption ink (reserved for ornament): it takes the secondary ink at the same size. */
+.stateNote { color: var(--ink-2); font-size: var(--type-small); }
 .crit { color: var(--crit-text); }
 .note { margin: var(--sp-3) 0 0; color: var(--ink-3); font-size: var(--type-small); }
-.rates { margin-top: var(--sp-3); overflow-x: auto; }
+.rates { margin-top: var(--sp-3); min-width: 0; max-width: 100%; overflow-x: auto; }
 .forensics { margin-top: var(--sp-3); border-top: 1px solid var(--line); }
 .forensics > summary { cursor: pointer; padding: var(--sp-2) 0; color: var(--ink-2); font-size: var(--type-small); }
 
@@ -39,7 +42,15 @@
 .method { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); color: var(--ink); font-size: var(--type-body); }
 .method p { margin: 0; }
 
+/* A phone's width. The page never scrolls sideways: the record's rows stack, the rate table scrolls inside its own
+ * container (.rates; the kit's table is its own scroller below 900px as well), the plot inside its frame, and an
+ * identity chip whose value is longer than the screen wraps inside itself instead of pushing the page out. */
 @media (max-width: 640px) {
+  /* A token longer than the screen (a URL inside a failure's own message, a key) breaks at the edge; break-word
+   * leaves every intrinsic width as it was, so nothing that fits is re-flowed. */
+  .page { overflow-wrap: break-word; }
   .kv { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
   .kv dd { margin-bottom: var(--sp-2); }
+  .page [data-slot="identity"] > [data-chip] { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .marks { white-space: normal; }
 }

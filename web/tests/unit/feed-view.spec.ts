@@ -1,5 +1,4 @@
-// The Feed's honest-amount law (AMENDMENT 1 item B), pinned as executable
-// assertions:
+// The Feed's honest-amount law, pinned as executable assertions:
 //
 //   - a null amount is "record-only", never zero;
 //   - an `opaque` (or out-of-set) unit renders the RAW integer verbatim —
@@ -11,9 +10,9 @@
 //   - severity: liquidation and deficit_created are crit (color + form);
 //     the display class itself always renders verbatim.
 //
-// WAVE R1 ITEM 4 extends the law with SCALE-BY-PROVENANCE. This API serves
-// `amount_decimals: null` on every row, so the old code rendered every amount
-// as a raw integer — a $22 borrow as `22064279`. Now:
+// The law includes SCALE-BY-PROVENANCE. This API serves `amount_decimals: null`
+// on every row, and a raw integer reads as a different amount — a $22 borrow
+// as `22064279`. So:
 //   - dm_normalized_debt IS a fixed point at the engine's own value_decimals,
 //     so given that number FROM THE WIRE the decimal point is placed exactly
 //     (with thousands separators);
@@ -33,9 +32,9 @@ import {
   feedTagTone,
   feedTakeaway,
   liquidationEstablished,
-  plural,
   renderBps,
 } from "../../lib/feed-view";
+import { plural } from "../../lib/prose";
 import { EM_DASH } from "../../lib/format";
 import type { FeedChainEvent } from "../../lib/feed-data";
 import { FEED_LIQUIDATIONS, FEED_UNITS } from "../fixtures/feed";
@@ -363,9 +362,10 @@ test.describe("feedTakeaway", () => {
 });
 
 // ---------------------------------------------------------------------------
-// W-3L (inventory 430) — liquidationEstablished: the fold license. Only a
-// fully-established extract may start closed; ANY em-dash field keeps it
-// open (the concrete defect: em-dash bonus/seized hidden behind a fold).
+// liquidationEstablished: the definition of an established extract. Only a
+// fully-established extract could ever start folded; ANY em-dash field may not
+// hide behind a fold or a hover. (The Activity table prints every extract
+// visibly, so no page folds one today; the definition stays pinned.)
 // ---------------------------------------------------------------------------
 
 test.describe("W-3L — liquidationEstablished", () => {

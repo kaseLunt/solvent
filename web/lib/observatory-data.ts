@@ -1,6 +1,5 @@
-// Typed access to GET /v1/observatory/series — THINNED TO DELEGATION (the
-// OWED note is discharged): @solvent/client wraps the endpoint, so this file
-// no longer owns fetch mechanics. What it still owns:
+// Typed access to GET /v1/observatory/series, by delegation: @solvent/client
+// wraps the endpoint, so this file owns no fetch mechanics. What it owns:
 //
 //   - the Observatory's error contract (`ObservatoryFetchError` /
 //     `isRollupUnavailable`): the rollup's honest degraded state

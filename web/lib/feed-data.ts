@@ -1,10 +1,9 @@
-// The Feed surface's wire seam over GET /v1/events (W5).
+// The Feed surface's wire seam over GET /v1/events.
 //
 // Transport + generated-contract typing live in lib/inspector-data.ts (the
-// documented C1 seam — this file deliberately re-uses its `fetchEvents`
-// rather than growing a second fetch path). What THIS file owns is the
-// Feed's law layer, encoding AMENDMENT 1 item B of the P5 plan
-// (docs/plans/2026-07-30-solvent-phase5-web.md):
+// one documented seam over the events route — this file deliberately re-uses
+// its `fetchEvents` rather than growing a second fetch path). What THIS file
+// owns is the Feed's law layer — the two laws the events contract states:
 //
 //   ORDERING — block heights are incomparable ACROSS chains (ETH ~25.6M vs
 //   OP ~154M say nothing about time relative to each other):
@@ -27,8 +26,8 @@
 //   vocabulary, on the wire since 1.2.0): dm_normalized_debt / aave_scaled /
 //   none / opaque — welded compile-time BOTH WAYS below.
 //
-// (C2 landed: the formerly-OWED `amount_unit` extension collapsed into the
-// generated `ChainEvent`, which now carries the field as required.)
+// (`amount_unit` is a required field of the generated `ChainEvent`: no local
+// extension of the wire type exists here.)
 
 import type { components, operations } from "@solvent/client";
 import {

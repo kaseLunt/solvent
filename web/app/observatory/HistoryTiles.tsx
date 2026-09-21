@@ -3,9 +3,9 @@ import kit from "@/components/kit/kit.module.css";
 import { HISTORY_TILES, type HistoryTile } from "@/lib/history-view";
 
 /**
- * Debt · Collateral · Accounts · Liquidatable positions — the four metrics' newest captured points (plan R4). The
- * same four render pending while the series loads; a refused record (degraded, unavailable) renders none, because a
- * tile with no reading behind it would look like an answer.
+ * Debt · Collateral · Accounts · Liquidatable positions — the four metrics at the newest recorded hour. The same
+ * four render pending while the series loads; a refused record (degraded, unavailable) renders none, because a tile
+ * with no reading behind it would look like an answer.
  */
 export function HistoryTiles({ tiles, pending }: { tiles: readonly HistoryTile[]; pending: boolean }) {
   if (tiles.length === 0 && !pending) return null;

@@ -1,26 +1,28 @@
-// The Observatory's bucket-series chart (W4-owned; NEW component — the four
-// shared chart files are untouched). One engine's metric across the bucket
-// axis:
+// History's bucket-series chart: one engine's metric across the bucket axis.
 //
-//   - the line BREAKS at every gap (absent bucket, withheld bucket, null
-//     metric) — this component never interpolates across missing data;
+//   - the line BREAKS at every gap (absent bucket, withheld bucket, null or
+//     unreadable metric) — this component never interpolates across missing
+//     data;
 //   - every plotted point is a hover/click target carrying its provenance
 //     title (bucket as-of + watermark block), and every gap tick carries its
 //     NAMED reason — provenance on hover, not buried;
-//   - a withheld gap wears the warn form-mark (outlined square — color AND
-//     form, the W0 severity ruling) so a refusal never reads as a mere hole;
+//   - severity is color AND form, never color alone: a withheld gap wears the
+//     outlined warn square, so a refusal never reads as a mere hole, and an
+//     unreadable figure wears the warn cross, so a value that failed its wire
+//     guard reads as neither an absent hour nor a withheld one. Both marks are
+//     exported, and the page's key draws them from here — one shape, one
+//     source;
 //   - the zero floor is drawn whenever `includeZero` holds (the default):
 //     scales never fabricate drama by cropping the floor away;
 //   - no direct label is struck through: each sits ABOVE the reference it
-//     names (the y-max above the line, the newest figure above its point, the
+//     names (the peak above the line, the newest figure above its point, the
 //     0 on top of the floor rule), is painted after the line and the points,
 //     and wears a halo in the panel's ground;
-//   - Wave W-OBS: the panel answers WITHOUT a click — the drawn y-max wears
-//     its exact display string, the x-axis states its extent buckets (and the
-//     selected bucket's time), and the newest captured point prints the same
-//     figure the summary card above carries. All label strings arrive from
-//     the caller's existing formatters (LAW-5: no number lives only in a
-//     hover; LAW-4: displayed numbers are string work, floats only place them).
+//   - the panel answers WITHOUT a click — the drawn y-max wears its exact
+//     display string and the word that says what it is, the x-axis states its
+//     extent buckets (and the selected bucket's time), and the newest captured
+//     point prints that hour's exact figure. No number lives only in a hover,
+//     and every displayed number is the caller's string: floats only place it.
 //
 // Values are GEOMETRY only — exact decimal strings live in adjacent mono
 // text and in the point-detail panel. Styling: shared chart atoms are
@@ -48,12 +50,18 @@ export interface ObservatorySeriesChartProps {
   /** Select a bucket (fired by points AND gap hit-targets). */
   onSelect?: (index: number) => void;
   /**
-   * The drawn y-max's display string (Wave W-OBS): `seriesMaxPoint(...).label`
-   * — the SAME formatter output the ledger register uses for that wire row,
-   * derived from the drawn domain, never invented. Omit when nothing plots
-   * above the zero floor (the floor's own "0" label already states the max).
+   * The drawn y-max's label: `seriesMaxPoint(...).directLabel` — the word that
+   * says what it is ("peak") and the SAME formatter output that hour's record
+   * prints, derived from the drawn domain, never invented. Omit when nothing
+   * plots above the zero floor (the floor's own "0" label already states the max).
    */
   yMaxLabel?: string;
+  /**
+   * The axis index the y-max belongs to. With it the label sits over the peak
+   * itself; without it — or where it would run into the newest figure's label —
+   * the label keeps the plot's left edge, where its word still says what it is.
+   */
+  yMaxIndex?: number;
   /** The oldest axis entry's bucket hour (the head's own UTC format). */
   xStartLabel?: string;
   /** The newest axis entry's bucket hour (the head's own UTC format). */
@@ -71,14 +79,59 @@ export interface ObservatorySeriesChartProps {
   charPx?: number;
   /**
    * Direct value at the NEWEST captured point: the same `displayMetric`
-   * string the summary card above carries — one source, never retyped.
+   * string that hour's record prints — one source, never retyped.
    * When the last plotted point is NOT the newest axis entry (the newest
-   * bucket is withheld or carries this metric as null), the caller's pure
-   * layer (`seriesNewestPoint(...).directLabel`) appends a
+   * bucket is withheld, or carries this metric as null or unreadable), the
+   * caller's pure layer (`seriesNewestPoint(...).directLabel`) appends a
    * "(last captured {bucket})" qualifier to that string BEFORE it arrives
    * here; this component never re-derives it.
    */
   newestValueLabel?: string;
+}
+
+/** The two form-marks a gap tick can wear, 6px wide, centred on the tick and hung from `top`. */
+interface GapMarkProps {
+  /** The tick's x. */
+  cx: number;
+  /** The mark's top edge. */
+  top: number;
+  testId?: string;
+  title?: string;
+}
+
+const GAP_MARK_SIZE = 6;
+const GAP_MARK_STROKE = { stroke: "var(--warn)", strokeWidth: 1.5 } as const;
+
+/** A WITHHELD bucket's mark: the outlined warn square. The chart draws it on the tick; the page's key draws this same element. */
+export function GapWarnSquare({ cx, top, testId, title }: GapMarkProps) {
+  return (
+    <rect
+      data-testid={testId}
+      x={cx - GAP_MARK_SIZE / 2}
+      y={top}
+      width={GAP_MARK_SIZE}
+      height={GAP_MARK_SIZE}
+      style={{ fill: "transparent", ...GAP_MARK_STROKE }}
+    >
+      {title !== undefined && <title>{title}</title>}
+    </rect>
+  );
+}
+
+/**
+ * An UNREADABLE figure's mark: the warn cross — a value that failed its wire guard, neither an absent hour nor a
+ * withheld one. Two strokes, not a path: the plot's paths are its line segments and nothing else.
+ */
+export function GapUnreadableCross({ cx, top, testId, title }: GapMarkProps) {
+  const half = GAP_MARK_SIZE / 2;
+  const style = { strokeLinecap: "round", ...GAP_MARK_STROKE } as const;
+  return (
+    <g data-testid={testId}>
+      {title !== undefined && <title>{title}</title>}
+      <line x1={cx - half} y1={top} x2={cx + half} y2={top + GAP_MARK_SIZE} style={style} />
+      <line x1={cx + half} y1={top} x2={cx - half} y2={top + GAP_MARK_SIZE} style={style} />
+    </g>
+  );
 }
 
 /** Height (rendered px) of each axis-label strip ADDED below the plot budget. */
@@ -111,6 +164,7 @@ export function ObservatorySeriesChart({
   selectedIndex = null,
   onSelect,
   yMaxLabel,
+  yMaxIndex,
   xStartLabel,
   xEndLabel,
   selectedTimeLabel,
@@ -194,6 +248,26 @@ export function ObservatorySeriesChart({
     return Math.min(Math.max(x(selectedIndex), half + 1), width - half - 1);
   })();
 
+  // Where the newest figure's label starts and ends (measured glyphs): the peak's label never runs into it.
+  const newestOnRight = newestIndex !== undefined && x(newestIndex) > width / 2;
+  const newestSpan = (() => {
+    if (newestValueLabel === undefined || newestIndex === undefined) return null;
+    const length = newestValueLabel.length * glyphPx;
+    const start = newestOnRight ? x(newestIndex) - 6 - length : x(newestIndex) + 6;
+    return { left: start, right: start + length };
+  })();
+  // The peak's label sits over the peak, centred and clamped into the frame. Where that would touch the newest
+  // figure's label — or where the caller names no index — it keeps the plot's left edge, PAST the first point's dot
+  // (a label at x = padX would sit on that dot when the peak IS the first captured bucket).
+  const yMaxCentre = (() => {
+    if (yMaxLabel === undefined || yMaxIndex === undefined || yMaxIndex < 0 || yMaxIndex >= values.length) return null;
+    const half = (yMaxLabel.length * glyphPx) / 2;
+    if (half * 2 >= width) return null;
+    const centre = Math.min(Math.max(x(yMaxIndex), half + 1), width - half - 1);
+    const clear = newestSpan === null || centre + half + glyphPx < newestSpan.left || centre - half - glyphPx > newestSpan.right;
+    return clear ? centre : null;
+  })();
+
   return (
     <svg
       className={styles.chart}
@@ -271,19 +345,9 @@ export function ObservatorySeriesChart({
             >
               {title !== undefined && <title>{title}</title>}
             </line>
-            {kind === "withheld" && (
-              // The warn form-mark: an OUTLINED square (color and form).
-              <rect
-                data-testid="obs-gap-warn"
-                x={x(index) - 3}
-                y={padTop}
-                width={6}
-                height={6}
-                style={{ fill: "transparent", stroke: "var(--warn)", strokeWidth: 1.5 }}
-              >
-                {title !== undefined && <title>{title}</title>}
-              </rect>
-            )}
+            {/* The form-marks (color and form): a withheld bucket's outlined square, an unreadable figure's cross. */}
+            {kind === "withheld" && <GapWarnSquare cx={x(index)} top={padTop} testId="obs-gap-warn" title={title} />}
+            {kind === "unreadable" && <GapUnreadableCross cx={x(index)} top={padTop} testId="obs-gap-unreadable" title={title} />}
             {selectable && (
               <rect
                 data-testid="obs-gap-hit"
@@ -367,14 +431,15 @@ export function ObservatorySeriesChart({
       {yMaxLabel !== undefined && (
         // The drawn y-max, labelled in the panel's own exact register — the
         // domain is [0, max of finite values], so this string IS that point's
-        // ledger display, derived, never retyped.
+        // exact display, derived, never retyped, behind the word that says
+        // what it is.
         <text
           className={styles.axisLabel}
           data-testid="obs-ymax-label"
-          // Starts PAST the first point's dot: when the max IS the first
-          // captured bucket, a label at x = padX would sit on the dot itself.
-          x={padX + 10}
+          data-place={yMaxCentre === null ? "edge" : "peak"}
+          x={yMaxCentre ?? padX + 10}
           y={y(max) - 6}
+          textAnchor={yMaxCentre === null ? undefined : "middle"}
           style={LABEL_HALO}
         >
           {yMaxLabel}
@@ -386,14 +451,14 @@ export function ObservatorySeriesChart({
         newestValue !== null &&
         newestValue !== undefined && (
           // The newest captured point's figure, printed at the point — the
-          // summary card's exact string (one source), so the picture answers
-          // without a click.
+          // exact string that hour's record prints (one source), so the
+          // picture answers without a click.
           <text
             className={styles.valueLabel}
             data-testid="obs-newest-value"
-            x={x(newestIndex) > width / 2 ? x(newestIndex) - 6 : x(newestIndex) + 6}
+            x={newestOnRight ? x(newestIndex) - 6 : x(newestIndex) + 6}
             y={Math.max(12, y(newestValue) - 8)}
-            textAnchor={x(newestIndex) > width / 2 ? "end" : "start"}
+            textAnchor={newestOnRight ? "end" : "start"}
             style={LABEL_HALO}
           >
             {newestValueLabel}

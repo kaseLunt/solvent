@@ -1,8 +1,9 @@
-// The selected bucket's FULL record (plan R5: a card, not a list). Every
-// sentence is the lib's (`pointRecord`): this component prints the rows, keeps
-// each hazard row outside the counted fold exactly when the record puts it in
-// the answer, and draws the rate snapshot as the kit's table. Nothing here
-// decides a word.
+// The selected bucket's FULL record: a card, not a list. Every sentence is
+// the lib's (`pointRecord`): this component prints the rows, keeps each hazard
+// row outside the counted fold exactly when the record puts it in the answer,
+// sets a clause in the ink the record names for it (a caption is dim; a state
+// never is), and draws the rate snapshot as the kit's table inside its own
+// scroll container. Nothing here decides a word.
 
 import { Fragment } from "react";
 import { KitTable, StatusPill, type KitColumn, type KitRow } from "@/components/kit";
@@ -18,18 +19,23 @@ const RATE_COLUMNS: KitColumn[] = HISTORY_RATE_COLUMNS.map((column) => ({
   ...(column.align === undefined ? {} : { align: column.align }),
 }));
 
+/** One record renders at a time, so one id names its heading. */
+const TITLE_ID = "history-point-title";
+
 export function HistoryPoint({ entry, response }: { entry: BucketEntry; response: ObservatorySeriesResponse }) {
   const record = pointRecord(entry, response);
   return (
+    // The card is named BY its heading: the accessible name is the visible title and the hour it belongs to, one
+    // node — so the two cannot differ in case or in words, and a reader of either knows which hour's record this is.
     <section
       className={kit.card}
       data-testid="history-point"
       data-bucket={record.bucket}
       data-kind={record.kind}
-      aria-label={record.title}
+      aria-labelledby={TITLE_ID}
     >
       <div className={kit.cardT}>
-        <h3>
+        <h3 id={TITLE_ID}>
           {record.title} <span className={styles.mono}>{record.bucket}</span>
         </h3>
       </div>
@@ -67,7 +73,11 @@ function Rows({ rows, code }: { rows: readonly RecordRow[]; code: string | null 
                 {row.value}
               </span>
             )}
-            {row.note !== null && <span className={styles.dim}>{row.note}</span>}
+            {row.note !== null && (
+              <span className={row.noteTone === "state" ? styles.stateNote : styles.dim} data-note={row.noteTone}>
+                {row.note}
+              </span>
+            )}
           </dd>
         </Fragment>
       ))}

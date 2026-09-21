@@ -1,8 +1,8 @@
-// The Activity page's view model (plan 2026-09-16, R1–R5): the verdict header,
-// the identity chips, the two tiles, the table rows, the list's qualifier and
-// notices, the live strip's line, the list's empty words and the drawer's
-// doctrine, decided once from the walk's state and never re-derived in a
-// component.
+// The Activity page's view model: the verdict header, the identity chips, the
+// two tiles, the table rows, the list's qualifier and notices, the refusal
+// strip's head, what the foot offers, the live strip's line, the list's empty
+// words and the drawer's doctrine, decided once from the walk's state and
+// never re-derived in a component.
 //
 // The laws it carries forward from the Feed surface and its list:
 //
@@ -25,6 +25,10 @@
 //     timestamp; engine-scoped a null time is a per-row fallback, not a tail;
 //   - nothing loaded is a dash, never a zero; an exhausted filter is a real
 //     answer and its zero is true;
+//   - a refusal is said once, in the service's own words (the dek), under the
+//     code the service stated — never a code it did not state — and a refused
+//     walk offers its one way forward, the restart, not a button that re-sends
+//     what was refused;
 //   - every wire integer printed here passes the population guard first.
 
 import { groupDecimalString } from "./book-format";
@@ -36,13 +40,13 @@ import {
   type FeedEngine,
   type FeedOrderMode,
 } from "./feed-data";
-import { RAW_UNITS_TAG, feedAmount, feedNewest, feedRowKey, feedTagTone, feedTakeaway, plural, renderBps } from "./feed-view";
+import { RAW_UNITS_TAG, feedAmount, feedNewest, feedRowKey, feedTagTone, feedTakeaway, renderBps } from "./feed-view";
 import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal } from "./format";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import { refused, sentence, type LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
-import { groupInt, joinAnd } from "./prose";
+import { engineInProse, groupInt, joinAnd, plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import { isWirePopulation, readWirePopulation } from "./wireGuard";
 
@@ -71,7 +75,6 @@ export interface ActivityInput {
   readonly rows: readonly FeedChainEvent[];
   readonly mode: FeedOrderMode;
   readonly hasMore: boolean;
-  readonly loading: boolean;
   readonly engine: FeedEngine | null;
   readonly view: "all" | "ledger";
   readonly types: readonly EventDisplayType[];
@@ -152,6 +155,16 @@ export interface ActivityView {
   readonly doctrine: readonly string[];
   /** The ordering-drift alert when the wire served a timed row inside the untimed tail; null otherwise. */
   readonly drift: string | null;
+  /**
+   * The refusal strip's head while a refusal stands; null otherwise. It names the state and the code the service
+   * stated — the service's words themselves are the dek's, said once.
+   */
+  readonly refusalHead: string | null;
+  /**
+   * What the foot offers: the next page, the end of the feed, or nothing. A refused walk offers nothing here — its
+   * cursor was refused, re-sending it can only be refused again, and the restart is the strip's.
+   */
+  readonly foot: "more" | "end" | "none";
 }
 
 /** The loading arm's dek: what will be here, before anything is counted. */
@@ -225,8 +238,9 @@ const ORDER_CROSS =
   "ordered by custodied header time (block_time DESC) with a deterministic chain-aware tiebreak. Block heights are " +
   "never compared across chains, and rows without header time follow in the disclosed untimed tail.";
 
+/** The engine is named as a sentence names it — the product's word, never the wire's id. */
 const orderScoped = (engine: string | null): string =>
-  `ordered by block height (block, tx, log, seq) DESC, because heights are comparable within ${engine ?? "one chain"}'s own chain.`;
+  `ordered by block height (block, tx, log, seq) DESC, because heights are comparable within ${engine === null ? "one engine" : engineInProse(engine)}'s own chain.`;
 
 const EXHAUSTED_WORDS =
   "no recorded chain action matches this filter. An empty page here is a real answer from the service.";
@@ -236,14 +250,11 @@ const LOADING_WORDS = "loading recorded chain actions…";
 /** The foot's word and the rows tile's sub once the cursor is spent: one sentence, printed from here alone. */
 export const END_OF_FEED = "end of the filtered feed";
 
-/** An engine as prose names it: the dek and the qualifier speak sentences, where the label form does not read. */
-function proseEngine(wire: string): string {
-  if (wire === CASH) return "Cash";
-  if (wire === LEGACY) return "the legacy Aave v3 market";
-  return wire;
-}
-
-/** A block number the reader typed, grouped; one past the safe integers prints as typed, never re-rounded. */
+/**
+ * The block number the since-block control holds, grouped. One past the safe integers was already rounded when the
+ * draft became a number, so it prints as that number's own digits, ungrouped — grouping would dress a rounded figure
+ * as an exact one.
+ */
 const typedBlock = (block: number): string => (Number.isSafeInteger(block) ? groupInt(block) : String(block));
 
 /**
@@ -349,10 +360,16 @@ function activityState(input: ActivityInput): ActivityState {
   return "ok";
 }
 
+/** The refusal's state word with the code the service stated, verbatim. A refusal that stated no code is given none. */
+function refusedWord(refusal: ActivityRefusal | null, word = "page refused"): string {
+  const code = (refusal?.code ?? "").trim();
+  return code === "" ? word : `${word} · ${code}`;
+}
+
 function emptyWords(state: ActivityState, input: ActivityInput): string {
   switch (state) {
     case "refused":
-      return `page refused · ${input.refusal?.code ?? "bad_request"}: restart below`;
+      return `${refusedWord(input.refusal)}: restart above`;
     case "error":
       return `page fetch failed: ${input.error ?? ""}`;
     case "exhausted":
@@ -364,11 +381,14 @@ function emptyWords(state: ActivityState, input: ActivityInput): string {
   }
 }
 
-/** The service's own words for a refused page, its code named once — never twice, never dropped — then what to do. */
+/**
+ * The service's own words for a refused page, the code it stated named once — never twice, never dropped, and never
+ * invented when it stated none — then what to do.
+ */
 function refusalDek(refusal: ActivityRefusal): string {
-  const code = refusal.code ?? "bad_request";
+  const code = (refusal.code ?? "").trim();
   const said = sentence(refusal.message);
-  const named = refusal.message.includes(code) ? said : `${said} (${code}).`;
+  const named = code === "" || refusal.message.includes(code) ? said : `${said} (${code}).`;
   return `${named} Restart the list below.`;
 }
 
@@ -396,8 +416,8 @@ function engineSplit(rows: readonly FeedChainEvent[]): string {
   const cash = rows.filter((event) => event.engine === CASH).length;
   const legacy = rows.filter((event) => event.engine === LEGACY).length;
   const places = [
-    { count: cash, name: proseEngine(CASH) },
-    { count: legacy, name: proseEngine(LEGACY) },
+    { count: cash, name: engineInProse(CASH) },
+    { count: legacy, name: engineInProse(LEGACY) },
     { count: n - cash - legacy, name: "an engine this page does not name" },
   ].filter((place) => place.count > 0);
   const only = places.length === 1 ? places[0] : undefined;
@@ -434,7 +454,7 @@ function factDek(input: ActivityInput): string {
     }
   }
   if (sentences.length > 0) return sentences.join(" ");
-  return `Listed newest first, by ${engine === null ? "block time" : `block number on ${proseEngine(engine)}'s chain`}.`;
+  return `Listed newest first, by ${engine === null ? "block time" : `block number on ${engineInProse(engine)}'s chain`}.`;
 }
 
 function headlineFor(state: ActivityState, input: ActivityInput): LabHeadline {
@@ -484,7 +504,7 @@ function listQualifier(input: ActivityInput, drifted: boolean): string {
     ? "in the order the service sent"
     : input.engine === null
       ? "newest first, by block time"
-      : `newest first, by block number on ${proseEngine(input.engine)}'s chain`;
+      : `newest first, by block number on ${engineInProse(input.engine)}'s chain`;
   if (input.envelope === null) return order;
   return `${order} · loads ${groupInt(readWirePopulation(input.envelope.limit, "limit"))} at a time`;
 }
@@ -655,9 +675,9 @@ export function deriveActivityView(input: ActivityInput): ActivityView {
         : tailKeepsItsOrder(rows)
           ? ACTIVITY_TAIL_NOTICE
           : ACTIVITY_TAIL_NOTICE_UNORDERED,
+    // Sentences only: the list's TITLE is the list head's, never a paragraph here.
     doctrine: [
       ACTIVITY_INTRO,
-      ACTIVITY_LIST_TITLE,
       ACTIVITY_METHOD,
       ACTIVITY_FORENSICS,
       ACTIVITY_TAIL_NOTE,
@@ -666,5 +686,7 @@ export function deriveActivityView(input: ActivityInput): ActivityView {
       ACTIVITY_LIVE_NOTE,
     ],
     drift: drifted ? ACTIVITY_DRIFT : null,
+    refusalHead: state === "refused" ? refusedWord(input.refusal, "PAGE REFUSED") : null,
+    foot: state === "refused" ? "none" : input.hasMore ? "more" : "end",
   };
 }

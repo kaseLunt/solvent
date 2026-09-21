@@ -8,11 +8,12 @@ import styles from "./activity.module.css";
 /**
  * The liquidation's typed extract, visible beneath the pill in every view: the liquidator opens the Inspector, the
  * amounts are the extract's own, an unestablished bonus is the em dash the lib gave it — never behind a fold or a
- * hover. The wire's note is the line's title.
+ * hover. The wire's note is the one sentence that says what a dash here means, so it is page text too — a title
+ * is out of reach of a keyboard and of a touch screen. In the untimed tail the extract dims with its row.
  */
-function LiquidationLine({ detail }: { detail: ActivityLiquidation }) {
+function LiquidationLine({ detail, dim }: { detail: ActivityLiquidation; dim: boolean }) {
   return (
-    <span className={styles.detail} data-testid="activity-liquidation" title={detail.note}>
+    <span className={dim ? `${styles.detail} ${styles.detailDim}` : styles.detail} data-testid="activity-liquidation">
       liquidator{" "}
       <Link href={detail.liquidatorHref} className={kit.addr} title={detail.liquidator} data-testid="activity-liquidator">
         {truncateAddress(detail.liquidator)}
@@ -20,6 +21,11 @@ function LiquidationLine({ detail }: { detail: ActivityLiquidation }) {
       · debt repaid <b>{detail.repaid}</b>
       {detail.repaidAsset !== null && <span className={kit.dim}> {detail.repaidAsset}</span>} · seized <b>{detail.seized}</b> · bonus realized{" "}
       <b>{detail.bonusRealized}</b> / configured <b>{detail.bonusConfigured}</b>
+      {detail.note !== "" && (
+        <span className={styles.detailNote} data-testid="activity-liquidation-note">
+          {detail.note}
+        </span>
+      )}
     </span>
   );
 }
@@ -53,7 +59,7 @@ export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[
       type: (
         <>
           {row.tone === "crit" ? <StatusPill tone="crit">{row.type}</StatusPill> : <span className={styles.type}>{row.type}</span>}
-          {row.detail !== null && <LiquidationLine detail={row.detail} />}
+          {row.detail !== null && <LiquidationLine detail={row.detail} dim={row.dim} />}
         </>
       ),
       account: (

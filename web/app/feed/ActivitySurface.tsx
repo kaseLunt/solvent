@@ -2,10 +2,10 @@
 
 // The Activity surface: recorded chain actions + the live stream's state, on the kit.
 //
-//   - the record = GET /v1/events on cursor pages (lib/feed-data, the C1 seam
-//     under the AMENDMENT-1 laws); the live state = the global SSE provider
-//     (FeedLiveStrip) — the two are separate instruments and are never
-//     conflated (spec §5 law 6);
+//   - the record = GET /v1/events on cursor pages (lib/feed-data: the events
+//     seam under the ordering and amount-unit laws); the live state = the
+//     global SSE provider (FeedLiveStrip) — the two are separate instruments
+//     and are never conflated: live posture is never history;
 //   - the ordering regime is DISCLOSED per mode, and switching mode (or any
 //     filter) drops the walk entirely — an engine-scoped cursor and a
 //     cross-engine cursor rank by different keys and are NEVER interchanged;
@@ -14,8 +14,11 @@
 //     mystery and not a server error. A height bound is also CHAIN-scoped,
 //     so changing engine drops it (same number, different chain, different
 //     meaning) — with a visible notice, never silently re-meant;
-//   - a refused page (400 — e.g. a cursor minted for the other mode) renders
-//     the envelope's own words plus an honest restart from page one.
+//   - a refused page (400 — e.g. a cursor minted for the other mode) says the
+//     envelope's own words ONCE, in the header's dek; the strip names the
+//     refusal and carries the one way forward — an honest restart from page
+//     one. A refused walk offers no "Load more": its cursor was refused, and
+//     re-sending it can only be refused again.
 //
 // The walk's state machine below is the Feed surface's, unchanged in law; the
 // words the page prints are lib/activity-view's, derived once per render.
@@ -99,13 +102,12 @@ export function ActivitySurface() {
 
   const resetRef = useRef<() => void>(() => undefined);
 
-  // The envelope echo and the refusal are PER-WALK facts, and both used to be
-  // written before useCursorPages' epoch check could rule the page stale — a
-  // page resolving concurrently with `restartWalk()` therefore wrote the OLD
-  // scope's filter echo under the NEW walk's controls. The hook hands each
-  // dispatch an `isCurrent` predicate (the same epoch its own rows are gated
-  // on), and every setter here is gated on it: a stale walk's page may still
-  // resolve, but it no longer gets to describe this one.
+  // The envelope echo and the refusal are PER-WALK facts. A page resolving
+  // concurrently with `restartWalk()` must never write the OLD scope's filter
+  // echo (or its refusal) under the NEW walk's controls, so the hook hands
+  // each dispatch an `isCurrent` predicate (the same epoch its own rows are
+  // gated on) and every setter here is gated on it: a stale walk's page may
+  // still resolve, but it never gets to describe this one.
   const fetchPage = useCallback(
     async (
       cursor: string | null,
@@ -209,7 +211,6 @@ export function ActivitySurface() {
     rows,
     mode,
     hasMore,
-    loading,
     engine,
     view,
     types,
@@ -292,10 +293,11 @@ export function ActivitySurface() {
         </div>
       )}
 
-      {refusal !== null && (
+      {/* The refusal's strip: its head (the state, under the code the service stated) and the restart. The service's
+          words are the dek's, said once — the strip does not repeat them. */}
+      {activity.refusalHead !== null && (
         <div className={`${styles.strip} ${styles.stripRefused}`} role="alert" data-testid="activity-refusal">
-          <b>PAGE REFUSED · {refusal.code ?? "bad_request"}</b>
-          <span>{refusal.message}</span>
+          <b>{activity.refusalHead}</b>
           <button
             type="button"
             className={`${kit.btn} ${kit.btnGhost}`}
@@ -326,8 +328,9 @@ export function ActivitySurface() {
 
       <ActivityTable rows={activity.rows} emptyText={activity.emptyText} />
 
-      <div className={styles.foot} data-testid="activity-foot">
-        {hasMore ? (
+      {/* What the foot offers is the view model's: the next page, the end, or — behind a refusal — nothing. */}
+      <div className={styles.foot} data-testid="activity-foot" data-foot={activity.foot}>
+        {activity.foot === "more" && (
           <button
             type="button"
             className={`${kit.btn} ${kit.btnGhost}`}
@@ -337,9 +340,8 @@ export function ActivitySurface() {
           >
             {loading ? "Loading…" : "Load more"}
           </button>
-        ) : (
-          <span data-testid="activity-end">{END_OF_FEED}</span>
         )}
+        {activity.foot === "end" && <span data-testid="activity-end">{END_OF_FEED}</span>}
       </div>
     </div>
   );

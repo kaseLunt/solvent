@@ -1,22 +1,23 @@
 "use client";
 
-// The kept SVG (plan R6) in the Console register: one engine, one metric at a
-// time, the metric selector beneath the card's finding line, the bucket record
-// a click away. Engine separation is visual law: this chart renders exactly
-// one engine, the one the switcher selected — never a combined total.
+// History's chart in the Console register: one engine, one metric at a time,
+// the metric selector beneath the card's finding line, the bucket record a
+// click away. Engine separation is visual law: this chart renders exactly one
+// engine, the one the switcher selected — never a combined total.
 //
-// Every direct label is the pure layer's string — the drawn y-max wears its
-// exact ledger string (seriesMaxPoint), the newest captured point prints the
-// tile's figure or its "(last captured {bucket})" qualifier
-// (seriesNewestPoint), a window where one or zero captured points plot states
-// that BEFORE the visual (sparseCaptureLine, template rule R6) — never
-// retyped here. The width is the measured frame's content box (LAW-3, 1:1);
+// Every direct label is the pure layer's string — the drawn y-max is named
+// the window's peak and wears that hour's exact figure (seriesMaxPoint), the
+// newest captured point prints its hour's exact figure or that figure with
+// its "(last captured {bucket})" qualifier (seriesNewestPoint), a window where
+// one or zero captured points plot states that BEFORE the visual
+// (sparseCaptureLine: what qualifies a picture is read before it) — never
+// retyped here. The plot is drawn 1:1 at the measured frame's content box;
 // below the minimum the frame scrolls rather than the chart shrinking.
 
-import { ObservatorySeriesChart } from "@/components/charts/ObservatorySeriesChart";
+import { GapUnreadableCross, GapWarnSquare, ObservatorySeriesChart } from "@/components/charts/ObservatorySeriesChart";
 import chart from "@/components/charts/charts.module.css";
 import kit from "@/components/kit/kit.module.css";
-import { HISTORY_MARKS } from "@/lib/history-view";
+import type { HistoryMark } from "@/lib/history-view";
 import type { ObservatorySeriesResponse } from "@/lib/observatory-data";
 import {
   buildMetricSeries,
@@ -120,9 +121,10 @@ export function HistoryChart({
             maxPoint !== null &&
             maxPoint.value > 0 &&
             (newestPoint === null || maxPoint.index !== newestPoint.index)
-              ? maxPoint.label
+              ? maxPoint.directLabel
               : undefined
           }
+          yMaxIndex={maxPoint?.index}
           xStartLabel={oldestEntry?.bucketStart}
           xEndLabel={axis.entries.length > 1 && newestEntry !== undefined ? newestEntry.bucketStart : undefined}
           selectedTimeLabel={
@@ -141,19 +143,21 @@ export function HistoryChart({
 }
 
 /**
- * The key to the chart's two hole marks, beside the card's finding line: the same glyphs the plot draws (the dashed
- * tick; the tick wearing the outlined warn square), the lib's words. The method notes stay in the drawer.
+ * The key to the chart's hole marks, beside the card's finding line: the same glyphs the plot draws — the dashed
+ * tick; the tick wearing the chart's own outlined warn square; the tick wearing its warn cross — with the lib's
+ * words. It lists the marks the view found ON the chart, so a window with no hole carries no key. The method notes
+ * stay in the drawer.
  */
-export function HistoryMarks() {
+export function HistoryMarks({ marks }: { marks: readonly HistoryMark[] }) {
+  if (marks.length === 0) return null;
   return (
     <ul className={styles.marks} data-testid="history-marks" aria-label="marks">
-      {HISTORY_MARKS.map((mark) => (
+      {marks.map((mark) => (
         <li key={mark.mark} data-mark={mark.mark}>
           <svg className={styles.markGlyph} width={12} height={12} viewBox="0 0 12 12" aria-hidden>
             <line className={chart.gapTick} x1={6} x2={6} y1={1} y2={11} />
-            {mark.mark === "withheld" && (
-              <rect x={3} y={1} width={6} height={6} style={{ fill: "transparent", stroke: "var(--warn)", strokeWidth: 1.5 }} />
-            )}
+            {mark.mark === "withheld" && <GapWarnSquare cx={6} top={1} />}
+            {mark.mark === "unreadable" && <GapUnreadableCross cx={6} top={1} />}
           </svg>
           <span>{mark.label}</span>
         </li>

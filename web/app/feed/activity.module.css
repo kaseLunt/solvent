@@ -62,6 +62,10 @@
 /* The extract stacks beneath the pill and wraps inside the nowrap cell, so an em dash is read, not hovered for. */
 .detail { display: block; max-width: 44ch; margin-top: 4px; white-space: normal; line-height: 1.5; font-size: var(--type-floor); color: var(--ink-2); }
 .detail b { font-family: var(--mono); font-weight: var(--w-medium); color: var(--ink); font-variant-numeric: tabular-nums; }
+/* The wire's note is the extract's last line: page text, not a hover, at the extract's own size and measure. */
+.detailNote { display: block; margin-top: 2px; }
+/* In the untimed tail the row is dim, and its extract dims with it: the cell's ink, figures included. */
+.detailDim, .detailDim b { color: inherit; }
 .tx { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-3); text-decoration: none; }
 .tx:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
 

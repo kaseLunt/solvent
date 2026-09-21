@@ -14,3 +14,21 @@ export function joinAnd(names: readonly string[]): string {
 export function groupInt(value: number | bigint): string {
   return value.toLocaleString("en-US");
 }
+
+/** A grouped count with its noun, singular exactly at one: "1 liquidation", "1,200 chain actions", "0 hours". */
+export function plural(n: number, noun: string): string {
+  return `${groupInt(n)} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * An engine as a SENTENCE names it, in one phrasing: Cash by its name, the legacy market with its article and its
+ * qualifier first ("the legacy Aave v3 market") — the label form, "Aave v3 market (legacy)", reads as a label and
+ * stays on chips, kickers and switches. An engine this product does not name prints as the wire's own id, never as
+ * one of the two. The ids are the contract's (`debt_manager`, `aave_v3_etherfi`), welded to the app's constants by
+ * this module's unit spec: it cannot import them without importing its own importers.
+ */
+export function engineInProse(wire: string): string {
+  if (wire === "debt_manager") return "Cash";
+  if (wire === "aave_v3_etherfi") return "the legacy Aave v3 market";
+  return wire;
+}

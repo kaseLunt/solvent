@@ -1,6 +1,6 @@
-// Feed presentation decisions (W5), pure and unit-tested.
+// Feed presentation decisions, pure and unit-tested.
 //
-// The honest-amount law (AMENDMENT 1 item B): an event's `amount` is the
+// The honest-amount law: an event's `amount` is the
 // engine's own ACCOUNTING unit, named by its unit tag — NOT a display token
 // amount and NEVER convertible to a USD figure here (conversion needs the
 // engine's live/event-time index, which this surface does not hold). So:
@@ -29,7 +29,7 @@ import {
   type FeedOrderMode,
 } from "./feed-data";
 import { humanUtc } from "./human-utc";
-import { groupInt, joinAnd } from "./prose";
+import { joinAnd, plural } from "./prose";
 
 export type FeedAmount =
   | { kind: "record-only" }
@@ -44,9 +44,9 @@ export type FeedAmount =
       /** Asset symbol context (rendered dim, after the chip), when carried. */
       symbol: string | null;
       /**
-       * Wave R1 item 4: TRUE when `display` is the wire's raw integer because
-       * no scale is licensed for it. The row renders a `raw units` tag, so an
-       * unscaled integer can never be mistaken for a placed decimal.
+       * TRUE when `display` is the wire's raw integer because no scale is
+       * licensed for it. The row renders a `raw units` tag, so an unscaled
+       * integer can never be mistaken for a placed decimal.
        */
       rawUnits: boolean;
     };
@@ -72,7 +72,7 @@ export type FeedAmount =
  *     the TOKEN's decimals, not the engine's `value_decimals` (8, the pool's
  *     base currency). The event payload carries no per-leg decimals, so
  *     nothing licenses a scale: raw integer, `raw units` tag. Using the
- *     engine's 8 here would be exactly the fabrication the ruling forbids.
+ *     engine's 8 here would be exactly the fabrication the unit law forbids.
  *
  * `amount_decimals`, when the wire DOES carry it, still wins — it is the
  * row's own statement about itself.
@@ -206,10 +206,6 @@ export function renderBps(value: string | null): string {
   return value === null ? EM_DASH : `${value} bps`;
 }
 
-/** A grouped count with its noun, plural unless the count is one: "1 liquidation", "1,200 chain actions". */
-export function plural(n: number, noun: string): string {
-  return `${groupInt(n)} ${noun}${n === 1 ? "" : "s"}`;
-}
 
 /**
  * What the loaded rows license as "the newest", decided once: the headline's claim and the header's `Newest` chip
@@ -325,10 +321,11 @@ export function feedTakeaway(
 /**
  * TRUE only when EVERY field of a liquidation extract is established: a
  * non-null repaid amount, at least one seizure leg with every amount
- * carried, and both bonus figures. The W-3L hazard fence (inventory 430):
- * an extract carrying ANY em dash may not hide behind a closed fold, so
- * the all-actions view opens an unestablished extract by default — the
- * same law the Inspector's LiquidationExtract already enforces.
+ * carried, and both bonus figures. The law it names: an extract carrying ANY
+ * em dash may never hide behind a fold or a hover. The Activity table keeps
+ * that law without asking — it prints every extract visibly, established or
+ * not — so no page reads this today; it stays as the definition of
+ * "established", pinned, for the first surface that folds an extract again.
  */
 export function liquidationEstablished(
   detail: NonNullable<FeedChainEvent["liquidation"]>,

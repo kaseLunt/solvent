@@ -4,14 +4,20 @@
 //
 // The bucket laws, applied to GET /v1/observatory/series:
 //
-//   - a point derives ONLY from the newest COMPLETE risk batch in its bucket
-//     (migration 00016's law) — a bucket with no wire row is ABSENT and enters
-//     the axis as a GAP saying "no complete batch in this bucket", never an
-//     interpolated value and never a flat line;
+//   - a point derives ONLY from the newest COMPLETE risk batch the rollup
+//     observed in its bucket — a bucket with no wire row is ABSENT and enters
+//     the axis as a GAP saying "no complete batch was observed in this bucket"
+//     (none existed at the rollup's ticks, or the rollup did not tick or could
+//     not write: the wire cannot tell these apart, so the page claims only the
+//     observation), never an interpolated value and never a flat line;
 //   - a WITHHELD bucket (refused: true) is a row in the record — the engine's
 //     whole book was refused at capture time. It is a GAP carrying its named
 //     refusal code; its null totals render as em dashes, NEVER 0;
 //   - a null metric on a served bucket is a GAP saying null-is-not-zero;
+//   - a money metric that FAILS ITS WIRE GUARD (not the contract's exact
+//     decimal) is a GAP of its own kind — UNREADABLE: not an absent hour, not
+//     a withheld one, never zero and never a throw. It passes the guard
+//     before it meets a formatter, here and in every sentence;
 //   - `step_seconds` is the stride the server actually applied: every Nth
 //     captured bucket VERBATIM, never an average. Gap detection uses the
 //     applied stride, so downsampled series don't invent holes;
@@ -31,16 +37,14 @@ import { renderUsdAmount } from "./book-format";
 import { EM_DASH, formatBlock } from "./format";
 import { humanUsd } from "./human-usd";
 import { humanUtc } from "./human-utc";
-import { engineName } from "./inspector-headline";
-import { LEGACY } from "./inspector-position";
 import type {
   ObservatoryEngine,
   ObservatorySeriesPoint,
   ObservatorySeriesResponse,
 } from "./observatory-data";
-import { groupInt } from "./prose";
+import { engineInProse, groupInt, plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
-import { readWirePopulation, wireBigInt } from "./wireGuard";
+import { isWireDecimal, readWirePopulation, wireBigInt } from "./wireGuard";
 
 /** The rollup's native bucket (the contract: hourly). */
 export const NATIVE_BUCKET_SECONDS = 3600;
@@ -49,8 +53,8 @@ export const NATIVE_BUCKET_SECONDS = 3600;
  * captured  — a wire row with refused: false (the engine's book was served);
  * withheld  — a wire row with refused: true (the whole book was refused —
  *             totals are null FOR THAT REASON, never 0);
- * absent    — no wire row: no complete batch existed in this bucket. Nothing
- *             was captured, so nothing is drawn — never interpolated.
+ * absent    — no wire row: no complete batch was observed in this bucket.
+ *             Nothing was recorded, so nothing is drawn — never interpolated.
  */
 export type BucketKind = "captured" | "withheld" | "absent";
 
@@ -144,11 +148,16 @@ export const METRIC_LABELS: Record<BucketMetric, string> = {
 
 /**
  * gap vocabulary, per entry (null where a finite value is plotted):
- *   withheld — the engine's book was refused in this bucket;
- *   absent   — no complete batch in this bucket;
- *   null     — the bucket was served but this metric is null (not zero).
+ *   withheld   — the engine's book was refused in this bucket;
+ *   absent     — no complete batch was observed in this bucket;
+ *   null       — the bucket was served but this metric is null (not zero);
+ *   unreadable — the bucket was served and states this metric, but the value
+ *                fails its wire guard (not zero, and not one of the above).
  */
-export type GapKind = "withheld" | "absent" | "null";
+export type GapKind = "withheld" | "absent" | "null" | "unreadable";
+
+/** The word for a figure that fails its wire guard: the tile's sub, the chart's mark, the record's clause. */
+export const UNREADABLE = "unreadable";
 
 export interface BucketMetricSeries {
   /** Geometry, aligned with axis.entries. Null is a GAP — never interpolated. */
@@ -173,11 +182,20 @@ function rawMetric(point: ObservatorySeriesPoint, metric: BucketMetric): string 
   }
 }
 
+/** True when a served row states a money metric that fails the decimal guard: a figure no formatter may be handed. */
+export function metricUnreadable(point: ObservatorySeriesPoint, metric: BucketMetric): boolean {
+  const raw = rawMetric(point, metric);
+  return typeof raw === "string" && !isWireDecimal(raw);
+}
+
 /**
  * Exact display string for one metric of one wire row: money grouped at the
  * engine's own scale ("$1,900,000"), a count grouped ("8,552"). A null metric
  * is an em dash — NEVER "0" (a withheld book rendered as zero debt would
- * fabricate the exact reassurance this surface exists to withhold).
+ * fabricate the exact reassurance this surface exists to withhold) — and so is
+ * a money string that fails the decimal guard: it never reaches the formatter
+ * (whose own refusal is a throw), and the caller that prints the dash names
+ * which of the two it is (`metricUnreadable`).
  */
 export function displayMetric(
   point: ObservatorySeriesPoint,
@@ -189,14 +207,19 @@ export function displayMetric(
   // The two count metrics are wire populations, guarded at THIS one chokepoint — tiles, chart labels and bucket
   // records all read through it — and grouped, as every count the product prints is.
   if (typeof raw === "number") return groupInt(readWirePopulation(raw, metric));
+  if (!isWireDecimal(raw)) return EM_DASH;
   // Money is grouped, always: string surgery on the exact decimal at the engine's own scale, the digits untouched.
   return renderUsdAmount(raw, usdDecimals);
 }
 
-/** Display-precision geometry for one metric value. Null = no finite geometry. */
+/**
+ * Display-precision geometry for one metric value. Null = no finite geometry. A money string is placed only after
+ * it passes the decimal guard — the caller has already named an unreadable one as its own gap.
+ */
 function geometryOf(raw: string | number | null, usdDecimals: number): number | null {
   if (raw === null) return null;
   if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  if (!isWireDecimal(raw)) return null;
   const n = Number(formatUnits(raw, usdDecimals));
   return Number.isFinite(n) ? n : null;
 }
@@ -219,7 +242,7 @@ export function buildMetricSeries(
     if (entry.point === null) {
       values.push(null);
       titles.push(
-        `${entry.bucketStart} · no complete batch in this bucket · nothing was captured; absence is stated, never interpolated`,
+        `${entry.bucketStart} · no complete batch was observed in this bucket · nothing was recorded; absence is stated, never interpolated`,
       );
       gapKinds.push("absent");
       continue;
@@ -234,6 +257,16 @@ export function buildMetricSeries(
       continue;
     }
     const raw = rawMetric(point, metric);
+    if (metricUnreadable(point, metric)) {
+      // A named hole of its own: the hour was recorded and states this figure, but not as the exact decimal the
+      // contract allows. It is drawn as a gap with its own mark — never placed, never zero, never a throw.
+      values.push(null);
+      titles.push(
+        `${entry.bucketStart} · ${METRIC_LABELS[metric]} is ${UNREADABLE} in this bucket: the wire's value is not an exact decimal (unreadable is not zero)`,
+      );
+      gapKinds.push("unreadable");
+      continue;
+    }
     const value = geometryOf(raw, response.usd_decimals);
     if (raw === null || value === null) {
       values.push(null);
@@ -253,13 +286,28 @@ export function buildMetricSeries(
   return { values, titles, gapKinds };
 }
 
-/** The stride, disclosed. A stride never averages — it serves every Nth bucket. */
+/**
+ * The stride in the reader's word — the identity chip's value. The native stride is "hourly"; an applied one is said
+ * as the service applies it: a recorded hour is served only when it starts at least one stride after the last one
+ * SERVED, so "at most one in every N" — never "every Nth" (a hole shifts the grid).
+ */
+export function strideWord(stepSeconds: number | null): string {
+  if (stepSeconds === null) return "hourly";
+  // A served stride is a wire population, guarded at the read.
+  const stride = readWirePopulation(stepSeconds, "step_seconds");
+  if (stride <= NATIVE_BUCKET_SECONDS) return "hourly";
+  return stride % NATIVE_BUCKET_SECONDS === 0
+    ? `at most one hour in every ${groupInt(stride / NATIVE_BUCKET_SECONDS)}`
+    : `at most one hour per ${groupInt(stride)} seconds`;
+}
+
+/** The stride's method sentence — the chip's title and a drawer paragraph. A stride never averages: each hour served is verbatim. */
 export function describeStride(stepSeconds: number | null): string {
   if (stepSeconds === null) {
-    return "native hourly buckets · every captured bucket served verbatim";
+    return "native hourly record · every recorded hour is served verbatim";
   }
-  // p1b-14: a served stride is a wire population, guarded at the read.
-  return `stride ${String(readWirePopulation(stepSeconds, "step_seconds"))}s · every Nth captured bucket VERBATIM, skipped buckets are never averaged`;
+  // A served stride is a wire population, guarded at the read.
+  return `stride ${String(readWirePopulation(stepSeconds, "step_seconds"))}s · the service serves at most one recorded hour per stride, each VERBATIM; skipped hours are never averaged`;
 }
 
 /** The served range, disclosed. Absent bounds are unbounded, and say so. */
@@ -268,22 +316,33 @@ export function describeRange(from: string | null, to: string | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Wave W-OBS — the direct labels the panels draw, derived (never retyped).
+// The direct labels the chart draws, derived (never retyped): no figure lives
+// only in a hover, and every label says which point it belongs to.
 // ---------------------------------------------------------------------------
 
 /**
  * A labelled point of one metric series: the index into the axis, the drawn
- * geometry at that index, and the display string of the SAME wire row through
- * `displayMetric` — the exact formatter the summary cards and the bucket
- * record use, so a label on the chart and the card above it share one source.
+ * geometry at that index, and the exact display string of the SAME wire row
+ * through `displayMetric` — the formatter the bucket record prints with, so a
+ * label on the chart and that hour's record are one string. (The tiles above
+ * read the same wire row in the compact tier.)
  */
 export interface SeriesLabelledPoint {
   /** Index into `axis.entries` / `series.values`. */
   index: number;
   /** The drawn geometry at that index (display precision, GEOMETRY only). */
   value: number;
-  /** `displayMetric` of the same wire row — the card register, never retyped. */
+  /** `displayMetric` of the same wire row — the exact register, never retyped. */
   label: string;
+}
+
+/** The word the chart's y-max label opens with: it is the window's highest plotted value, and says so. */
+export const PEAK_WORD = "peak";
+
+/** `seriesMaxPoint`'s result: the highest plotted point, plus the label the chart prints for it. */
+export interface SeriesMaxPoint extends SeriesLabelledPoint {
+  /** The chart's direct label: "peak {label}" — a bare figure at the plot's left edge reads as the starting value. */
+  directLabel: string;
 }
 
 function labelledPointAt(
@@ -301,15 +360,16 @@ function labelledPointAt(
 /**
  * The point the drawn y-max belongs to. The chart's y-domain is [0, max of
  * finite values] (the zero floor is always drawn), so the max label IS this
- * point's display string — derived from the drawn domain, never invented.
- * Ties keep the first (oldest) occurrence; null when nothing plots.
+ * point's display string — derived from the drawn domain, never invented —
+ * named for what it is: the window's PEAK, not its first value. Ties keep the
+ * first (oldest) occurrence; null when nothing plots.
  */
 export function seriesMaxPoint(
   axis: BucketAxis,
   response: ObservatorySeriesResponse,
   metric: BucketMetric,
   series: BucketMetricSeries,
-): SeriesLabelledPoint | null {
+): SeriesMaxPoint | null {
   let bestIndex = -1;
   let bestValue = Number.NEGATIVE_INFINITY;
   series.values.forEach((value, index) => {
@@ -319,23 +379,25 @@ export function seriesMaxPoint(
     }
   });
   if (bestIndex < 0) return null;
-  return labelledPointAt(axis, response, metric, bestIndex, bestValue);
+  const point = labelledPointAt(axis, response, metric, bestIndex, bestValue);
+  return point === null ? null : { ...point, directLabel: `${PEAK_WORD} ${point.label}` };
 }
 
 /**
  * `seriesNewestPoint`'s result: the last plotted point, plus the direct
- * label the chart prints at it (Wave W-OBS-B). ONE-SOURCE LAW, both arms:
+ * label the chart prints at it. ONE-SOURCE LAW, both arms:
  *
  *   - when the last plotted point IS the newest axis entry, `directLabel`
- *     is `label` VERBATIM — the summary card's exact string;
+ *     is `label` VERBATIM — that hour's exact figure, as its record prints it;
  *   - when it is NOT (the newest bucket is withheld, or carries this metric
- *     as null), `directLabel` is that SAME string plus a
+ *     as null or unreadable), `directLabel` is that SAME string plus a
  *     "(last captured {bucket})" qualifier naming which row the figure
- *     belongs to. The card above shows the newest bucket's dash/refusal,
- *     and the chart must never print an older number unqualified beside it.
+ *     belongs to. The tile above shows the newest bucket's dash and its
+ *     word, and the chart must never print an older number unqualified
+ *     beside it.
  *
  * The qualifier's bucket hour is the entry's own `bucketStart`, the same
- * UTC string the panel head's "as of bucket ..." line prints.
+ * UTC string the tiles' subs and the x-axis extents print.
  */
 export interface SeriesNewestPoint extends SeriesLabelledPoint {
   /** True exactly when the last plotted point IS the newest axis entry. */
@@ -346,9 +408,8 @@ export interface SeriesNewestPoint extends SeriesLabelledPoint {
 
 /**
  * The NEWEST captured point of one metric series (the last finite value on
- * the axis), with its display string — the same figure the newest-bucket
- * summary card carries when the newest wire bucket is captured, from the
- * same formatter over the same wire row — and the direct label the chart
+ * the axis), with its exact display string — the same wire row the newest
+ * hour's tile reads in the compact tier — and the direct label the chart
  * prints (see `SeriesNewestPoint`: qualified whenever the last plotted
  * point is not the newest axis entry). Null when nothing plots.
  */
@@ -378,11 +439,11 @@ export function seriesNewestPoint(
 }
 
 /**
- * The sparse-window STATE line (template rule R6: everything that qualifies
- * the visual renders before it). Non-null exactly when ONE or ZERO captured
- * points plot in the window — a panel that is mostly gaps must say so in the
- * existing absent/withheld register instead of reading as a blank box.
- * Computed from the series, never static copy.
+ * The sparse-window STATE line: everything that qualifies a visual renders
+ * before it. Non-null exactly when ONE or ZERO captured points plot in the
+ * window — a panel that is mostly gaps must say so in the absent/withheld
+ * register instead of reading as a blank box. Computed from the series,
+ * never static copy.
  */
 export function sparseCaptureLine(series: BucketMetricSeries): string | null {
   const plotted = series.values.filter((v) => v !== null && Number.isFinite(v)).length;
@@ -390,6 +451,7 @@ export function sparseCaptureLine(series: BucketMetricSeries): string | null {
   const absent = series.gapKinds.filter((kind) => kind === "absent").length;
   const withheld = series.gapKinds.filter((kind) => kind === "withheld").length;
   const nulls = series.gapKinds.filter((kind) => kind === "null").length;
+  const unreadable = series.gapKinds.filter((kind) => kind === "unreadable").length;
   const parts = [
     plotted === 1
       ? "1 captured bucket plots in this window"
@@ -416,6 +478,13 @@ export function sparseCaptureLine(series: BucketMetricSeries): string | null {
         : `${String(nulls)} served buckets carry null values (null is not zero)`,
     );
   }
+  if (unreadable > 0) {
+    parts.push(
+      unreadable === 1
+        ? "1 served bucket carries an unreadable value (unreadable is not zero)"
+        : `${String(unreadable)} served buckets carry unreadable values (unreadable is not zero)`,
+    );
+  }
   return parts.join(" · ");
 }
 
@@ -428,9 +497,6 @@ export function sparseCaptureLine(series: BucketMetricSeries): string | null {
 // the bucket record.
 // ---------------------------------------------------------------------------
 
-/** The engine as a sentence names it: the legacy market takes its article. */
-export const named = (engine: ObservatoryEngine): string =>
-  engine === LEGACY ? `the ${engineName(engine)}` : engineName(engine);
 
 /** The debt a headline counts, by engine: one engine per sentence, never a sum or a comparison across the two. */
 const DEBT_OF: Record<ObservatoryEngine, string> = {
@@ -438,8 +504,6 @@ const DEBT_OF: Record<ObservatoryEngine, string> = {
   aave_v3_etherfi: "legacy Aave v3 debt",
 };
 
-/** A grouped count with its noun, singular exactly at one. */
-const plural = (n: number, noun: string): string => `${groupInt(n)} ${noun}${n === 1 ? "" : "s"}`;
 
 /** The window's unit: an hour at the native stride, a sampled hour when the service applied a larger one. */
 const hourUnit = (axis: BucketAxis): string =>
@@ -552,7 +616,7 @@ export function observatoryTakeaway(
       emphasis: "No hour in this window was recorded.",
       rest: "",
       holes: "",
-      dek: `No complete batch was observed for ${named(engine)} in this range, so there is nothing to chart. That is a missing record, not a zero.`,
+      dek: `No complete batch was observed for ${engineInProse(engine)} in this range, so there is nothing to chart. That is a missing record, not a zero.`,
       answered: false,
     };
   }
@@ -623,7 +687,8 @@ const ends = (both: boolean): string => (both ? "either end" : "one end");
  * One money metric's movement: ONE bigint subtraction of two values of one
  * engine at one scale, each through the decimal guard first. A delta, not
  * "A → B": the compact tier truncates both ends of a quiet week to the same
- * figure. Never a percentage.
+ * figure. Never a percentage. "rose by X, to Y": the two figures are told
+ * apart in words — "rose 1 to 49" reads as a range.
  */
 function moneyMove(name: string, first: string | null, last: string | null, decimals: number): string {
   if (first === null || last === null) {
@@ -635,7 +700,7 @@ function moneyMove(name: string, first: string | null, last: string | null, deci
     return `${name} unreadable at ${ends(a === null && b === null)}, so no change is given`;
   }
   if (a === b) return `${name} unchanged at ${humanUsd(b, decimals)}`;
-  return `${name} ${b > a ? "rose" : "fell"} ${humanUsd(b > a ? b - a : a - b, decimals)} to ${humanUsd(b, decimals)}`;
+  return `${name} ${b > a ? "rose" : "fell"} by ${humanUsd(b > a ? b - a : a - b, decimals)}, to ${humanUsd(b, decimals)}`;
 }
 
 /** One count metric's movement; each non-null end passes the population guard before the subtraction. */
@@ -646,14 +711,15 @@ function countMove(name: string, first: number | null, last: number | null): str
   const a = readWirePopulation(first, name);
   const b = readWirePopulation(last, name);
   if (a === b) return `${name} unchanged at ${groupInt(b)}`;
-  return `${name} ${b > a ? "rose" : "fell"} ${groupInt(Math.abs(b - a))} to ${groupInt(b)}`;
+  return `${name} ${b > a ? "rose" : "fell"} by ${groupInt(Math.abs(b - a))}, to ${groupInt(b)}`;
 }
 
 /**
  * The chart's finding: movement between the FIRST and LAST recorded hours of
  * the window, as deltas in the reader's tier. It reads only what was recorded
  * — refusals and absences are the takeaway's job — and the exact values it
- * leans on are the chart's own end labels and any hour's record.
+ * leans on are the chart's own end labels and any hour's record. Each
+ * movement carries its own comma, so the three are joined by semicolons.
  */
 export function gridReadingLine(
   response: ObservatorySeriesResponse,
@@ -672,8 +738,8 @@ export function gridReadingLine(
   }
   return (
     `Between the first and last recorded hours (${humanUtcSpan(first.bucket_start, last.bucket_start, response.served_at)}), ` +
-    `${moneyMove("debt", first.debt_usd, last.debt_usd, response.usd_decimals)}, ` +
-    `${countMove("accounts", first.accounts, last.accounts)}, ` +
+    `${moneyMove("debt", first.debt_usd, last.debt_usd, response.usd_decimals)}; ` +
+    `${countMove("accounts", first.accounts, last.accounts)}; ` +
     `and ${countMove("liquidatable positions", first.liquidatable_positions, last.liquidatable_positions)}.`
   );
 }
@@ -684,7 +750,7 @@ export function gridReadingLine(
  */
 export function pointDetailTakeaway(entry: BucketEntry): string {
   if (entry.point === null) {
-    return `ABSENT · no complete batch in this bucket (${entry.bucketStart}).`;
+    return `ABSENT · no complete batch was observed in this bucket (${entry.bucketStart}).`;
   }
   if (entry.point.refused) {
     return (

@@ -1,8 +1,10 @@
 // The bucket laws for the observatory rollup series (lib/observatory-series),
-// pinned: an absent bucket is a NAMED gap ("no complete batch in this
-// bucket"), a withheld bucket is a gap carrying its refusal code, a null
-// metric is null-not-zero, nothing is ever interpolated across any of them,
-// and a stride serves every Nth bucket VERBATIM (gap detection respects it).
+// pinned: an absent bucket is a NAMED gap ("no complete batch was observed in
+// this bucket"), a withheld bucket is a gap carrying its refusal code, a null
+// metric is null-not-zero, a money figure that fails its wire guard is a gap
+// of its own kind (unreadable — never zero, never a throw), nothing is ever
+// interpolated across any of them, and a stride serves each hour VERBATIM
+// (gap detection respects it).
 // The two sentences the page leads with are pinned in their parts: the
 // reader's tier (compact money, grouped counts, the instant from the wire's
 // own UTC fields against the envelope's served_at), every arm, and a missing
@@ -16,9 +18,11 @@ import {
   describeStride,
   displayMetric,
   effectiveStrideSeconds,
+  metricUnreadable,
   NATIVE_BUCKET_SECONDS,
   seriesMaxPoint,
   seriesNewestPoint,
+  strideWord,
   gridReadingLine,
   observatoryTakeaway,
   pointDetailTakeaway,
@@ -67,7 +71,7 @@ test("a withheld bucket is a GAP carrying its named refusal — never a value, n
   expect(displayMetric(DM_WITHHELD, "accounts", OBSERVATORY_SERIES_DM.usd_decimals)).toBe(EM_DASH);
 });
 
-test("an absent bucket enters the axis as a named gap — no complete batch in this bucket", () => {
+test("an absent bucket enters the axis as a named gap — no complete batch was OBSERVED in it: the claim is the observation, never that no batch existed", () => {
   const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
   // 06,07,08 captured · 09 ABSENT (inserted) · 10 captured.
   expect(axis.entries.map((entry) => entry.kind)).toEqual([
@@ -84,8 +88,11 @@ test("an absent bucket enters the axis as a named gap — no complete batch in t
   const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_AAVE, "debt_usd");
   expect(debt.values[3]).toBeNull(); // the line BREAKS — never interpolated
   expect(debt.gapKinds[3]).toBe("absent");
-  expect(debt.titles[3]).toContain("no complete batch in this bucket");
+  expect(debt.titles[3]).toContain("no complete batch was observed in this bucket");
   expect(debt.titles[3]).toContain("never interpolated");
+  // The rollup writes a row by OBSERVING a batch: an hour also has no row when the rollup did not look or could
+  // not write. No word here claims that no batch existed or ran.
+  expect(debt.titles[3]).not.toMatch(/no complete batch in this|batch existed|batch ran/);
   // Neighbours still plot their own display-precision geometry.
   expect(debt.values[2]).toBeCloseTo(928.779012, 6);
   expect(debt.values[4]).toBeCloseTo(619.186008, 6);
@@ -151,6 +158,49 @@ test("a null metric on a SERVED bucket is a gap saying null-is-not-zero", () => 
   expect(debt.values).toEqual([309.593004]);
 });
 
+test("a money figure that fails its wire guard is a NAMED hole of its own kind — never placed, never zero, never a throw — and the series around it still plots", () => {
+  const at = (hour: string, change: Partial<ObservatorySeriesPoint> = {}) => ({ ...DM_CAPTURED, bucket_start: `2026-07-29T${hour}:00:00Z`, ...change });
+  for (const bad of ["", "12.5", "1e9", "0x10", "309 593004", "NaN"]) {
+    const body = { ...OBSERVATORY_SERIES_DM, points: [at("06"), at("07", { debt_usd: bad }), at("08")] };
+    const axis = buildBucketAxis(body);
+    // The hour itself was recorded: the axis counts it as captured, and only this metric of it is a hole.
+    expect(axis.entries.map((entry) => entry.kind)).toEqual(["captured", "captured", "captured"]);
+    const debt = buildMetricSeries(axis, body, "debt_usd");
+    expect(debt.values).toEqual([309.593004, null, 309.593004]);
+    expect(debt.gapKinds).toEqual([null, "unreadable", null]);
+    expect(debt.titles[1]).toBe(
+      "2026-07-29T07:00:00Z · debt (usd) is unreadable in this bucket: the wire's value is not an exact decimal (unreadable is not zero)",
+    );
+    // Its own kind: not the absent hour's word, not the withheld one's, not the null metric's.
+    expect(debt.titles[1]).not.toMatch(/no complete batch|WITHHELD|is null/);
+    const bucket = body.points[1];
+    if (bucket === undefined) throw new Error("fixture invariant: three points");
+    expect(metricUnreadable(bucket, "debt_usd")).toBe(true);
+    expect(metricUnreadable(bucket, "collateral_usd")).toBe(false);
+    // The exact display is the em dash — the formatter, whose own refusal is a throw, is never reached.
+    expect(displayMetric(bucket, "debt_usd", 6)).toBe(EM_DASH);
+    // The same hour's other metrics plot: the hole is per-metric.
+    expect(buildMetricSeries(axis, body, "collateral_usd").gapKinds).toEqual([null, null, null]);
+    // No label is ever drawn from it: the peak and the newest figure are readable hours' own.
+    expect(seriesMaxPoint(axis, body, "debt_usd", debt)?.label).toBe("$309.593004");
+    expect(seriesNewestPoint(axis, body, "debt_usd", debt)?.directLabel).toBe("$309.593004");
+  }
+  // At the newest hour, the chart's older label says which hour it belongs to — as it does for a withheld newest hour.
+  const newestBad = { ...OBSERVATORY_SERIES_DM, points: [at("06"), at("07", { debt_usd: "12.5" })] };
+  const axis = buildBucketAxis(newestBad);
+  const debt = buildMetricSeries(axis, newestBad, "debt_usd");
+  expect(seriesNewestPoint(axis, newestBad, "debt_usd", debt)).toMatchObject({
+    atNewestBucket: false,
+    directLabel: "$309.593004 (last captured 2026-07-29T06:00:00Z)",
+  });
+  expect(sparseCaptureLine(debt)).toBe(
+    "1 captured bucket plots in this window · 1 served bucket carries an unreadable value (unreadable is not zero)",
+  );
+  // A null stays a null, and a count is not money: neither is "unreadable".
+  expect(metricUnreadable({ ...DM_CAPTURED, debt_usd: null }, "debt_usd")).toBe(false);
+  expect(metricUnreadable(DM_CAPTURED, "accounts")).toBe(false);
+});
+
 test("exact displays: usd through the engine's own scale, counts verbatim, null an em dash", () => {
   expect(displayMetric(DM_CAPTURED, "debt_usd", 6)).toBe("$309.593004");
   expect(displayMetric(DM_CAPTURED, "collateral_usd", 6)).toBe("$412.790672");
@@ -178,6 +228,8 @@ test("exact displays are GROUPED: money and counts at or above a thousand wear s
   expect(debt.titles[debt.titles.length - 1]).toContain("debt (usd) $1,900,000 @ block");
   expect(seriesNewestPoint(axis, DEMO_OBSERVATORY_AAVE, "debt_usd", debt)?.directLabel).toBe("$1,900,000");
   expect(seriesMaxPoint(axis, DEMO_OBSERVATORY_AAVE, "debt_usd", debt)?.label).toBe("$1,919,760");
+  // The y-max is NAMED: a bare figure at the plot's left edge reads as the window's starting value.
+  expect(seriesMaxPoint(axis, DEMO_OBSERVATORY_AAVE, "debt_usd", debt)?.directLabel).toBe("peak $1,919,760");
   // A count outside the contract is refused at the chokepoint, never grouped into a different number.
   expect(() => displayMetric({ ...dm, accounts: -1 }, "accounts", 6)).toThrow(WireIntegerError);
 });
@@ -190,6 +242,20 @@ test("the stride is disclosed verbatim-or-native — a stride never averages", (
   expect(describeStride(21600)).toContain("21600");
   expect(describeStride(21600)).toContain("VERBATIM");
   expect(describeStride(21600)).toContain("never averaged");
+  // The service skips relative to the last hour it SERVED, so a hole shifts the grid: never "every Nth".
+  expect(describeStride(21600)).not.toMatch(/every Nth/);
+});
+
+test("the stride's word for the chip: hourly at the native stride; an applied one as the service applies it — at most one hour in every N", () => {
+  expect(strideWord(null)).toBe("hourly");
+  expect(strideWord(3600)).toBe("hourly");
+  expect(strideWord(7200)).toBe("at most one hour in every 2");
+  expect(strideWord(21600)).toBe("at most one hour in every 6");
+  expect(strideWord(5000)).toBe("at most one hour per 5,000 seconds");
+  for (const word of [strideWord(null), strideWord(7200), strideWord(5000)]) expect(word).not.toMatch(/bucket|verbatim|every \d+(st|nd|rd|th)/i);
+  // A stride outside the contract is refused before it is worded.
+  expect(() => strideWord(-7200)).toThrow(WireIntegerError);
+  expect(() => strideWord(7200.5)).toThrow(WireIntegerError);
 });
 
 test("the served range is disclosed, unbounded ends stated as unbounded", () => {
@@ -198,10 +264,10 @@ test("the served range is disclosed, unbounded ends stated as unbounded", () => 
 });
 
 // ---------------------------------------------------------------------------
-// Wave W-OBS — the direct labels: derived from the drawn domain, one source.
+// The direct labels: derived from the drawn domain, one source.
 // ---------------------------------------------------------------------------
 
-test("W-OBS: the y-max label IS the max point's ledger display — derived, never retyped", () => {
+test("W-OBS: the y-max label IS the max point's ledger display — derived, never retyped — and it is named the window's peak", () => {
   const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
   const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_AAVE, "debt_usd");
   const maxPoint = seriesMaxPoint(axis, OBSERVATORY_SERIES_AAVE, "debt_usd", debt);
@@ -214,23 +280,30 @@ test("W-OBS: the y-max label IS the max point's ledger display — derived, neve
   expect(maxPoint.index).toBe(1); // 07:00 and 08:00 tie; the first wins
 
   // The label equals the formatter output of the drawn max: the SAME
-  // displayMetric call the summary cards and the bucket record use.
+  // displayMetric call the bucket record prints that hour with.
   const point = axis.entries[maxPoint.index]?.point;
   if (point === null || point === undefined) throw new Error("max point must be wire-backed");
   expect(maxPoint.label).toBe(
     displayMetric(point, "debt_usd", OBSERVATORY_SERIES_AAVE.usd_decimals),
   );
   expect(maxPoint.label).toBe("$928.779012");
+  // What the chart prints: the word, then that same string — a peak, not the window's first value.
+  expect(maxPoint.directLabel).toBe(`peak ${maxPoint.label}`);
+  expect(maxPoint.directLabel).toBe("peak $928.779012");
+  const first = axis.entries[0]?.point;
+  if (first === null || first === undefined) throw new Error("the first entry must be wire-backed");
+  expect(maxPoint.label).not.toBe(displayMetric(first, "debt_usd", OBSERVATORY_SERIES_AAVE.usd_decimals));
 });
 
-test("W-OBS: the newest captured point carries the summary card's exact figure", () => {
+test("W-OBS: the newest captured point carries that hour's exact figure — the string its record prints", () => {
   const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
   const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_AAVE, "debt_usd");
   const newest = seriesNewestPoint(axis, OBSERVATORY_SERIES_AAVE, "debt_usd", debt);
   if (newest === null) throw new Error("the aave debt series must have a newest point");
 
   // The last finite value on the axis (index 4 — 10:00), labelled by the
-  // same formatter over the same wire row the newest-bucket card renders.
+  // same formatter over the same wire row the hour's record prints (the tile
+  // above reads that row in the compact tier).
   expect(newest.index).toBe(4);
   const point = axis.entries[4]?.point;
   if (point === null || point === undefined) throw new Error("newest point must be wire-backed");
@@ -239,8 +312,8 @@ test("W-OBS: the newest captured point carries the summary card's exact figure",
   );
   expect(newest.label).toBe("$619.186008");
 
-  // W-OBS-B plain arm: the last plotted point IS the newest axis entry, so
-  // the direct label is the card's string VERBATIM — an always-qualify
+  // The plain arm: the last plotted point IS the newest axis entry, so
+  // the direct label is that hour's exact string VERBATIM — an always-qualify
   // mutant would smear "(last captured ...)" onto the newest row itself.
   expect(newest.atNewestBucket).toBe(true);
   expect(newest.directLabel).toBe(newest.label);
@@ -248,12 +321,12 @@ test("W-OBS: the newest captured point carries the summary card's exact figure",
 
 test("W-OBS-B qualified arm: a direct label older than the axis head states WHICH row it is", () => {
   // The verbatim DM example: the newest axis entry (09:00) is WITHHELD, so
-  // the last plotted point is the OLDER 08:00 row. The direct label is the
-  // card register's exact string PLUS the "(last captured {bucket})"
-  // qualifier — the chart may not print an older number unqualified while
-  // the newest card shows the withheld dash. Kills the unqualified-print
-  // mutant (directLabel === label here) and the retyped-value mutant (the
-  // qualified arm must START with the exact card string).
+  // the last plotted point is the OLDER 08:00 row. The direct label is that
+  // row's exact string PLUS the "(last captured {bucket})" qualifier — the
+  // chart may not print an older number unqualified while the newest hour's
+  // tile shows the withheld dash. Kills the unqualified-print mutant
+  // (directLabel === label here) and the retyped-value mutant (the qualified
+  // arm must START with the exact string).
   const axis = buildBucketAxis(OBSERVATORY_SERIES_DM);
   const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_DM, "debt_usd");
   const newest = seriesNewestPoint(axis, OBSERVATORY_SERIES_DM, "debt_usd", debt);
@@ -265,7 +338,7 @@ test("W-OBS-B qualified arm: a direct label older than the axis head states WHIC
   expect(newest.directLabel).toBe(`${newest.label} (last captured 2026-07-29T08:00:00Z)`);
   expect(newest.directLabel).toBe("$309.593004 (last captured 2026-07-29T08:00:00Z)");
   // The qualifier's hour is the plotted entry's own bucketStart — the same
-  // UTC string the panel head's as-of line prints.
+  // UTC string the tiles' subs and the x-axis extents print.
   expect(axis.entries[0]?.bucketStart).toBe("2026-07-29T08:00:00Z");
 });
 
@@ -505,8 +578,9 @@ test.describe("observatoryTakeaway — the headline's parts and the dek", () => 
       dek: "No complete batch was observed for Cash in this range, so there is nothing to chart. That is a missing record, not a zero.",
       answered: false,
     });
+    // In a sentence the legacy market is named as prose names it — one phrasing, the product's (lib/prose).
     expect(observatoryTakeaway(empty, axis, "aave_v3_etherfi").dek).toBe(
-      "No complete batch was observed for the Aave v3 market (legacy) in this range, so there is nothing to chart. That is a missing record, not a zero.",
+      "No complete batch was observed for the legacy Aave v3 market in this range, so there is nothing to chart. That is a missing record, not a zero.",
     );
   });
 
@@ -592,9 +666,9 @@ test.describe("gridReadingLine — the chart's finding, as deltas", () => {
     const span = `${humanUtc(first.bucket_start, served).replace(/\u00a0UTC$/, "")} → ${humanUtc(last.bucket_start, served)}`;
     expect(gridReadingLine(DEMO_OBSERVATORY_AAVE, axis)).toBe(
       `Between the first and last recorded hours (${span}), ` +
-        `debt fell ${humanUsd(debtFall, usd)} to ${humanUsd(BigInt(last.debt_usd), usd)}, ` +
-        `accounts fell ${groupInt(accountsFall)} to ${groupInt(last.accounts)}, ` +
-        `and liquidatable positions rose ${groupInt(liquidatableRise)} to ${groupInt(last.liquidatable_positions)}.`,
+        `debt fell by ${humanUsd(debtFall, usd)}, to ${humanUsd(BigInt(last.debt_usd), usd)}; ` +
+        `accounts fell by ${groupInt(accountsFall)}, to ${groupInt(last.accounts)}; ` +
+        `and liquidatable positions rose by ${groupInt(liquidatableRise)}, to ${groupInt(last.liquidatable_positions)}.`,
     );
   });
 
@@ -602,12 +676,14 @@ test.describe("gridReadingLine — the chart's finding, as deltas", () => {
     const span = `${nb("Aug 1, 21:00")} → ${nb("Aug 8, 20:00 UTC")}`;
     const aave = gridReadingLine(DEMO_OBSERVATORY_AAVE, buildBucketAxis(DEMO_OBSERVATORY_AAVE));
     expect(aave).toBe(
-      `Between the first and last recorded hours (${span}), debt fell $11K to $1.9M, accounts fell 91 to 8,552, and liquidatable positions rose 1 to 46.`,
+      `Between the first and last recorded hours (${span}), debt fell by $11K, to $1.9M; accounts fell by 91, to 8,552; and liquidatable positions rose by 1, to 46.`,
     );
     const dm = gridReadingLine(DEMO_OBSERVATORY_DM, buildBucketAxis(DEMO_OBSERVATORY_DM));
     expect(dm).toBe(
-      `Between the first and last recorded hours (${span}), debt rose $1.8M to $27.8M, accounts fell 52 to 1,412, and liquidatable positions rose 1 to 49.`,
+      `Between the first and last recorded hours (${span}), debt rose by $1.8M, to $27.8M; accounts fell by 52, to 1,412; and liquidatable positions rose by 1, to 49.`,
     );
+    // A change and its end are told apart in words: "rose 1 to 49" reads as a range from 1 to 49.
+    for (const line of [aave, dm]) expect(line).not.toMatch(/(rose|fell) [$\d][^ ]* to /);
     for (const line of [aave, dm]) expect(line).not.toMatch(/%|\$[0-9.,KMB]+ → \$|\d{4}-\d{2}-\d{2}T/);
     expect(dm).not.toMatch(/legacy|Aave|8,552/);
     expect(aave).not.toMatch(/Cash|1,412/);
@@ -618,7 +694,7 @@ test.describe("gridReadingLine — the chart's finding, as deltas", () => {
     const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
     expect(gridReadingLine(OBSERVATORY_SERIES_AAVE, axis)).toBe(
       `Between the first and last recorded hours (${nb("Jul 29, 06:00")} → ${nb("Jul 29, 10:00 UTC")}), ` +
-        "debt unchanged at $619.18, accounts rose 1 to 6, and liquidatable positions unchanged at 0.",
+        "debt unchanged at $619.18; accounts rose by 1, to 6; and liquidatable positions unchanged at 0.",
     );
     const two = (change: Partial<ObservatorySeriesPoint>, both = false) => {
       const body = {
@@ -627,14 +703,14 @@ test.describe("gridReadingLine — the chart's finding, as deltas", () => {
       };
       return gridReadingLine(body, buildBucketAxis(body));
     };
-    expect(two({ accounts: null })).toContain(", accounts not stated at one end, so no change is given, and ");
-    expect(two({ accounts: null }, true)).toContain(", accounts not stated at either end, so no change is given, and ");
-    expect(two({ debt_usd: null })).toContain("debt not stated at one end, so no change is given, accounts unchanged at 3,");
-    expect(two({ debt_usd: "12.5" })).toContain("debt unreadable at one end, so no change is given,");
-    expect(two({ debt_usd: "" }, true)).toContain("debt unreadable at either end, so no change is given,");
+    expect(two({ accounts: null })).toContain("; accounts not stated at one end, so no change is given; and ");
+    expect(two({ accounts: null }, true)).toContain("; accounts not stated at either end, so no change is given; and ");
+    expect(two({ debt_usd: null })).toContain("debt not stated at one end, so no change is given; accounts unchanged at 3;");
+    expect(two({ debt_usd: "12.5" })).toContain("debt unreadable at one end, so no change is given;");
+    expect(two({ debt_usd: "" }, true)).toContain("debt unreadable at either end, so no change is given;");
     expect(two({ liquidatable_positions: null })).toContain("and liquidatable positions not stated at one end, so no change is given.");
     for (const line of [two({ accounts: null }), two({ debt_usd: null }), two({ liquidatable_positions: null })]) {
-      expect(line).not.toMatch(/\$0\b|fell 3 to|to 0\b/);
+      expect(line).not.toMatch(/\$0\b|fell by 3, to|to 0\b/);
     }
     // A count outside the contract is refused before the subtraction.
     expect(() => two({ accounts: 2.5 })).toThrow(WireIntegerError);
@@ -678,6 +754,6 @@ test.describe("W-3L — pointDetailTakeaway", () => {
 
     expect(
       pointDetailTakeaway({ bucketStart: "2026-07-29T07:00:00Z", kind: "absent", point: null }),
-    ).toBe("ABSENT · no complete batch in this bucket (2026-07-29T07:00:00Z).");
+    ).toBe("ABSENT · no complete batch was observed in this bucket (2026-07-29T07:00:00Z).");
   });
 });

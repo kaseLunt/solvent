@@ -6,9 +6,9 @@
 // cannot drift. A statement of record wears ink: an answered series is
 // `neutral`, a refusal is dashed, and a hole's severity rides the census chip,
 // never the headline's colour. Every figure passes the wire guards before it
-// is formatted; a bucket the rollup withheld or never captured is a dashed
-// tile with the gap's word, never a 0. The surface prints this and decides
-// nothing twice.
+// is formatted; a bucket the rollup withheld or never recorded — or a figure
+// that fails its guard — is a dashed tile with the gap's word, never a 0 and
+// never a throw. The surface prints this and decides nothing twice.
 import { EM_DASH, formatBlock, truncateAddress } from "./format";
 import { humanUsd } from "./human-usd";
 import { engineName } from "./inspector-headline";
@@ -28,16 +28,18 @@ import {
   displayMetric,
   gridReadingLine,
   METRIC_LABELS,
-  named,
+  metricUnreadable,
   observatoryTakeaway,
   pointDetailTakeaway,
-  seriesNewestPoint,
+  strideWord,
+  UNREADABLE,
   type BucketAxis,
   type BucketEntry,
   type BucketKind,
   type BucketMetric,
+  type GapKind,
 } from "./observatory-series";
-import { groupInt } from "./prose";
+import { engineInProse, groupInt, plural } from "./prose";
 import { isWirePopulation, isWireScale, readWirePopulation, wireBigInt } from "./wireGuard";
 
 export type HistoryState = "loading" | "degraded" | "unavailable" | "ok";
@@ -57,7 +59,7 @@ export interface HistoryView {
   readonly kicker: string;
   /** Emphasis, rest and dek = observatoryTakeaway(...)'s parts, or a refusal sentence with its own dek; tone neutral when the series answered, refused otherwise. */
   readonly headline: LabHeadline;
-  /** Engine · Stride · Range · Buckets ("165 captured · 1 withheld · 2 absent") · Served. */
+  /** Engine · Stride ("hourly") · Range · Hours ("165 recorded · 1 withheld · 2 absent") · Served. */
   readonly chips: LabChip[];
   /** The four metrics' newest captured points; empty until the series answers. */
   readonly tiles: readonly HistoryTile[];
@@ -65,7 +67,9 @@ export interface HistoryView {
   readonly finding: string | null;
   /** The chart's accessible name for the selected metric; null until the series answers. */
   readonly chartLabel: string | null;
-  /** The drawer's paragraphs, verbatim: the intro, the chart's method notes, then the wire's own notes. */
+  /** The key to the hole marks the selected metric's chart draws in this window; empty when it draws none. */
+  readonly marks: readonly HistoryMark[];
+  /** The drawer's paragraphs, verbatim: the intro, the chart's method notes, the stride's sentence, then the wire's own notes. */
   readonly doctrine: readonly string[];
 }
 
@@ -90,14 +94,14 @@ export const HISTORY_LOADING_DEK = "The hourly record of this engine's debt, col
 /** After the service's own message: a degraded rollup is a fact about the deployment, and the live figures have a page. */
 export const HISTORY_DEGRADED_CLAUSE = "That is a fact about this deployment, not an empty history; live figures are on the Book.";
 
-/** The intro paragraph — drawer doctrine (R3), verbatim. */
+/** The intro paragraph: the page's doctrine lives in the drawer, verbatim — the header states facts about the window. */
 export const HISTORY_INTRO =
-  "How each engine's book has moved, hour by hour, in a record that outlives batch retention. An hour with no complete batch renders as a hole, which is never smoothed over and never drawn as a zero; one engine per view, never combined onto one axis.";
+  "How each engine's book has moved, hour by hour, in a record that outlives batch retention. An hour in which no complete batch was observed renders as a hole, which is never smoothed over and never drawn as a zero; one engine per view, never combined onto one axis.";
 
 /** The chart's method notes — the legend's three marks, the two drawing notes, the source — verbatim. */
 export const HISTORY_METHOD: readonly string[] = [
   "captured buckets · the line never interpolates across a gap",
-  "absent bucket · no complete batch in this bucket",
+  "absent bucket · no complete batch was observed in this bucket",
   "withheld bucket · the book was refused, so totals are null and never 0",
   "zero floor drawn · the scale never crops it away",
   "click any bucket for its full record",
@@ -122,7 +126,7 @@ export interface HistoryTileSpec {
   readonly label: string;
 }
 
-/** The four tiles, in reading order (plan R4): the same four in every state. */
+/** The four tiles, in reading order: the same four in every state. */
 export const HISTORY_TILES: readonly HistoryTileSpec[] = [
   { key: "debt", metric: "debt_usd", label: "Debt" },
   { key: "collateral", metric: "collateral_usd", label: "Collateral" },
@@ -140,26 +144,29 @@ const dashed = (spec: HistoryTileSpec, sub: string): HistoryTile => ({
   tone: "refused",
 });
 
-/**
- * The gap's word for a metric that plots nothing at the newest bucket: the
- * bucket was withheld, no complete batch existed, or the served bucket states
- * this metric as null (null is not zero).
- */
-function gapWord(last: BucketEntry): string {
-  if (last.kind === "withheld") return "withheld";
-  if (last.kind === "absent") return "no complete batch";
-  return "not stated";
-}
+/** A window that holds no hour at all: nothing was recorded, and the tile says that — not that no batch existed. */
+const NO_HOUR_WORD = "no hour recorded";
 
 /**
- * One tile: the metric's newest captured point, exactly when that point IS the
- * newest bucket on the axis (`seriesNewestPoint(...).atNewestBucket`). An
- * older figure never stands in for a newest bucket that refused or captured
- * nothing — that tile is dashed with the gap's word. Money is the Book's tier
- * at the classified scale after the decimal passes its guard; populations
- * after theirs. (The module's own sentences read the newest counts through
- * the throwing read first, so an out-of-contract count lands at the route
- * boundary before any tile is decided — the same posture the old page held.)
+ * The tile's word for a metric that plots nothing at the newest bucket — the chart's own gap kind for that bucket,
+ * said once: the bucket was withheld, no batch was observed in it, the served bucket states this metric as null
+ * (null is not zero), or states it as a value that fails its wire guard (unreadable is not zero).
+ */
+const GAP_WORDS: Record<GapKind, string> = {
+  withheld: "withheld",
+  absent: "none observed",
+  null: "not stated",
+  unreadable: UNREADABLE,
+};
+
+/**
+ * One tile: the metric at the newest bucket on the axis, exactly when the chart plots a point there. The judgement
+ * is the series builder's — the tile's word IS that bucket's gap kind, so the tile and the chart cannot disagree —
+ * and an older figure never stands in for a newest bucket that refused, stated nothing or stated something
+ * unreadable: that tile is dashed with the gap's word. Money is the Book's tier at the classified scale after the
+ * decimal passes its guard. (A COUNT outside the contract keeps the throwing read: the module's sentences and the
+ * builder's titles read counts through it, so such a count lands at the route boundary before any tile is decided.
+ * The two guards below the gap check narrow the types; the gap check has already ruled both cases out.)
  */
 function tileOf(
   spec: HistoryTileSpec,
@@ -168,33 +175,38 @@ function tileOf(
   scale: number,
 ): HistoryTile {
   const last = axis.entries[axis.entries.length - 1];
-  if (last === undefined) return dashed(spec, "no complete batch");
+  if (last === undefined) return dashed(spec, NO_HOUR_WORD);
   const series = buildMetricSeries(axis, response, spec.metric);
-  const newest = seriesNewestPoint(axis, response, spec.metric, series);
-  if (newest === null || !newest.atNewestBucket || last.point === null) return dashed(spec, gapWord(last));
+  const gap = series.gapKinds[series.gapKinds.length - 1] ?? null;
+  if (last.point === null) return dashed(spec, GAP_WORDS.absent);
+  if (gap !== null) return dashed(spec, GAP_WORDS[gap]);
   const point = last.point;
-  const sub = `bucket ${point.bucket_start}`;
+  const sub = `hour of ${point.bucket_start}`;
   if (spec.metric === "debt_usd" || spec.metric === "collateral_usd") {
     const raw = spec.metric === "debt_usd" ? point.debt_usd : point.collateral_usd;
     const value = raw === null ? null : wireBigInt(raw);
-    if (value === null) return dashed(spec, "unreadable");
+    if (value === null) return dashed(spec, UNREADABLE);
     return { key: spec.key, label: spec.label, value: humanUsd(value, scale), sub, tone: "neutral" };
   }
   const raw = spec.metric === "accounts" ? point.accounts : point.liquidatable_positions;
-  if (!isWirePopulation(raw)) return dashed(spec, "unreadable");
+  if (!isWirePopulation(raw)) return dashed(spec, UNREADABLE);
   return { key: spec.key, label: spec.label, value: groupInt(raw), sub, tone: "neutral" };
 }
+
+/** The census chip before the series answers, and its label in every state: the window is counted in hours. */
+const HOURS_CHIP = "Hours";
 
 /** The identity strip of an answered series: the tally is warn-toned whenever a hole exists. */
 function okChips(engine: ObservatoryEngine, response: ObservatorySeriesResponse, axis: BucketAxis): LabChip[] {
   const holes = axis.withheldCount > 0 || axis.absentCount > 0;
   return [
     engineChip(engine),
-    { label: "Stride", value: describeStride(response.step_seconds) },
+    // The reader's word on the chip; the method sentence is its title and a drawer paragraph.
+    { label: "Stride", value: strideWord(response.step_seconds), title: describeStride(response.step_seconds) },
     { label: "Range", value: describeRange(response.from, response.to) },
     {
-      label: "Buckets",
-      value: `${String(axis.capturedCount)} captured · ${String(axis.withheldCount)} withheld · ${String(axis.absentCount)} absent`,
+      label: HOURS_CHIP,
+      value: `${groupInt(axis.capturedCount)} recorded · ${groupInt(axis.withheldCount)} withheld · ${groupInt(axis.absentCount)} absent`,
       tone: holes ? "warn" : "ok",
     },
     // The envelope carries served_at and no age: the wire's own instant, verbatim, never a browser-clock age.
@@ -204,13 +216,13 @@ function okChips(engine: ObservatoryEngine, response: ObservatorySeriesResponse,
 
 export function deriveHistoryView(reading: HistoryReading): HistoryView {
   const kicker = `History · ${engineName(reading.engine)}`;
-  const base = { kicker, tiles: [], finding: null, chartLabel: null, doctrine: HISTORY_DOCTRINE } as const;
+  const base = { kicker, tiles: [], finding: null, chartLabel: null, marks: [], doctrine: HISTORY_DOCTRINE } as const;
   if (reading.phase === "loading") {
     return {
       ...base,
       state: "loading",
-      headline: refused(`Loading the history of ${named(reading.engine)}…`, HISTORY_LOADING_DEK),
-      chips: [engineChip(reading.engine), { label: "Buckets", value: "pending", tone: "refused" }],
+      headline: refused(`Loading the history of ${engineInProse(reading.engine)}…`, HISTORY_LOADING_DEK),
+      chips: [engineChip(reading.engine), { label: HOURS_CHIP, value: "pending", tone: "refused" }],
     };
   }
   if (reading.phase === "degraded") {
@@ -218,7 +230,7 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
       ...base,
       state: "degraded",
       headline: refused(
-        `No hourly history exists for ${named(reading.engine)} on this deployment yet.`,
+        `No hourly history exists for ${engineInProse(reading.engine)} on this deployment yet.`,
         `${sentence(reading.message ?? "the service named no reason")} ${HISTORY_DEGRADED_CLAUSE}`,
       ),
       chips: [engineChip(reading.engine), { label: "Rollup", value: "unavailable", tone: "refused" }],
@@ -230,22 +242,23 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
       ...base,
       state: "unavailable",
       headline: refused(
-        `The history of ${named(reading.engine)} could not be fetched.`,
+        `The history of ${engineInProse(reading.engine)} could not be fetched.`,
         `${sentence(reading.message ?? "the series answered without a body")} ${HISTORY_UNAVAILABLE_CLAUSE}`,
       ),
       chips: [engineChip(reading.engine), { label: "Record", value: "unavailable", tone: "refused" }],
     };
   }
   const response = reading.response;
-  // The scale is classified before any figure is formatted at it: every money string on the page (the takeaway,
-  // the tiles, the chart's labels) would otherwise reach the formatter's own throw. A record whose scale is
-  // outside the contract cannot be read, and the page says so by name instead of unmounting.
+  // The scale is classified before any figure is formatted at it, as every money string is classified before it
+  // meets a formatter: either would otherwise reach the formatter's own throw. A record whose scale is outside
+  // the contract cannot be read at all, and the page says so by name instead of unmounting; a single figure that
+  // fails its guard is a named hole in an otherwise readable record.
   if (!isWireScale(response.usd_decimals)) {
     return {
       ...base,
       state: "unavailable",
       headline: refused(
-        `The history of ${named(reading.engine)} cannot be read.`,
+        `The history of ${engineInProse(reading.engine)} cannot be read.`,
         `${HISTORY_UNREADABLE_SCALE} ${HISTORY_UNAVAILABLE_CLAUSE}`,
       ),
       chips: [engineChip(reading.engine), { label: "Record", value: "unreadable", tone: "refused" }],
@@ -255,7 +268,7 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
   const axis = buildBucketAxis(response);
   // The series answered when its latest recorded hour stated a debt figure. A record is ink, never the colour of a
   // health verdict — holes included: their severity is the census chip's. A withheld latest hour, one that states no
-  // debt, or a window with no recorded hour is a refusal the takeaway states in its own words.
+  // debt or an unreadable one, or a window with no recorded hour is a refusal the takeaway states in its own words.
   const takeaway = observatoryTakeaway(response, axis, reading.engine);
   return {
     state: "ok",
@@ -265,28 +278,38 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
     tiles: HISTORY_TILES.map((spec) => tileOf(spec, axis, response, scale)),
     finding: gridReadingLine(response, axis),
     chartLabel: `${METRIC_LABELS[reading.metric]} for ${engineName(reading.engine)} across rollup buckets`,
-    doctrine: [...HISTORY_DOCTRINE, ...response.notes],
+    marks: marksFor(buildMetricSeries(axis, response, reading.metric).gapKinds),
+    doctrine: [...HISTORY_DOCTRINE, describeStride(response.step_seconds), ...response.notes],
   };
 }
 
 // ---------------------------------------------------------------------------
-// The chart's two hole marks and their words — the key beside the finding line
-// maps each glyph the plot draws to its meaning. The six method notes stay in
-// the drawer (R3); this is the one thing no other element on the page states.
+// The chart's hole marks and their words — the key beside the finding line
+// maps each glyph the plot draws to its meaning. The method notes stay in the
+// drawer; this is the one thing no other element on the page states. A key
+// explains marks that are ON the chart: a window (of the selected metric) with
+// no hole carries no key.
 // ---------------------------------------------------------------------------
 
 export interface HistoryMark {
-  readonly mark: "absent" | "withheld";
+  readonly mark: "absent" | "withheld" | "unreadable";
   readonly label: string;
 }
 
+/** Every mark the plot can draw for a hole, in the key's order. An absent hour is one no complete batch was OBSERVED in. */
 export const HISTORY_MARKS: readonly HistoryMark[] = [
-  { mark: "absent", label: "no complete batch this hour" },
+  { mark: "absent", label: "no complete batch was observed" },
   { mark: "withheld", label: "batch present, figures withheld" },
+  { mark: "unreadable", label: "figure unreadable" },
 ];
 
+/** The key for one drawn series: the marks whose gap kind occurs in it, in the key's order. */
+export function marksFor(gapKinds: readonly (GapKind | null)[]): readonly HistoryMark[] {
+  return HISTORY_MARKS.filter((mark) => gapKinds.includes(mark.mark));
+}
+
 // ---------------------------------------------------------------------------
-// The bucket record (plan R5: a card, not a list). Every sentence the record
+// The bucket record: a card, not a list. Every sentence the record
 // prints is decided here; HistoryPoint prints it. Provenance on detail, not
 // buried in a tooltip: the bucket's as-of, the engine's balances watermark at
 // capture time, the refusal posture, the exact totals (null renders as an em
@@ -302,8 +325,13 @@ export interface RecordRow {
   readonly label: string;
   /** The row's leading text. */
   readonly value: string;
-  /** The dim clause after the value, carrying its own leading separator; null when the value stands alone. */
+  /** The clause after the value, carrying its own leading separator; null when the value stands alone. */
   readonly note: string | null;
+  /**
+   * What the clause IS: a caption (provenance in parentheses — the dim ink) or a state (why a figure is missing,
+   * withheld or unreadable — never the caption ink, which is reserved for ornament).
+   */
+  readonly noteTone: "caption" | "state";
   /** refused: the withheld state word (a pill, the wire code as its title); crit: a biting reorg disclosure. */
   readonly tone: "neutral" | "crit" | "refused";
   /** The value is an exact figure or identifier, set in mono. */
@@ -372,13 +400,15 @@ export interface PointRecord {
 export const HISTORY_RECORD_TITLE = "Bucket record";
 
 export const HISTORY_ABSENT_NOTE =
-  "The rollup captured nothing for this hour, because no complete risk batch existed to observe. Nobody refused it. An absent bucket is a hole in the record, stated by name: nothing is interpolated across it, and it never renders as zero.";
+  "The rollup wrote no row for this hour: no complete risk batch was observed in it. Either none existed when the rollup looked, or the rollup did not look or could not write — the record cannot tell these apart. Nobody refused it. An absent bucket is a hole in the record, stated by name: nothing is interpolated across it, and it never renders as zero.";
 
 export const HISTORY_PROVENANCE =
   "provenance: this point was captured from the newest COMPLETE risk batch in its bucket (the observatory_points rollup law) and survives batch retention. rate values are the wire's exact decimal strings, rendered verbatim.";
 
 /** The clauses after a value, each carrying the separator it follows the value with. */
 const NULL_TOTAL_CLAUSE = ", null because the book was withheld and never zero";
+const UNSTATED_TOTAL_CLAUSE = ", not stated for this hour and never zero";
+const UNREADABLE_TOTAL_CLAUSE = `, ${UNREADABLE}: the wire's value is not an exact decimal, and it is never shown as zero`;
 const WITHHELD_STATE_CLAUSE = "the engine's whole book was withheld at capture time";
 const WATERMARK_CLAUSE = " (the engine's balances watermark at capture, never a chain head observed later)";
 const BATCH_CLAUSE = " (the COMPLETE batch this bucket observed; the batch itself may since have been pruned by retention)";
@@ -396,6 +426,7 @@ const plain = (key: string, label: string, value: string, note: string | null = 
   label,
   value,
   note,
+  noteTone: "caption",
   tone: "neutral",
   mono: false,
   testId: null,
@@ -410,8 +441,15 @@ const plain = (key: string, label: string, value: string, note: string | null = 
  * guarded reads.
  */
 function sweepRowOf(point: ObservatorySeriesPoint): RecordRow {
-  const base = { key: "sweep", label: "sweep stamp (the count's collateral clock)", tone: "neutral" as const, testId: "history-point-sweep" };
-  if (!point.sweep_recorded) return { ...base, value: EM_DASH, note: SWEEP_UNRECORDED_CLAUSE, mono: false };
+  const base = {
+    key: "sweep",
+    label: "sweep stamp (the count's collateral clock)",
+    noteTone: "caption" as const,
+    tone: "neutral" as const,
+    testId: "history-point-sweep",
+  };
+  // A missing stamp is a disclosure about the record's state, not a caption.
+  if (!point.sweep_recorded) return { ...base, value: EM_DASH, note: SWEEP_UNRECORDED_CLAUSE, noteTone: "state", mono: false };
   if (point.sweep === null) return { ...base, value: "none", note: SWEEP_NONE_CLAUSE, mono: false };
   const s = point.sweep;
   const value =
@@ -472,8 +510,21 @@ export function pointRecord(entry: BucketEntry, response: ObservatorySeriesRespo
     };
   }
   // The four totals print through the one chokepoint the chart's labels use: grouped money at the engine's own
-  // scale, grouped counts after the population guard, an em dash for a null — never 0.
+  // scale, grouped counts after the population guard, an em dash for a null or an unreadable figure — never 0.
   const total = (metric: BucketMetric): string => displayMetric(point, metric, response.usd_decimals);
+  // A dashed money total says WHY, and the true why: the book was withheld, the hour did not state the figure, or
+  // the figure fails its wire guard.
+  const money = (key: string, metric: "debt_usd" | "collateral_usd"): RecordRow => {
+    const stated = metric === "debt_usd" ? point.debt_usd : point.collateral_usd;
+    const note = metricUnreadable(point, metric)
+      ? UNREADABLE_TOTAL_CLAUSE
+      : stated !== null
+        ? null
+        : point.refused
+          ? NULL_TOTAL_CLAUSE
+          : UNSTATED_TOTAL_CLAUSE;
+    return { ...plain(key, METRIC_LABELS[metric], total(metric), note), noteTone: note === null ? "caption" : "state", mono: true };
+  };
 
   const maxEpochAtCompute = readWirePopulation(point.max_epoch_at_compute, "max_epoch_at_compute");
   const ackedEpoch = readWirePopulation(point.acked_epoch, "acked_epoch");
@@ -486,9 +537,10 @@ export function pointRecord(entry: BucketEntry, response: ObservatorySeriesRespo
     key: "reorg",
     label: "reorg posture at compute",
     value: unacked
-      ? `${String(maxEpochAtCompute - ackedEpoch)} unacked epoch(s) · acked ${String(ackedEpoch)} of ${String(maxEpochAtCompute)}`
+      ? `${plural(maxEpochAtCompute - ackedEpoch, "unacked epoch")} · acked ${String(ackedEpoch)} of ${String(maxEpochAtCompute)}`
       : "none unacked",
     note: REORG_CLAUSE,
+    noteTone: "caption",
     tone: unacked ? "crit" : "neutral",
     mono: false,
     testId: "history-point-epochs",
@@ -496,13 +548,14 @@ export function pointRecord(entry: BucketEntry, response: ObservatorySeriesRespo
   const sweepRow = sweepRowOf(point);
   const code = point.refusal_code ?? "unnamed";
   const stateRow: RecordRow = point.refused
-    ? { key: "state", label: "state", value: "withheld", note: ` · ${code} · ${WITHHELD_STATE_CLAUSE}`, tone: "refused", mono: false, testId: null }
+    ? // The refusal code and its clause are the row's STATE, in the state ink — never the caption's.
+      { key: "state", label: "state", value: "withheld", note: ` · ${code} · ${WITHHELD_STATE_CLAUSE}`, noteTone: "state", tone: "refused", mono: false, testId: null }
     : plain("state", "state", "captured");
 
   const answer: RecordRow[] = [
     stateRow,
-    { ...plain("debt", "debt (usd)", total("debt_usd"), point.debt_usd === null ? NULL_TOTAL_CLAUSE : null), mono: true },
-    { ...plain("collateral", "collateral (usd)", total("collateral_usd"), point.collateral_usd === null ? NULL_TOTAL_CLAUSE : null), mono: true },
+    money("debt", "debt_usd"),
+    money("collateral", "collateral_usd"),
     plain("accounts", "accounts", total("accounts")),
     plain("refused-rows", "refused position rows", groupInt(readWirePopulation(point.refused_positions, "refused_positions"))),
     plain("liquidatable", "liquidatable positions", total("liquidatable_positions")),
@@ -527,7 +580,7 @@ export function pointRecord(entry: BucketEntry, response: ObservatorySeriesRespo
     absentNote: null,
     refusalCode: point.refused ? code : null,
     answer,
-    forensicSummary: `${String(forensicRowCount)} provenance row(s)${ratesSuffix}`,
+    forensicSummary: `${plural(forensicRowCount, "provenance row")}${ratesSuffix}`,
     forensic,
     rates,
     ratesEmpty:

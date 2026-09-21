@@ -1,6 +1,10 @@
 // web/tests/unit/prose.spec.ts
 import { expect, test } from "@playwright/test";
-import { groupInt, joinAnd } from "../../lib/prose";
+import { FEED_ENGINES } from "../../lib/feed-data";
+import { engineName } from "../../lib/inspector-headline";
+import { CASH, LEGACY } from "../../lib/inspector-position";
+import { OBSERVATORY_ENGINES } from "../../lib/observatory-data";
+import { engineInProse, groupInt, joinAnd, plural } from "../../lib/prose";
 
 test("joinAnd: one name stands alone, two take 'and', three take a comma and 'and', none is empty", () => {
   expect(joinAnd(["Cash"])).toBe("Cash");
@@ -16,4 +20,31 @@ test("groupInt: en-US grouping for a number and a bigint; nothing under a thousa
   expect(groupInt(29)).toBe("29");
   expect(groupInt(0)).toBe("0");
   expect(groupInt(1234567n)).toBe("1,234,567");
+});
+
+test("plural: a grouped count with its noun, singular exactly at one — zero and every other count take the s; never '(s)'", () => {
+  expect(plural(1, "liquidation")).toBe("1 liquidation");
+  expect(plural(0, "liquidation")).toBe("0 liquidations");
+  expect(plural(2, "account")).toBe("2 accounts");
+  expect(plural(18251, "chain action")).toBe("18,251 chain actions");
+  expect(plural(1000, "hour")).toBe("1,000 hours");
+  for (const n of [0, 1, 2, 1200]) expect(plural(n, "provenance row")).not.toContain("(s)");
+});
+
+test("engineInProse: ONE phrasing for an engine inside a sentence — Cash by name, the legacy market with its article — welded to the app's engine constants; an engine the product does not name is never one of the two", () => {
+  expect(engineInProse(CASH)).toBe("Cash");
+  expect(engineInProse(LEGACY)).toBe("the legacy Aave v3 market");
+  // The ids are typed here as literals (this module cannot import its own importers): weld them to every list that owns them.
+  expect(engineInProse("debt_manager")).toBe(engineInProse(CASH));
+  expect(engineInProse("aave_v3_etherfi")).toBe(engineInProse(LEGACY));
+  for (const engine of [...FEED_ENGINES, ...OBSERVATORY_ENGINES]) {
+    expect([CASH, LEGACY]).toContain(engine);
+    // Every engine the pages serve has a prose name that is not its wire id, and reads inside a sentence.
+    expect(engineInProse(engine)).not.toBe(engine);
+    expect(`on ${engineInProse(engine)}'s chain`).not.toMatch(/\(legacy\)|_/);
+  }
+  // The label form stays the label's: a sentence never wears the parenthesis.
+  expect(engineName(LEGACY)).toBe("Aave v3 market (legacy)");
+  expect(engineInProse(LEGACY)).not.toContain("(");
+  expect(engineInProse("some_new_engine")).toBe("some_new_engine");
 });

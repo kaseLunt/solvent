@@ -1,5 +1,5 @@
 // web/tests/e2e/activity.spec.ts
-// The Activity page-test contract (spec 2026-09-15 §7; plan 2026-09-16 R8).
+// The Activity page-test contract.
 // MOCKED API via route interception: the primary state is the demo feed page
 // (tests/fixtures/demo, 50 cross-engine rows newest first, 3 liquidations, 2
 // untimed rows in the disclosed tail, a cursor behind it) with the committed
@@ -17,7 +17,10 @@
 // view pinning the type; since-block impossible with no single engine (short
 // form, the sentence in its title), real with one, removed with a notice when
 // the engine changes, and no cursor ever crossing a mode; a 400 refusal named
-// under the dashed tone with the service's own words and an honest restart;
+// under the dashed tone with the service's own words said ONCE (the dek), an
+// honest restart and no "Load more" — with rows loaded and with none; a
+// liquidation's extract with the wire's note as page text, dimming with its
+// row in the untimed tail;
 // load more appending and the tiles counting; degraded envelopes and the
 // empty filter as real answers; amount units named or raw, never a dollar;
 // the live strip as its own instrument, one plain line naming no roadmap;
@@ -232,6 +235,14 @@ test("the ledger view pins the type to liquidation: the request says so, three r
   await expect(extracts.nth(1)).toContainText("bonus realized — / configured —");
   await expect(extracts.nth(2)).toContainText("bonus realized — / configured —");
   await expect(extracts.nth(1)).not.toContainText("configured 0");
+  // The wire's note is the one sentence that says what those dashes mean: page text under each extract, not a hover.
+  const notes = page.getByTestId("activity-liquidation-note");
+  await expect(notes).toHaveCount(3);
+  for (const [i, event] of LEDGER_PAGE.events.entries()) {
+    await expect(notes.nth(i)).toBeVisible();
+    await expect(notes.nth(i)).toHaveText(event.liquidation?.note ?? "NEVER");
+    await expect(extracts.nth(i)).not.toHaveAttribute("title", /.+/);
+  }
   const ledgerSentence = takeawayText(LEDGER_PAGE.events, "cross-engine", false, asServed(LEDGER_PAGE.served_at, { ledger: true }));
   expect(ledgerSentence).toBe(`3 liquidations loaded, the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`);
   await expect(headline(page)).toHaveText(ledgerSentence);
@@ -266,10 +277,55 @@ test("all-actions view: an UNESTABLISHED extract is visible on cold load — the
   await expect(extract).toBeVisible();
   await expect(extract).toContainText("realized —");
   await expect(extract).toContainText("configured 500 bps");
+  // What the dash means is said where the dash is: the wire's own note, visible with no hover (a title is out of
+  // reach of a keyboard and of a touch screen).
+  await expect(extract.getByTestId("activity-liquidation-note")).toBeVisible();
+  await expect(extract).toContainText("never estimated");
+  await expect(extract).toContainText(FEED_CROSS_PAGE_1.events[0]?.liquidation?.note ?? "NEVER");
+  await expect(extract).not.toHaveAttribute("title", /.+/);
   await expect(extract.getByTestId("activity-liquidator")).toHaveAttribute("href", /^\/inspector\/0x/);
   // The extract sits inside its own row, beneath the crit pill.
   await expect(rows(page).first().locator('[data-tone="crit"]')).toHaveText("liquidation");
   await expect(rows(page).first().getByTestId("activity-liquidation")).toBeVisible();
+});
+
+test("a liquidation in the untimed tail dims WITH its row: the extract, its figures and its note take the row's dim ink — a timed row's extract keeps its own", async ({ page }) => {
+  await muteStream(page);
+  const liquidation = FEED_CROSS_PAGE_1.events[0];
+  if (liquidation === undefined || liquidation.liquidation === null) throw new Error("fixture invariant: the cross page opens on its liquidation");
+  // The same liquidation twice: once with its block time, once without — the second is the untimed tail.
+  const page1 = {
+    ...FEED_CROSS_PAGE_1,
+    events: [liquidation, { ...liquidation, block_time: null, log_index: liquidation.log_index + 1 }],
+    next_cursor: null,
+  };
+  await mockEvents(page, (params, route) => fulfillJson(route, page1));
+  await page.goto("/feed");
+  await expect(rows(page)).toHaveCount(2);
+  await expect(page.locator('[data-testid^="activity-row-"][class*="dim"]')).toHaveCount(1);
+  const inks = (row: number) =>
+    rows(page)
+      .nth(row)
+      .evaluate((tr) => {
+        const colour = (el: Element | null): string => (el === null ? "missing" : getComputedStyle(el).color);
+        const extract = tr.querySelector('[data-testid="activity-liquidation"]');
+        return {
+          cell: colour(extract?.closest("td") ?? null),
+          extract: colour(extract),
+          figure: colour(extract?.querySelector("b") ?? null),
+          note: colour(extract?.querySelector('[data-testid="activity-liquidation-note"]') ?? null),
+        };
+      });
+  const timed = await inks(0);
+  const tail = await inks(1);
+  // In the tail everything the extract prints is the dim cell's ink.
+  expect(tail.extract).toBe(tail.cell);
+  expect(tail.figure).toBe(tail.cell);
+  expect(tail.note).toBe(tail.cell);
+  // A timed row's extract is NOT the cell's ink (secondary prose, full-ink figures), so the pin above can fail.
+  expect(timed.cell).not.toBe(tail.cell);
+  expect(timed.figure).not.toBe(tail.figure);
+  expect(timed.extract).not.toBe(tail.extract);
 });
 
 test("since-block: a stated impossibility with no single engine — short form, the sentence in its title — a real numeric control with one (Enter applies), removed with a notice when the engine changes; a cursor never crosses modes and the bound never crosses chains", async ({ page }) => {
@@ -336,7 +392,7 @@ test("since-block: a stated impossibility with no single engine — short form, 
   for (const params of requests.filter((candidate) => candidate.get("engine") === null)) expect(params.get("since_block")).toBeNull();
 });
 
-test("a refused cursor (400): the headline names the refusal under the dashed tone and counts the loaded rows as loaded, the dek gives the envelope's own words; served rows survive; restart from page one clears it", async ({ page }) => {
+test("a refused cursor (400): the headline names the refusal under the dashed tone and counts the loaded rows as loaded, the dek gives the envelope's own words — once; the strip names the refusal and restarts; no 'Load more' re-sends the refused cursor; served rows survive; restart from page one clears it", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, (params, route) =>
     params.get("cursor") === null ? fulfillJson(route, DEMO_FEED_PAGE_1) : fulfillJson(route, FEED_ERROR_BAD_CURSOR, 400),
@@ -348,7 +404,14 @@ test("a refused cursor (400): the headline names the refusal under the dashed to
   const refusal = page.getByTestId("activity-refusal");
   await expect(refusal).toBeVisible();
   await expect(refusal).toContainText("PAGE REFUSED · bad_request");
-  await expect(refusal).toContainText("not interchangeable");
+  // The service's words are the dek's, said once: the strip names the refusal and carries the restart, no more.
+  await expect(refusal).not.toContainText("not interchangeable");
+  await expect(refusal.getByTestId("activity-restart")).toBeVisible();
+  await expect(page.locator("main").getByText("not interchangeable")).toHaveCount(1);
+  // The refused cursor is never offered again: the foot offers nothing until the list restarts.
+  await expect(page.getByTestId("activity-load-more")).toHaveCount(0);
+  await expect(page.getByTestId("activity-end")).toHaveCount(0);
+  await expect(page.getByTestId("activity-foot")).toHaveAttribute("data-foot", "none");
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "refused");
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
   await expect(headline(page)).toHaveText("The next page was refused, after 50 chain actions loaded.");
@@ -362,6 +425,45 @@ test("a refused cursor (400): the headline names the refusal under the dashed to
   await expect(page.getByTestId("activity-refusal")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(50);
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("activity-load-more")).toBeVisible();
+});
+
+test("a refusal with NOTHING loaded: the service's words are said once, no 'Load more' stands beside the restart, the tiles are dashes — and the restart is the way forward", async ({ page }) => {
+  await muteStream(page);
+  let refuse = true;
+  const asked: URLSearchParams[] = [];
+  await mockEvents(page, (params, route) => (refuse ? fulfillJson(route, FEED_ERROR_BAD_CURSOR, 400) : demoWalk(params, route)), asked);
+  await page.goto("/feed");
+
+  await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "refused");
+  await expect(rows(page)).toHaveCount(0);
+  await expect(headline(page)).toHaveText("The service refused this page.");
+  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
+  // Once: the dek carries the envelope's own words; the strip, the table and the tiles name the state, not the words again.
+  await expect(page.getByTestId("activity-verdict-dek")).toContainText("not interchangeable");
+  await expect(page.getByTestId("activity-verdict-dek")).toContainText("Restart the list below.");
+  await expect(page.locator("main").getByText("not interchangeable")).toHaveCount(1);
+  const refusal = page.getByTestId("activity-refusal");
+  await expect(refusal).toContainText("PAGE REFUSED · bad_request");
+  await expect(refusal).not.toContainText("not interchangeable");
+  await expect(page.getByTestId("activity-table")).toContainText("page refused · bad_request: restart above");
+  // One way forward, one button: the restart. Nothing loaded means there is no "more" to load.
+  await expect(page.getByTestId("activity-restart")).toBeVisible();
+  await expect(page.getByTestId("activity-load-more")).toHaveCount(0);
+  await expect(page.getByTestId("activity-end")).toHaveCount(0);
+  // Nothing loaded is a dash, never a zero.
+  await expect(page.getByTestId("activity-kpi-rows")).toContainText("—");
+  await expect(page.getByTestId("activity-kpi-rows")).toContainText("page refused");
+  await expect(page.getByTestId("activity-kpi-rows")).not.toContainText("0");
+
+  refuse = false;
+  await page.getByTestId("activity-restart").click();
+  await expect(rows(page)).toHaveCount(50);
+  await expect(page.getByTestId("activity-refusal")).toHaveCount(0);
+  await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("activity-load-more")).toBeVisible();
+  // The restart asked for page one: no cursor was ever sent.
+  for (const params of asked) expect(params.get("cursor")).toBeNull();
 });
 
 test("load more appends the cursor page: the rows tile counts, the tail grows, the end is stated, the headline says these are every action matching the filter", async ({ page }) => {
@@ -588,7 +690,7 @@ test("before the first page answers NOTHING is counted: the headline names the l
   await expect(headline(page)).toContainText("3 liquidations among the 50 chain actions loaded,");
 });
 
-test("the doctrine lives in the drawer, verbatim: the intro, the list's name, the method line, the forensics note, the tail note, the order's full sentence, the since-block law and the live strip's law; the intro's opening is not page copy; Escape closes it and the button regains focus", async ({ page }) => {
+test("the doctrine lives in the drawer, verbatim — sentences only: the intro, the method line, the forensics note, the tail note, the order's full sentence, the since-block law and the live strip's law; the list's name is the list head's, not a paragraph; the intro's opening is not page copy; Escape closes it and the button regains focus", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
@@ -603,7 +705,6 @@ test("the doctrine lives in the drawer, verbatim: the intro, the list's name, th
   const body = page.getByTestId("activity-drawer-body");
   await expect(body.locator("p")).toHaveText([
     ACTIVITY_INTRO,
-    ACTIVITY_LIST_TITLE,
     ACTIVITY_METHOD,
     ACTIVITY_FORENSICS,
     ACTIVITY_TAIL_NOTE,

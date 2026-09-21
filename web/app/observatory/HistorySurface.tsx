@@ -151,7 +151,7 @@ function EngineHistory({
             finding={
               <div className={styles.findingRow}>
                 <span data-testid="history-chart-finding">{view.finding}</span>
-                <HistoryMarks />
+                <HistoryMarks marks={view.marks} />
               </div>
             }
           >

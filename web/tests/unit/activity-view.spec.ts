@@ -57,7 +57,6 @@ const base = (over: Partial<ActivityInput> = {}): ActivityInput => ({
   rows: ROWS,
   mode: "cross-engine",
   hasMore: DEMO_FEED_PAGE_1.next_cursor !== null,
-  loading: false,
   engine: null,
   view: "all",
   types: [],
@@ -330,7 +329,7 @@ test("tiles: rows loaded with the cursor's word, liquidations among the loaded r
   expect(deriveActivityView(base({ rows: big })).headline.emphasis).toBe("72 liquidations among the 1,200 chain actions loaded,");
 });
 
-test("a refused page: the dashed tone, emphasis only — the state named, the loaded rows counted as loaded; the service's own words in the dek with its code named once; the list's restart word", () => {
+test("a refused page: the dashed tone, emphasis only — the state named, the loaded rows counted as loaded; the service's own words in the dek with the code it stated named once, and never a code it did not state; the list's restart word", () => {
   const message = "400 bad_request: events page: cursor was minted for a engine-scoped page but this request is cross-engine-mode (http://x/v1/events?cursor=c)";
   const v = deriveActivityView(base({ refusal: { status: 400, code: "bad_request", message } }));
   expect(v.state).toBe("refused");
@@ -342,21 +341,58 @@ test("a refused page: the dashed tone, emphasis only — the state named, the lo
   });
   // The service's words carry their own code: it is not said twice.
   expect(v.headline.dek.match(/bad_request/g)).toHaveLength(1);
-  expect(v.emptyText).toBe("page refused · bad_request: restart below");
+  // The restart is the refusal strip's, which stands ABOVE the table these words print in.
+  expect(v.emptyText).toBe("page refused · bad_request: restart above");
+  expect(v.refusalHead).toBe("PAGE REFUSED · bad_request");
   // Served rows survive a refused continuation: the tiles keep counting them.
   expect(v.rows).toHaveLength(50);
   expect(v.tiles.rows).toEqual({ value: "50", sub: "more available", tone: "neutral" });
   const coded = deriveActivityView(base({ rows: [], refusal: { status: 400, code: null, message: "refused" } }));
   expect(coded.headline.emphasis).toBe("The service refused this page.");
-  // Words that carry no code: the code is named after them, never dropped.
-  expect(coded.headline.dek).toBe("Refused. (bad_request). Restart the list below.");
-  expect(coded.emptyText).toBe("page refused · bad_request: restart below");
+  // A refusal that stated NO code is given none — in the dek, the table's words and the strip's head. A code the
+  // service did not state is never printed as its code.
+  expect(coded.headline.dek).toBe("Refused. Restart the list below.");
+  expect(coded.emptyText).toBe("page refused: restart above");
+  expect(coded.refusalHead).toBe("PAGE REFUSED");
+  for (const blank of [null, "", "  "]) {
+    const arm = deriveActivityView(base({ rows: [], refusal: { status: 400, code: blank, message: "refused" } }));
+    expect(`${arm.headline.dek} ${arm.emptyText} ${arm.refusalHead ?? ""}`).not.toContain("bad_request");
+  }
+  // Words that carry no code, under a code the service DID state: the code is named after them, never dropped.
+  const named = deriveActivityView(base({ rows: [], refusal: { status: 400, code: "bad_cursor", message: "refused" } }));
+  expect(named.headline.dek).toBe("Refused. (bad_cursor). Restart the list below.");
+  expect(named.emptyText).toBe("page refused · bad_cursor: restart above");
+  expect(named.refusalHead).toBe("PAGE REFUSED · bad_cursor");
   // Nothing loaded behind a refusal is a dash, never a zero — in the tiles and in the headline.
   expect(coded.tiles.rows).toEqual({ value: EM_DASH, sub: "page refused", tone: "refused" });
   expect(coded.tiles.liquidations).toEqual({ value: EM_DASH, sub: "page refused", tone: "refused" });
   expect(h1(base({ rows: [], refusal: { status: 400, code: null, message: "refused" } }))).not.toMatch(/\d/);
   const one = deriveActivityView(base({ rows: ROWS.slice(0, 1), refusal: { status: 400, code: "bad_request", message: "no" } }));
   expect(one.headline.emphasis).toBe("The next page was refused, after 1 chain action loaded.");
+});
+
+test("a refused walk offers no next page — with nothing loaded or with rows loaded: its cursor was refused, and the restart is the one way forward; the service's words are the dek's alone", () => {
+  const message = "400 bad_request: events page: cursor was minted for a engine-scoped page but this request is cross-engine-mode (http://x/v1/events?limit=50)";
+  const refusal = { status: 400, code: "bad_request", message };
+  // The cold load the service refused: the cursor is still open (hasMore), and the foot still offers nothing.
+  const cold = deriveActivityView(base({ rows: [], hasMore: true, envelope: null, refusal }));
+  expect(cold.state).toBe("refused");
+  expect(cold.foot).toBe("none");
+  const later = deriveActivityView(base({ hasMore: true, refusal }));
+  expect(later.foot).toBe("none");
+  // Every other state keeps the cursor's own answer.
+  expect(deriveActivityView(base()).foot).toBe("more");
+  expect(deriveActivityView(base({ hasMore: false })).foot).toBe("end");
+  expect(deriveActivityView(base({ rows: [], hasMore: true, envelope: null })).foot).toBe("more");
+  expect(deriveActivityView(base({ rows: [], hasMore: false })).foot).toBe("end");
+  expect(deriveActivityView(base({ rows: [], error: "boom" })).foot).toBe("more");
+  expect(deriveActivityView(base()).refusalHead).toBeNull();
+  expect(deriveActivityView(base({ rows: [], error: "boom" })).refusalHead).toBeNull();
+  // Said once: the service's words are in the dek and in no other string the view hands the page.
+  const elsewhere = [cold.kicker, cold.headline.emphasis, cold.headline.rest, cold.emptyText, cold.refusalHead ?? "", cold.listQualifier, cold.tiles.rows.sub, cold.tiles.liquidations.sub, ...cold.chips.map((c) => c.value)];
+  expect(cold.headline.dek).toContain("cursor was minted for a engine-scoped page");
+  for (const words of elsewhere) expect(words).not.toContain("cursor was minted");
+  expect(cold.headline.dek.match(/cursor was minted/g)).toHaveLength(1);
 });
 
 test("a failed fetch: the dashed tone, emphasis only, the failure's own message as the dek; rows already loaded are counted as loaded; a refusal outranks an error", () => {
@@ -414,8 +450,10 @@ test("loading: no rows yet with a cursor ahead — NOTHING is counted: the headl
     expect(arm.headline.emphasis).toBe("Loading recorded chain actions…");
     expect(arm.chips.some((c) => c.label === "Newest")).toBe(false);
   }
-  // Rows already shown while the next page loads: the page has answered.
-  expect(deriveActivityView(base({ loading: true })).state).toBe("ok");
+  // Rows already shown: the page has answered. The state is decided by the rows, the cursor and the last failure
+  // alone — whether a fetch is in flight is the surface's own (aria-busy, the button's word) and is not an input.
+  expect(deriveActivityView(base()).state).toBe("ok");
+  expect(Object.keys(base())).not.toContain("loading");
 });
 
 test("the list's head: its own name — never another page's — with the order in short form and the envelope's page size; the tail's notice only when a tail is loaded; the full order sentence, the since-block law and the live strip's law are the drawer's", () => {
@@ -453,9 +491,11 @@ test("the list's head: its own name — never another page's — with the order 
   // One engine chosen: a null time is a per-row fallback, never a tail.
   expect(deriveActivityView(base({ rows: FEED_ENGINE_AAVE_PAGE_1.events, engine: "aave_v3_etherfi", mode: "engine-scoped" })).tailNote).toBeNull();
 
+  // Sentences only: the list's title is the list head's and is never a drawer paragraph.
+  expect(cross.doctrine).not.toContain(ACTIVITY_LIST_TITLE);
+  for (const paragraph of cross.doctrine) expect(paragraph).toMatch(/[.…]$/);
   expect(cross.doctrine).toEqual([
     ACTIVITY_INTRO,
-    ACTIVITY_LIST_TITLE,
     ACTIVITY_METHOD,
     ACTIVITY_FORENSICS,
     ACTIVITY_TAIL_NOTE,
@@ -463,8 +503,12 @@ test("the list's head: its own name — never another page's — with the order 
     ACTIVITY_SINCE_NOTE,
     ACTIVITY_LIVE_NOTE,
   ]);
-  expect(deriveActivityView(base({ engine: "debt_manager", mode: "engine-scoped" })).doctrine[5]).toBe(
-    "Ordered by block height (block, tx, log, seq) DESC, because heights are comparable within debt_manager's own chain.",
+  // The engine in a sentence is the product's name for it — one phrasing (lib/prose) — never the wire's id.
+  expect(deriveActivityView(base({ engine: "debt_manager", mode: "engine-scoped" })).doctrine[4]).toBe(
+    "Ordered by block height (block, tx, log, seq) DESC, because heights are comparable within Cash's own chain.",
+  );
+  expect(deriveActivityView(base({ engine: "aave_v3_etherfi", mode: "engine-scoped" })).doctrine[4]).toBe(
+    "Ordered by block height (block, tx, log, seq) DESC, because heights are comparable within the legacy Aave v3 market's own chain.",
   );
   expect(ACTIVITY_INTRO).toBe(
     "Chain actions as recorded: borrows, repays, supplies, withdrawals, liquidations. The live strip shows the stream's posture now; the list below pages through durable history. The two never blend.",
@@ -578,7 +622,7 @@ test("no public string on this page names the roadmap: not 'P4', not an 'outbox'
   const printed = [
     ...inputs.flatMap((input) => {
       const v = deriveActivityView(input);
-      return [v.kicker, v.headline.emphasis, v.headline.rest, v.headline.dek, v.emptyText, v.listQualifier, v.tailNote ?? "", v.drift ?? "", ...v.doctrine, ...v.chips.map((c) => `${c.label} ${c.value}`), v.tiles.rows.sub, v.tiles.liquidations.sub];
+      return [v.kicker, v.headline.emphasis, v.headline.rest, v.headline.dek, v.emptyText, v.refusalHead ?? "", v.listQualifier, v.tailNote ?? "", v.drift ?? "", ...v.doctrine, ...v.chips.map((c) => `${c.label} ${c.value}`), v.tiles.rows.sub, v.tiles.liquidations.sub];
     }),
     ...strips.flatMap((input) => {
       const v = deriveLiveStrip(input);
