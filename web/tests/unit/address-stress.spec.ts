@@ -3,7 +3,18 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
-import { horizonLabel, rowVerdict, sideRoomWords, stressReading, stressVerdictWords, UNREADABLE_HORIZON, type StressHorizon, type StressRow } from "../../lib/address-stress";
+import {
+  horizonLabel,
+  projectionWords,
+  rowVerdict,
+  scaleAbsenceWords,
+  sideRoomWords,
+  stressReading,
+  stressVerdictWords,
+  UNREADABLE_HORIZON,
+  type StressHorizon,
+  type StressRow,
+} from "../../lib/address-stress";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const load = <T,>(name: string): T => JSON.parse(readFileSync(path.join(here, "..", "fixtures", name), "utf8")) as T;
@@ -274,6 +285,32 @@ test("sideRoomWords: the room cell's one register on both pages — a negative r
   // A figure prints at no other scale than its own.
   expect(sideRoomWords(side, null)).toBe("unreadable scale");
   expect(sideRoomWords(null, null)).toBe("not computed");
+});
+
+test("a figure with no scale to print at names the TRUE cause: an unreadable scale only when a position's scale failed the guard — never when the lookup has no Cash position, withheld the book, or did not complete", () => {
+  const side = { debt: 4822000000n, cap: 5012500000n, room: 190500000n, verdict: "not-liquidatable" as const };
+  expect(scaleAbsenceWords("unreadable")).toBe("unreadable scale");
+  expect(scaleAbsenceWords("no-position")).toBe("no Cash position in the lookup");
+  expect(scaleAbsenceWords("withheld")).toBe("Cash book withheld in the lookup");
+  expect(scaleAbsenceWords("no-lookup")).toBe("lookup not completed");
+  // With no cause handed over, the scale's own word stands — the caller that knows more says more.
+  expect(scaleAbsenceWords(null)).toBe("unreadable scale");
+  expect(sideRoomWords(side, null, "unreadable")).toBe("unreadable scale");
+  expect(sideRoomWords(side, null, "no-position")).toBe("no Cash position in the lookup");
+  expect(sideRoomWords(side, null, "no-position")).not.toContain("scale");
+  expect(sideRoomWords(side, null, "withheld")).toBe("Cash book withheld in the lookup");
+  // The side is asked first, and a readable scale prints the figure whatever cause rides beside it.
+  expect(sideRoomWords(null, null, "no-position")).toBe("not computed");
+  expect(sideRoomWords(side, 6, "no-position")).toBe("$190.50");
+  // The projection cell keeps the same register: each horizon's interest at the position's scale, or the one true cause — never "+— interest".
+  const horizons: StressHorizon[] = [
+    { seconds: 2_592_000, extraInterest: 12_340_000n, verdict: "not-liquidatable" },
+    { seconds: 7_776_000, extraInterest: null, verdict: "not-liquidatable" },
+  ];
+  expect(projectionWords(horizons, 6)).toBe("30d: +$12.34 interest · 90d: — interest");
+  expect(projectionWords(horizons, null)).toBe("unreadable scale");
+  expect(projectionWords(horizons, null, "no-position")).toBe("no Cash position in the lookup");
+  expect(projectionWords(horizons, null, "no-position")).not.toContain("+—");
 });
 
 test("the reading carries the stress response's own batch on every arm; an id the population guard refuses names no batch", () => {

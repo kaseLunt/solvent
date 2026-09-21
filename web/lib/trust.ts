@@ -1,18 +1,24 @@
 // web/lib/trust.ts
-// The Trust checklist (spec 2026-09-15 §5.3; plan 2 ruling R5): five items,
-// each a state and a short detail. Nothing here is a verdict — it is what the
-// reader needs to decide how much to believe the verdict above it.
+// The Trust checklist (spec 2026-09-15 §5.3): five items, each a state and a
+// short detail. Nothing here is a verdict — it is what the reader needs to
+// decide how much to believe the verdict above it.
 //
-// Three laws:
+// Four laws:
 //   - every wire count that is printed or compared (price ages and budgets,
 //     sweep tallies, reconcile tallies) passes `readWirePopulation` first; a
 //     malformed value throws HERE, the same contract `lib/evidence.ts` keeps;
 //   - wire words (verdicts, provenance, refusal codes) ride `title`; the
 //     visible detail speaks plainly and names EVERY input it is about;
 //   - `ok` only when the wire affirms it: an unmeasured age, an empty weld,
-//     an empty stamp or an absent receipt is `dim`, never green.
+//     an empty stamp or an absent receipt is `dim`, never green;
+//   - an item claims only what its evidence proved. The reconcile receipt is
+//     the record of a PINNED run, finished at the instant it states, against
+//     the blocks it was pinned to — the live batch does not inherit it. So the
+//     item says what that run did, in the past tense, with the run's own date;
+//     it never says the Book, this batch or this account reconciles.
 import type { PriceInput, RefinedPosition, components } from "@solvent/client";
 import { humanAge } from "./freshness";
+import { humanUtc } from "./human-utc";
 import { CASH, symbolFor } from "./inspector-position";
 import { groupInt, joinAnd } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
@@ -39,6 +45,11 @@ export interface TrustInput {
   readonly batchId: number;
   readonly sweep: SweepStamp | null;
   readonly reconcile: ReconcileSummary | null;
+  /**
+   * The `served_at` of the evidence envelope that carried the receipt: the year the run's date is read against.
+   * Absent or null, the run's year always prints — a date is never left to a year this module could not name.
+   */
+  readonly evidenceServedAt?: string | null;
 }
 
 const plural = (count: number, noun: string): string => (count === 1 ? noun : `${noun}s`);
@@ -179,8 +190,24 @@ function provenanceItem(position: RefinedPosition): TrustItem {
   return { id: "provenance", label, detail: "provenance not recognised", state: "dim", title: otherWords.join("; ") };
 }
 
-function reconcileItem(reconcile: ReconcileSummary | null): TrustItem {
-  const label = "Book reconciles to chain";
+/** The receipt item's two labels: what the run did when every counted row matched, and the run alone when it cannot say that. */
+const RECONCILE_MATCHED = "Pinned reconcile run matched the chain";
+const RECONCILE_RUN = "Pinned reconcile run";
+
+/**
+ * When the pinned run finished, in prose — the receipt's own `finished_at`. A receipt that carries no readable instant
+ * names no date: never "null", never the serving time in its place. Text that is no well-formed UTC instant prints
+ * verbatim (`humanUtc`'s law): it is never repaired into a time the wire did not state.
+ */
+function finishedWords(reconcile: ReconcileSummary, servedAt: string | null): string | null {
+  const at: unknown = reconcile.finished_at;
+  if (typeof at !== "string" || at.trim().length === 0) return null;
+  return humanUtc(at, servedAt ?? undefined);
+}
+
+function reconcileItem(reconcile: ReconcileSummary | null, servedAt: string | null): TrustItem {
+  // Only a receipt whose every counted row matched says so; every other arm is named as the run and claims nothing.
+  const label = RECONCILE_RUN;
   if (reconcile === null) return { id: "reconcile", label, detail: "receipt unavailable", state: "dim" };
   const drift = readWirePopulation(reconcile.gated_drift, "reconcile.gated_drift");
   const exitCode = readWirePopulation(reconcile.exit_code, "reconcile.exit_code");
@@ -202,9 +229,17 @@ function reconcileItem(reconcile: ReconcileSummary | null): TrustItem {
     const drifted = compared - exact;
     return { id: "reconcile", label, detail: `${groupInt(drifted)} ${cash}${plural(drifted, "row")} drifted`, state: "warn", title };
   }
-  return { id: "reconcile", label, detail: `${groupInt(exact)}/${groupInt(compared)} ${cash}rows exact · committed receipt`, state: "ok", title };
+  const finished = finishedWords(reconcile, servedAt);
+  const detail = `${groupInt(exact)}/${groupInt(compared)} ${cash}rows${finished === null ? "" : ` · ${finished}`}`;
+  return { id: "reconcile", label: RECONCILE_MATCHED, detail, state: "ok", title };
 }
 
-export function trustChecklist({ position, batchId, sweep, reconcile }: TrustInput): TrustItem[] {
-  return [computedItem(position, batchId), pricesItem(position), sweepItem(position, sweep), provenanceItem(position), reconcileItem(reconcile)];
+export function trustChecklist({ position, batchId, sweep, reconcile, evidenceServedAt }: TrustInput): TrustItem[] {
+  return [
+    computedItem(position, batchId),
+    pricesItem(position),
+    sweepItem(position, sweep),
+    provenanceItem(position),
+    reconcileItem(reconcile, evidenceServedAt ?? null),
+  ];
 }

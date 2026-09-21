@@ -1,5 +1,5 @@
 // web/lib/inspector-headline.ts
-// The Inspector's verdict sentences (spec 2026-09-15 §3.5, plan 2 ruling R6).
+// The Inspector's verdict sentences (spec 2026-09-15 §3.5).
 // One source per state; the surface renders these strings verbatim and the
 // e2e contract pins them. Money through humanUsdFull (never compacted), percents from the position.
 import { humanAge } from "./freshness";

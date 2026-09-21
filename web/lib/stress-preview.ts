@@ -75,6 +75,12 @@ export function stressPreview(waterfall: Waterfall, engine: string, coverage?: C
   // An engine withheld at the aggregate level is on no grid point: a refusal with its cause, never an absence.
   const withheld = waterfall.excluded_engines.find((e) => e.engine === engine);
   if (withheld !== undefined) return { kind: "refused", reason: plainCause(withheld.code, withheld.detail) };
+  // A waterfall served with no points is a grid nobody published: a refusal by name, for every caller. It is never
+  // read as "the engine is absent from the grid" — an engine is absent from points that exist — and it never
+  // outranks the engine's own cause above: the more specific refusal speaks first.
+  const served: unknown = waterfall.points;
+  if (!Array.isArray(served)) return { kind: "refused", reason: "waterfall.points is not a list" };
+  if (served.length === 0) return { kind: "refused", reason: "no points published" };
   const located = waterfall.points.map((p, index) => ({ index, factor: p.factor, at: p.engines.find((e) => e.engine === engine) }));
   if (located.every((p) => p.at === undefined)) return { kind: "absent" };
   // On some points but not all: the missing coverage is named, never filtered into a shorter list.

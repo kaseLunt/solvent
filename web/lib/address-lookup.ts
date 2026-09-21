@@ -4,7 +4,8 @@
 // The Inspector's data seam (spec 2026-09-15 §5.3). Every result is keyed by
 // the address it answers FOR — a result for another address is simply not
 // this page's state — and the position lookup is repaired on resume with its
-// own envelope (Wave R4/R6 laws, moved from the old surface). The surface is
+// own envelope: a resumed tab never shows an age it cannot anchor, and a
+// failed background repair never blanks a rendered position. The surface is
 // mounted with key={addr} as well; the keying here is the second lock.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AddressLookup, HistoryLookup, StressLookup } from "@solvent/client";

@@ -1,10 +1,9 @@
 import { KitTable, SectionHead, StatusPill, type KitRow } from "@/components/kit";
-import { horizonLabel, rowVerdict, sideRoomWords, stressVerdictWords, type StressRow, type StressSide } from "@/lib/address-stress";
+import { projectionWords, rowVerdict, sideRoomWords, stressVerdictWords, type StressRow, type StressSide } from "@/lib/address-stress";
 import { humanUsdFull } from "@/lib/human-price";
 import { stressBatchNote, stressEmptyText, type InspectorView } from "@/lib/inspector-view";
 import { isWireScale } from "@/lib/wireGuard";
 import styles from "../inspector.module.css";
-import { moneyFor } from "./money";
 
 const COLUMNS = [
   { key: "scenario", header: "Scenario" },
@@ -24,13 +23,14 @@ function realization(r: StressRow): string | null {
 /**
  * The committed scenarios applied to this account — the wire's own before/after sides; a rate step is a delta-only
  * projection. The lib decides the row's verdict (`rowVerdict`, the one judge the Scenarios page shares), its room
- * words, the batch note and the empty words; this file only places the rows. A room prints only from a computable
- * side — never beside an unknowable verdict — and a negative room is "over cap by", never a minus on a dollar figure.
+ * words, its projection's words, the batch note and the empty words; this file only places the rows. A room prints
+ * only from a computable side — never beside an unknowable verdict — and a negative room is "over cap by", never a
+ * minus on a dollar figure. Where no figure has a scale to print at, the cell says the view's own cause
+ * (`view.scaleAbsence`) — "unreadable scale" is never said of a lookup that holds no Cash position.
  * Before and after are the STRESS body's own sides, read for the batch it names.
  */
 export function StressTable({ view }: { view: InspectorView }) {
-  const money = moneyFor(view.decimals);
-  const room = (side: StressSide | null): string => sideRoomWords(side, view.decimals);
+  const room = (side: StressSide | null): string => sideRoomWords(side, view.decimals, view.scaleAbsence);
   const result = view.stress;
   const note = stressBatchNote(view);
   const rows: KitRow[] =
@@ -59,7 +59,7 @@ export function StressTable({ view }: { view: InspectorView }) {
               before: room(r.before),
               after:
                 r.projection !== null ? (
-                  r.projection.map((h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null ? "—" : `+${money(h.extraInterest)}`} interest`).join(" · ")
+                  projectionWords(r.projection, view.decimals, view.scaleAbsence)
                 ) : extra === null ? (
                   room(r.after)
                 ) : (

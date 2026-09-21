@@ -4,8 +4,7 @@
 // (debt_manager) positions, least room first, so the liquidatable rows arrive
 // on page one and a headline can settle before the walk ends.
 //
-// The laws this module embodies (the loadBook pattern is COPIED from
-// BookSurface, not imported — the two surfaces own their fetches separately):
+// The laws this module embodies:
 //   - an ABORTED request is a supersession, never an error: the newer request
 //     reports for itself, and neither arm of a superseded promise may land;
 //   - a failed RESUME re-fetch never blanks a rendered book (`keepOnFailure`);
@@ -22,12 +21,16 @@
 //     engine's refusal, never an empty book; a page from another engine, at
 //     another scale, or carrying a row the contract would not have produced
 //     is a named invalid response; a terminal page completes the walk only
-//     when the rows delivered equal the census the wire advertised.
+//     when the rows delivered equal the census the wire advertised;
+//   - a walk that does not complete says HOW it ended (`WalkStopKind`): before
+//     its last page, at its last page with rows that do not reconcile, or past
+//     its census — the one ending whose rows bound nothing.
 
-import { BatchSupersededError, UnavailableError, type components } from "@solvent/client";
+import { BatchSupersededError, type components } from "@solvent/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSolventClient } from "./api";
-import { censusFaultWords } from "./book-headline";
+import { censusFaultWords, type WalkStopKind } from "./book-headline";
+import { bookLoadFailure, wholeRefusal, type WholeRefusal } from "./cash-refusal";
 import { readCashPage, type CashPageReading, type CashRow } from "./cash-rows";
 import { receiptIdentity } from "./freshness";
 import { useAnchoredAgeSeconds, type LiveAgeReading } from "./live-age";
@@ -46,10 +49,7 @@ const PAGE_LIMIT = 1000;
 
 export type CashBookPhase = "loading" | "ok" | "no-batch" | "error";
 
-export interface WholeRefusal {
-  readonly code: string;
-  readonly detail: string;
-}
+export type { WholeRefusal };
 
 export interface CashBookReading {
   readonly phase: CashBookPhase;
@@ -63,6 +63,8 @@ export interface CashBookReading {
     readonly rows: readonly CashRow[];
     readonly walkComplete: boolean;
     readonly walkFailure: PositionsFailure | null;
+    /** How a walk that did not complete ended; null exactly when `walkFailure` is. */
+    readonly walkStop: WalkStopKind | null;
   };
   readonly legacy: {
     readonly engine: BookEngine | null;
@@ -85,26 +87,13 @@ interface WalkState {
   readonly rows: readonly CashRow[];
   readonly complete: boolean;
   readonly failure: PositionsFailure | null;
+  /** How the walk ended when it did not complete; null exactly when `failure` is. */
+  readonly stop: WalkStopKind | null;
   /** The positions endpoint withheld the engine's whole book on this batch. */
   readonly refused: WholeRefusal | null;
 }
 
-const WALK_IDLE: WalkState = { forBatch: null, rows: [], complete: false, failure: null, refused: null };
-
-/**
- * An engine withheld whole on this book: named in `refused_engines`, or
- * flagged on its own aggregate (a withheld engine whatever the counts say).
- */
-function wholeRefusal(book: BookResponse | null, name: string): WholeRefusal | null {
-  if (book === null) return null;
-  const listed = book.refused_engines.find((r) => r.engine === name);
-  if (listed !== undefined) return { code: listed.code, detail: listed.detail };
-  const engine = book.engines.find((e) => e.engine === name);
-  if (engine !== undefined && engine.refused) {
-    return { code: engine.refusal?.code ?? "", detail: engine.refusal?.detail ?? "" };
-  }
-  return null;
-}
+const WALK_IDLE: WalkState = { forBatch: null, rows: [], complete: false, failure: null, stop: null, refused: null };
 
 export function useCashBook(): CashBookReading {
   const [state, setState] = useState<BookState>({ phase: "loading" });
@@ -140,10 +129,7 @@ export function useCashBook(): CashBookReading {
         },
         (cause: unknown) => {
           if (controller.signal.aborted) return false;
-          const failure: BookState =
-            cause instanceof UnavailableError
-              ? { phase: "no-batch", message: cause.body.error.message, retryAfterSeconds: cause.retryAfterSeconds }
-              : { phase: "error", message: cause instanceof Error ? cause.message : String(cause) };
+          const failure: BookState = bookLoadFailure(cause);
           setState((previous) => (keepOnFailure && previous.phase === "ok" ? previous : failure));
           return false;
         },
@@ -188,11 +174,17 @@ export function useCashBook(): CashBookReading {
     // the derived reads below mask the older walk behind `forBatch`. Rows a
     // page delivered are kept even when that page ends the walk in failure:
     // they are a lower bound, and the failure beside them says so.
-    const land = (cursor: string | null, rows: readonly CashRow[], complete: boolean, failure: PositionsFailure | null): void => {
+    const land = (
+      cursor: string | null,
+      rows: readonly CashRow[],
+      complete: boolean,
+      failure: PositionsFailure | null,
+      stop: WalkStopKind | null = null,
+    ): void => {
       setWalk((previous) =>
         cursor === null
-          ? { forBatch: batchId, rows, complete, failure, refused: null }
-          : { ...previous, rows: [...previous.rows, ...rows], complete, failure },
+          ? { forBatch: batchId, rows, complete, failure, stop, refused: null }
+          : { ...previous, rows: [...previous.rows, ...rows], complete, failure, stop },
       );
     };
     const step = (cursor: string | null): void => {
@@ -213,6 +205,7 @@ export function useCashBook(): CashBookReading {
               rows: previous.forBatch === batchId ? previous.rows : [],
               complete: false,
               failure: { register: "transport", message: `the book moved to batch ${String(page.batch.id)} during the walk` },
+              stop: "before-end",
               refused: null,
             }));
             return;
@@ -234,12 +227,14 @@ export function useCashBook(): CashBookReading {
               rows: [],
               complete: false,
               failure: null,
+              stop: null,
               refused: { code: reading.code ?? "", detail: reading.detail ?? "" },
             });
             return;
           }
           if (reading.kind === "malformed") {
-            land(cursor, [], false, invalid(reading.fault));
+            // A page that could not be read is not known to be the last one: the walk stopped before it read its end.
+            land(cursor, [], false, invalid(reading.fault), "before-end");
             return;
           }
           if (advertised !== null && reading.total !== advertised) {
@@ -248,19 +243,16 @@ export function useCashBook(): CashBookReading {
               reading.rows,
               false,
               invalid(`the census changed mid-walk: ${String(advertised)} rows advertised, then ${String(reading.total)}`),
+              reading.last ? "at-end" : "before-end",
             );
             return;
           }
           advertised = reading.total;
           delivered += reading.rows.length;
-          const short = reading.last ? delivered !== reading.total : delivered > reading.total;
-          if (short) {
-            land(
-              cursor,
-              reading.rows,
-              false,
-              invalid(censusFaultWords(delivered, reading.total)),
-            );
+          // Past the census on any page; short of it only once the last page has landed.
+          const over = delivered > reading.total;
+          if (over || (reading.last && delivered !== reading.total)) {
+            land(cursor, reading.rows, false, invalid(censusFaultWords(delivered, reading.total)), over ? "over" : "at-end");
             return;
           }
           land(cursor, reading.rows, reading.last, null);
@@ -286,8 +278,8 @@ export function useCashBook(): CashBookReading {
           // this walk already landed.
           setWalk((previous) =>
             previous.forBatch === batchId
-              ? { ...previous, complete: false, failure }
-              : { forBatch: batchId, rows: [], complete: false, failure, refused: null },
+              ? { ...previous, complete: false, failure, stop: "before-end" }
+              : { forBatch: batchId, rows: [], complete: false, failure, stop: "before-end", refused: null },
           );
         },
       );
@@ -332,6 +324,7 @@ export function useCashBook(): CashBookReading {
       rows: walkForThisBook ? walk.rows : [],
       walkComplete: walkForThisBook && walk.complete,
       walkFailure: walkForThisBook ? walk.failure : null,
+      walkStop: walkForThisBook && walk.failure !== null ? walk.stop : null,
     },
     legacy: {
       engine: engineOf(LEGACY),

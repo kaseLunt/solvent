@@ -159,15 +159,44 @@ export function roomWords(room: bigint, decimals: number): string {
 }
 
 /**
+ * Why a stress figure has no scale to print at. The scale is the lookup's Cash position's own, so there are four
+ * causes and they are not one another: the position's scale failed the guard; the lookup found no Cash position;
+ * the lookup's Cash book is withheld; the lookup did not complete. Only the first is an unreadable scale.
+ */
+export type ScaleAbsence = "unreadable" | "no-position" | "withheld" | "no-lookup";
+
+const SCALE_ABSENCE_WORDS: Readonly<Record<ScaleAbsence, string>> = {
+  unreadable: UNREADABLE_SCALE,
+  "no-position": "no Cash position in the lookup",
+  withheld: "Cash book withheld in the lookup",
+  "no-lookup": "lookup not completed",
+};
+
+/** The cell's words where no figure prints for want of a scale: the true cause, or — handed none — the scale's own word. */
+export function scaleAbsenceWords(absence: ScaleAbsence | null): string {
+  return SCALE_ABSENCE_WORDS[absence ?? "unreadable"];
+}
+
+/**
  * A side's room words, the one register every room cell and tile shares on both pages: "not computed" for a
  * missing, unreadable or unknowable side — never a figure beside a refused register or an unknowable verdict; a
- * negative room "over cap by" a positive figure — never a minus on a dollar figure; the refused scale word where the
- * position's scale did not pass the guard — a figure prints at no other scale than its own.
+ * negative room "over cap by" a positive figure — never a minus on a dollar figure; and where there is no scale to
+ * print at, the cause the view states (`ScaleAbsence`) — a figure prints at no other scale than its own, and "unreadable
+ * scale" is said only of a scale that was read and refused.
  */
-export function sideRoomWords(side: StressSide | null, decimals: number | null): string {
+export function sideRoomWords(side: StressSide | null, decimals: number | null, absence: ScaleAbsence | null = null): string {
   const figures = computableSide(side);
   if (figures === null) return "not computed";
-  return decimals === null ? UNREADABLE_SCALE : roomWords(figures.room, decimals);
+  return decimals === null ? scaleAbsenceWords(absence) : roomWords(figures.room, decimals);
+}
+
+/**
+ * A projection's cell: each horizon's extra interest at the position's scale, a dash for a horizon that carries none.
+ * With no scale to print at the cell is the one true cause, said once — never "+— interest" per horizon.
+ */
+export function projectionWords(horizons: readonly StressHorizon[], decimals: number | null, absence: ScaleAbsence | null = null): string {
+  if (decimals === null) return scaleAbsenceWords(absence);
+  return horizons.map((h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null ? "—" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`).join(" · ");
 }
 
 /**

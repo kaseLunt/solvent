@@ -1,5 +1,6 @@
 import { bookHeadlineRefused, type Headline } from "./book-headline";
 import type { CashBookReading } from "./cash-book";
+import { CASH_ENGINE_MISSING } from "./cash-refusal";
 import { summarizeCash, unavailableHeadline, type CashSummary } from "./cash-summary";
 import { humanAge } from "./freshness";
 import { freshnessTier, type FreshnessTier, type TierConstants } from "./freshnessTiers";
@@ -49,14 +50,43 @@ export interface BadDebtView {
 }
 
 /**
+ * Why the Cash book's figures are absent — decided here, never in a component.
+ * Three states that are not one another: a read still in flight has not
+ * failed; a book that could not be read (or that does not list the engine)
+ * refused nothing and computed nothing; an engine that withheld its book did
+ * answer, and "not computed" is its word alone. A fetch failure is never
+ * worded as an engine's refusal.
+ */
+export interface CashAbsence {
+  readonly kind: "loading" | "unavailable" | "not-computed";
+  /** A tile's sub line. */
+  readonly word: string;
+  /** A card's one line. */
+  readonly line: string;
+}
+
+const ABSENCE_LOADING: CashAbsence = { kind: "loading", word: "loading…", line: "Loading…" };
+const ABSENCE_UNAVAILABLE: CashAbsence = { kind: "unavailable", word: "unavailable", line: "Unavailable." };
+const ABSENCE_NOT_COMPUTED: CashAbsence = { kind: "not-computed", word: "not computed", line: "Not computed." };
+
+/** The census clause for each absence: the count's place is never left to a zero. */
+const CENSUS_WORDS: Record<CashAbsence["kind"], string> = {
+  loading: "accounts loading…",
+  unavailable: "accounts unavailable",
+  "not-computed": "accounts withheld",
+};
+
+/**
  * Everything the Book and the Overview print about the Cash book, derived
  * ONCE from a reading (spec 2026-09-15 §5.1, §5.2). The laws live here so
- * both pages inherit them: a withheld engine yields NO summary (no tile,
- * band or row may print a walk-derived figure under a refused headline);
- * every wire population and scale is classified before it is read; every
- * money string passes the decimal guard before it is formatted; the snapshot
- * chip wears the ratified tier; unsettled figures say so, and a walk that
- * stopped is named rather than settled.
+ * both pages inherit them: a withheld engine yields NO summary and NO census
+ * (no tile, band, row, chip or head may print a figure under a refused
+ * headline — its card's counts are placeholders); why the figures are absent
+ * is decided here, so a failed fetch is never worded as a refusal nor a read
+ * in flight as a failure; every wire population and scale is classified
+ * before it is read; every money string passes the decimal guard before it
+ * is formatted; the snapshot chip wears the ratified tier; unsettled figures
+ * say so, and a walk that stopped is named rather than settled.
  */
 export interface CashView {
   readonly decimals: number;
@@ -64,19 +94,30 @@ export interface CashView {
   /** The engine is missing from `engines[]` altogether — an anomaly rendered as unavailable, never as zero. */
   readonly engineAbsent: boolean;
   readonly withheld: { code: string; detail: string } | null;
+  /**
+   * The engine's census as `/v1/book` states it. All three are null while the
+   * book is unread, when the engine is absent, and when it is withheld: a
+   * withheld card keeps integer counts because the contract requires the
+   * fields, and they are placeholders "whatever the position counts say" — so
+   * they are never read, and never printed as a census.
+   */
   readonly positions: number | null;
   readonly computedPositions: number | null;
   readonly refusedPositions: number | null;
+  /** The Cash section head's qualifier: the engine, the chain, and the census — or why there is no census. */
+  readonly sectionQualifier: string;
   /** Null while loading, on failure, when the engine is absent, and when it is withheld. */
   readonly summary: CashSummary | null;
   readonly headline: Headline;
   readonly chips: ViewChip[];
-  /** Tiles render in the refused register (dashed, "—"). */
+  /** Tiles render in the refused register (dashed, "—"): exactly when `absence` is not null. */
   readonly refusedTiles: boolean;
+  /** Why the book's figures are absent, in the words every tile and card prints; null when they are served. */
+  readonly absence: CashAbsence | null;
   /** The walk is still paging; derived figures are a lower bound. */
   readonly walking: boolean;
   readonly settled: boolean;
-  /** The walk stopped before its last page, with this cause; derived figures are a lower bound and no negative is claimed. */
+  /** The walk stopped before it was complete, with this cause; derived figures are what it read and no negative is claimed. */
   readonly walkStopped: string | null;
   readonly tier: FreshnessTier | null;
   readonly ageSeconds: number | null;
@@ -102,17 +143,6 @@ const LOADING: Headline = {
 
 const n = (value: number): string => value.toLocaleString("en-US");
 
-/**
- * A waterfall served with no points is a grid nobody published: a refusal by
- * name. It is never read as "the engine is absent from the grid" — an engine
- * is absent from points that exist — and never as "no stress grid", which is
- * the wire serving no waterfall at all.
- */
-function emptyGrid(points: unknown): StressPreview | null {
-  if (!Array.isArray(points)) return { kind: "refused", reason: "waterfall.points is not a list" };
-  return points.length === 0 ? { kind: "refused", reason: "no points published" } : null;
-}
-
 export function deriveCashView(reading: CashBookReading, constants: TierConstants): CashView {
   const cash = reading.cash;
   const loaded = reading.phase === "ok";
@@ -122,12 +152,25 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
   // Every scale and population is classified before it is read; the throwing reads land in the route boundary.
   const decimals = engine === null ? 6 : readWireScale(engine.value_decimals, "engines[debt_manager].value_decimals");
 
-  const positions = engine === null ? null : readWirePopulation(engine.positions, "engines[debt_manager].positions");
+  // A withheld card's counts are placeholders, not a census: none is read, so none can print — and none can throw.
+  const census = engine === null || withheld !== null ? null : engine;
+  const positions = census === null ? null : readWirePopulation(census.positions, "engines[debt_manager].positions");
   const computedPositions =
-    engine === null ? null : readWirePopulation(engine.computed_positions, "engines[debt_manager].computed_positions");
+    census === null ? null : readWirePopulation(census.computed_positions, "engines[debt_manager].computed_positions");
   const refusedPositions =
-    engine === null ? null : readWirePopulation(engine.refused_positions, "engines[debt_manager].refused_positions");
-  const refusedTiles = !loaded || withheld !== null || engineAbsent;
+    census === null ? null : readWirePopulation(census.refused_positions, "engines[debt_manager].refused_positions");
+  // In flight before failed, the engine's own refusal before an engine the book does not list.
+  const absence: CashAbsence | null =
+    reading.phase === "loading"
+      ? ABSENCE_LOADING
+      : !loaded
+        ? ABSENCE_UNAVAILABLE
+        : withheld !== null
+          ? ABSENCE_NOT_COMPUTED
+          : engineAbsent
+            ? ABSENCE_UNAVAILABLE
+            : null;
+  const refusedTiles = absence !== null;
 
   const summary =
     loaded && engine !== null && withheld === null
@@ -137,6 +180,7 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
           refusedPositions: refusedPositions ?? 0,
           walkComplete: cash.walkComplete,
           walkStopped: cash.walkFailure === null ? null : cash.walkFailure.message,
+          walkStopKind: cash.walkFailure === null ? null : cash.walkStop,
           refusedWhole: null,
         })
       : null;
@@ -156,13 +200,17 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
         : withheldCause !== null
           ? bookHeadlineRefused(withheldCause)
           : engineAbsent
-            ? unavailableHeadline("the Cash engine is missing from this batch")
+            ? unavailableHeadline(CASH_ENGINE_MISSING)
             : (summary?.headline ?? LOADING);
 
   const ageSeconds = reading.age.unresolved ? null : reading.age.seconds;
   const tier = ageSeconds === null ? null : freshnessTier(ageSeconds, constants);
   const tierTone = (t: FreshnessTier | null): ViewChip["tone"] =>
     t === null ? "refused" : t === "fresh" ? "ok" : t === "aging" ? "warn" : "crit";
+  const coverage: ViewChip =
+    computedPositions === null || positions === null
+      ? { label: "Coverage", value: withheld !== null ? "withheld" : "unavailable", tone: "refused" }
+      : { label: "Coverage", value: `${n(computedPositions)} / ${n(positions)} computed`, tone: "neutral" };
   const chips: ViewChip[] =
     reading.book === null
       ? [{ label: "Identity", value: reading.phase === "loading" ? "pending" : "unavailable", tone: "refused" }]
@@ -173,16 +221,10 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
             value: ageSeconds === null ? "age unknown" : `${humanAge(ageSeconds)} · ${tier ?? ""}`.trim(),
             tone: tierTone(tier),
           },
-          {
-            label: "Coverage",
-            value:
-              computedPositions === null || positions === null
-                ? "unavailable"
-                : `${n(computedPositions)} / ${n(positions)} computed`,
-            tone: computedPositions === null ? "refused" : "neutral",
-          },
+          coverage,
           { label: "Current", value: "not projected" },
         ];
+  const censusWords = positions !== null ? `${n(positions)} borrowing accounts` : CENSUS_WORDS[(absence ?? ABSENCE_UNAVAILABLE).kind];
 
   const walking = summary !== null && !cash.walkComplete && cash.walkFailure === null;
   const walkStopped = summary === null ? null : summary.stopped;
@@ -191,7 +233,7 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
       ? { kind: "refused", reason: withheldCause }
       : reading.book === null || reading.book.waterfall === null
         ? null
-        : (emptyGrid(reading.book.waterfall.points) ?? stressPreview(reading.book.waterfall, "debt_manager", reading.book.coverage));
+        : stressPreview(reading.book.waterfall, "debt_manager", reading.book.coverage);
 
   const debt = refusedTiles || engine === null ? ABSENT : readWireMoney(engine.total_debt, decimals, "engines[debt_manager].total_debt");
   const collateral =
@@ -239,10 +281,12 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
     positions,
     computedPositions,
     refusedPositions,
+    sectionQualifier: `Debt Manager engine · OP Mainnet · ${censusWords}`,
     summary,
     headline,
     chips,
     refusedTiles,
+    absence,
     walking,
     settled: summary !== null && cash.walkComplete,
     walkStopped,

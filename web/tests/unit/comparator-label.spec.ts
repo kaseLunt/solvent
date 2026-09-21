@@ -1,5 +1,5 @@
-// Phase 0 fix 4: wire tokens are identifiers, not reader copy (audit: Book
-// histogram printed "comparator: hf_num/hf_den" verbatim).
+// Wire tokens are identifiers, not reader copy: a panel head never prints
+// "comparator: hf_num/hf_den" verbatim.
 import { expect, test } from "@playwright/test";
 import { comparatorReaderLabel } from "../../lib/book-copy";
 

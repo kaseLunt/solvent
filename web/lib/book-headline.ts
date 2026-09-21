@@ -17,9 +17,22 @@ export interface BookHeadlineInput {
   readonly computed: number;
   /** The walk reached its last page. Only a complete walk may claim a negative over the book. */
   readonly complete: boolean;
-  /** The walk stopped before its last page, with this cause; null while it runs or once it is complete. */
+  /** The walk stopped before it was complete, with this cause; null while it runs or once it is complete. */
   readonly stopped: string | null;
+  /** How that walk ended; null exactly when `stopped` is. */
+  readonly stopKind: WalkStopKind | null;
 }
+
+/**
+ * How a walk that did not complete ended — the dek words what happened, never
+ * one frame for all three. "before-end": the walk never read its last page (a
+ * failed request, a moved batch, a page that could not be read, a census
+ * fault mid-walk). "at-end": it reached its last page and its rows do not
+ * reconcile with the census the wire advertised. "over": it delivered more
+ * rows than the census, on any page — the landed rows may count an account
+ * twice, so no figure over them is a total OR a lower bound.
+ */
+export type WalkStopKind = "before-end" | "at-end" | "over";
 
 export interface Headline {
   readonly variant: "material" | "quiet" | "refused" | "pending";
@@ -61,13 +74,28 @@ function causeWords(stopped: string): string {
   return trimmed.length === 0 ? "the service gave no reason" : trimmed;
 }
 
-/** How far the walk got, when it did not get to the end: every figure is then a lower bound, and the dek says so. */
-export function walkSentence(input: Pick<BookHeadlineInput, "complete" | "stopped" | "computed">): string | null {
+/** What happened to a walk that did not complete, as the clause that opens the dek: the frame is the stop's own, with its cause. */
+export function stopFrame(kind: WalkStopKind | null, stopped: string): string {
+  const cause = causeWords(stopped);
+  if (kind === "at-end") return `The walk reached its last page and its rows do not reconcile with the census (${cause})`;
+  if (kind === "over") return `The walk ran past its census (${cause})`;
+  return `The walk stopped before the last page (${cause})`;
+}
+
+/**
+ * How far the walk got, when it did not get to the end. A running walk and a
+ * walk that stopped short read distinct accounts, so every figure is a lower
+ * bound and the dek says so. A walk past its census cannot say that: its rows
+ * may count an account twice, and a sum over them bounds nothing.
+ */
+export function walkSentence(input: Pick<BookHeadlineInput, "complete" | "stopped" | "stopKind" | "computed">): string | null {
   if (input.complete) return null;
   const read = plural(input.computed, "computed account");
-  return input.stopped === null
-    ? `The walk is still running; every figure is a lower bound over the ${read} read so far.`
-    : `The walk stopped before the last page (${causeWords(input.stopped)}); every figure is a lower bound over the ${read} it read.`;
+  if (input.stopped === null) return `The walk is still running; every figure is a lower bound over the ${read} read so far.`;
+  const frame = stopFrame(input.stopKind, input.stopped);
+  return input.stopKind === "over"
+    ? `${frame}; its rows may count an account twice, so no figure here is a total or a lower bound.`
+    : `${frame}; every figure is a lower bound over the ${read} it read.`;
 }
 
 /**
@@ -127,7 +155,7 @@ export function bookHeadline(input: BookHeadlineInput): Headline {
       emphasis: "The Cash book could not be fully read this batch.",
       rest: "",
       dek: joinSentences([
-        `The walk stopped before the last page (${causeWords(input.stopped)}).`,
+        `${stopFrame(input.stopKind, input.stopped)}.`,
         readSoFar,
         "No verdict is claimed over the rest.",
         below,

@@ -86,7 +86,14 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   await expect(page.getByTestId("inspector-trust-prices")).toContainText("35s · within 180s");
   await expect(page.getByTestId("inspector-trust-sweep")).toHaveAttribute("data-state", "warn");
   await expect(page.getByTestId("inspector-trust-sweep")).toContainText("1 of 3 rows failed · gen 4");
-  await expect(page.getByTestId("inspector-trust-reconcile")).toContainText("29/29 Cash rows exact");
+  // The receipt item says what the receipt IS — a pinned, dated run that matched the chain — and nothing about this
+  // batch or this account: the live batch does not inherit the run's result.
+  const receipt = page.getByTestId("inspector-trust-reconcile");
+  await expect(receipt).toHaveAttribute("data-state", "ok");
+  await expect(receipt).toContainText("Pinned reconcile run matched the chain");
+  await expect(receipt).toContainText("29/29 Cash rows · Jul 29, 02:14 UTC");
+  await expect(receipt).not.toContainText("reconciles");
+  await expect(receipt).not.toContainText("Book");
   await expect(page.getByTestId("inspector-room-spark").locator("svg")).toBeVisible();
   await expect(page.getByTestId("inspector-legacy")).toHaveCount(0);
   await expect(page.getByTestId("inspector-address-secondary")).toHaveAttribute("href", `/lab?address=${DEMO_NEAR_ADDR}`);

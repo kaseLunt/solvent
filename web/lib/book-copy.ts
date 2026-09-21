@@ -1,15 +1,14 @@
-// Verbatim copy from the solvent-design SUPPLEMENT ruling (16–18 + captions
-// a/b/c), shared across the Book and Lab surfaces so the same sentence can
-// never fork. Tests pin every string independently — a reword here fails the
-// suite, which is the point.
+// Reader copy shared across the Book and Lab surfaces, held in one place so
+// the same sentence can never fork. Tests pin every string independently — a
+// reword here fails the suite, which is the point.
 
 /**
- * W-HR-A — the risk map's dek. It names the two axes in reader words and the
- * marginal that makes the grid readable; it does NOT name a scatter, because
- * there is no longer a scatter and a dek that describes a dead register is a
- * lie with good intentions.
+ * The risk map's dek. It names the two axes in reader words and the marginal
+ * that makes the grid readable; it names the grid it sits on and no other
+ * chart — a dek that describes a register the page does not draw is a lie
+ * with good intentions.
  */
-// "plotted debt", never "the book's debt" (Codex r55): the map excludes the
+// "plotted debt", never "the book's debt": the map excludes the
 // source-filtered rows, so its Σ is NOT the on-book Σ the summary cards carry.
 // A dek that says "the book's" beside an ANSWER that says "mapped here" hands
 // the reader two contradictory totals under one name.
@@ -19,25 +18,25 @@ export const RISK_MAP_DEK =
   "margin carries each band's exact Σ debt. A band holding few accounts can still carry more " +
   "debt than a crowded one.";
 
-/** §18 — the waterfall section note, verbatim. */
+/** The waterfall section note, verbatim. */
 export const WATERFALL_SECTION_NOTE =
   "If the shocked asset fell step by step, how much debt could the engine liquidate, and " +
   "how much would it lose? Bars: cumulative eligible debt at each price. ×1.00 is the " +
   "standing census; every lower point is a projection.";
 
-/** §18 — the one dim legend line under the waterfall panel grid, verbatim. */
+/** The one dim legend line under the waterfall panel grid, verbatim. */
 export const BAD_DEBT_LEGEND =
   "bad debt = debt still owed after all collateral is seized, the protocol's loss at that price.";
 
-/** Caption (b) — the eligible-vs-realized primary gloss, verbatim. */
+/** The eligible-vs-realized primary gloss, verbatim. */
 export const ELIGIBLE_REALIZED_GLOSS =
   '"Eligible" = debt the engine is entitled to liquidate at that price. What actually ' +
   "closes can be less: the Debt Manager liquidates in two passes, half the debt, then " +
   "the remainder.";
 
 /**
- * Caption (a) — the always-visible held-flat summary, verbatim template.
- * Count-aware (W-UX-C micro-ruling 3): "1 price input held flat" at n = 1 —
+ * The always-visible held-flat summary, verbatim template.
+ * Count-aware: "1 price input held flat" at n = 1 —
  * prose pluralizes; label-value grammar elsewhere may stay invariant.
  */
 export function heldFlatSummary(n: number): string {
@@ -49,18 +48,19 @@ export function heldFlatSummary(n: number): string {
   );
 }
 
-/** Caption (a) — the counted <details> summary line, verbatim template. */
+/** The counted <details> summary line, verbatim template. */
 export function heldFlatDetailsSummary(n: number): string {
   return `held flat: ${String(n)} inputs named`;
 }
 
 /**
- * WAVE W-3L — the Book waterfall's FORENSICS summary (template slot 7).
+ * The Book waterfall's forensics summary — the disclosure's one line.
  *
  * It COUNTS the held-flat inputs it hides, because the count itself stays
  * visible in STATE and this line must agree with it. What sits behind the
  * disclosure is a named list, a definition and a wire note: no refusal, no
- * unknowable, and no count that exists nowhere else (R3).
+ * unknowable, and no count that exists nowhere else: a disclosure may fold
+ * detail away, never a fact the page states nowhere else.
  */
 export function waterfallForensicsSummary(n: number): string {
   const held = n === 0 ? "no held-flat inputs" : `${String(n)} held-flat inputs named`;
@@ -68,19 +68,19 @@ export function waterfallForensicsSummary(n: number): string {
 }
 
 /**
- * Caption (a) — the held-flat value column header. The wire declares no
+ * The held-flat value column header. The wire declares no
  * decimals for `held_flat[].value`, so scaling it to USD would be
  * fabrication; the header says so instead.
  */
 export const HELD_FLAT_VALUE_HEADER = "held value (source's raw units, unscaled by design)";
 
-/** Caption (c) — the collateral-at-risk reader caption (title text), verbatim. */
+/** The collateral-at-risk reader caption (title text), verbatim. */
 export const AT_RISK_READER_CAPTION =
   "collateral at risk is re-measured at each price step, so it can fall as prices fall, " +
   "because the same collateral is worth less. A dip in the line comes from that arithmetic, " +
   "not from missing data.";
 
-/** Caption (c) — the Lab book panel's counted wire-notes summary, verbatim template. */
+/** The Lab book panel's counted wire-notes summary, verbatim template. */
 export function wireNotesSummary(n: number): string {
   return `wire notes: ${String(n)}, verbatim`;
 }
@@ -150,12 +150,12 @@ export function riskBandRefusedRow(count: number): string {
 }
 
 /**
- * WAVE W-3L — THE TINT ASYMMETRY, SAID OUT LOUD (template slot 6).
+ * The tint asymmetry, said out loud.
  *
- * Sub-1.00 buckets tint crit on the wad comparator and on no other, and the
- * only place that was explained was inside the wire note and an SVG `<title>`.
- * A `<title>` is hover sugar (LAW-5) and a wire note is not a method line, so
- * the rule now renders as a sentence on the panel that obeys it.
+ * Sub-1.00 buckets tint crit on the wad comparator and on no other. A hover
+ * `<title>` is sugar and a wire note is not a method line, so the rule renders
+ * as a sentence on the panel that obeys it: a reader is never left to infer
+ * why one engine's buckets are coloured and the other's are not.
  */
 export function riskBandTintClause(comparator: string): string {
   return comparator === "hf_wad"
@@ -165,15 +165,15 @@ export function riskBandTintClause(comparator: string): string {
         "from a strict boolean, not from a bucket boundary.";
 }
 
-/** WAVE W-3L — the risk-band panel's FORENSICS summary (template slot 7). */
+/** The risk-band panel's forensics summary — the disclosure's one line. */
 export function riskBandForensicsSummary(buckets: number): string {
   return `Exact data: the wire's own note and ${String(buckets)} bucket boundaries`;
 }
 
 /**
- * Phase 0 fix 4: comparator wire tokens are identifiers, not reader copy —
- * the Book histogram printed "comparator: hf_num/hf_den" verbatim as a panel
- * head. Known tokens humanize per ENGINE semantics (the wad IS the pool's own
+ * Comparator wire tokens are identifiers, not reader copy: a panel head never
+ * prints "comparator: hf_num/hf_den" verbatim. Known tokens humanize per
+ * ENGINE semantics (the wad IS the pool's own
  * comparator; num/den is a disclosure, never the trigger); an unknown token
  * passes through verbatim rather than being guessed at.
  */

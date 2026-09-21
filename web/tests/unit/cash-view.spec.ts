@@ -29,6 +29,7 @@ function reading(over: Omit<Partial<CashBookReading>, "cash"> & { cash?: Partial
       rows,
       walkComplete: true,
       walkFailure: null,
+      walkStop: null,
     },
     legacy: { engine: null, badDebt: null, histogram: null, refusedWhole: null },
     age: { seconds: 42, unresolved: false, refreshFailed: false },
@@ -91,7 +92,7 @@ test("an unfinished walk is walking, not settled; its entry line and headline sa
 
 test("a stopped walk is named on the view: not walking, not settled, the cause carried, the entry line honest", () => {
   const v = deriveCashView(
-    reading({ cash: { rows: [], walkComplete: false, walkFailure: { register: "transport", message: "Failed to fetch" } } }),
+    reading({ cash: { rows: [], walkComplete: false, walkFailure: { register: "transport", message: "Failed to fetch" }, walkStop: "before-end" } }),
     TIER_FALLBACK,
   );
   expect(v.walking).toBe(false);
@@ -101,12 +102,25 @@ test("a stopped walk is named on the view: not walking, not settled, the cause c
   expect(v.headline.emphasis).toBe("The Cash book could not be fully read this batch.");
   expect(v.bookEntryLine).toBe("Walk stopped before the book was read");
   const invalid = deriveCashView(
-    reading({ cash: { walkComplete: false, walkFailure: { register: "invalid-response", message: "the walk delivered 2 of the 3 rows the wire advertised" } } }),
+    reading({
+      cash: { walkComplete: false, walkFailure: { register: "invalid-response", message: "the walk delivered 2 of the 3 rows the wire advertised" }, walkStop: "at-end" },
+    }),
     TIER_FALLBACK,
   );
   expect(invalid.headline.variant).toBe("material");
   expect(invalid.headline.dek).toContain("the walk delivered 2 of the 3 rows the wire advertised");
   expect(invalid.walkStopped).toBe("the walk delivered 2 of the 3 rows the wire advertised");
+  // The walk reached its last page: the dek says so, and never "before the last page".
+  expect(invalid.headline.dek).toContain("The walk reached its last page and its rows do not reconcile with the census");
+  expect(invalid.headline.dek).not.toContain("before the last page");
+  // A walk past its census threads its kind to the summary: the view claims no bound over rows that may repeat an account.
+  const over = deriveCashView(
+    reading({ cash: { walkComplete: false, walkFailure: { register: "invalid-response", message: "the walk delivered 2 rows for a census of 1" }, walkStop: "over" } }),
+    TIER_FALLBACK,
+  );
+  expect(over.summary?.stopKind).toBe("over");
+  expect(over.headline.dek).toContain("The walk ran past its census (the walk delivered 2 rows for a census of 1); its rows may count an account twice");
+  expect(over.headline.dek).not.toContain("every figure is a lower bound");
 });
 
 test("the preview line: the ETH −30% line, or the withheld preview named — never ordinary copy over a refusal", () => {
@@ -147,6 +161,14 @@ test("a waterfall served with no points is a refusal — 'no points published' �
     TIER_FALLBACK,
   );
   expect(withheld.preview).toEqual({ kind: "refused", reason: "collateral sweep failed" });
+  // Nor the grid's own exclusion of the engine: a waterfall that names the engine excluded AND serves no points says the engine's cause.
+  const excluded = deriveCashView(
+    reading({
+      book: { ...BOOK, waterfall: { ...BOOK.waterfall, points: [], excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }] } },
+    }),
+    TIER_FALLBACK,
+  );
+  expect(excluded.previewLine).toBe("Preview withheld: collateral-flag custody unproven");
 });
 
 test("money passes the decimal guard: '' and '0x10' are named as malformed fields, never $0 or $16", () => {
@@ -231,4 +253,53 @@ test("the legacy view: a withheld engine names its cause and prints no populatio
   // A malformed legacy debt is named, never "$0 debt".
   expect(deriveLegacyView({ ...legacy, engine: { ...legacy.engine, total_debt: "" } })?.summaryLine).toContain("debt unreadable");
   expect(deriveLegacyView({ engine: null, badDebt: null, histogram: null, refusedWhole: null })).toBeNull();
+});
+
+test("a withheld Cash engine's census is never a count: all three populations are null, the Coverage chip and the section head say withheld — the card's placeholders are not read, whatever they hold", () => {
+  const refusedWhole = { code: "FLAG_CUSTODY_UNPROVEN", detail: "" };
+  // The contract's own withheld card: refused, null totals, and integer counts that are placeholders — 0 in the contract's example.
+  const zeros = { ...cashEngine, refused: true, positions: 0, computed_positions: 0, refused_positions: 0, total_debt: null, total_collateral: null };
+  // The other placeholder shape: served counts left standing beside the refusal.
+  const standing = { ...cashEngine, refused: true, total_debt: null, total_collateral: null };
+  for (const engine of [zeros, standing]) {
+    const v = deriveCashView(reading({ cash: { engine, refusedWhole, rows: [], walkComplete: false } }), TIER_FALLBACK);
+    expect(v.positions).toBeNull();
+    expect(v.computedPositions).toBeNull();
+    expect(v.refusedPositions).toBeNull();
+    expect(v.chips[2]).toEqual({ label: "Coverage", value: "withheld", tone: "refused" });
+    expect(v.sectionQualifier).toBe("Debt Manager engine · OP Mainnet · accounts withheld");
+    expect(v.chips.map((c) => c.value).join(" ")).not.toMatch(/\b0\b|computed/);
+  }
+  // A placeholder the population guard would refuse is never read: a withheld card does not throw the route.
+  const negativeZero = { ...zeros, positions: -0, computed_positions: -0, refused_positions: -0 };
+  expect(() => deriveCashView(reading({ cash: { engine: negativeZero, refusedWhole, rows: [] } }), TIER_FALLBACK)).not.toThrow();
+  // A served engine's census still prints, and still passes the guard.
+  const served = deriveCashView(reading({}), TIER_FALLBACK);
+  expect(served.positions).toBe(2);
+  expect(served.sectionQualifier).toBe("Debt Manager engine · OP Mainnet · 2 borrowing accounts");
+  expect(() => deriveCashView(reading({ cash: { engine: { ...cashEngine, positions: -0 } } }), TIER_FALLBACK)).toThrow(/engines\[debt_manager\]\.positions/);
+});
+
+test("why the figures are absent is decided here: a read in flight is loading, an unread book is unavailable, a withheld engine is not computed — a fetch failure is never worded as an engine's refusal", () => {
+  const unread = { book: null, cash: { engine: null, rows: [] } } as const;
+  const loading = deriveCashView(reading({ phase: "loading", ...unread }), TIER_FALLBACK);
+  expect(loading.absence).toEqual({ kind: "loading", word: "loading…", line: "Loading…" });
+  expect(loading.sectionQualifier).toBe("Debt Manager engine · OP Mainnet · accounts loading…");
+  const failed = deriveCashView(reading({ phase: "error", failure: { message: "Failed to fetch", retryAfterSeconds: null }, ...unread }), TIER_FALLBACK);
+  const noBatch = deriveCashView(reading({ phase: "no-batch", failure: { message: "no servable batch", retryAfterSeconds: 30 }, ...unread }), TIER_FALLBACK);
+  for (const v of [failed, noBatch]) {
+    expect(v.absence).toEqual({ kind: "unavailable", word: "unavailable", line: "Unavailable." });
+    expect(v.refusedTiles).toBe(true);
+    expect(v.sectionQualifier).toBe("Debt Manager engine · OP Mainnet · accounts unavailable");
+    expect(`${v.absence?.word ?? ""} ${v.absence?.line ?? ""}`).not.toMatch(/computed/i);
+  }
+  // The book answered and does not list the engine: unavailable, in the missing engine's own words — never a refusal it did not state.
+  const missing = deriveCashView(reading({ cash: { engine: null, rows: [] } }), TIER_FALLBACK);
+  expect(missing.absence?.kind).toBe("unavailable");
+  expect(missing.headline.dek).toBe("The Cash engine is missing from this batch.");
+  // An engine's refusal keeps the engine's word.
+  const withheld = deriveCashView(reading({ cash: { refusedWhole: { code: "SWEEP_FAILED", detail: "" } } }), TIER_FALLBACK);
+  expect(withheld.absence).toEqual({ kind: "not-computed", word: "not computed", line: "Not computed." });
+  // A served book has no absence to word.
+  expect(deriveCashView(reading({}), TIER_FALLBACK).absence).toBeNull();
 });

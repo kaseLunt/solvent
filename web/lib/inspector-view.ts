@@ -9,7 +9,7 @@
 // derived here too, so a component only places what it is handed.
 import type { RefinedPosition } from "@solvent/client";
 import type { AddressReading, Phase } from "./address-lookup";
-import { stressReading, type StressReading } from "./address-stress";
+import { stressReading, type ScaleAbsence, type StressReading } from "./address-stress";
 import type { ViewChip } from "./cash-view";
 import { truncateAddress } from "./format";
 import { humanAge } from "./freshness";
@@ -72,6 +72,12 @@ export interface InspectorView {
    * unreadable — and then no Cash figure prints at any scale, on any card.
    */
   readonly decimals: number | null;
+  /**
+   * Why `decimals` is null, or null when it is not: the position's own scale failed the guard, the lookup found no
+   * Cash position, its Cash book is withheld, or the lookup did not complete. A cell that cannot print a figure says
+   * THIS cause — "unreadable scale" is true of the first alone.
+   */
+  readonly scaleAbsence: ScaleAbsence | null;
   readonly cash: CashPosition | null;
   readonly cashWire: RefinedPosition | null;
   readonly legacy: RefinedPosition | null;
@@ -117,7 +123,7 @@ const loadPhase = (p: Phase<unknown>): LoadPhase =>
 
 function empty(state: InspectorState, kicker: string, headline: InspectorHeadline, chips: ViewChip[], loads: Loads): InspectorView {
   return {
-    state, kicker, headline, chips, batchId: null, decimals: null, cash: null, cashWire: null, legacy: null, table: null, boundary: null,
+    state, kicker, headline, chips, batchId: null, decimals: null, scaleAbsence: "no-lookup", cash: null, cashWire: null, legacy: null, table: null, boundary: null,
     trust: null, room: null, streak: null, legacySeries: null, historyBatchId: null, historyOutcome: null, ...loads, stress: null,
     stressBatchId: null, stressFromPreviousLookup: false, refusedTiles: true, floor: null, tier: null, ageSeconds: null,
   };
@@ -223,7 +229,16 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
   const streakOfThisBatch = historyBatchId !== null && historyBatchId === batchId ? streak : null;
 
   const sweep = batch.watermarks.find((w) => w.engine === CASH)?.sweep ?? null;
-  const trust = cashWire === null ? null : trustChecklist({ position: cashWire, batchId, sweep, reconcile: reading.evidence?.reconcile ?? null });
+  const trust =
+    cashWire === null
+      ? null
+      : trustChecklist({
+          position: cashWire,
+          batchId,
+          sweep,
+          reconcile: reading.evidence?.reconcile ?? null,
+          evidenceServedAt: reading.evidence?.served_at ?? null,
+        });
   const table = cashWire === null || cash === null ? null : collateralTable(cashWire, cash);
   // A boundary is printed only for a computed position WITH a verdict: a computed row whose verdict is unknowable has none to print.
   // The table stays: its legs are wire facts either way.
@@ -282,6 +297,9 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
     chips,
     batchId,
     decimals,
+    // Asked in the order of truth: a number is no absence; a read position without one had its scale refused; with no
+    // position, a withheld Cash book is said before "no position" — a withheld book is never an absent one.
+    scaleAbsence: decimals !== null ? null : cash !== null ? "unreadable" : state === "cannot-compute" ? "withheld" : "no-position",
     cash,
     cashWire,
     legacy,

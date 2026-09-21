@@ -162,3 +162,14 @@ test("a grid whose first point is not the unshocked mark is refused", () => {
   first.factor = "999999999999999999";
   expect(stressPreview(skewed, "aave_v3_etherfi")).toEqual({ kind: "refused", reason: "the grid's first point is not the unshocked mark" });
 });
+
+test("a waterfall served with no points is a named refusal for every caller — never 'absent' — and the engine's own cause still speaks first", () => {
+  expect(stressPreview({ ...waterfall, points: [] }, "debt_manager")).toEqual({ kind: "refused", reason: "no points published" });
+  expect(stressPreview({ ...waterfall, points: null as unknown as Waterfall["points"] }, "debt_manager")).toEqual({
+    kind: "refused",
+    reason: "waterfall.points is not a list",
+  });
+  // The grid excludes the engine by name AND serves no points: the more specific refusal is the engine's.
+  const excluded = { ...waterfall, points: [], excluded_engines: [{ engine: "debt_manager", code: "SWEEP_FAILED", detail: "", note: "" }] };
+  expect(stressPreview(excluded, "debt_manager")).toEqual({ kind: "refused", reason: "collateral sweep failed" });
+});

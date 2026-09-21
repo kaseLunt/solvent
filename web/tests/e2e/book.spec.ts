@@ -2,6 +2,8 @@
 // semantic invariant against the running production build with the API
 // mocked from committed fixtures; strings come from lib/book-headline.ts.
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { refinePositionSummary } from "@solvent/client";
+import { readCashRow } from "../../lib/cash-rows";
 import { BATCH_SUPERSEDED, BOOK, BOOK_ENGINE_REFUSED, BOOK_ERROR_UNAVAILABLE, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { DEMO_BOOK, DEMO_META, DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2 } from "../fixtures/demo";
 import { META } from "../fixtures/meta";
@@ -70,6 +72,9 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   await expect(legacy).not.toHaveAttribute("open", /.*/);
   await expect(legacy.locator("summary")).toContainText("Legacy · Aave v3 market");
   await expect(legacy.locator("summary")).toContainText("2 positions");
+  // The section head states the census and anchors to the legacy block that is on the page.
+  await expect(page.getByTestId("book-section-cash")).toContainText("Debt Manager engine · OP Mainnet · 2 borrowing accounts");
+  await expect(page.getByTestId("book-section-cash").getByRole("link", { name: "Legacy Aave v3 market ↓" })).toHaveAttribute("href", "#legacy");
   // Never summed: 4,200 (Cash) + 6,000 (legacy) appears nowhere.
   await expect(page.locator("body")).not.toContainText("$10,200");
   // Wire names live in the drawer, not on the page.
@@ -105,25 +110,41 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
   await expect(page.getByTestId("book-attention").locator("tbody tr.dim, tbody tr[class*='dim']")).toHaveCount(6);
 });
 
-test("the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero", async ({ page }) => {
+test("the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero — the card's placeholder counts print nowhere", async ({ page }) => {
+  // The contract's own withheld card: refused, its refusal, null totals, and integer counts that are placeholders —
+  // 0 in the contract's example ("whatever the position counts say"). A count read from it would print as a census.
+  const refusal = {
+    engine: "debt_manager",
+    code: "FLAG_CUSTODY_UNPROVEN",
+    detail: "collateral-flag custody is unproven for this window",
+    note: "a withheld engine is never representable as an empty healthy one",
+  };
   const withheld = {
     ...BOOK,
-    refused_engines: [
-      {
-        engine: "debt_manager",
-        code: "FLAG_CUSTODY_UNPROVEN",
-        detail: "collateral-flag custody is unproven for this window",
-        note: "a withheld engine is never representable as an empty healthy one",
-      },
-    ],
+    refused_engines: [refusal],
     engines: BOOK.engines.map((e) =>
-      e.engine === "debt_manager" ? { ...e, refused: true, total_debt: null, total_collateral: null } : e,
+      e.engine === "debt_manager"
+        ? { ...e, refused: true, refusal, positions: 0, computed_positions: 0, refused_positions: 0, liquidatable_positions: 0, refusals: [], total_debt: null, total_collateral: null }
+        : e,
     ),
   };
   await mockCommitted(page, withheld);
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "refused");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be computed this batch.");
+  // The census is withheld with the engine: the section head, the Coverage chip and the Not-computed tile's VALUE.
+  const head = page.getByTestId("book-section-cash");
+  await expect(head).toContainText("Debt Manager engine · OP Mainnet · accounts withheld");
+  await expect(head).not.toContainText("borrowing accounts");
+  const identity = page.getByTestId("book-verdict-identity");
+  await expect(identity).toContainText("Coverage withheld");
+  await expect(identity).not.toContainText("computed");
+  await expect(identity.locator('[data-chip="Coverage"]')).toHaveClass(/chipRefused/);
+  const notComputed = page.getByTestId("book-kpi-notcomputed");
+  await expect(notComputed).toContainText("—");
+  await expect(notComputed).not.toContainText(/\b0\b/);
+  await expect(page.locator("main")).not.toContainText("0 borrowing accounts");
+  await expect(page.locator("main")).not.toContainText("0 / 0");
   for (const id of ["debt", "liquidatable", "near", "median", "baddebt"]) {
     await expect(page.getByTestId(`book-kpi-${id}`)).toHaveAttribute("data-tone", "refused");
     await expect(page.getByTestId(`book-kpi-${id}`)).toContainText("—");
@@ -139,6 +160,11 @@ test("the Cash engine withheld whole: refused headline, refused tiles, nothing r
   await expect(page.locator('main [data-tone="crit"]')).toHaveCount(0);
   await expect(page.getByTestId("book-bands-card")).not.toContainText("$0");
   await expect(page.getByTestId("book-kpi-near")).not.toContainText("$0");
+  // The drawer's refusal section names the withheld book — a withheld card's empty refusal list is never "None."
+  await page.getByTestId("book-methodology").click();
+  const method = page.getByTestId("book-methodology-body");
+  await expect(method).toContainText("The Cash engine withheld its whole book this batch: collateral-flag custody unproven.");
+  await expect(method).not.toContainText("None.");
 });
 
 test("a positions page from another batch reloads the book once instead of mixing rows", async ({ page }) => {
@@ -163,9 +189,54 @@ test("no servable batch (503): the load-failure headline names the reason", asyn
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be loaded.");
   await expect(page.getByTestId("book-verdict-dek")).toContainText(BOOK_ERROR_UNAVAILABLE.error.message.slice(1, 20));
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("—");
-  // A book that could not be read refused nothing and computed nothing: the tile says so, never "nothing refused".
-  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("not computed");
+  // A book that could not be read refused nothing and computed nothing: the tile says "unavailable" — never the
+  // engine's word "not computed" (the tile's LABEL is "Not computed"; the pin is on its sub), never "nothing refused".
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("unavailable");
+  await expect(page.getByTestId("book-kpi-notcomputed")).not.toContainText("not computed");
   await expect(page.getByTestId("book-kpi-notcomputed")).not.toContainText("nothing refused");
+});
+
+const TILES = ["debt", "liquidatable", "near", "median", "baddebt", "notcomputed"] as const;
+
+test("a fetch failure is an unread book: every tile, the chart card and the table say 'unavailable' — never the engine's word 'not computed' — and no anchor points at a legacy block that is not there", async ({
+  page,
+}) => {
+  await page.route("**/v1/**", (route) => route.abort("failed"));
+  await page.goto("/book");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be loaded.");
+  for (const id of TILES) {
+    const tile = page.getByTestId(`book-kpi-${id}`);
+    await expect(tile).toHaveAttribute("data-tone", "refused");
+    await expect(tile).toContainText("—");
+    await expect(tile).toContainText("unavailable");
+    await expect(tile).not.toContainText("not computed");
+  }
+  await expect(page.getByTestId("book-bands-card")).toContainText("Unavailable.");
+  await expect(page.getByTestId("book-bands")).toHaveCount(0);
+  await expect(page.getByTestId("book-attention")).toHaveCount(0);
+  // The engine's refusal word appears once on the page — the sixth tile's LABEL — and nowhere as a state.
+  await expect(page.locator("main")).not.toContainText("Not computed.");
+  await expect(page.locator("main")).not.toContainText("not computed");
+  await expect(page.getByTestId("book-section-cash")).toContainText("accounts unavailable");
+  await expect(page.getByTestId("book-legacy")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Legacy Aave v3 market ↓" })).toHaveCount(0);
+});
+
+test("a read in flight has not failed and refused nothing: the tiles say 'loading…' — never 'unavailable', never 'not computed'", async ({ page }) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/book", () => new Promise<void>(() => undefined));
+  await page.goto("/book");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("Loading the Cash book…");
+  for (const id of TILES) {
+    const tile = page.getByTestId(`book-kpi-${id}`);
+    await expect(tile).toContainText("loading…");
+    await expect(tile).not.toContainText("unavailable");
+    await expect(tile).not.toContainText("not computed");
+  }
+  await expect(page.getByTestId("book-bands-card")).toContainText("Loading…");
+  await expect(page.getByTestId("book-section-cash")).toContainText("accounts loading…");
+  await expect(page.locator("main")).not.toContainText("Not computed.");
 });
 
 test("a 409 during the walk restarts it on the reloaded book", async ({ page }) => {
@@ -255,7 +326,7 @@ test("while the walk is still running the verdict is pending — never 'Nothing 
   await expect(page.getByTestId("book-attention")).toContainText("Walking the book…");
   // The distance chart: a walk-derived zero is a dash — in the finding and on every bar — and the bars wear their own qualifier.
   await expect(page.getByTestId("book-bands-card")).toContainText(
-    "— within 10% of the cap: a zero is claimed only by a complete walk · walking the book, figures are a lower bound",
+    "— within 10% of the cap: a zero is claimed only by a complete walk · the walk is still running",
   );
   await expect(page.getByTestId("book-bands-card")).not.toContainText("$0");
   // Nothing is read yet: every bar is a dash alone — no count beside it, no count on it, no height.
@@ -305,14 +376,18 @@ test("a terminal page short of the advertised census stops the walk by name — 
   await expect(page.getByTestId("book-walk-failure")).toContainText("the walk delivered 2 of the 3 rows the wire advertised");
   await expect(page.getByTestId("book-walk-failure").getByRole("button", { name: "Retry" })).toHaveCount(0);
   await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "crit");
-  await expect(page.getByTestId("book-verdict-dek")).toContainText("The walk stopped before the last page");
+  // The walk REACHED its last page — it was short of the census there; "before the last page" would be false.
+  await expect(page.getByTestId("book-verdict-dek")).toContainText(
+    "The walk reached its last page and its rows do not reconcile with the census (the walk delivered 2 of the 3 rows the wire advertised); every figure is a lower bound",
+  );
+  await expect(page.getByTestId("book-verdict-dek")).not.toContainText("before the last page");
   await expect(page.getByTestId("book-verdict-dek")).not.toContainText("No account is within 10%");
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("lower bound, walk stopped");
   await expect(page.getByTestId("book-kpi-near")).toContainText("—");
   await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("data-tone", "refused");
   await expect(page.getByTestId("book-kpi-median")).toContainText("walk stopped");
   await expect(page.getByTestId("book-bands-card")).toContainText(
-    "— within 10% of the cap: a zero is claimed only by a complete walk · the walk stopped, figures are a lower bound",
+    "— within 10% of the cap: a zero is claimed only by a complete walk · the walk stopped",
   );
   await expect(page.getByTestId("book-bands-card")).not.toContainText("$0");
   // The band the walk read in prints what it read; every other band is a dash alone, never "$0 · 0".
@@ -340,17 +415,36 @@ test("the distance chart over an incomplete walk: the figure is a floor in its o
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
+  // The demo's page one reads in all seven bands, so "no $0 mid-walk" could not fail on it. The walk is reshaped so
+  // page one leaves ONE band unread: every "< 2% room" row moves to page two (the census still reconciles: 1,412).
+  const inUnreadBand = (p: (typeof DEMO_POSITIONS_DM_PAGE_1.positions)[number]): boolean => readCashRow(refinePositionSummary(p)).band === 1;
+  const moved = DEMO_POSITIONS_DM_PAGE_1.positions.filter(inUnreadBand);
+  expect(moved.length).toBeGreaterThan(0);
+  const pageOne = { ...DEMO_POSITIONS_DM_PAGE_1, positions: DEMO_POSITIONS_DM_PAGE_1.positions.filter((p) => !inUnreadBand(p)) };
+  const pageTwo = { ...DEMO_POSITIONS_DM_PAGE_2, positions: [...DEMO_POSITIONS_DM_PAGE_2.positions, ...moved] };
   await page.route("**/v1/positions*", async (route) => {
     const cursor = new URL(route.request().url()).searchParams.get("cursor");
-    if (cursor === null) return json(route, DEMO_POSITIONS_DM_PAGE_1);
+    if (cursor === null) return json(route, pageOne);
     await held;
-    return json(route, DEMO_POSITIONS_DM_PAGE_2);
+    return json(route, pageTwo);
   });
   await page.goto("/book");
   const card = page.getByTestId("book-bands-card");
-  // Page one carries the least room first, so the near-cap accounts are read while page two is still out.
+  // Page one carries the least room first, so near-cap accounts are read while page two is still out.
   await expect(card).toContainText(/at least \$[\d.,]+[KMB]? sits within 10% of the cap · walking the book, figures are a lower bound/);
   await expect(card).not.toContainText("$0");
+  // The band page one read nothing in is a dash alone — no "$0", no count on it or beside it, no height — while every
+  // band it did read in prints its figure and its count.
+  const bars = page.getByTestId("book-bands");
+  const unread = bars.locator('[data-band="0-2"]');
+  await expect(unread).toContainText("—");
+  await expect(unread).not.toHaveAttribute("data-count", /.*/);
+  await expect(unread.locator("small")).toHaveCount(0);
+  await expect(unread.locator("i")).toHaveCSS("height", "0px");
+  await expect(bars.locator("[data-count]")).toHaveCount(6);
+  for (const id of ["breached", "2-5", "5-10", "10-25", "25-50", "50-plus"]) {
+    await expect(bars.locator(`[data-band="${id}"]`)).toContainText(/\$[\d.,]+[KMB]? · [\d,]+/);
+  }
   await expect(page.getByTestId("book-bands-note")).toHaveText(
     "Walking the book: every bar and every count is a lower bound over the accounts read so far.",
   );
@@ -359,6 +453,9 @@ test("the distance chart over an incomplete walk: the figure is a floor in its o
   await expect(card).toContainText(/· \$[\d.,]+[KMB]? sits within 10% of the cap/);
   await expect(card).not.toContainText("at least");
   await expect(card).not.toContainText("lower bound");
+  // Complete: the band page two filled prints what the book holds, with its count.
+  await expect(unread).toHaveAttribute("data-count", String(moved.length));
+  await expect(bars.locator("[data-count]")).toHaveCount(7);
 });
 
 test("a complete walk prints its empty bands as zeros — the dash is the unfinished walk's alone", async ({ page }) => {
@@ -392,6 +489,21 @@ test("a walk past its census is worded against the census — 'delivered N rows 
   await expect(page.getByTestId("book-walk-failure")).not.toContainText("2 of the 1");
   await expect(page.getByTestId("book-verdict-dek")).toContainText("the walk delivered 2 rows for a census of 1");
   await expect(page.locator("body")).not.toContainText("No account needs attention");
+  // The walk did not stop "before the last page" — it ran past its census — and rows past a census may count an
+  // account twice, so nothing on the page is called a lower bound or "at least".
+  await expect(page.getByTestId("book-verdict-dek")).toContainText(
+    "The walk ran past its census (the walk delivered 2 rows for a census of 1); its rows may count an account twice, so no figure here is a total or a lower bound.",
+  );
+  await expect(page.getByTestId("book-verdict-dek")).not.toContainText("before the last page");
+  await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("not a bound, the walk ran past its census");
+  await expect(page.getByTestId("book-bands-note")).toHaveText(
+    "The walk ran past its census: its rows may count an account twice, so no bar or count here is a total or a lower bound.",
+  );
+  const main = page.locator("main");
+  await expect(main).not.toContainText("at least");
+  await expect(main).not.toContainText("figures are a lower bound");
+  await expect(main).not.toContainText("lower bound, walk stopped");
+  await expect(main).not.toContainText("is a lower bound over");
 });
 
 test("a positions page from another engine never enters the Cash walk", async ({ page }) => {
@@ -406,11 +518,16 @@ test("a positions page from another engine never enters the Cash walk", async ({
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be fully read this batch.");
   await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(1);
   await expect(page.getByTestId("book-attention")).toContainText("no account is cleared");
-  const counts = await page
-    .getByTestId("book-bands")
-    .locator("[data-count]")
-    .evaluateAll((els) => els.reduce((n, el) => n + Number(el.getAttribute("data-count")), 0));
-  expect(counts).toBe(0);
+  // No foreign row entered a band: all seven bars stand, and not one carries a count or a figure — seven dashes, not
+  // seven zeros (a stopped walk claims no zero), and not a sum that an absent attribute would satisfy on its own.
+  const bars = page.getByTestId("book-bands").locator("[data-band]");
+  await expect(bars).toHaveCount(7);
+  await expect(page.getByTestId("book-bands").locator("[data-count]")).toHaveCount(0);
+  for (const bar of await bars.all()) {
+    await expect(bar).toContainText("—");
+    await expect(bar).not.toContainText("$");
+    await expect(bar.locator("small")).toHaveCount(0);
+  }
 });
 
 test("another engine's refused page is a wrong-engine fault — never Cash's refusal", async ({ page }) => {

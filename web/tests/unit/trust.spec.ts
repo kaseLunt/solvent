@@ -10,6 +10,9 @@ if (sweep === null) throw new Error("fixture must carry the debt_manager sweep")
 const reconcile = EVIDENCE_MANIFEST.reconcile;
 if (reconcile === null || reconcile === undefined) throw new Error("fixture must carry a reconcile receipt");
 const byId = (items: ReturnType<typeof trustChecklist>) => Object.fromEntries(items.map((i) => [i.id, i])) as Record<TrustId, TrustItem>;
+// `humanUtc` joins its tokens with U+00A0; an expectation with an ordinary space would pin a string the item never prints.
+const nbInstant = (text: string): string => text.replaceAll(" ", "\u00a0");
+const servedAt = EVIDENCE_MANIFEST.served_at;
 
 /** The two `near()` price inputs, by leg: weETH first, ETHFI second. */
 function twoPrices(): [TrustInput["position"]["price_inputs"][number], TrustInput["position"]["price_inputs"][number]] {
@@ -27,7 +30,52 @@ test("five items, in the mockup's order; the happy account is all green except t
   // the fixture's sweep stamp: 1 of 3 rows failed, generation 4 — a book-wide caveat, so warn
   expect(t.sweep).toMatchObject({ label: "Collateral sweep", detail: "1 of 3 rows failed · gen 4", state: "warn" });
   expect(t.provenance).toMatchObject({ label: "Price provenance", detail: "the engine's own inputs", state: "ok", title: "engine-exact" });
-  expect(t.reconcile).toMatchObject({ label: "Book reconciles to chain", detail: "29/29 Cash rows exact · committed receipt", state: "ok" });
+  // The receipt item says what the receipt IS — a pinned, dated run that matched the chain — and carries the run's own finish instant.
+  expect(t.reconcile).toMatchObject({
+    label: "Pinned reconcile run matched the chain",
+    detail: `29/29 Cash rows · ${nbInstant("Jul 29, 2026, 02:14 UTC")}`,
+    state: "ok",
+    title: reconcile.artifact_path,
+  });
+});
+
+test("reconcile: the item claims what the pinned run proved, in the past tense, dated by the run — never a present-tense claim about the live Book, this batch or this account", () => {
+  const item = (patch: TrustInput["reconcile"], at: string | null = servedAt) =>
+    byId(trustChecklist({ position: near(), batchId: 18251, sweep, reconcile: patch, evidenceServedAt: at })).reconcile;
+  // The receipt's own `finished_at`, in prose; the year is dropped exactly when it is the year of the envelope that served it.
+  expect(item(reconcile)).toEqual({
+    id: "reconcile",
+    label: "Pinned reconcile run matched the chain",
+    detail: `29/29 Cash rows · ${nbInstant("Jul 29, 02:14 UTC")}`,
+    state: "ok",
+    title: reconcile.artifact_path,
+  });
+  expect(item(reconcile, null).detail).toBe(`29/29 Cash rows · ${nbInstant("Jul 29, 2026, 02:14 UTC")}`);
+  expect(item({ ...reconcile, welds: [] }).detail).toBe(`87/87 rows · ${nbInstant("Jul 29, 02:14 UTC")}`);
+  // A receipt that carries no readable instant names no date — never "null", never an invented one.
+  for (const finished_at of [null, undefined, 1785291247, "", "   "]) {
+    expect(item({ ...reconcile, finished_at: finished_at as never }).detail).toBe("29/29 Cash rows");
+  }
+  // An instant that is not a well-formed UTC instant is the wire's own text, verbatim — never repaired into a time it did not state.
+  expect(item({ ...reconcile, finished_at: "2026-07-29 02:14" }).detail).toBe("29/29 Cash rows · 2026-07-29 02:14");
+  // Only a receipt whose every counted row matched says "matched"; every other arm is named as the run and claims nothing.
+  const arms = [
+    item(null),
+    item({ ...reconcile, result: "fail", gated_drift: 2 }),
+    item({ ...reconcile, exit_code: 1 }),
+    item({ ...reconcile, welds: reconcile.welds.map((w) => (w.engine === "debt_manager" ? { ...w, rows_exact: 28 } : w)) }),
+    item({ ...reconcile, welds: reconcile.welds.map((w) => (w.engine === "debt_manager" ? { ...w, rows_compared: 0, rows_exact: 0 } : w)) }),
+    item({ ...reconcile, welds: reconcile.welds.map((w) => (w.engine === "debt_manager" ? { ...w, rows_exact: 30 } : w)) }),
+  ];
+  for (const arm of arms) {
+    expect(arm.label).toBe("Pinned reconcile run");
+    expect(arm.state).not.toBe("ok");
+    expect(`${arm.label} ${arm.detail}`).not.toContain("matched");
+  }
+  // No arm speaks in the present tense about the live Book, this batch or this account.
+  for (const arm of [item(reconcile), ...arms]) {
+    expect(`${arm.label} ${arm.detail}`).not.toMatch(/reconciles|\bBook\b|this batch|this account|\bis exact\b|\bare exact\b/);
+  }
 });
 
 test("a refused position names its cause; a stale price names the asset and the budget; a missing price refuses", () => {
@@ -78,7 +126,7 @@ test("reconcile: drift warns with the count; no receipt is dim, never ok", () =>
   expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, reconcile: drifted })).reconcile).toMatchObject({ state: "warn", detail: "2 drifted rows · did not pass" });
   expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, reconcile: null })).reconcile).toMatchObject({ state: "dim", detail: "receipt unavailable" });
   const noWeld = { ...reconcile, welds: [] };
-  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, reconcile: noWeld })).reconcile).toMatchObject({ state: "ok", detail: "87/87 rows exact · committed receipt" });
+  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, reconcile: noWeld })).reconcile).toMatchObject({ state: "ok", detail: `87/87 rows · ${nbInstant("Jul 29, 2026, 02:14 UTC")}` });
 });
 
 // ---- The laws each item holds, one input per arm ----

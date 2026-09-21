@@ -635,3 +635,28 @@ test("historyFinding speaks from the streak and the newest point's own kind: a o
     "Room has stayed above the 10% line in the newest batch · dashed line: 10% of cap",
   );
 });
+
+test("why no Cash figure has a scale to print at is a fact of the view: no position, a withheld book, a lookup that did not complete, or a scale the guard refused — never one word for all four", () => {
+  const stress = { phase: "ready", value: lookup(STRESS_DM) } as const;
+  const of = (overrides: Partial<AddressReading>) => deriveInspectorView(reading({ stress, ...overrides }), TIER_FALLBACK);
+  // A read position at a readable scale: nothing is absent.
+  const served = of({ lookup: { phase: "ready", value: found([nearWire()]) } });
+  expect(served.decimals).toBe(6);
+  expect(served.scaleAbsence).toBeNull();
+  // The position exists and its own scale failed the guard: the one case "unreadable scale" is true of.
+  const unreadable = of({ lookup: { phase: "ready", value: found([nearWire({ value_decimals: 1.5 })]) } });
+  expect(unreadable.decimals).toBeNull();
+  expect(unreadable.scaleAbsence).toBe("unreadable");
+  // No Cash position in the lookup — beside stress rows the two answers disagree, and there is no scale to call unreadable.
+  const none = of({ lookup: { phase: "ready", value: lookup(ADDRESS_NOT_FOUND) } });
+  expect(none.state).toBe("no-position");
+  expect(none.decimals).toBeNull();
+  expect(none.scaleAbsence).toBe("no-position");
+  // A withheld Cash book is not "no position".
+  const withheld = of({ lookup: { phase: "ready", value: lookup(ADDRESS_UNKNOWABLE) } });
+  expect(withheld.state).toBe("cannot-compute");
+  expect(withheld.scaleAbsence).toBe("withheld");
+  // A lookup in flight or failed knows nothing of the position.
+  expect(of({ lookup: { phase: "loading" } }).scaleAbsence).toBe("no-lookup");
+  expect(of({ lookup: { phase: "error", message: "Failed to fetch" } }).scaleAbsence).toBe("no-lookup");
+});

@@ -1,5 +1,5 @@
 // One Cash position on /v1/address/{addr}, read into what the Inspector prints
-// (spec 2026-09-15 §5.3; plan 2 rulings R1–R3). Every decimal passes the wire
+// (spec 2026-09-15 §5.3). Every decimal passes the wire
 // guard before it becomes a bigint; the verdict is the engine's own boolean.
 import type { PriceInput, RefinedLeg, RefinedPosition } from "@solvent/client";
 import type { ViewChip } from "./cash-view";
@@ -90,7 +90,7 @@ export function readCashPosition(position: RefinedPosition): CashPosition {
     ...base,
     cap,
     room: cap - debt,
-    // R15: room and used are printed from the SAME tenths, so the two always sum to 100.0 in print by construction.
+    // Room and used are printed from the SAME tenths, so the two always sum to 100.0 in print by construction.
     roomPercent: roomTenths === null ? null : formatTenths(roomTenths),
     roomTenths,
     usedPercent: roomTenths === null ? null : formatTenths(1000n - roomTenths),
@@ -211,7 +211,7 @@ const AXIS_LABEL: Record<string, string> = {
 };
 
 /**
- * R3: the sentence follows the wire's factor-level solve — assets on the axis
+ * The sentence follows the wire's factor-level solve — assets on the axis
  * move together; held assets stay flat. A joint solve is never half-printed:
  * a served entry without a floor beside one with a floor is unreadable, and a
  * solve that contradicts the verdict (already breached, or a boundary above
@@ -287,7 +287,7 @@ export function boundaryOf(position: RefinedPosition, cash: CashPosition): Bound
   };
 }
 
-/** R2: wire source names, made readable. Unknown sources print verbatim. */
+/** Wire source names, made readable. Unknown sources print verbatim. */
 export function sourceDisplay(source: string): string {
   if (source === "priceproviderv2") return "PriceProvider v2";
   if (source.startsWith("aaveoracle:")) return "Aave oracle";

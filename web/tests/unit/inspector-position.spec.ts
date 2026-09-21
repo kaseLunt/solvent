@@ -28,7 +28,7 @@ test("readCashPosition: the engine's verdict decides liquidatable; healthy is ro
   expect(liq.status).toBe("liquidatable");
   expect(liq.room).toBe(-387500000n);
   expect(liq.roomPercent).toBe("−7.8%");
-  expect(liq.usedPercent).toBe("107.8%"); // R15: the complement of room, never an independent truncation (107.7)
+  expect(liq.usedPercent).toBe("107.8%"); // the complement of room, never an independent truncation (107.7)
   const healthy = readCashPosition(near({ borrowings: "2100000000" }));
   expect(healthy.status).toBe("healthy");
   expect(healthy.roomPercent).toBe("58.1%");

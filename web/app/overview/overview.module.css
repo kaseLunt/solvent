@@ -39,6 +39,9 @@
 .stepD { font-size: var(--type-label); color: var(--ink-2); margin-top: 6px; line-height: 1.45; min-height: 58px; }
 .stepV { font-size: var(--type-label); margin-top: 10px; color: var(--ink); font-variant-numeric: tabular-nums; }
 .stepV b { font-weight: var(--w-semibold); }
+/* A step whose claim is withdrawn: the refused register is --ink-2, the cautioned one the warn text. A step that stands stays in ink. */
+.step[data-tone="refused"] .stepV { color: var(--ink-2); }
+.step[data-tone="warn"] .stepV b { color: var(--warn-text); }
 .foot { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; color: var(--ink-3); font-size: var(--type-label); flex-wrap: wrap; }
 .foot b { color: var(--ink-2); font-weight: var(--w-medium); }
 

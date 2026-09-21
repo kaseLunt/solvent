@@ -201,7 +201,16 @@ export function liquidatableRows(rows: readonly CashRow[]): SizedCashRow[] {
   return withDebt(rows).filter((r) => r.computed && r.verdict === "liquidatable");
 }
 
+/** The room bands within 10% of the borrow cap, by their place in `HEADROOM_BANDS`. */
 const NEAR_CAP_BANDS: ReadonlySet<number> = new Set([1, 2, 3]);
+
+/**
+ * The same bands by id — the one definition the near-cap rows, the distance
+ * chart's finding and its warn tone share, so the three cannot drift apart.
+ */
+export const NEAR_CAP_BAND_IDS: ReadonlySet<string> = new Set(
+  HEADROOM_BANDS.flatMap((band, index) => (NEAR_CAP_BANDS.has(index) ? [band.id] : [])),
+);
 
 function byRoom(a: CashRow, b: CashRow): number {
   const x = a.roomTenths ?? 0n;

@@ -60,16 +60,24 @@ test("with the API unreachable the hero still renders and the strip refuses hone
     await expect(page.getByTestId(`pipeline-${id}`)).toHaveAttribute("data-value", "unavailable");
   }
   await expect(page.locator("body")).not.toContainText("$0 of Cash debt");
+  // An unread book refused nothing: the strip's census is a dash, its chip says unavailable, and the engine's word
+  // "not computed" is nowhere on the page.
+  await expect(page.getByTestId("overview-live-accounts")).toContainText("—");
+  await expect(page.getByTestId("overview-live-accounts")).not.toContainText(/\d/);
+  await expect(page.getByTestId("overview-live-identity")).toContainText("Identity unavailable");
+  await expect(page.locator("main")).not.toContainText(/not computed/i);
 });
 
-test("a withheld Cash engine refuses the strip and the entry cards carry no walk-derived figure", async ({ page }) => {
+test("a withheld Cash engine refuses the strip — its census included — and the entry cards carry no walk-derived figure", async ({ page }) => {
+  // The contract's own withheld card: its counts are placeholders (0 in the contract's example), never a census.
+  const refusal = { engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "collateral-flag custody is unproven", note: "" };
   const withheld = {
     ...BOOK,
-    refused_engines: [
-      { engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "collateral-flag custody is unproven", note: "" },
-    ],
+    refused_engines: [refusal],
     engines: BOOK.engines.map((e) =>
-      e.engine === "debt_manager" ? { ...e, refused: true, total_debt: null, total_collateral: null } : e,
+      e.engine === "debt_manager"
+        ? { ...e, refused: true, refusal, positions: 0, computed_positions: 0, refused_positions: 0, liquidatable_positions: 0, total_debt: null, total_collateral: null }
+        : e,
     ),
   };
   await page.route("**/v1/stream**", (route) => route.abort());
@@ -84,6 +92,15 @@ test("a withheld Cash engine refuses the strip and the entry cards carry no walk
   await expect(page.getByTestId("overview-entry-inspector")).toContainText("Try any 0x address");
   await expect(page.locator("body")).not.toContainText("$0");
   await expect(page.locator("body")).not.toContainText("liquidatable now");
+  // The strip's "Accounts" and its Coverage chip: the census is withheld with the engine — never the card's 0, so
+  // the strip cannot say "Accounts 0" above a pipeline step that says the census is withheld.
+  await expect(page.getByTestId("overview-live-accounts")).toContainText("—");
+  await expect(page.getByTestId("overview-live-accounts")).not.toContainText(/\d/);
+  const identity = page.getByTestId("overview-live-identity");
+  await expect(identity).toContainText("Coverage withheld");
+  await expect(identity).not.toContainText("computed");
+  await expect(identity.locator('[data-chip="Coverage"]')).toHaveClass(/chipRefused/);
+  await expect(page.getByTestId("pipeline-compute")).toContainText("Cash accounts withheld");
 });
 
 test("a withheld Cash engine: the pipeline's compute step prints the batch and names the census withheld — never '0 Cash accounts'", async ({ page }) => {
@@ -110,6 +127,12 @@ test("a withheld Cash engine: the pipeline's compute step prints the batch and n
   await expect(compute).toContainText(`batch ${BOOK.batch.id.toLocaleString("en-US")} · Cash accounts withheld`);
   await expect(compute).not.toContainText("0 Cash accounts");
   await expect(page.locator("body")).not.toContainText("0 Cash accounts");
+  // The withheld step wears the refused register, not only its words: its line is not the ink of a step that stands.
+  await expect(compute).toHaveAttribute("data-tone", "refused");
+  const serve = page.getByTestId("pipeline-serve");
+  await expect(serve).toHaveAttribute("data-tone", "neutral");
+  const lineColour = (step: typeof compute) => step.locator("b").evaluate((b) => getComputedStyle(b.parentElement ?? b).color);
+  expect(await lineColour(compute)).not.toBe(await lineColour(serve));
 });
 
 test("while the walk runs the strip is pending and the Book entry says so — never '$0 within 10% of cap'", async ({ page }) => {

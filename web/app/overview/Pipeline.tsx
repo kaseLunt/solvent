@@ -35,12 +35,18 @@ const STEP_COPY: Record<PipelineStep["key"], { name: string; description: string
   },
 };
 
-/** How it works — four steps, each carrying a live number or an honest "unavailable". */
+/**
+ * How it works — four steps, each carrying a live number or an honest "unavailable". A step's tone is the shared
+ * law's, and the front door honours the two that withdraw a claim: a refused step reads in the refused register and
+ * a cautioned one in the warn register, so a withheld census is not only worded as one. A step that stands (`ok`,
+ * `neutral`) prints in ink — the front door's line is a record, and green is kept for a verdict on the page that
+ * owns it.
+ */
 export function Pipeline({ meta, evidence, reading }: PipelineProps) {
   return (
     <div className={styles.pipe}>
       {pipelineSteps(meta, evidence, reading).map((step) => (
-        <div key={step.key} className={styles.step} data-testid={`pipeline-${step.key}`} data-value={step.line.figure}>
+        <div key={step.key} className={styles.step} data-testid={`pipeline-${step.key}`} data-value={step.line.figure} data-tone={step.tone}>
           <div className={styles.stepNum}>{step.ordinal}</div>
           <div className={styles.stepN}>{STEP_COPY[step.key].name}</div>
           <div className={styles.stepD}>{STEP_COPY[step.key].description}</div>

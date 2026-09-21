@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { bookHeadline, bookHeadlineRefused, censusFaultWords, nearCapSentence, walkSentence } from "../../lib/book-headline";
+import { bookHeadline, bookHeadlineRefused, censusFaultWords, nearCapSentence, stopFrame, walkSentence } from "../../lib/book-headline";
 
 const usd6 = (n: number): bigint => BigInt(Math.round(n * 1_000_000));
 /** A complete walk: the only state in which a negative may be claimed over the book. */
-const settled = { computed: 10, complete: true, stopped: null } as const;
+const settled = { computed: 10, complete: true, stopped: null, stopKind: null } as const;
 const nothing = { sum: 0n, count: 0 } as const;
 
 test("material: money first, the emphasized phrase carries the verdict", () => {
@@ -73,7 +73,7 @@ test("quiet with nothing liquidatable at all", () => {
 });
 
 test("a negative is claimed only over computed accounts: beside refused accounts the dek says 'No computed position'", () => {
-  const h = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 2, computed: 5, complete: true, stopped: null });
+  const h = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 2, computed: 5, complete: true, stopped: null, stopKind: null });
   expect(h.variant).toBe("quiet");
   expect(h.dek).toBe(
     "No computed position is liquidatable. No account is within 10% of its borrow cap. 2 positions could not be computed this batch and are counted, not hidden.",
@@ -82,7 +82,7 @@ test("a negative is claimed only over computed accounts: beside refused accounts
 });
 
 test("a complete walk that computed no account beside refused ones is a refusal, never a quiet verdict", () => {
-  const h = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 1, computed: 0, complete: true, stopped: null });
+  const h = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 1, computed: 0, complete: true, stopped: null, stopKind: null });
   expect(h.variant).toBe("refused");
   expect(h.tone).toBe("refused");
   expect(h.emphasis).toBe("No Cash account could be computed this batch.");
@@ -91,7 +91,7 @@ test("a complete walk that computed no account beside refused ones is a refusal,
 });
 
 test("an unfinished walk with nothing material is pending — never 'Nothing material is liquidatable'", () => {
-  const first = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 1, computed: 0, complete: false, stopped: null });
+  const first = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 1, computed: 0, complete: false, stopped: null, stopKind: null });
   expect(first.variant).toBe("pending");
   expect(first.tone).toBe("refused");
   expect(first.emphasis).toBe("Walking the Cash book…");
@@ -99,7 +99,7 @@ test("an unfinished walk with nothing material is pending — never 'Nothing mat
     "No page has landed yet. The verdict settles when the walk ends. 1 position could not be computed this batch and is counted, not hidden.",
   );
   expect(first.dek).not.toContain("No account is within 10%");
-  const later = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 0, computed: 40, complete: false, stopped: null });
+  const later = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 0, computed: 40, complete: false, stopped: null, stopKind: null });
   expect(later.dek).toBe("Nothing material is liquidatable among the 40 computed accounts read so far. The verdict settles when the walk ends.");
 });
 
@@ -112,16 +112,48 @@ test("a stopped walk names its cause and claims no verdict over the rest", () =>
     notComputed: 0,
     computed: 3,
     complete: false,
-    stopped: "the walk delivered 3 of the 5 rows the wire advertised",
+    stopped: "Failed to fetch",
+    stopKind: "before-end",
   });
   expect(h.variant).toBe("refused");
   expect(h.emphasis).toBe("The Cash book could not be fully read this batch.");
   expect(h.dek).toBe(
-    "The walk stopped before the last page (the walk delivered 3 of the 5 rows the wire advertised). " +
+    "The walk stopped before the last page (Failed to fetch). " +
       "Nothing material is liquidatable among the 3 computed accounts read so far. No verdict is claimed over the rest.",
   );
-  const blank = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 0, computed: 0, complete: false, stopped: "  " });
+  const blank = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 0, computed: 0, complete: false, stopped: "  ", stopKind: "before-end" });
   expect(blank.dek).toBe("The walk stopped before the last page (the service gave no reason). No page has landed yet. No verdict is claimed over the rest.");
+});
+
+test("the dek words what happened to the walk: 'before the last page' is said only of a walk that never read its last page — a walk that reached it, or ran past its census, says so", () => {
+  const base = { decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 0, computed: 3, complete: false } as const;
+  const short = censusFaultWords(3, 5);
+  const past = censusFaultWords(3, 2);
+  expect(stopFrame("before-end", "Failed to fetch")).toBe("The walk stopped before the last page (Failed to fetch)");
+  expect(stopFrame("at-end", short)).toBe(
+    "The walk reached its last page and its rows do not reconcile with the census (the walk delivered 3 of the 5 rows the wire advertised)",
+  );
+  expect(stopFrame("over", past)).toBe("The walk ran past its census (the walk delivered 3 rows for a census of 2)");
+  // The refused headline: the frame is the stop's own, and neither census fault is "before the last page".
+  const atEnd = bookHeadline({ ...base, stopped: short, stopKind: "at-end" });
+  expect(atEnd.dek).toBe(
+    "The walk reached its last page and its rows do not reconcile with the census (the walk delivered 3 of the 5 rows the wire advertised). " +
+      "Nothing material is liquidatable among the 3 computed accounts read so far. No verdict is claimed over the rest.",
+  );
+  const over = bookHeadline({ ...base, stopped: past, stopKind: "over" });
+  expect(over.dek).toContain("The walk ran past its census (the walk delivered 3 rows for a census of 2).");
+  for (const h of [atEnd, over]) expect(h.dek).not.toContain("before the last page");
+  // A material finding beside each stop: a lower bound where the rows are distinct accounts; under a walk past its
+  // census the rows may count an account twice, so no bound is claimed — never "lower bound", never "at least".
+  const material = { ...base, material: { sum: usd6(4200), count: 1 }, computed: 1 };
+  expect(bookHeadline({ ...material, stopped: short, stopKind: "at-end" }).dek).toBe(
+    "The walk reached its last page and its rows do not reconcile with the census (the walk delivered 3 of the 5 rows the wire advertised); every figure is a lower bound over the 1 computed account it read.",
+  );
+  const overMaterial = bookHeadline({ ...material, stopped: past, stopKind: "over" });
+  expect(overMaterial.dek).toBe(
+    "The walk ran past its census (the walk delivered 3 rows for a census of 2); its rows may count an account twice, so no figure here is a total or a lower bound.",
+  );
+  expect(overMaterial.dek).not.toMatch(/every figure is a lower bound|at least/);
 });
 
 test("the census fault: a short walk delivered N of the M rows; a walk past its census delivered N rows FOR a census of M — never 'N of the M' with N the larger", () => {
@@ -139,16 +171,17 @@ test("the census fault: a short walk delivered N of the M rows; a walk past its 
     computed: 3,
     complete: false,
     stopped: censusFaultWords(3, 2),
+    stopKind: "over",
   });
   expect(h.dek).toContain("(the walk delivered 3 rows for a census of 2)");
 });
 
 test("a material finding stands mid-walk as a lower bound; a zero near-cap count mid-walk is silence, not a negative", () => {
   const input = { decimals: 6, material: { sum: usd6(4200), count: 1 }, belowLine: nothing, nearCap: nothing, notComputed: 0, computed: 1 };
-  const running = bookHeadline({ ...input, complete: false, stopped: null });
+  const running = bookHeadline({ ...input, complete: false, stopped: null, stopKind: null });
   expect(running.variant).toBe("material");
   expect(running.dek).toBe("The walk is still running; every figure is a lower bound over the 1 computed account read so far.");
-  const stopped = bookHeadline({ ...input, complete: false, stopped: "Failed to fetch" });
+  const stopped = bookHeadline({ ...input, complete: false, stopped: "Failed to fetch", stopKind: "before-end" });
   expect(stopped.variant).toBe("material");
   expect(stopped.dek).toBe(
     "The walk stopped before the last page (Failed to fetch); every figure is a lower bound over the 1 computed account it read.",
@@ -156,7 +189,7 @@ test("a material finding stands mid-walk as a lower bound; a zero near-cap count
   expect(nearCapSentence(nothing, 6, false)).toBeNull();
   expect(nearCapSentence(nothing, 6, true)).toBe("No account is within 10% of its borrow cap.");
   expect(nearCapSentence({ sum: usd6(500), count: 1 }, 6, false)).toBe("1 account is within 10% of its borrow cap, carrying $500.");
-  expect(walkSentence({ complete: true, stopped: null, computed: 9 })).toBeNull();
+  expect(walkSentence({ complete: true, stopped: null, stopKind: null, computed: 9 })).toBeNull();
 });
 
 test("refused: the whole engine withheld", () => {

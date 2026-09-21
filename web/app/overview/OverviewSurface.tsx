@@ -143,7 +143,7 @@ export function OverviewSurface() {
             <div className={styles.liveStatL}>Collateral</div>
             <div className={styles.liveStatV}>{moneyText(view.collateral)}</div>
           </div>
-          <div>
+          <div data-testid="overview-live-accounts">
             <div className={styles.liveStatL}>Accounts</div>
             <div className={styles.liveStatV}>{view.positions === null ? "—" : view.positions.toLocaleString("en-US")}</div>
           </div>
