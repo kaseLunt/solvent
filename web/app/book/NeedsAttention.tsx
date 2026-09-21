@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { KitTable, SmallToggle, StatusPill, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { notComputedCause, type CashRow, type SizedCashRow } from "@/lib/cash-rows";
+import { notComputedCause, rowStandingLabel, type CashRow, type SizedCashRow } from "@/lib/cash-rows";
 import { attentionEmptyText, type CashSummary } from "@/lib/cash-summary";
 import { humanUsd } from "@/lib/human-usd";
 import styles from "./book.module.css";
@@ -41,6 +41,7 @@ function toRow(r: SizedCashRow, status: "liquidatable" | "near"): KitRow {
   };
 }
 
+/** A row with no verdict here — refused by the engine, or unreadable by this page: dimmed, its standing and its cause in the lib's words. */
 function refusedRow(r: CashRow): KitRow {
   return {
     key: r.account,
@@ -56,7 +57,7 @@ function refusedRow(r: CashRow): KitRow {
       debt: r.debt === null ? "—" : humanUsd(r.debt, r.decimals),
       status: (
         <StatusPill tone="refused" title={notComputedCause(r)}>
-          Not computed
+          {rowStandingLabel(r)}
         </StatusPill>
       ),
     },
@@ -71,7 +72,7 @@ export interface NeedsAttentionProps {
   onRetry: () => void;
 }
 
-/** Material liquidatable first, then near cap by room, then the refused rows — dimmed, never dropped. */
+/** Material liquidatable first, then near cap by room, then the rows with no verdict (refused or unreadable) — dimmed, never dropped. */
 export function NeedsAttention({ summary, rows, walkFailure, onRetry }: NeedsAttentionProps) {
   const [showSmall, setShowSmall] = useState(false);
   const material = [...summary.liquidatable.material].sort(byRoom).map((r) => toRow(r, "liquidatable"));
@@ -80,7 +81,7 @@ export function NeedsAttention({ summary, rows, walkFailure, onRetry }: NeedsAtt
   const belowLine = [...summary.liquidatable.small, ...summary.liquidatable.dust]
     .sort(byRoom)
     .map((r) => toRow(r, "liquidatable"));
-  // Material rows always show; near-cap fills the default rows; refused rows are ALWAYS appended (counted, not hidden).
+  // Material rows always show; near-cap fills the default rows; rows with no verdict are ALWAYS appended (counted, not hidden).
   const base = [...material, ...near.slice(0, Math.max(0, DEFAULT_ROWS - material.length)), ...refused];
   const shown = showSmall ? [...base, ...belowLine] : base;
   const n = summary.liquidatable.counts.belowLine;

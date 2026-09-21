@@ -4,13 +4,13 @@ import { useState } from "react";
 import { BandBars, ChartCard, KpiTile, SectionHead, VerdictHeader, type Band } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { useCashBook } from "@/lib/cash-book";
+import { BAD_DEBT_NOT_REPORTED } from "@/lib/cash-refusal";
 import { NEAR_CAP_BAND_IDS } from "@/lib/cash-rows";
 import { attentionFinding, bandsFinding, bandsSoFar, tileBoundNote } from "@/lib/cash-summary";
 import { deriveCashView, deriveLegacyView, malformedSub, moneyText } from "@/lib/cash-view";
 import { humanUsd } from "@/lib/human-usd";
 import { MATERIAL_LINE_USD } from "@/lib/materiality";
 import { useMetaConstants } from "@/lib/meta";
-import { plainCause } from "@/lib/refusal-phrasebook";
 import { BookLegacy } from "./BookLegacy";
 import { BookMethodology } from "./BookMethodology";
 import { NeedsAttention } from "./NeedsAttention";
@@ -44,26 +44,18 @@ export function BookSurface() {
     tone: bandTone(b.id),
   }));
   const distance = summary === null ? null : bandsFinding(summary);
-  const refusalKey = cash.engine?.refusals[0]?.key;
   const badDebt = view.badDebt;
   const walkFailure =
     cash.walkFailure === null
       ? null
       : { message: cash.walkFailure.message, retryable: cash.walkFailure.register === "transport" };
-  const withheldCause = view.withheld === null ? null : plainCause(view.withheld.code, view.withheld.detail);
-  // A walk-derived zero is a finding only once the walk is complete: until
-  // then the tile shows a dash, and a positive figure wears the walk's own note.
+  // A walk-derived zero is a finding only over a book read whole — a complete
+  // walk, every row of it readable: until then the tile shows a dash, and a
+  // positive figure wears the walk's own note.
   const boundNote = tileBoundNote(summary);
-  // The withheld engine's cause first; then why there is no count at all; only a served census names its refusals.
-  const notComputedSub =
-    withheldCause ??
-    (view.refusedPositions === null
-      ? absentWord
-      : refusalKey !== undefined
-        ? plainCause(refusalKey)
-        : view.refusedPositions === 0
-          ? "nothing refused"
-          : "cause not stated");
+  const whole = summary !== null && summary.whole;
+  // The figures are held short of a finding: the walk stopped, or it completed over a row this page could not read.
+  const held = walkStopped !== null || (summary !== null && summary.settled && !summary.whole);
 
   return (
     <div className={styles.page} aria-busy={walking ? "true" : undefined}>
@@ -114,7 +106,7 @@ export function BookSurface() {
           value={
             summary === null
               ? "—"
-              : summary.material.count > 0 || summary.settled
+              : summary.material.count > 0 || whole
                 ? humanUsd(summary.material.sum, decimals)
                 : "—"
           }
@@ -128,7 +120,7 @@ export function BookSurface() {
               ? "refused"
               : summary !== null && summary.material.count > 0
                 ? "crit"
-                : walkStopped !== null
+                : held
                   ? "refused"
                   : "neutral"
           }
@@ -140,7 +132,7 @@ export function BookSurface() {
           value={
             summary === null
               ? "—"
-              : summary.nearCap.count > 0 || summary.settled
+              : summary.nearCap.count > 0 || whole
                 ? humanUsd(summary.nearCap.sum, decimals)
                 : "—"
           }
@@ -150,7 +142,7 @@ export function BookSurface() {
               ? "refused"
               : summary !== null && summary.nearCap.count > 0
                 ? "warn"
-                : walkStopped !== null
+                : held
                   ? "refused"
                   : "neutral"
           }
@@ -192,8 +184,8 @@ export function BookSurface() {
         <KpiTile
           testId="book-kpi-notcomputed"
           label="Not computed"
-          value={view.refusedPositions === null ? "—" : String(view.refusedPositions)}
-          sub={notComputedSub}
+          value={view.notComputedTile.value}
+          sub={view.notComputedTile.sub}
           tone="refused"
         />
       </div>
@@ -247,11 +239,11 @@ export function BookSurface() {
               badDebt === null
                 ? refusedTiles
                   ? absentLine
-                  : "Not reported."
+                  : BAD_DEBT_NOT_REPORTED
                 : badDebt.reading.kind === "malformed"
                   ? `Standing bad debt is unreadable: ${malformedSub(badDebt.reading.field)}.`
                   : badDebt.reading.kind === "absent"
-                    ? (badDebt.cause === null ? "Not reported." : `Standing bad debt withheld: ${badDebt.cause}.`)
+                    ? (badDebt.cause === null ? BAD_DEBT_NOT_REPORTED : `Standing bad debt withheld: ${badDebt.cause}.`)
                     : `${badDebt.reading.text} of debt is no longer covered by collateral, across ${badDebt.insolvent === null ? "an unknown number of accounts" : plural(badDebt.insolvent, "account")}.`
             }
           >
@@ -263,7 +255,7 @@ export function BookSurface() {
       )}
 
       <BookLegacy view={legacy} />
-      <BookMethodology open={methodOpen} onClose={() => setMethodOpen(false)} book={reading.book} />
+      <BookMethodology open={methodOpen} onClose={() => setMethodOpen(false)} book={reading.book} withheld={view.withheld} />
     </div>
   );
 }

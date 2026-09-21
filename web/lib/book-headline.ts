@@ -15,7 +15,12 @@ export interface BookHeadlineInput {
   readonly notComputed: number;
   /** Accounts the walk has read with a known verdict. */
   readonly computed: number;
-  /** The walk reached its last page. Only a complete walk may claim a negative over the book. */
+  /**
+   * Rows the engine calls computed that this page could not read. Absent means none. One of them is enough to
+   * withhold every negative: a row nobody could read is not a row that was cleared.
+   */
+  readonly unreadable?: number;
+  /** The walk reached its last page. Only a complete walk, read whole, may claim a negative over the book. */
   readonly complete: boolean;
   /** The walk stopped before it was complete, with this cause; null while it runs or once it is complete. */
   readonly stopped: string | null;
@@ -29,10 +34,13 @@ export interface BookHeadlineInput {
  * failed request, a moved batch, a page that could not be read, a census
  * fault mid-walk). "at-end": it reached its last page and its rows do not
  * reconcile with the census the wire advertised. "over": it delivered more
- * rows than the census, on any page — the landed rows may count an account
- * twice, so no figure over them is a total OR a lower bound.
+ * rows than the census, on any page — it landed accounts the census does not
+ * count. "duplicate": a page delivered an account the walk had already read —
+ * pages that repeat an account do not partition the book, and the two readings
+ * of that account cannot both stand. Over the last two, no figure is a total
+ * OR a lower bound.
  */
-export type WalkStopKind = "before-end" | "at-end" | "over";
+export type WalkStopKind = "before-end" | "at-end" | "over" | "duplicate";
 
 export interface Headline {
   readonly variant: "material" | "quiet" | "refused" | "pending";
@@ -68,33 +76,61 @@ export function notComputedSentence(n: number): string | null {
   return `${plural(n, "position")} could not be computed this batch and ${one ? "is" : "are"} counted, not hidden.`;
 }
 
+/**
+ * The unreadable rows' sentence. The engine computed these positions and refused nothing: what failed is this page's
+ * reading of them, and the sentence says so — counted beside the refused positions, never among them.
+ */
+export function unreadableSentence(n: number): string | null {
+  if (n === 0) return null;
+  const one = n === 1;
+  return `${plural(n, "position")} the engine calls computed could not be read by this page and ${one ? "is" : "are"} counted, not cleared.`;
+}
+
 /** A stop cause as parenthetical words: trimmed, unterminated, or the fallback when the wire gave none. */
 function causeWords(stopped: string): string {
   const trimmed = stopped.trim().replace(/\.$/, "");
   return trimmed.length === 0 ? "the service gave no reason" : trimmed;
 }
 
-/** What happened to a walk that did not complete, as the clause that opens the dek: the frame is the stop's own, with its cause. */
+/** What happened to a walk that did not complete, in the stop's own frame — one frame is never said of all four endings. */
+export function stopWords(kind: WalkStopKind | null): string {
+  if (kind === "at-end") return "The walk reached its last page and its rows do not reconcile with the census";
+  if (kind === "over") return "The walk ran past its census";
+  if (kind === "duplicate") return "The walk was served an account twice";
+  return "The walk stopped before the last page";
+}
+
+/** The same frame as the clause that opens the dek, with the stop's cause. */
 export function stopFrame(kind: WalkStopKind | null, stopped: string): string {
-  const cause = causeWords(stopped);
-  if (kind === "at-end") return `The walk reached its last page and its rows do not reconcile with the census (${cause})`;
-  if (kind === "over") return `The walk ran past its census (${cause})`;
-  return `The walk stopped before the last page (${cause})`;
+  return `${stopWords(kind)} (${causeWords(stopped)})`;
+}
+
+/** Why no figure over a walk that ended this way is a total or a lower bound; null for an ending whose rows still bound the book. */
+function noBoundReason(kind: WalkStopKind | null): string | null {
+  if (kind === "over") return "it landed more accounts than the census counts";
+  if (kind === "duplicate") return "pages that repeat an account do not partition the book";
+  return null;
 }
 
 /**
- * How far the walk got, when it did not get to the end. A running walk and a
- * walk that stopped short read distinct accounts, so every figure is a lower
- * bound and the dek says so. A walk past its census cannot say that: its rows
- * may count an account twice, and a sum over them bounds nothing.
+ * How far the reading got, when it did not read the whole book. A running
+ * walk and a walk that stopped short read distinct accounts, so every figure
+ * is a lower bound and the dek says so — as does a complete walk that landed
+ * a row this page could not read. A walk past its census, or one served an
+ * account twice, cannot say that: a sum over its rows bounds nothing.
  */
-export function walkSentence(input: Pick<BookHeadlineInput, "complete" | "stopped" | "stopKind" | "computed">): string | null {
-  if (input.complete) return null;
+export function walkSentence(
+  input: Pick<BookHeadlineInput, "complete" | "stopped" | "stopKind" | "computed" | "unreadable">,
+): string | null {
   const read = plural(input.computed, "computed account");
+  if (input.complete) {
+    return (input.unreadable ?? 0) > 0 ? `Every figure is a lower bound over the ${read} this page could read.` : null;
+  }
   if (input.stopped === null) return `The walk is still running; every figure is a lower bound over the ${read} read so far.`;
   const frame = stopFrame(input.stopKind, input.stopped);
-  return input.stopKind === "over"
-    ? `${frame}; its rows may count an account twice, so no figure here is a total or a lower bound.`
+  const noBound = noBoundReason(input.stopKind);
+  return noBound !== null
+    ? `${frame}; ${noBound}, so no figure here is a total or a lower bound.`
     : `${frame}; every figure is a lower bound over the ${read} it read.`;
 }
 
@@ -110,6 +146,21 @@ export function censusFaultWords(delivered: number, census: number): string {
     : `the walk delivered ${String(delivered)} of the ${String(census)} rows the wire advertised`;
 }
 
+/**
+ * The duplicate fault's words: WHICH account, and on WHICH pages — the first
+ * delivery and the one that repeated it (1-based, in walk order) — and how
+ * many further rows of that page repeated an account. The account is printed
+ * as the repeating page spelled it; identity itself ignores the address's case.
+ */
+export function duplicateFaultWords(account: string, firstPage: number, againPage: number, others = 0): string {
+  const where =
+    firstPage === againPage
+      ? `twice on page ${String(againPage)}`
+      : `on page ${String(firstPage)} and again on page ${String(againPage)}`;
+  const more = others === 0 ? "" : `, and ${plural(others, "more repeated row")} on that page`;
+  return `account ${account} was delivered ${where}${more}`;
+}
+
 function joinSentences(parts: readonly (string | null)[]): string {
   return parts.filter((p): p is string => p !== null && p.length > 0).join(" ");
 }
@@ -118,13 +169,17 @@ function joinSentences(parts: readonly (string | null)[]): string {
  * The Book's headline. A positive finding stands as soon as it is read (the
  * walk lands the least room first); a negative — nothing material, no
  * position liquidatable, no account near cap — is claimed only over the
- * computed accounts of a complete walk. An unfinished walk is pending, a
- * stopped one is named, and refused accounts are never inside a negative.
+ * computed accounts of a complete walk whose every row this page could read.
+ * An unfinished walk is pending, a stopped one is named, refused accounts are
+ * never inside a negative — and one unreadable row withholds them all: the
+ * engine computed it, and nobody here knows what it says.
  */
 export function bookHeadline(input: BookHeadlineInput): Headline {
+  const unreadable = input.unreadable ?? 0;
   const below = belowLineSentence({ belowLine: input.belowLine.count }, { belowLine: input.belowLine.sum }, input.decimals);
-  const near = nearCapSentence(input.nearCap, input.decimals, input.complete);
+  const near = nearCapSentence(input.nearCap, input.decimals, input.complete && unreadable === 0);
   const notComputed = notComputedSentence(input.notComputed);
+  const unread = unreadableSentence(unreadable);
   const walk = walkSentence(input);
   if (input.material.count > 0) {
     return {
@@ -132,7 +187,7 @@ export function bookHeadline(input: BookHeadlineInput): Headline {
       tone: "crit",
       emphasis: `${humanUsd(input.material.sum, input.decimals)} of Cash debt is liquidatable right now,`,
       rest: ` across ${plural(input.material.count, "account")}.`,
-      dek: joinSentences([below, near, notComputed, walk]),
+      dek: joinSentences([below, near, notComputed, unread, walk]),
     };
   }
   if (!input.complete) {
@@ -146,7 +201,7 @@ export function bookHeadline(input: BookHeadlineInput): Headline {
         tone: "refused",
         emphasis: "Walking the Cash book…",
         rest: "",
-        dek: joinSentences([readSoFar, "The verdict settles when the walk ends.", below, notComputed]),
+        dek: joinSentences([readSoFar, "The verdict settles when the walk ends.", below, notComputed, unread]),
       };
     }
     return {
@@ -160,7 +215,18 @@ export function bookHeadline(input: BookHeadlineInput): Headline {
         "No verdict is claimed over the rest.",
         below,
         notComputed,
+        unread,
       ]),
+    };
+  }
+  if (unreadable > 0) {
+    // The walk is complete and a row on it could not be read: no all-clear, in any of its forms, is said over it.
+    return {
+      variant: "refused",
+      tone: "refused",
+      emphasis: "The Cash book could not be fully read this batch.",
+      rest: "",
+      dek: joinSentences([unread, `No verdict is claimed over ${unreadable === 1 ? "it" : "them"}.`, below, near, notComputed]),
     };
   }
   if (input.computed === 0 && input.notComputed > 0) {

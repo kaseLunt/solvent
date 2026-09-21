@@ -22,6 +22,7 @@ function reading(over: Omit<Partial<CashBookReading>, "cash"> & { cash?: Partial
     phase: "ok",
     book: BOOK,
     failure: null,
+    repairFault: null,
     cash: {
       engine: cashEngine,
       badDebt: cashBadDebt,
@@ -52,6 +53,9 @@ test("the committed page derives the material headline, tier-toned chips, and a 
   expect(v.debt).toEqual({ kind: "value", value: 4_200_000_000n, text: "$4,200" });
   expect(v.badDebt).toEqual({ reading: { kind: "value", value: 239_603_961n, text: "$239.60" }, insolvent: 1, cause: null });
   expect(v.bookEntryLine).toBe("$0 within 10% of cap");
+  // The sixth tile: the aggregate's refused count under its own cause — nothing unreadable, so nothing added to either.
+  expect(v.notComputedTile).toEqual({ value: "1", sub: "collateral sweep never ran" });
+  expect(v.chips).toHaveLength(4);
 });
 
 test("a stale batch wears the stale tier on the snapshot chip — never the fresh colour", () => {
@@ -100,7 +104,7 @@ test("a stopped walk is named on the view: not walking, not settled, the cause c
   expect(v.walkStopped).toBe("Failed to fetch");
   expect(v.headline.variant).toBe("refused");
   expect(v.headline.emphasis).toBe("The Cash book could not be fully read this batch.");
-  expect(v.bookEntryLine).toBe("Walk stopped before the book was read");
+  expect(v.bookEntryLine).toBe("The walk stopped before the last page");
   const invalid = deriveCashView(
     reading({
       cash: { walkComplete: false, walkFailure: { register: "invalid-response", message: "the walk delivered 2 of the 3 rows the wire advertised" }, walkStop: "at-end" },
@@ -113,14 +117,28 @@ test("a stopped walk is named on the view: not walking, not settled, the cause c
   // The walk reached its last page: the dek says so, and never "before the last page".
   expect(invalid.headline.dek).toContain("The walk reached its last page and its rows do not reconcile with the census");
   expect(invalid.headline.dek).not.toContain("before the last page");
+  // The Overview's Book entry card wears the same frame: a walk that READ its last page never "stopped before" anything.
+  expect(invalid.bookEntryLine).toBe("The walk reached its last page and its rows do not reconcile with the census");
+  expect(invalid.bookEntryLine).not.toMatch(/before the (book was read|last page)/);
   // A walk past its census threads its kind to the summary: the view claims no bound over rows that may repeat an account.
   const over = deriveCashView(
     reading({ cash: { walkComplete: false, walkFailure: { register: "invalid-response", message: "the walk delivered 2 rows for a census of 1" }, walkStop: "over" } }),
     TIER_FALLBACK,
   );
   expect(over.summary?.stopKind).toBe("over");
-  expect(over.headline.dek).toContain("The walk ran past its census (the walk delivered 2 rows for a census of 1); its rows may count an account twice");
+  expect(over.headline.dek).toContain("The walk ran past its census (the walk delivered 2 rows for a census of 1); it landed more accounts than the census counts");
   expect(over.headline.dek).not.toContain("every figure is a lower bound");
+  expect(over.bookEntryLine).toBe("The walk ran past its census");
+  // A walk served an account twice threads its own kind the same way: named, and no bound claimed.
+  const twice = "account 0xccCc000000000000000000000000000000000003 was delivered on page 1 and again on page 2";
+  const duplicate = deriveCashView(
+    reading({ cash: { walkComplete: false, walkFailure: { register: "invalid-response", message: twice }, walkStop: "duplicate" } }),
+    TIER_FALLBACK,
+  );
+  expect(duplicate.summary?.stopKind).toBe("duplicate");
+  expect(duplicate.headline.dek).toContain(`The walk was served an account twice (${twice}); pages that repeat an account do not partition the book`);
+  expect(duplicate.headline.dek).not.toMatch(/every figure is a lower bound|at least/);
+  expect(duplicate.bookEntryLine).toBe("The walk was served an account twice");
 });
 
 test("the preview line: the ETH −30% line, or the withheld preview named — never ordinary copy over a refusal", () => {
@@ -198,7 +216,7 @@ test("loading, failure, and an absent engine each refuse rather than default to 
   expect(loading.headline.emphasis).toBe("Loading the Cash book…");
   expect(loading.chips).toEqual([{ label: "Identity", value: "pending", tone: "refused" }]);
   const failed = deriveCashView(
-    reading({ phase: "no-batch", book: null, failure: { message: "no servable batch", retryAfterSeconds: 30 }, cash: { engine: null, rows: [] } }),
+    reading({ phase: "no-batch", book: null, failure: { message: "no servable batch", retryAfterSeconds: 30, unreadable: false }, cash: { engine: null, rows: [] } }),
     TIER_FALLBACK,
   );
   expect(failed.headline.emphasis).toBe("The Cash book could not be loaded.");
@@ -285,8 +303,8 @@ test("why the figures are absent is decided here: a read in flight is loading, a
   const loading = deriveCashView(reading({ phase: "loading", ...unread }), TIER_FALLBACK);
   expect(loading.absence).toEqual({ kind: "loading", word: "loading…", line: "Loading…" });
   expect(loading.sectionQualifier).toBe("Debt Manager engine · OP Mainnet · accounts loading…");
-  const failed = deriveCashView(reading({ phase: "error", failure: { message: "Failed to fetch", retryAfterSeconds: null }, ...unread }), TIER_FALLBACK);
-  const noBatch = deriveCashView(reading({ phase: "no-batch", failure: { message: "no servable batch", retryAfterSeconds: 30 }, ...unread }), TIER_FALLBACK);
+  const failed = deriveCashView(reading({ phase: "error", failure: { message: "Failed to fetch", retryAfterSeconds: null, unreadable: false }, ...unread }), TIER_FALLBACK);
+  const noBatch = deriveCashView(reading({ phase: "no-batch", failure: { message: "no servable batch", retryAfterSeconds: 30, unreadable: false }, ...unread }), TIER_FALLBACK);
   for (const v of [failed, noBatch]) {
     expect(v.absence).toEqual({ kind: "unavailable", word: "unavailable", line: "Unavailable." });
     expect(v.refusedTiles).toBe(true);
@@ -302,4 +320,69 @@ test("why the figures are absent is decided here: a read in flight is loading, a
   expect(withheld.absence).toEqual({ kind: "not-computed", word: "not computed", line: "Not computed." });
   // A served book has no absence to word.
   expect(deriveCashView(reading({}), TIER_FALLBACK).absence).toBeNull();
+});
+
+test("an answer that is not a book is UNREADABLE — never 'unavailable' (the service answered) and never 'not computed' (no engine refused): headline, tiles' word, census and identity all say so, by the fault's name", () => {
+  const fault = "engines is not a list (got null)";
+  const v = deriveCashView(
+    reading({ phase: "error", book: null, failure: { message: fault, retryAfterSeconds: null, unreadable: true }, cash: { engine: null, badDebt: null, rows: [] } }),
+    TIER_FALLBACK,
+  );
+  expect(v.absence).toEqual({ kind: "unreadable", word: "unreadable", line: "Unreadable." });
+  expect(v.refusedTiles).toBe(true);
+  expect(v.summary).toBeNull();
+  expect(v.headline.emphasis).toBe("The Cash book's answer could not be read.");
+  expect(v.headline.dek).toBe("The service answered, and the body is not a book: engines is not a list (got null).");
+  expect(v.sectionQualifier).toBe("Debt Manager engine · OP Mainnet · accounts unreadable");
+  expect(v.chips).toEqual([{ label: "Identity", value: "unreadable", tone: "refused" }]);
+  expect(v.notComputedTile).toEqual({ value: "—", sub: "unreadable" });
+  expect(v.debt).toEqual({ kind: "absent" });
+  expect(`${v.headline.emphasis} ${v.headline.dek} ${v.absence?.word ?? ""} ${v.sectionQualifier}`).not.toMatch(/unavailable|not computed|could not be loaded/i);
+  // A read that FAILED keeps its own word: the two are never one state.
+  const failed = deriveCashView(
+    reading({ phase: "error", book: null, failure: { message: "Failed to fetch", retryAfterSeconds: null, unreadable: false }, cash: { engine: null, badDebt: null, rows: [] } }),
+    TIER_FALLBACK,
+  );
+  expect(failed.absence?.kind).toBe("unavailable");
+  expect(failed.chips).toEqual([{ label: "Identity", value: "unavailable", tone: "refused" }]);
+  expect(failed.notComputedTile).toEqual({ value: "—", sub: "unavailable" });
+});
+
+test("a later answer that could not be read never replaced the book: every figure stands from the book that was readable, and the identity strip says so with the fault on hover", () => {
+  const standing = deriveCashView(reading({ repairFault: "batch is not an object (got null)" }), TIER_FALLBACK);
+  const clean = deriveCashView(reading({}), TIER_FALLBACK);
+  expect(standing.chips.slice(0, 4)).toEqual(clean.chips);
+  expect(standing.chips[4]).toEqual({ label: "Re-read", value: "unreadable · this batch stands", tone: "warn", title: "batch is not an object (got null)" });
+  expect(clean.chips.map((c) => c.label)).not.toContain("Re-read");
+  // Nothing else moves: the verdict, the tiles and the summary are the standing book's.
+  expect({ ...standing, chips: null }).toEqual({ ...clean, chips: null });
+});
+
+test("the sixth tile counts what has no verdict here — the engine's refused positions and the rows this page could not read, each in its own word; a withheld engine and an unread book print no count", () => {
+  const first = POSITIONS_DM_PAGE_1.positions[0];
+  if (first === undefined) throw new Error("fixture invariant: the committed page serves a row");
+  const bad = readCashRow(refinePositionSummary({ ...first, account: "0xbad", total_debt: "1e6" }));
+  const clean = { ...cashEngine, refused_positions: 0, refusals: [] };
+  // The engine refused nothing and one row is unreadable: the tile is never "0 · nothing refused" alone.
+  const one = deriveCashView(reading({ cash: { engine: clean, rows: [bad] } }), TIER_FALLBACK);
+  expect(one.notComputedTile).toEqual({ value: "1", sub: "nothing refused · 1 unreadable" });
+  expect(one.refusedPositions).toBe(0);
+  expect(one.summary?.unreadable).toBe(1);
+  expect(one.headline.emphasis).toBe("The Cash book could not be fully read this batch.");
+  expect(one.bookEntryLine).toBe("1 row of the book could not be read");
+  expect(one.settled).toBe(true);
+  // Beside the engine's own refusals: the sum, and both words.
+  const both = deriveCashView(reading({ cash: { rows: [...rows, bad, bad] } }), TIER_FALLBACK);
+  expect(both.notComputedTile).toEqual({ value: "3", sub: "collateral sweep never ran · 2 unreadable" });
+  // Mid-walk the unreadable count is what has landed so far.
+  const walking = deriveCashView(reading({ cash: { engine: clean, rows: [bad], walkComplete: false } }), TIER_FALLBACK);
+  expect(walking.notComputedTile).toEqual({ value: "1", sub: "nothing refused · 1 unreadable so far" });
+  // A refused count the wire itemises no cause for, and a served book that refused nothing.
+  expect(deriveCashView(reading({ cash: { engine: { ...cashEngine, refusals: [] } } }), TIER_FALLBACK).notComputedTile).toEqual({ value: "1", sub: "cause not stated" });
+  expect(deriveCashView(reading({ cash: { engine: clean, rows: [] } }), TIER_FALLBACK).notComputedTile).toEqual({ value: "0", sub: "nothing refused" });
+  // No census, no count: the withheld engine's cause, and the absence's own word.
+  const withheld = deriveCashView(reading({ cash: { refusedWhole: { code: "SWEEP_FAILED", detail: "" }, rows: [] } }), TIER_FALLBACK);
+  expect(withheld.notComputedTile).toEqual({ value: "—", sub: "collateral sweep failed" });
+  const loading = deriveCashView(reading({ phase: "loading", book: null, cash: { engine: null, rows: [] } }), TIER_FALLBACK);
+  expect(loading.notComputedTile).toEqual({ value: "—", sub: "loading…" });
 });

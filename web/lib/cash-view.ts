@@ -1,7 +1,7 @@
 import { bookHeadlineRefused, type Headline } from "./book-headline";
 import type { CashBookReading } from "./cash-book";
 import { CASH_ENGINE_MISSING } from "./cash-refusal";
-import { summarizeCash, unavailableHeadline, type CashSummary } from "./cash-summary";
+import { summarizeCash, unavailableHeadline, unreadableHeadline, walkEntryLine, type CashSummary } from "./cash-summary";
 import { humanAge } from "./freshness";
 import { freshnessTier, type FreshnessTier, type TierConstants } from "./freshnessTiers";
 import { humanUsd } from "./human-usd";
@@ -14,6 +14,8 @@ export interface ViewChip {
   readonly label: string;
   readonly value: string;
   readonly tone?: "neutral" | "ok" | "warn" | "crit" | "refused";
+  /** The chip's hover text: the detail its few words stand for. */
+  readonly title?: string;
 }
 
 /** A wire money field read for display: the figure, an absence, or the malformed field named. */
@@ -51,14 +53,15 @@ export interface BadDebtView {
 
 /**
  * Why the Cash book's figures are absent — decided here, never in a component.
- * Three states that are not one another: a read still in flight has not
- * failed; a book that could not be read (or that does not list the engine)
- * refused nothing and computed nothing; an engine that withheld its book did
- * answer, and "not computed" is its word alone. A fetch failure is never
- * worded as an engine's refusal.
+ * Four states that are not one another: a read still in flight has not
+ * failed; a book that could not be fetched (or that does not list the engine)
+ * refused nothing and computed nothing; an answer that is not a book is here
+ * and cannot be read — "unreadable", never "unavailable"; an engine that
+ * withheld its book did answer, and "not computed" is its word alone. A fetch
+ * failure is never worded as an engine's refusal.
  */
 export interface CashAbsence {
-  readonly kind: "loading" | "unavailable" | "not-computed";
+  readonly kind: "loading" | "unavailable" | "unreadable" | "not-computed";
   /** A tile's sub line. */
   readonly word: string;
   /** A card's one line. */
@@ -67,14 +70,22 @@ export interface CashAbsence {
 
 const ABSENCE_LOADING: CashAbsence = { kind: "loading", word: "loading…", line: "Loading…" };
 const ABSENCE_UNAVAILABLE: CashAbsence = { kind: "unavailable", word: "unavailable", line: "Unavailable." };
+const ABSENCE_UNREADABLE: CashAbsence = { kind: "unreadable", word: "unreadable", line: "Unreadable." };
 const ABSENCE_NOT_COMPUTED: CashAbsence = { kind: "not-computed", word: "not computed", line: "Not computed." };
 
 /** The census clause for each absence: the count's place is never left to a zero. */
 const CENSUS_WORDS: Record<CashAbsence["kind"], string> = {
   loading: "accounts loading…",
   unavailable: "accounts unavailable",
+  unreadable: "accounts unreadable",
   "not-computed": "accounts withheld",
 };
+
+/** The sixth tile as the Book prints it: the positions with no verdict here, and why. */
+export interface NotComputedTile {
+  readonly value: string;
+  readonly sub: string;
+}
 
 /**
  * Everything the Book and the Overview print about the Cash book, derived
@@ -127,7 +138,13 @@ export interface CashView {
   readonly collateral: MoneyReading;
   /** Null when the book is unloaded, the engine withheld or absent, or the wire reports no bad-debt row. */
   readonly badDebt: BadDebtView | null;
-  /** The Book entry card's micro-stat: a figure only once the walk is complete. */
+  /**
+   * The "Not computed" tile. Its count is the engine's refused positions PLUS the rows the engine calls computed that
+   * this page could not read — each in its own word in the sub line, because the engine refused none of the latter;
+   * a dash where there is no census to count.
+   */
+  readonly notComputedTile: NotComputedTile;
+  /** The Book entry card's micro-stat: a figure only over a book read whole. */
   readonly bookEntryLine: string;
   /** The Scenarios entry card's micro-stat: the ETH −30% line, or the withheld preview named. */
   readonly previewLine: string;
@@ -159,12 +176,16 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
     census === null ? null : readWirePopulation(census.computed_positions, "engines[debt_manager].computed_positions");
   const refusedPositions =
     census === null ? null : readWirePopulation(census.refused_positions, "engines[debt_manager].refused_positions");
+  // The service answered and the body is not a book: neither a failed read nor an absence the wire stated.
+  const unreadableAnswer = !loaded && reading.failure !== null && reading.failure.unreadable;
   // In flight before failed, the engine's own refusal before an engine the book does not list.
   const absence: CashAbsence | null =
     reading.phase === "loading"
       ? ABSENCE_LOADING
       : !loaded
-        ? ABSENCE_UNAVAILABLE
+        ? unreadableAnswer
+          ? ABSENCE_UNREADABLE
+          : ABSENCE_UNAVAILABLE
         : withheld !== null
           ? ABSENCE_NOT_COMPUTED
           : engineAbsent
@@ -196,7 +217,9 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
     reading.phase === "loading"
       ? LOADING
       : !loaded
-        ? unavailableHeadline(failureMessage ?? "the service did not answer")
+        ? unreadableAnswer
+          ? unreadableHeadline(failureMessage ?? "")
+          : unavailableHeadline(failureMessage ?? "the service did not answer")
         : withheldCause !== null
           ? bookHeadlineRefused(withheldCause)
           : engineAbsent
@@ -211,9 +234,14 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
     computedPositions === null || positions === null
       ? { label: "Coverage", value: withheld !== null ? "withheld" : "unavailable", tone: "refused" }
       : { label: "Coverage", value: `${n(computedPositions)} / ${n(positions)} computed`, tone: "neutral" };
+  // A later answer that could not be read did not replace this book: the strip says so, and names the fault on hover.
+  const standing: ViewChip[] =
+    reading.repairFault === null
+      ? []
+      : [{ label: "Re-read", value: "unreadable · this batch stands", tone: "warn", title: reading.repairFault }];
   const chips: ViewChip[] =
     reading.book === null
-      ? [{ label: "Identity", value: reading.phase === "loading" ? "pending" : "unavailable", tone: "refused" }]
+      ? [{ label: "Identity", value: reading.phase === "loading" ? "pending" : unreadableAnswer ? "unreadable" : "unavailable", tone: "refused" }]
       : [
           { label: "Batch", value: n(reading.book.batch.id) },
           {
@@ -223,6 +251,7 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
           },
           coverage,
           { label: "Current", value: "not projected" },
+          ...standing,
         ];
   const censusWords = positions !== null ? `${n(positions)} borrowing accounts` : CENSUS_WORDS[(absence ?? ABSENCE_UNAVAILABLE).kind];
 
@@ -255,15 +284,26 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
           cause: badDebtWire.refused ? plainCause(badDebtWire.refusal?.code ?? "", badDebtWire.refusal?.detail ?? "") : null,
         };
 
-  // A walk-derived figure is the entry card's micro-stat only once the walk is complete; before that the card says what the walk is doing.
-  const bookEntryLine =
-    summary === null
-      ? "Live figures"
-      : summary.stopped !== null
-        ? "Walk stopped before the book was read"
-        : !summary.settled
-          ? "Walking the book…"
-          : `${humanUsd(summary.nearCap.sum, decimals)} within 10% of cap`;
+  // A walk-derived figure is the entry card's micro-stat only over a book read whole; short of that the card says what happened to the walk.
+  const bookEntryLine = summary === null ? "Live figures" : walkEntryLine(summary);
+
+  // The withheld engine's cause first; then why there is no count at all; only a served census names its refusals —
+  // and the rows this page could not read are counted with them, in their own word.
+  const refusalKey = engine?.refusals[0]?.key;
+  const unread = summary?.unreadable ?? 0;
+  const refusedSub =
+    refusedPositions === null
+      ? (absence?.word ?? "")
+      : refusalKey !== undefined
+        ? plainCause(refusalKey)
+        : refusedPositions === 0
+          ? "nothing refused"
+          : "cause not stated";
+  const unreadSub = unread === 0 ? "" : ` · ${String(unread)} unreadable${walking ? " so far" : ""}`;
+  const notComputedTile: NotComputedTile = {
+    value: refusedPositions === null ? "—" : String(refusedPositions + unread),
+    sub: withheldCause ?? `${refusedSub}${refusedPositions === null ? "" : unreadSub}`,
+  };
   const previewLine =
     preview === null
       ? "Committed scenarios"
@@ -296,6 +336,7 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
     debt,
     collateral,
     badDebt,
+    notComputedTile,
     bookEntryLine,
     previewLine,
   };

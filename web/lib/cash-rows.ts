@@ -1,5 +1,5 @@
 // web/lib/cash-rows.ts
-import type { RefinedPositionsResponse, components } from "@solvent/client";
+import type { components } from "@solvent/client";
 import { HEADROOM_BANDS, headroomBand, headroomPercent, headroomTenths } from "./headroom";
 import { plainCause } from "./refusal-phrasebook";
 import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
@@ -26,6 +26,13 @@ export interface CashRow {
   readonly verdict: Verdict;
   readonly refusal: { code: string; detail: string | null } | null;
   readonly computed: boolean;
+  /**
+   * Set on a row the ENGINE calls computed for which this page holds no verdict and figures it can read: the members
+   * that failed, by name. The engine refused nothing here — the page could not read what it served — so the row is
+   * never worded as a refusal, is counted on its own, and never sits inside a negative. Absent on a computed row
+   * and on a row the engine refused.
+   */
+  readonly unreadable?: string;
 }
 
 function wireInt(value: string | null | undefined): bigint | null {
@@ -55,10 +62,21 @@ export function readCashRow(row: CashWireRow): CashRow {
     cap !== null &&
     borrowings !== null;
   if (!computed || debt === null || cap === null || borrowings === null) {
-    return {
+    const held: CashRow = {
       account: row.account, decimals: row.value_decimals, debt, collateral, cap: null, room: null,
       roomPercent: null, roomTenths: null, band: null, verdict: row.liquidation_verdict, refusal, computed: false,
     };
+    if (row.status !== "computed") return held;
+    // The engine calls the row computed, so what is missing is the page's to name — in read order.
+    const faults = [
+      refusal === null ? null : `a refusal (${refusal.code}) rides a row the engine calls computed`,
+      row.liquidation_verdict === "unknowable" ? "no liquidation verdict was served" : null,
+      debt === null ? "total_debt is not a wire decimal" : null,
+      hf === null ? "health_factor is null" : null,
+      hf !== null && cap === null ? "health_factor.num is not a wire decimal" : null,
+      hf !== null && borrowings === null ? "health_factor.den is not a wire decimal" : null,
+    ].filter((fault): fault is string => fault !== null);
+    return { ...held, unreadable: faults.join("; ") };
   }
   return {
     account: row.account,
@@ -76,15 +94,31 @@ export function readCashRow(row: CashWireRow): CashRow {
   };
 }
 
-/** Why a not-computed row is not computed, in reader words: the wire's refusal, or the verdict the engine withheld without one. */
+/**
+ * Why a row carries no verdict here, in reader words: the wire's refusal, the verdict the engine withheld without
+ * one, or — for a row the engine calls computed — what this page could not read, which is never worded as a refusal.
+ */
 export function notComputedCause(row: CashRow): string {
   if (row.refusal !== null) return `${plainCause(row.refusal.code, row.refusal.detail)} · ${row.refusal.code}`;
   if (row.verdict === "unknowable") return "the engine served no liquidation verdict for this account";
+  if (row.unreadable !== undefined) return `this page could not read the row the engine served: ${row.unreadable}`;
   return "the engine served no readable figures for this account";
+}
+
+/** The rows the engine calls computed that this page could not read: counted on their own, never cleared. */
+export function unreadableRows(rows: readonly CashRow[]): CashRow[] {
+  return rows.filter((r) => !r.computed && r.unreadable !== undefined);
+}
+
+/** The standing a row without a verdict wears in the table: the engine's act, or the page's own inability — never one word for both. */
+export function rowStandingLabel(row: CashRow): string {
+  return row.unreadable !== undefined ? "Unreadable" : "Not computed";
 }
 
 /** What one page of the Cash walk must agree with: the book it is walked for. */
 export interface CashPageExpectation {
+  /** The batch the book answered for. A page of any other batch is reported, and none of its rows is read. */
+  readonly batchId: number;
   readonly engine: string;
   /** The engine's own scale from `/v1/book`. Every row must be at it, or a sum would add unlike units. */
   readonly decimals: number;
@@ -93,7 +127,10 @@ export interface CashPageExpectation {
 }
 
 export type CashPageReading =
-  | { readonly kind: "rows"; readonly rows: CashRow[]; readonly last: boolean; readonly total: number }
+  /** `next` is the page's own cursor, read once and judged: null exactly when `last`. */
+  | { readonly kind: "rows"; readonly rows: CashRow[]; readonly last: boolean; readonly next: string | null; readonly total: number }
+  /** The page answers for another batch: its id, for the caller's one reload. Nothing else on it is read. */
+  | { readonly kind: "other-batch"; readonly batchId: number }
   /** The positions endpoint withheld the engine's whole book: a refusal with its cause, never an empty book. */
   | { readonly kind: "refused"; readonly code: string | null; readonly detail: string | null }
   /** A 200 whose body breaks the contract: named, and nothing derived from it. */
@@ -107,8 +144,12 @@ function field(value: object, key: string): unknown {
 function describe(value: unknown): string {
   if (Object.is(value, -0)) return "-0";
   if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) return "an array";
+  if (typeof value === "object" && value !== null) return "an object";
   return String(value);
 }
+
+const isRecord = (value: unknown): value is object => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * Read one positions page for the Cash walk, or refuse it by name. The page
@@ -118,19 +159,36 @@ function describe(value: unknown): string {
  * never Cash's refusal; a refused page is a refusal, not an empty book; a row
  * at another scale never enters a sum at the book's; a row the contract would
  * not have produced is a malformed page, not a throw.
- * The batch identity is the caller's law — it decides a reload, not a reading.
+ * The body is read as the untyped JSON it is: nothing on it is dereferenced
+ * before it is judged — not the body itself, and not its batch, which is read
+ * HERE so that a page without one is a named fault and never a throw. Whose
+ * batch the page answers for is reported; what a moved batch does is the
+ * caller's law — it decides a reload, not a reading.
  */
-export function readCashPage(page: RefinedPositionsResponse, expect: CashPageExpectation): CashPageReading {
-  if (page.engine !== expect.engine) {
-    return { kind: "malformed", fault: `the page answers for engine ${describe(page.engine)}, not ${expect.engine}` };
+export function readCashPage(page: unknown, expect: CashPageExpectation): CashPageReading {
+  if (!isRecord(page)) return { kind: "malformed", fault: `the page is not an object (got ${describe(page)})` };
+  const batch = field(page, "batch");
+  if (!isRecord(batch)) return { kind: "malformed", fault: `batch is not an object (got ${describe(batch)})` };
+  const batchId = field(batch, "id");
+  if (!isWirePopulation(batchId)) {
+    return { kind: "malformed", fault: `batch.id is not a wire population (got ${describe(batchId)})` };
+  }
+  if (batchId !== expect.batchId) return { kind: "other-batch", batchId };
+  const engine = field(page, "engine");
+  if (engine !== expect.engine) {
+    return { kind: "malformed", fault: `the page answers for engine ${describe(engine)}, not ${expect.engine}` };
   }
   const refused = field(page, "refused");
   if (typeof refused !== "boolean") {
     return { kind: "malformed", fault: `refused is not a boolean (got ${describe(refused)})` };
   }
   if (refused) {
-    const refusal = page.refusal ?? null;
-    return { kind: "refused", code: refusal?.code ?? null, detail: refusal?.detail ?? null };
+    const refusal = field(page, "refusal");
+    const word = (key: string): string | null => {
+      const value = isRecord(refusal) ? field(refusal, key) : null;
+      return typeof value === "string" ? value : null;
+    };
+    return { kind: "refused", code: word("code"), detail: word("detail") };
   }
   const total = field(page, "total_positions");
   if (!isWirePopulation(total)) {
@@ -187,7 +245,7 @@ export function readCashPage(page: RefinedPositionsResponse, expect: CashPageExp
     }
     rows.push(readCashRow(raw as CashWireRow));
   }
-  return { kind: "rows", rows, last: cursor === null, total };
+  return { kind: "rows", rows, last: cursor === null, next: cursor, total };
 }
 
 export type SizedCashRow = CashRow & { readonly debt: bigint };

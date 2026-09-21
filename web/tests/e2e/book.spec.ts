@@ -489,21 +489,208 @@ test("a walk past its census is worded against the census — 'delivered N rows 
   await expect(page.getByTestId("book-walk-failure")).not.toContainText("2 of the 1");
   await expect(page.getByTestId("book-verdict-dek")).toContainText("the walk delivered 2 rows for a census of 1");
   await expect(page.locator("body")).not.toContainText("No account needs attention");
-  // The walk did not stop "before the last page" — it ran past its census — and rows past a census may count an
-  // account twice, so nothing on the page is called a lower bound or "at least".
+  // The walk did not stop "before the last page" — it ran past its census — and it landed more accounts than the
+  // census counts, so nothing on the page is called a lower bound or "at least". Its two rows are distinct accounts
+  // (identities are tracked across the walk), so the page never says it may have counted one twice.
   await expect(page.getByTestId("book-verdict-dek")).toContainText(
-    "The walk ran past its census (the walk delivered 2 rows for a census of 1); its rows may count an account twice, so no figure here is a total or a lower bound.",
+    "The walk ran past its census (the walk delivered 2 rows for a census of 1); it landed more accounts than the census counts, so no figure here is a total or a lower bound.",
   );
   await expect(page.getByTestId("book-verdict-dek")).not.toContainText("before the last page");
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("not a bound, the walk ran past its census");
   await expect(page.getByTestId("book-bands-note")).toHaveText(
-    "The walk ran past its census: its rows may count an account twice, so no bar or count here is a total or a lower bound.",
+    "The walk ran past its census: it landed more accounts than the book counts, so no bar or count here is a total or a lower bound.",
   );
   const main = page.locator("main");
+  await expect(main).not.toContainText("count an account twice");
   await expect(main).not.toContainText("at least");
   await expect(main).not.toContainText("figures are a lower bound");
   await expect(main).not.toContainText("lower bound, walk stopped");
   await expect(main).not.toContainText("is a lower bound over");
+});
+
+test("a positions page with no batch ends the walk BY NAME — never a throw that leaves the walk looking alive forever", async ({ page }) => {
+  // The shape the client's refinement lets through: the positions array refines, the null batch rides along.
+  await mockWith(page, BOOK, { ...POSITIONS_DM_PAGE_1, positions: [], batch: null });
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.goto("/book");
+  await expect(page.getByTestId("book-walk-failure")).toContainText("batch is not an object (got null)");
+  // A body that cannot be read is not a transport failure: the identical request cannot answer differently, so no retry.
+  await expect(page.getByTestId("book-walk-failure").getByRole("button", { name: "Retry" })).toHaveCount(0);
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be fully read this batch.");
+  await expect(page.getByTestId("book-verdict-dek")).toContainText("The walk stopped before the last page (batch is not an object (got null)).");
+  // The walk is OVER: nothing on the page is still busy, and nothing says it is walking.
+  await expect(page.locator("[aria-busy='true']")).toHaveCount(0);
+  await expect(page.getByTestId("book-verdict-headline")).not.toHaveText("Walking the Cash book…");
+  await expect(page.getByTestId("book-attention")).toContainText("no account is cleared");
+  await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+  // The fulfilment callback never dereferenced the null batch: no "Cannot read properties of null (reading 'id')" escaped it.
+  expect(pageErrors.filter((message) => /Cannot read properties of null|reading 'id'/.test(message))).toEqual([]);
+});
+
+test("a duplicate account never satisfies the census: page one returns A, the last page returns A again — A is counted once, the fault names the account and both pages, and no bound is claimed", async ({
+  page,
+}) => {
+  const [a] = POSITIONS_DM_PAGE_1.positions;
+  if (a === undefined) throw new Error("fixture invariant: the committed page serves a row");
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/book", (route) => json(route, BOOK));
+  // Both pages advertise the book's two rows and deliver one each: counted blind, the walk would complete on A + A.
+  await page.route("**/v1/positions*", (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get("cursor");
+    return json(route, { ...POSITIONS_DM_PAGE_1, positions: [a], next_cursor: cursor === null ? "page-two" : null });
+  });
+  await page.goto("/book");
+  const twice = `account ${a.account} was delivered on page 1 and again on page 2`;
+  await expect(page.getByTestId("book-walk-failure")).toContainText(twice);
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("$4,200 of Cash debt is liquidatable right now, across 1 account.");
+  await expect(page.getByTestId("book-verdict-dek")).toHaveText(
+    `1 position could not be computed this batch and is counted, not hidden. The walk was served an account twice (${twice}); pages that repeat an account do not partition the book, so no figure here is a total or a lower bound.`,
+  );
+  // Counted once: the account's debt is never doubled, in the tile, the bar or the table.
+  await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("$4,200");
+  await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("1 account · 0 more under $100 · not a bound, the walk was served an account twice");
+  await expect(page.getByTestId("book-bands").locator('[data-band="breached"]')).toContainText("$4,200 · 1");
+  await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(1);
+  await expect(page.getByTestId("book-bands-note")).toHaveText(
+    "The walk was served an account twice: pages that repeat an account do not partition the book, so no bar or count here is a total or a lower bound.",
+  );
+  const main = page.locator("main");
+  await expect(main).not.toContainText("$8,400");
+  await expect(main).not.toContainText("across 2 accounts");
+  await expect(main).not.toContainText("at least");
+  await expect(main).not.toContainText("figures are a lower bound");
+  await expect(main).not.toContainText("lower bound, walk stopped");
+  await expect(main).not.toContainText("is a lower bound over");
+  await expect(page.locator("body")).not.toContainText("No account needs attention");
+});
+
+test("an unreadable computed row blocks every all-clear: counted in the headline, the dek and the sixth tile, and no negative is said over it — though the walk is complete and the engine refused nothing", async ({
+  page,
+}) => {
+  const [a] = POSITIONS_DM_PAGE_1.positions;
+  if (a === undefined) throw new Error("fixture invariant: the committed page serves a row");
+  // The aggregate: one computed position, none refused. Its one row: computed, liquidatable, and a debt no guard admits.
+  const book = cashEngineOf(BOOK, { positions: 1, computed_positions: 1, refused_positions: 0, refusals: [] });
+  await mockWith(page, book, { ...POSITIONS_DM_PAGE_1, total_positions: 1, positions: [{ ...a, total_debt: "1e6" }] });
+  await page.goto("/book");
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be fully read this batch.");
+  await expect(page.getByTestId("book-verdict-dek")).toHaveText(
+    "1 position the engine calls computed could not be read by this page and is counted, not cleared. No verdict is claimed over it.",
+  );
+  // Every negative the page can say, withheld.
+  const body = page.locator("body");
+  for (const negative of ["Nothing material", "No position is liquidatable", "No computed position", "No account is within 10%", "No account needs attention"]) {
+    await expect(body).not.toContainText(negative);
+  }
+  // The sixth tile counts it, in its own word — the engine refused nothing, and the tile never reads "0 · nothing refused" alone.
+  const notComputed = page.getByTestId("book-kpi-notcomputed");
+  await expect(notComputed).toContainText("1");
+  await expect(notComputed).toContainText("nothing refused · 1 unreadable");
+  // No zero is a finished count: the walk-derived tiles are dashes in the refused register, wearing the lower-bound note.
+  for (const id of ["liquidatable", "near"]) {
+    const tile = page.getByTestId(`book-kpi-${id}`);
+    await expect(tile).toContainText("—");
+    await expect(tile).not.toContainText("$0");
+    await expect(tile).toHaveAttribute("data-tone", "refused");
+    await expect(tile).toContainText("lower bound, 1 row unreadable");
+  }
+  await expect(page.getByTestId("book-bands-card")).toContainText(
+    "— within 10% of the cap: a zero is claimed only over a book read whole · 1 row could not be read",
+  );
+  await expect(page.getByTestId("book-bands-card")).not.toContainText("$0");
+  await expect(page.getByTestId("book-bands").locator("[data-count]")).toHaveCount(0);
+  await expect(page.getByTestId("book-bands-note")).toHaveText(
+    "1 row could not be read: every bar and every count is a lower bound over the accounts this page could read.",
+  );
+  // The row stays on the table, dimmed, under its own standing — never the engine's "Not computed".
+  const rows = page.getByTestId("book-attention").locator("tbody tr");
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText("Unreadable");
+  await expect(rows.first()).not.toContainText("Not computed");
+  await expect(rows.first()).toHaveClass(/dim/);
+  // The walk itself completed: nothing is busy, and no walk failure is claimed.
+  await expect(page.locator("[aria-busy='true']")).toHaveCount(0);
+  await expect(page.getByTestId("book-walk-failure")).toHaveCount(0);
+});
+
+test("a first answer that is not a book is a NAMED unreadable failure — never 'unavailable', never 'not computed', never the route's refusal", async ({ page }) => {
+  for (const [body, fault] of [
+    [null, "the body is not an object (got null)"],
+    [{ ...BOOK, engines: null }, "engines is not a list (got null)"],
+    [{ ...BOOK, batch: null }, "batch is not an object (got null)"],
+  ] as const) {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await mockWith(page, body, POSITIONS_DM_PAGE_1);
+    await page.goto("/book");
+    await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book's answer could not be read.");
+    await expect(page.getByTestId("book-verdict-dek")).toHaveText(`The service answered, and the body is not a book: ${fault}.`);
+    await expect(page.getByTestId("book-verdict-identity")).toContainText("Identity unreadable");
+    await expect(page.getByTestId("book-section-cash")).toContainText("accounts unreadable");
+    for (const id of TILES) {
+      const tile = page.getByTestId(`book-kpi-${id}`);
+      await expect(tile).toHaveAttribute("data-tone", "refused");
+      await expect(tile).toContainText("unreadable");
+      await expect(tile).not.toContainText("unavailable");
+      await expect(tile).not.toContainText("not computed");
+    }
+    await expect(page.getByTestId("book-bands-card")).toContainText("Unreadable.");
+    await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+  }
+});
+
+test("a malformed background repair never replaces a readable book: the verdict and every figure stand, and the identity strip says the re-read could not be read", async ({
+  page,
+}) => {
+  let bookRequests = 0;
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  // The first answer is the book; every later one is a 200 whose body is not a book.
+  await page.route("**/v1/book", (route) => {
+    bookRequests += 1;
+    return json(route, bookRequests === 1 ? BOOK : { ...BOOK, engines: null });
+  });
+  await page.goto("/book");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("$4,200 of Cash debt is liquidatable right now, across 1 account.");
+  await expect(page.getByTestId("book-verdict-identity").locator('[data-chip="Re-read"]')).toHaveCount(0);
+  // A bfcache restore is definitive resume evidence by itself: the hook's repair re-reads the book.
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  await expect.poll(() => bookRequests).toBeGreaterThanOrEqual(2);
+  const reread = page.getByTestId("book-verdict-identity").locator('[data-chip="Re-read"]');
+  await expect(reread).toContainText("unreadable · this batch stands");
+  await expect(reread).toHaveAttribute("title", "engines is not a list (got null)");
+  // The readable book stands, whole: nothing crashed, nothing was replaced.
+  await expect(page.getByTestId("route-refusal")).toHaveCount(0);
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("$4,200 of Cash debt is liquidatable right now, across 1 account.");
+  await expect(page.getByTestId("book-verdict-identity")).toContainText(`Batch ${String(BOOK.batch.id)}`);
+  await expect(page.getByTestId("book-kpi-debt")).toContainText("$4,200");
+  await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(2);
+});
+
+test("the drawer takes the view's word for a withheld book: when ONLY the positions endpoint refuses the engine, its refusal section names the withheld book — never 'None.' under a 'could not be computed' headline", async ({
+  page,
+}) => {
+  const refused = {
+    ...POSITIONS_DM_PAGE_1,
+    refused: true,
+    refusal: { engine: "debt_manager", code: "SWEEP_FAILED", detail: "collateral sweep failed", note: "" },
+    total_positions: null,
+    positions: [],
+    next_cursor: null,
+  };
+  // The book itself lists no refusal for the engine and itemises none on its card.
+  await mockWith(page, cashEngineOf(BOOK, { refused_positions: 0, refusals: [] }), refused);
+  await page.goto("/book");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be computed this batch.");
+  await page.getByTestId("book-methodology").click();
+  const method = page.getByTestId("book-methodology-body");
+  await expect(method).toContainText("The Cash engine withheld its whole book this batch: collateral sweep failed. A withheld book itemises no refusals.");
+  await expect(method).not.toContainText("None.");
 });
 
 test("a positions page from another engine never enters the Cash walk", async ({ page }) => {

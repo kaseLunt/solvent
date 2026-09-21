@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Drawer } from "@/components/Drawer";
 import { asSentence } from "@/lib/book-headline";
 import type { BookResponse } from "@/lib/cash-book";
-import { CASH_ENGINE_MISSING, wholeRefusal } from "@/lib/cash-refusal";
+import { CASH_ENGINE_MISSING, NO_BATCH_LOADED, NO_REFUSALS, withheldBookSentence, type WholeRefusal } from "@/lib/cash-refusal";
 import { MATERIAL_LINE_USD, SMALL_LINE_USD } from "@/lib/materiality";
 import { plainCause } from "@/lib/refusal-phrasebook";
 import { readWirePopulation } from "@/lib/wireGuard";
@@ -14,13 +14,16 @@ export interface BookMethodologyProps {
   open: boolean;
   onClose: () => void;
   book: BookResponse | null;
+  /**
+   * The engine withheld whole, as the VIEW decided it — by the book's head, its card, or the positions endpoint. The
+   * drawer never re-derives it from the book alone: it would miss the third source, and read an empty list as "None".
+   */
+  withheld: WholeRefusal | null;
 }
 
 /** The one place the doctrine lives (spec §3.1): comparators, the materiality line, refusals, identity, evidence links. */
-export function BookMethodology({ open, onClose, book }: BookMethodologyProps) {
+export function BookMethodology({ open, onClose, book, withheld }: BookMethodologyProps) {
   const cash = book?.engines.find((e) => e.engine === "debt_manager") ?? null;
-  // A withheld engine's card itemises nothing it can be held to: its refusal list is never read as "None".
-  const withheld = wholeRefusal(book, "debt_manager");
   return (
     <Drawer open={open} onClose={onClose} title="Methodology & evidence">
       <div className={styles.method} data-testid="book-methodology-body">
@@ -43,16 +46,14 @@ export function BookMethodology({ open, onClose, book }: BookMethodologyProps) {
         </p>
         <h3>Refusals on this batch</h3>
         {book === null ? (
-          <p>No batch loaded.</p>
+          <p>{NO_BATCH_LOADED}</p>
         ) : cash === null ? (
           <p>{asSentence(CASH_ENGINE_MISSING, "")}</p>
         ) : withheld !== null ? (
-          <p>
-            The Cash engine withheld its whole book this batch: {plainCause(withheld.code, withheld.detail)}. A withheld
-            book itemises no refusals.
-          </p>
+          // A withheld engine's card itemises nothing it can be held to: its refusal list is never read as "None".
+          <p>{withheldBookSentence(withheld)}</p>
         ) : cash.refusals.length === 0 ? (
-          <p>None.</p>
+          <p>{NO_REFUSALS}</p>
         ) : (
           <ul>
             {cash.refusals.map((r) => (
@@ -64,7 +65,7 @@ export function BookMethodology({ open, onClose, book }: BookMethodologyProps) {
         )}
         <h3>Identity</h3>
         {book === null ? (
-          <p>No batch loaded.</p>
+          <p>{NO_BATCH_LOADED}</p>
         ) : (
           <p>
             Batch <code>{String(book.batch.id)}</code> computed <code>{book.batch.computed_at}</code> by{" "}

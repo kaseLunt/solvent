@@ -6,8 +6,20 @@ import { refinePositionSummary } from "@solvent/client";
 import { readCashRow } from "../../lib/cash-rows";
 import type { WalkStopKind } from "../../lib/book-headline";
 import { NEAR_CAP_BAND_IDS } from "../../lib/cash-rows";
-import { attentionEmptyText, attentionFinding, bandsFinding, bandsSoFar, summarizeCash, tileBoundNote, unavailableHeadline, walkQualifier } from "../../lib/cash-summary";
+import {
+  attentionEmptyText,
+  attentionFinding,
+  bandsFinding,
+  bandsSoFar,
+  summarizeCash,
+  tileBoundNote,
+  unavailableHeadline,
+  unreadableHeadline,
+  walkEntryLine,
+  walkQualifier,
+} from "../../lib/cash-summary";
 import { POSITIONS_DM_PAGE_1 } from "../fixtures/book";
+import { DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2 } from "../fixtures/demo";
 
 const rows = POSITIONS_DM_PAGE_1.positions.map((p) => readCashRow(refinePositionSummary(p)));
 const settled = { walkComplete: true, walkStopped: null, walkStopKind: null, refusedWhole: null } as const;
@@ -20,8 +32,10 @@ test("the committed DM page: one material liquidatable row, one refused", () => 
   expect(s.belowLine).toEqual({ sum: 0n, count: 0 });
   expect(s.nearCap).toEqual({ sum: 0n, count: 0 });
   expect(s.notComputed).toBe(1);
+  expect(s.unreadable).toBe(0);
   expect(s.computed).toBe(1);
   expect(s.settled).toBe(true);
+  expect(s.whole).toBe(true);
   expect(s.stopped).toBeNull();
   expect(s.bands.reduce((n, b) => n + b.count, 0)).toBe(1);
 });
@@ -66,17 +80,27 @@ test("a stopped walk is named on the summary and in the headline; a complete wal
   expect(done.headline.variant).toBe("material");
 });
 
-test("the attention table's empty line never clears the book over an unfinished walk or a hidden liquidatable position", () => {
-  const nothing = { belowLine: { sum: 0n, count: 0 }, decimals: 6 };
+test("the attention table's empty line never clears the book over an unfinished walk, an unreadable row or a hidden liquidatable position — and a stopped walk is framed by how it ended", () => {
+  const nothing = { belowLine: { sum: 0n, count: 0 }, decimals: 6, stopKind: null, unreadable: 0 };
   expect(attentionEmptyText({ settled: true, stopped: null, ...nothing })).toBe("No account needs attention.");
   expect(attentionEmptyText({ settled: false, stopped: null, ...nothing })).toBe("Walking the book…");
-  expect(attentionEmptyText({ settled: false, stopped: "Failed to fetch", ...nothing })).toBe(
-    "The walk stopped before the book was read; no account is cleared.",
+  expect(attentionEmptyText({ settled: false, stopped: "Failed to fetch", ...nothing, stopKind: "before-end" })).toBe(
+    "The walk stopped before the last page; no account is cleared.",
   );
-  expect(attentionEmptyText({ settled: true, stopped: null, belowLine: { sum: 50_000_000n, count: 1 }, decimals: 6 })).toBe(
+  // "Before the last page" is said only of a walk that never read it: the other endings wear their own frame.
+  expect(attentionEmptyText({ settled: false, stopped: "short", ...nothing, stopKind: "at-end" })).toBe(
+    "The walk reached its last page and its rows do not reconcile with the census; no account is cleared.",
+  );
+  expect(attentionEmptyText({ settled: false, stopped: "past", ...nothing, stopKind: "over" })).toBe("The walk ran past its census; no account is cleared.");
+  expect(attentionEmptyText({ settled: false, stopped: "twice", ...nothing, stopKind: "duplicate" })).toBe(
+    "The walk was served an account twice; no account is cleared.",
+  );
+  // A complete walk over a row this page could not read clears nobody.
+  expect(attentionEmptyText({ settled: true, stopped: null, ...nothing, unreadable: 2 })).toBe("2 rows could not be read; no account is cleared.");
+  expect(attentionEmptyText({ settled: true, stopped: null, ...nothing, belowLine: { sum: 50_000_000n, count: 1 } })).toBe(
     "Nothing material needs attention; 1 liquidatable position under $100 ($50) is behind the small & dust toggle.",
   );
-  expect(attentionEmptyText({ settled: true, stopped: null, belowLine: { sum: 61_500_000n, count: 3 }, decimals: 6 })).toBe(
+  expect(attentionEmptyText({ settled: true, stopped: null, ...nothing, belowLine: { sum: 61_500_000n, count: 3 } })).toBe(
     "Nothing material needs attention; 3 liquidatable positions under $100 ($61.50) are behind the small & dust toggle.",
   );
 });
@@ -138,7 +162,7 @@ test("the distance chart's finding: settled it states the figure; over an incomp
   }
 });
 
-test("a walk past its census claims no bound anywhere: its rows may count an account twice — never 'at least', never 'lower bound'; a walk short at its last page still does", () => {
+test("a walk past its census claims no bound anywhere: it landed more accounts than the census counts — never 'at least', never 'lower bound'; a walk short at its last page still does", () => {
   const first = POSITIONS_DM_PAGE_1.positions[0];
   if (first === undefined) throw new Error("fixture invariant: the committed page serves a row");
   const near = readCashRow(
@@ -155,14 +179,14 @@ test("a walk past its census claims no bound anywhere: its rows may count an acc
   const past = "the walk delivered 2 rows for a census of 1";
   const summary = (walkStopKind: WalkStopKind, input: typeof rows) =>
     summarizeCash({ rows: input, decimals: 6, refusedPositions: 0, refusedWhole: null, walkComplete: false, walkStopped: past, walkStopKind });
-  const over = summary("over", [near, near]);
+  const over = summary("over", [near, { ...near, account: "0xnear2" }]);
   expect(over.stopKind).toBe("over");
   const finding = bandsFinding(over);
   expect(finding).toEqual({
     lead: "Cash debt grouped by room under the borrow cap · bars are dollars, counts printed · ",
     figure: "$9,240",
     rest: " sits within 10% of the cap among the rows the walk landed · the walk ran past its census, figures are not a bound",
-    barsNote: "The walk ran past its census: its rows may count an account twice, so no bar or count here is a total or a lower bound.",
+    barsNote: "The walk ran past its census: it landed more accounts than the book counts, so no bar or count here is a total or a lower bound.",
   });
   expect(bandsFinding(summary("over", rows)).rest).toBe(" within 10% of the cap: a zero is claimed only by a complete walk · the walk ran past its census");
   expect(walkQualifier(over)).toBe(" · the walk ran past its census, figures are not a bound");
@@ -171,6 +195,8 @@ test("a walk past its census claims no bound anywhere: its rows may count an acc
   expect(over.headline.dek).toContain("The walk ran past its census (the walk delivered 2 rows for a census of 1)");
   for (const words of [finding.lead, finding.rest, finding.barsNote ?? "", walkQualifier(over), tileBoundNote(over), over.headline.dek]) {
     expect(words).not.toMatch(/at least|a lower bound over|are a lower bound|· lower bound/);
+    // Identities are tracked across the walk, so a walk past its census repeated no account — and never says it may have.
+    expect(words).not.toContain("count an account twice");
   }
   // Short at its last page: the rows are distinct accounts, so the floor stands — and the frame says the walk reached its end.
   const short = summary("at-end", [near]);
@@ -183,12 +209,12 @@ test("a walk past its census claims no bound anywhere: its rows may count an acc
 
 test("the tiles' bound note and the attention card's finding speak in the walk's registers; the near-cap bands have one definition", () => {
   expect(tileBoundNote(null)).toBe("");
-  expect(tileBoundNote({ settled: true, stopped: null, stopKind: null })).toBe("");
-  expect(tileBoundNote({ settled: false, stopped: null, stopKind: null })).toBe(" · lower bound, walking");
-  expect(tileBoundNote({ settled: false, stopped: "Failed to fetch", stopKind: "before-end" })).toBe(" · lower bound, walk stopped");
+  expect(tileBoundNote({ settled: true, stopped: null, stopKind: null, unreadable: 0 })).toBe("");
+  expect(tileBoundNote({ settled: false, stopped: null, stopKind: null, unreadable: 0 })).toBe(" · lower bound, walking");
+  expect(tileBoundNote({ settled: false, stopped: "Failed to fetch", stopKind: "before-end", unreadable: 0 })).toBe(" · lower bound, walk stopped");
   expect(attentionFinding(null)).toBe("Material first, then by room");
-  expect(attentionFinding({ settled: true, stopped: null, stopKind: null })).toBe("Material first, then by room");
-  expect(attentionFinding({ settled: false, stopped: null, stopKind: null })).toBe("Material first, then by room · walking the book, figures are a lower bound");
+  expect(attentionFinding({ settled: true, stopped: null, stopKind: null, unreadable: 0 })).toBe("Material first, then by room");
+  expect(attentionFinding({ settled: false, stopped: null, stopKind: null, unreadable: 0 })).toBe("Material first, then by room · walking the book, figures are a lower bound");
   expect([...NEAR_CAP_BAND_IDS]).toEqual(["0-2", "2-5", "5-10"]);
 });
 
@@ -213,20 +239,171 @@ test("the distance chart's bars keep the card's own law: a band the walk has rea
   expect(pending).toHaveLength(7);
   for (const band of pending) expect(band).toMatchObject({ count: null, debt: null });
   // Accounts read with no debt between them: the count is a positive read, the dollars are still not a claimed zero.
-  const debtless = bandsSoFar({ settled: false, bands: [{ id: "50-plus", label: "≥50%", count: 3, debt: 0n }] });
+  const debtless = bandsSoFar({ whole: false, bands: [{ id: "50-plus", label: "≥50%", count: 3, debt: 0n }] });
   expect(debtless).toEqual([{ id: "50-plus", label: "≥50%", count: 3, debt: null }]);
 });
 
 test("the walk qualifier: nothing over a settled or unloaded book, the running and the stopped register otherwise", () => {
   expect(walkQualifier(null)).toBe("");
-  expect(walkQualifier({ settled: true, stopped: null, stopKind: null })).toBe("");
-  expect(walkQualifier({ settled: false, stopped: null, stopKind: null })).toBe(" · walking the book, figures are a lower bound");
-  expect(walkQualifier({ settled: false, stopped: "Failed to fetch", stopKind: "before-end" })).toBe(" · the walk stopped, figures are a lower bound");
-  expect(walkQualifier({ settled: false, stopped: "the walk delivered 3 of the 5 rows the wire advertised", stopKind: "at-end" })).toBe(" · the walk stopped, figures are a lower bound");
+  expect(walkQualifier({ settled: true, stopped: null, stopKind: null, unreadable: 0 })).toBe("");
+  expect(walkQualifier({ settled: false, stopped: null, stopKind: null, unreadable: 0 })).toBe(" · walking the book, figures are a lower bound");
+  expect(walkQualifier({ settled: false, stopped: "Failed to fetch", stopKind: "before-end", unreadable: 0 })).toBe(" · the walk stopped, figures are a lower bound");
+  expect(walkQualifier({ settled: false, stopped: "the walk delivered 3 of the 5 rows the wire advertised", stopKind: "at-end", unreadable: 0 })).toBe(" · the walk stopped, figures are a lower bound");
+  // The running and the stopped registers keep their own words over an unreadable row: the walk's state is said first.
+  expect(walkQualifier({ settled: false, stopped: null, stopKind: null, unreadable: 1 })).toBe(" · walking the book, figures are a lower bound");
+  expect(walkQualifier({ settled: false, stopped: "Failed to fetch", stopKind: "before-end", unreadable: 1 })).toBe(" · the walk stopped, figures are a lower bound");
+});
+
+// ---------------------------------------------------------------------------
+// An unreadable computed row: the engine computed it, this page cannot read it.
+// ---------------------------------------------------------------------------
+
+const firstRow = POSITIONS_DM_PAGE_1.positions[0];
+if (firstRow === undefined) throw new Error("fixture invariant: the committed page serves a row");
+const readable = { status: "computed", refusal: null, health_factor: { wad: null, num: "10000000000", den: "5000000000", infinite: false, note: "" }, total_debt: "5000000000" } as const;
+/** `status: "computed"`, `liquidatable: true`, and a debt the decimal guard refuses — the row a false all-clear was said over. */
+const unreadable = readCashRow(refinePositionSummary({ ...firstRow, account: "0xbad", status: "computed", refusal: null, liquidatable: true, total_debt: "1e6" }));
+const far = readCashRow(refinePositionSummary({ ...firstRow, ...readable, account: "0xfar", liquidatable: false }));
+const NEGATIVES = /Nothing material is liquidatable|No position is liquidatable|No computed position is liquidatable|No account is within 10%|No account needs attention/;
+
+test("an unreadable computed row is counted and blocks every all-clear: no quiet headline, no 'No position is liquidatable', no near-cap negative — over a COMPLETE walk whose aggregate refused nothing", () => {
+  expect(unreadable.computed).toBe(false);
+  const s = summarizeCash({ rows: [unreadable, far], decimals: 6, refusedPositions: 0, ...settled });
+  expect(s.unreadable).toBe(1);
+  expect(s.notComputed).toBe(0);
+  expect(s.computed).toBe(1);
+  expect(s.settled).toBe(true);
+  expect(s.whole).toBe(false);
+  expect(s.headline.variant).toBe("refused");
+  expect(s.headline.tone).toBe("refused");
+  expect(s.headline.emphasis).toBe("The Cash book could not be fully read this batch.");
+  expect(s.headline.dek).toBe("1 position the engine calls computed could not be read by this page and is counted, not cleared. No verdict is claimed over it.");
+  expect(`${s.headline.emphasis} ${s.headline.dek}`).not.toMatch(NEGATIVES);
+  // Never worded as the engine's refusal: the engine refused nothing.
+  expect(s.headline.dek).not.toMatch(/refus|could not be computed/i);
+  // Alone on the book it is still not "No Cash account could be computed": the engine computed it.
+  const alone = summarizeCash({ rows: [unreadable], decimals: 6, refusedPositions: 0, ...settled });
+  expect(alone.headline.emphasis).toBe("The Cash book could not be fully read this batch.");
+  expect(`${alone.headline.emphasis} ${alone.headline.dek}`).not.toMatch(NEGATIVES);
+  // Beside refused positions both are counted, each in its own sentence.
+  const both = summarizeCash({ rows: [unreadable, unreadable, far], decimals: 6, refusedPositions: 2, ...settled });
+  expect(both.headline.dek).toBe(
+    "2 positions the engine calls computed could not be read by this page and are counted, not cleared. No verdict is claimed over them. " +
+      "2 positions could not be computed this batch and are counted, not hidden.",
+  );
+});
+
+test("beside an unreadable row a positive finding stands as a lower bound, and no negative rides with it", () => {
+  const s = summarizeCash({ rows: [...rows, unreadable], decimals: 6, refusedPositions: 1, ...settled });
+  expect(s.headline.variant).toBe("material");
+  expect(s.headline.emphasis).toBe("$4,200 of Cash debt is liquidatable right now,");
+  expect(s.headline.dek).toBe(
+    "1 position could not be computed this batch and is counted, not hidden. " +
+      "1 position the engine calls computed could not be read by this page and is counted, not cleared. " +
+      "Every figure is a lower bound over the 1 computed account this page could read.",
+  );
+  expect(s.headline.dek).not.toMatch(NEGATIVES);
+  // The same rows read whole keep the near-cap negative: it is the unreadable row that withholds it.
+  expect(summarizeCash({ rows, decimals: 6, refusedPositions: 1, ...settled }).headline.dek).toContain("No account is within 10% of its borrow cap.");
+});
+
+test("over an unreadable row no zero is a finding and no sum a total: the tiles' note, the bars, the distance finding, the table's empty line and the entry card all say lower bound — a complete walk is settled, and not whole", () => {
+  const s = summarizeCash({ rows: [unreadable, far], decimals: 6, refusedPositions: 0, ...settled });
+  expect(tileBoundNote(s)).toBe(" · lower bound, 1 row unreadable");
+  expect(walkQualifier(s)).toBe(" · 1 row could not be read, figures are a lower bound");
+  expect(attentionFinding(s)).toBe("Material first, then by room · 1 row could not be read, figures are a lower bound");
+  expect(attentionEmptyText(s)).toBe("1 row could not be read; no account is cleared.");
+  expect(walkEntryLine(s)).toBe("1 row of the book could not be read");
+  // The bars: the band read in prints what was read; every other band is unknown — never "$0 · 0".
+  const bars = bandsSoFar(s);
+  expect(bars.find((b) => b.id === "50-plus")).toMatchObject({ count: 1, debt: 5_000_000_000n });
+  for (const band of bars.filter((b) => b.id !== "50-plus")) expect(band).toMatchObject({ count: null, debt: null });
+  // The finding: a walk-derived zero is a dash, and the clause names the unreadable row — the walk itself is complete.
+  expect(bandsFinding(s)).toEqual({
+    lead: "Cash debt grouped by room under the borrow cap · bars are dollars, counts printed · ",
+    figure: "—",
+    rest: " within 10% of the cap: a zero is claimed only over a book read whole · 1 row could not be read",
+    barsNote: "1 row could not be read: every bar and every count is a lower bound over the accounts this page could read.",
+  });
+  // A positive read is a floor in its own words.
+  const near = readCashRow(refinePositionSummary({ ...firstRow, ...readable, account: "0xnear", liquidatable: false, health_factor: { ...readable.health_factor, num: "4804000000", den: "4620000000" }, total_debt: "4620000000" }));
+  const positive = bandsFinding(summarizeCash({ rows: [unreadable, unreadable, near], decimals: 6, refusedPositions: 0, ...settled }));
+  expect(positive.lead).toMatch(/at least $/);
+  expect(positive.rest).toBe(" sits within 10% of the cap · 2 rows could not be read, figures are a lower bound");
+  // Read whole, the same book claims its zeros and its total.
+  const whole = summarizeCash({ rows: [far], decimals: 6, refusedPositions: 0, ...settled });
+  expect(whole.whole).toBe(true);
+  expect(tileBoundNote(whole)).toBe("");
+  expect(bandsFinding(whole).figure).toBe("$0");
+  expect(walkEntryLine(whole)).toBe("$0 within 10% of cap");
+  expect(whole.headline.emphasis).toBe("Nothing material is liquidatable on the Cash book right now.");
+});
+
+test("an unreadable row is stated as soon as it lands: a running and a stopped walk count it in the dek beside their own registers", () => {
+  const running = summarizeCash({ rows: [unreadable], decimals: 6, refusedPositions: 0, walkComplete: false, walkStopped: null, walkStopKind: null, refusedWhole: null });
+  expect(running.headline.variant).toBe("pending");
+  expect(running.headline.dek).toContain("1 position the engine calls computed could not be read by this page and is counted, not cleared.");
+  expect(tileBoundNote(running)).toBe(" · lower bound, walking");
+  const stopped = summarizeCash({ rows: [unreadable], decimals: 6, refusedPositions: 0, walkComplete: false, walkStopped: "Failed to fetch", walkStopKind: "before-end", refusedWhole: null });
+  expect(stopped.headline.dek).toContain("1 position the engine calls computed could not be read by this page and is counted, not cleared.");
+  expect(tileBoundNote(stopped)).toBe(" · lower bound, walk stopped");
+});
+
+test("the demo walk is read whole: not one unreadable row, so its settled rendering carries no qualifier", () => {
+  const demo = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => readCashRow(refinePositionSummary(p)));
+  const s = summarizeCash({ rows: demo, decimals: 6, refusedPositions: 6, ...settled });
+  expect(s.unreadable).toBe(0);
+  expect(s.whole).toBe(true);
+  expect(tileBoundNote(s)).toBe("");
+  expect(bandsFinding(s).barsNote).toBeNull();
+});
+
+test("a walk served an account twice claims no bound anywhere, in its own words — never 'at least', never 'lower bound'", () => {
+  const near = readCashRow(refinePositionSummary({ ...firstRow, ...readable, account: "0xnear", liquidatable: false, health_factor: { ...readable.health_factor, num: "4804000000", den: "4620000000" }, total_debt: "4620000000" }));
+  const twice = "account 0xnear was delivered on page 1 and again on page 2";
+  const s = summarizeCash({ rows: [near], decimals: 6, refusedPositions: 0, refusedWhole: null, walkComplete: false, walkStopped: twice, walkStopKind: "duplicate" });
+  expect(s.stopKind).toBe("duplicate");
+  expect(walkQualifier(s)).toBe(" · the walk was served an account twice, figures are not a bound");
+  expect(tileBoundNote(s)).toBe(" · not a bound, the walk was served an account twice");
+  expect(walkEntryLine(s)).toBe("The walk was served an account twice");
+  const finding = bandsFinding(s);
+  expect(finding).toEqual({
+    lead: "Cash debt grouped by room under the borrow cap · bars are dollars, counts printed · ",
+    figure: "$4,620",
+    rest: " sits within 10% of the cap among the rows the walk landed · the walk was served an account twice, figures are not a bound",
+    barsNote: "The walk was served an account twice: pages that repeat an account do not partition the book, so no bar or count here is a total or a lower bound.",
+  });
+  expect(bandsFinding({ ...s, bands: s.bands.map((b) => ({ ...b, count: 0, debt: 0n })) }).rest).toBe(
+    " within 10% of the cap: a zero is claimed only by a complete walk · the walk was served an account twice",
+  );
+  expect(s.headline.dek).toContain(`The walk was served an account twice (${twice})`);
+  for (const words of [finding.lead, finding.rest, finding.barsNote ?? "", walkQualifier(s), tileBoundNote(s), s.headline.dek]) {
+    expect(words).not.toMatch(/at least|a lower bound over|are a lower bound|· lower bound/);
+  }
+});
+
+test("the entry card's line is framed by how the walk ended — 'before the last page' is said only of a walk that never read it", () => {
+  const base = { settled: false, unreadable: 0, nearCap: { sum: 0n, count: 0 }, decimals: 6 } as const;
+  expect(walkEntryLine({ ...base, stopped: null, stopKind: null })).toBe("Walking the book…");
+  expect(walkEntryLine({ ...base, stopped: "Failed to fetch", stopKind: "before-end" })).toBe("The walk stopped before the last page");
+  expect(walkEntryLine({ ...base, stopped: "short", stopKind: "at-end" })).toBe("The walk reached its last page and its rows do not reconcile with the census");
+  expect(walkEntryLine({ ...base, stopped: "past", stopKind: "over" })).toBe("The walk ran past its census");
+  for (const kind of ["at-end", "over", "duplicate"] as const) {
+    expect(walkEntryLine({ ...base, stopped: "x", stopKind: kind })).not.toMatch(/before the (book was read|last page)/);
+  }
+  expect(walkEntryLine({ ...base, settled: true, stopped: null, stopKind: null, nearCap: { sum: 4_620_000_000n, count: 1 } })).toBe("$4,620 within 10% of cap");
 });
 
 test("load failure headline", () => {
   expect(unavailableHeadline("no servable batch").emphasis).toBe("The Cash book could not be loaded.");
   expect(unavailableHeadline("no servable batch").dek).toBe("No servable batch.");
   expect(unavailableHeadline("  ").dek).toBe("The service gave no reason.");
+});
+
+test("an answer that is not a book has its own headline: it was not 'not loaded' and nothing was 'not computed' — the fault is named", () => {
+  const h = unreadableHeadline("engines is not a list (got null)");
+  expect(h.variant).toBe("refused");
+  expect(h.emphasis).toBe("The Cash book's answer could not be read.");
+  expect(h.dek).toBe("The service answered, and the body is not a book: engines is not a list (got null).");
+  expect(`${h.emphasis} ${h.dek}`).not.toMatch(/could not be loaded|could not be computed|unavailable/);
 });

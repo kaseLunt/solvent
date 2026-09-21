@@ -1,6 +1,6 @@
 // web/tests/unit/cash-rows.spec.ts
 import { expect, test } from "@playwright/test";
-import { refinePositionsResponse, type RefinedPositionsResponse } from "@solvent/client";
+import { refinePositionsResponse, refinePositionSummary, type RefinedPositionsResponse } from "@solvent/client";
 import {
   liquidatableRows,
   nearCapRows,
@@ -9,10 +9,13 @@ import {
   readCashRow,
   roomBands,
   roomPercentiles,
+  rowStandingLabel,
   sumDebt,
+  unreadableRows,
   type CashWireRow,
 } from "../../lib/cash-rows";
 import { POSITIONS_DM_PAGE_1 } from "../fixtures/book";
+import { DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2 } from "../fixtures/demo";
 
 function row(over: Partial<CashWireRow> & { account: string }): CashWireRow {
   return {
@@ -122,6 +125,39 @@ test("a malformed wire integer is refused, not coerced", () => {
   expect(r.debt).toBeNull();
 });
 
+test("a row the engine calls computed that this page cannot read is its own class: unreadable by name — never a refusal, never computed, in no sum and no band", () => {
+  // The engine's verdict is known and its debt is not a wire decimal: the engine refused nothing, the page cannot read it.
+  const r = readCashRow(row({ account: "0xbad", liquidation_verdict: "liquidatable", total_debt: "1e6" }));
+  expect(r.computed).toBe(false);
+  expect(r.refusal).toBeNull();
+  expect(r.unreadable).toBe("total_debt is not a wire decimal");
+  expect(rowStandingLabel(r)).toBe("Unreadable");
+  expect(notComputedCause(r)).toBe("this page could not read the row the engine served: total_debt is not a wire decimal");
+  expect(notComputedCause(r)).not.toMatch(/refus/i);
+  expect(liquidatableRows([r])).toEqual([]);
+  expect(roomBands([r]).reduce((n, b) => n + b.count, 0)).toBe(0);
+  // Every operand is named, in read order; a computed row with no health factor is unreadable too.
+  const both = readCashRow(row({ account: "0xbad2", total_debt: "", health_factor: cap("0x10", "1.5") }));
+  expect(both.unreadable).toBe("total_debt is not a wire decimal; health_factor.num is not a wire decimal; health_factor.den is not a wire decimal");
+  expect(readCashRow(row({ account: "0xbad3", health_factor: null })).unreadable).toBe("health_factor is null");
+  // A verdict the engine withheld on a row it calls computed is the same class — the page holds no verdict to read — in its own words.
+  const noVerdict = readCashRow(row({ account: "0xu", liquidation_verdict: "unknowable" }));
+  expect(noVerdict.unreadable).toBe("no liquidation verdict was served");
+  expect(notComputedCause(noVerdict)).toBe("the engine served no liquidation verdict for this account");
+  // A refused row is the engine's act: never unreadable, whatever its operands hold. A computed row is neither.
+  const refused = readCashRow(row({ account: "0xc", status: "refused", refusal: { code: "SWEEP_NEVER", detail: "", note: "" }, health_factor: null, total_debt: "1e6", liquidation_verdict: "unknowable" }));
+  expect(refused.unreadable).toBeUndefined();
+  expect(rowStandingLabel(refused)).toBe("Not computed");
+  expect(readCashRow(row({ account: "0xa" })).unreadable).toBeUndefined();
+  expect(unreadableRows([r, both, noVerdict, refused, readCashRow(row({ account: "0xa" }))]).map((x) => x.account)).toEqual(["0xbad", "0xbad2", "0xu"]);
+});
+
+test("the demo walk carries no unreadable row: every row that is not computed is the engine's refusal", () => {
+  const rows = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => readCashRow(refinePositionSummary(p)));
+  expect(unreadableRows(rows)).toEqual([]);
+  expect(rows.filter((r) => !r.computed).every((r) => r.refusal !== null)).toBe(true);
+});
+
 test("selectors: liquidatable, near cap (<10%, sorted by room), bands, percentiles, sums", () => {
   const rows = [
     readCashRow(row({ account: "0xliq", liquidation_verdict: "liquidatable", health_factor: cap("3200000000", "4200000000"), total_debt: "4200000000" })),
@@ -149,7 +185,7 @@ test("selectors: liquidatable, near cap (<10%, sorted by room), bands, percentil
 // readCashPage — one page judged before any row is derived.
 // ---------------------------------------------------------------------------
 
-const EXPECT = { engine: "debt_manager", decimals: 6, census: 2 } as const;
+const EXPECT = { engine: "debt_manager", decimals: 6, census: 2, batchId: POSITIONS_DM_PAGE_1.batch.id } as const;
 type Page = RefinedPositionsResponse;
 type PageRow = Page["positions"][number];
 
@@ -163,8 +199,29 @@ test("readCashPage: the committed page reads as rows, last, with its census", ()
   if (p.kind !== "rows") return;
   expect(p.rows.map((r) => r.account)).toEqual(POSITIONS_DM_PAGE_1.positions.map((r) => r.account));
   expect(p.last).toBe(true);
+  expect(p.next).toBeNull();
   expect(p.total).toBe(2);
-  expect(readCashPage(page({ next_cursor: "more" }), EXPECT)).toMatchObject({ kind: "rows", last: false });
+  expect(readCashPage(page({ next_cursor: "more" }), EXPECT)).toMatchObject({ kind: "rows", last: false, next: "more" });
+});
+
+test("readCashPage: the page's own batch is judged inside the reading — no batch, or a batch with no readable id, is malformed by name and never a throw; a page of another batch is reported, never read", () => {
+  type Batch = Page["batch"];
+  for (const batch of [null, undefined, 7, "1", [], {}, { id: null }, { id: "1" }, { id: -0 }, { id: 1.5 }]) {
+    const p = page({ batch: batch as unknown as Batch, positions: [] });
+    expect(() => readCashPage(p, EXPECT)).not.toThrow();
+    expect(readCashPage(p, EXPECT).kind).toBe("malformed");
+  }
+  expect(readCashPage(page({ batch: null as unknown as Batch, positions: [] }), EXPECT)).toEqual({ kind: "malformed", fault: "batch is not an object (got null)" });
+  expect(readCashPage(page({ batch: { id: "1" } as unknown as Batch }), EXPECT)).toEqual({ kind: "malformed", fault: 'batch.id is not a wire population (got "1")' });
+  // A body that is no object at all is the same named fault — the reading never dereferences what it has not judged.
+  for (const body of [null, undefined, 7, "page", []]) {
+    expect(() => readCashPage(body, EXPECT)).not.toThrow();
+    expect(readCashPage(body, EXPECT).kind).toBe("malformed");
+  }
+  expect(readCashPage(null, EXPECT)).toEqual({ kind: "malformed", fault: "the page is not an object (got null)" });
+  // Another batch's page: its id is handed back for the caller's one reload, and none of its rows is read.
+  const moved = page({ batch: { ...page().batch, id: EXPECT.batchId + 1 } });
+  expect(readCashPage(moved, EXPECT)).toEqual({ kind: "other-batch", batchId: EXPECT.batchId + 1 });
 });
 
 test("readCashPage: a refused page is the engine's refusal with its cause — never an empty book", () => {

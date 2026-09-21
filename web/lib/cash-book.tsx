@@ -7,7 +7,13 @@
 // The laws this module embodies:
 //   - an ABORTED request is a supersession, never an error: the newer request
 //     reports for itself, and neither arm of a superseded promise may land;
-//   - a failed RESUME re-fetch never blanks a rendered book (`keepOnFailure`);
+//   - the book's answer is judged before it is held (`bookAnswered`): a body
+//     that is not a book never becomes `phase: "ok"` — the first such answer is
+//     the named unreadable failure, which is neither "unavailable" nor an
+//     engine's refusal;
+//   - a failed RESUME re-fetch never blanks a rendered book (`keepOnFailure`),
+//     and an unreadable one never replaces it: the book that stood keeps
+//     standing, and the reading says so (`repairFault`);
 //   - a 409 batch_superseded mid-walk reloads the book AT MOST ONCE per
 //     superseding batch id, so a server that keeps superseding cannot be
 //     hammered;
@@ -16,22 +22,28 @@
 //     a failed or stalled walk always has a recovery path;
 //   - rows from a walk started for an older batch are never mixed with the
 //     current book — `walk.forBatch === batchId` gates every derived read;
-//   - every page is judged before a row is derived (`readCashPage`): a page
-//     from another batch reloads the book once; a refused page is the
-//     engine's refusal, never an empty book; a page from another engine, at
-//     another scale, or carrying a row the contract would not have produced
-//     is a named invalid response; a terminal page completes the walk only
-//     when the rows delivered equal the census the wire advertised;
+//   - every page is judged before anything on it is read (`walkStep`): the
+//     fetch's answer is never dereferenced here — not its batch, not its
+//     cursor — so a page that cannot be read ends the walk BY NAME and never
+//     as a throw that leaves the walk looking alive. A page from another batch
+//     reloads the book once; a refused page is the engine's refusal, never an
+//     empty book; a page from another engine, at another scale, or carrying a
+//     row the contract would not have produced is a named invalid response; an
+//     account delivered twice is a named fault and is never counted twice; a
+//     terminal page completes the walk only when the rows delivered equal the
+//     census the wire advertised;
 //   - a walk that does not complete says HOW it ended (`WalkStopKind`): before
-//     its last page, at its last page with rows that do not reconcile, or past
-//     its census — the one ending whose rows bound nothing.
+//     its last page, at its last page with rows that do not reconcile, past
+//     its census, or on a repeated account — the two endings whose rows bound
+//     nothing.
 
 import { BatchSupersededError, type components } from "@solvent/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSolventClient } from "./api";
-import { censusFaultWords, type WalkStopKind } from "./book-headline";
-import { bookLoadFailure, wholeRefusal, type WholeRefusal } from "./cash-refusal";
-import { readCashPage, type CashPageReading, type CashRow } from "./cash-rows";
+import type { WalkStopKind } from "./book-headline";
+import { WALK_START, walkStep } from "./book-walk";
+import { bookAnswered, bookEnvelopeFault, bookFailed, wholeRefusal, type BookState, type WholeRefusal } from "./cash-refusal";
+import type { CashRow } from "./cash-rows";
 import { receiptIdentity } from "./freshness";
 import { useAnchoredAgeSeconds, type LiveAgeReading } from "./live-age";
 import { classifyPositionsFailure, fetchPositionsPage, type PositionsFailure } from "./positions";
@@ -54,7 +66,16 @@ export type { WholeRefusal };
 export interface CashBookReading {
   readonly phase: CashBookPhase;
   readonly book: BookResponse | null;
-  readonly failure: { message: string; retryAfterSeconds: number | null } | null;
+  /**
+   * Why no book is held. `unreadable`: the service ANSWERED and the body is not a book — not a read that failed,
+   * and not an absence the wire stated.
+   */
+  readonly failure: { message: string; retryAfterSeconds: number | null; unreadable: boolean } | null;
+  /**
+   * A later answer to `/v1/book` could not be read and did NOT replace the book held here: the fault, by name.
+   * Null while no such answer stands against the book — and whenever no book is held.
+   */
+  readonly repairFault: string | null;
   readonly cash: {
     readonly engine: BookEngine | null;
     readonly badDebt: BadDebtEngine | null;
@@ -75,12 +96,6 @@ export interface CashBookReading {
   readonly age: LiveAgeReading;
   readonly reload: () => void;
 }
-
-type BookState =
-  | { phase: "loading" }
-  | { phase: "ok"; book: BookResponse }
-  | { phase: "no-batch"; message: string; retryAfterSeconds: number | null }
-  | { phase: "error"; message: string };
 
 interface WalkState {
   readonly forBatch: number | null;
@@ -118,19 +133,20 @@ export function useCashBook(): CashBookReading {
     return getSolventClient()
       .book(controller.signal)
       .then(
-        (book) => {
+        (answer: unknown) => {
           if (controller.signal.aborted) return false;
-          setState({ phase: "ok", book });
+          // Judged before it is held: an answer that is not a book is no receipt, and never replaces one that stands.
+          const readable = bookEnvelopeFault(answer) === null;
+          setState((previous) => bookAnswered(previous, answer, keepOnFailure));
           // Bumped HERE, with the receipt, so a changed id and the epoch land
           // in one render (one walk, not an aborted one against the old id),
           // and a re-walk never starts before the book it belongs to exists.
-          if (rewalk) setWalkEpoch((epoch) => epoch + 1);
-          return true;
+          if (readable && rewalk) setWalkEpoch((epoch) => epoch + 1);
+          return readable;
         },
         (cause: unknown) => {
           if (controller.signal.aborted) return false;
-          const failure: BookState = bookLoadFailure(cause);
-          setState((previous) => (keepOnFailure && previous.phase === "ok" ? previous : failure));
+          setState((previous) => bookFailed(previous, cause, keepOnFailure));
           return false;
         },
       );
@@ -160,11 +176,11 @@ export function useCashBook(): CashBookReading {
     walkControllerRef.current?.abort();
     const controller = new AbortController();
     walkControllerRef.current = controller;
-    const expectation = { engine: CASH, decimals: cashDecimals, census: cashCensus };
-    // The census this walk is held to, and the rows it has delivered so far: a
-    // terminal page completes the walk only when the two agree.
-    let advertised: number | null = null;
-    let delivered = 0;
+    const expectation = { batchId, engine: CASH, decimals: cashDecimals, census: cashCensus };
+    // The census this walk is held to, the rows it has delivered and the
+    // accounts it has read so far: a terminal page completes the walk only when
+    // census and rows agree, and no account is landed twice.
+    let tally = WALK_START;
 
     const invalid = (message: string): PositionsFailure => ({ register: "invalid-response", message });
     // No synchronous reset here (react-hooks/set-state-in-effect forbids a
@@ -189,14 +205,18 @@ export function useCashBook(): CashBookReading {
     };
     const step = (cursor: string | null): void => {
       fetchPositionsPage({ engine: CASH, sort: "headroom", dir: "asc", limit: PAGE_LIMIT, cursor, signal: controller.signal }).then(
-        (page) => {
+        (page: unknown) => {
           if (controller.signal.aborted) return;
-          if (page.batch.id !== batchId) {
+          // The page is never read here: `walkStep` judges it whole and cannot
+          // throw, so nothing in this callback can reject and leave the walk
+          // looking alive.
+          const outcome = walkStep(page, expectation, tally);
+          if (outcome.kind === "moved") {
             // Page one carries no cursor, so a batch minted between /v1/book and
             // this page never 409s — the page's own batch id is the guard. One
             // reload per such id; a second mismatch is stated as a failure.
-            if (restartedForRef.current !== page.batch.id) {
-              restartedForRef.current = page.batch.id;
+            if (restartedForRef.current !== outcome.batchId) {
+              restartedForRef.current = outcome.batchId;
               void loadBook({ rewalk: true });
               return;
             }
@@ -204,59 +224,30 @@ export function useCashBook(): CashBookReading {
               forBatch: batchId,
               rows: previous.forBatch === batchId ? previous.rows : [],
               complete: false,
-              failure: { register: "transport", message: `the book moved to batch ${String(page.batch.id)} during the walk` },
+              failure: { register: "transport", message: `the book moved to batch ${String(outcome.batchId)} during the walk` },
               stop: "before-end",
               refused: null,
             }));
             return;
           }
-          let reading: CashPageReading;
-          try {
-            reading = readCashPage(page, expectation);
-          } catch (cause: unknown) {
-            // A decoding failure is a named invalid response — never an
-            // unhandled rejection that leaves the walk looking alive.
-            reading = {
-              kind: "malformed",
-              fault: `the page could not be decoded: ${cause instanceof Error ? cause.message : String(cause)}`,
-            };
-          }
-          if (reading.kind === "refused") {
+          if (outcome.kind === "refused") {
             setWalk({
               forBatch: batchId,
               rows: [],
               complete: false,
               failure: null,
               stop: null,
-              refused: { code: reading.code ?? "", detail: reading.detail ?? "" },
+              refused: { code: outcome.code ?? "", detail: outcome.detail ?? "" },
             });
             return;
           }
-          if (reading.kind === "malformed") {
-            // A page that could not be read is not known to be the last one: the walk stopped before it read its end.
-            land(cursor, [], false, invalid(reading.fault), "before-end");
+          if (outcome.kind === "stopped") {
+            land(cursor, outcome.rows, false, invalid(outcome.fault), outcome.stop);
             return;
           }
-          if (advertised !== null && reading.total !== advertised) {
-            land(
-              cursor,
-              reading.rows,
-              false,
-              invalid(`the census changed mid-walk: ${String(advertised)} rows advertised, then ${String(reading.total)}`),
-              reading.last ? "at-end" : "before-end",
-            );
-            return;
-          }
-          advertised = reading.total;
-          delivered += reading.rows.length;
-          // Past the census on any page; short of it only once the last page has landed.
-          const over = delivered > reading.total;
-          if (over || (reading.last && delivered !== reading.total)) {
-            land(cursor, reading.rows, false, invalid(censusFaultWords(delivered, reading.total)), over ? "over" : "at-end");
-            return;
-          }
-          land(cursor, reading.rows, reading.last, null);
-          if (page.next_cursor !== null) step(page.next_cursor);
+          tally = outcome.tally;
+          land(cursor, outcome.rows, outcome.complete, null);
+          if (outcome.next !== null) step(outcome.next);
         },
         (cause: unknown) => {
           if (controller.signal.aborted) return;
@@ -313,10 +304,11 @@ export function useCashBook(): CashBookReading {
     book,
     failure:
       state.phase === "no-batch"
-        ? { message: state.message, retryAfterSeconds: state.retryAfterSeconds }
+        ? { message: state.message, retryAfterSeconds: state.retryAfterSeconds, unreadable: false }
         : state.phase === "error"
-          ? { message: state.message, retryAfterSeconds: null }
+          ? { message: state.message, retryAfterSeconds: null, unreadable: "unreadable" in state }
           : null,
+    repairFault: state.phase === "ok" ? state.repairFault : null,
     cash: {
       engine: engineOf(CASH),
       badDebt: badDebtOf(CASH),
