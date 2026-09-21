@@ -40,7 +40,8 @@ export const HISTORY_METRICS: readonly BucketMetric[] = [
 
 /** Never narrower than a readable week of hours (the frame scrolls below it); never wider than the widest shell (2560 → 1680). */
 const PLOT_MEASURE = { min: 320, max: 1680, fallback: 860 } as const;
-const PLOT_HEIGHT = 200;
+/** A zero-based series of a quiet week is nearly flat: the plot takes a sparkline's proportions, not a hall. */
+const PLOT_HEIGHT = 120;
 
 export function HistoryChart({
   axis,

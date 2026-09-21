@@ -1,16 +1,17 @@
-// History's one view model (plan 2026-09-16 R1–R4, R6): the verdict header,
-// the identity chips, the four newest-point tiles, the chart's finding line
-// and the drawer's doctrine, decided once from one engine's series reading.
-// The headline IS `observatoryTakeaway(...)` and the finding IS
-// `gridReadingLine(...)` — the module's own sentences, verbatim, so the header
-// and the reading cannot drift. Every figure passes the wire guards before it
+// History's one view model: the verdict header, the identity chips, the four
+// newest-point tiles, the chart's finding line and the drawer's doctrine,
+// decided once from one engine's series reading. The headline and the dek ARE
+// `observatoryTakeaway(...)`'s parts and the finding IS `gridReadingLine(...)`
+// — the module's own sentences, by identity, so the header and the reading
+// cannot drift. A statement of record wears ink: an answered series is
+// `neutral`, a refusal is dashed, and a hole's severity rides the census chip,
+// never the headline's colour. Every figure passes the wire guards before it
 // is formatted; a bucket the rollup withheld or never captured is a dashed
 // tile with the gap's word, never a 0. The surface prints this and decides
 // nothing twice.
-import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "./format";
+import { EM_DASH, formatBlock, truncateAddress } from "./format";
 import { humanUsd } from "./human-usd";
 import { engineName } from "./inspector-headline";
-import { LEGACY } from "./inspector-position";
 import { refused, sentence, type LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
 import type {
@@ -24,8 +25,10 @@ import {
   buildMetricSeries,
   describeRange,
   describeStride,
+  displayMetric,
   gridReadingLine,
   METRIC_LABELS,
+  named,
   observatoryTakeaway,
   pointDetailTakeaway,
   seriesNewestPoint,
@@ -52,7 +55,7 @@ export interface HistoryView {
   readonly state: HistoryState;
   /** "History · Cash" | "History · Aave v3 market (legacy)". */
   readonly kicker: string;
-  /** Emphasis = observatoryTakeaway(...) or the refusal sentence; rest ""; the dek is the one-line method. */
+  /** Emphasis, rest and dek = observatoryTakeaway(...)'s parts, or a refusal sentence with its own dek; tone neutral when the series answered, refused otherwise. */
   readonly headline: LabHeadline;
   /** Engine · Stride · Range · Buckets ("165 captured · 1 withheld · 2 absent") · Served. */
   readonly chips: LabChip[];
@@ -75,8 +78,17 @@ export interface HistoryReading {
   readonly message: string | null;
 }
 
-/** The dek (plan R3): the one clause the law keeps visible above the fold. */
-export const HISTORY_DEK = "One engine per view; a missing hour is a hole, never a zero.";
+/**
+ * The engines the switch offers, in the page's order: Cash first — it is the product's book, and the page opens on
+ * it. Every engine the contract serves is here exactly once; one engine per view, never combined.
+ */
+export const HISTORY_ENGINES = ["debt_manager", "aave_v3_etherfi"] as const satisfies readonly ObservatoryEngine[];
+
+/** The loading dek says what will be here; nothing is counted before the series answers. */
+export const HISTORY_LOADING_DEK = "The hourly record of this engine's debt, collateral, accounts and liquidatable positions.";
+
+/** After the service's own message: a degraded rollup is a fact about the deployment, and the live figures have a page. */
+export const HISTORY_DEGRADED_CLAUSE = "That is a fact about this deployment, not an empty history; live figures are on the Book.";
 
 /** The intro paragraph — drawer doctrine (R3), verbatim. */
 export const HISTORY_INTRO =
@@ -117,10 +129,6 @@ export const HISTORY_TILES: readonly HistoryTileSpec[] = [
   { key: "accounts", metric: "accounts", label: "Accounts" },
   { key: "liquidatable", metric: "liquidatable_positions", label: "Liquidatable positions" },
 ];
-
-/** The engine as the sentences name it: the legacy market takes its article. */
-const named = (engine: ObservatoryEngine): string =>
-  engine === LEGACY ? `the ${engineName(engine)}` : engineName(engine);
 
 const engineChip = (engine: ObservatoryEngine): LabChip => ({ label: "Engine", value: engineName(engine), title: engine });
 
@@ -201,7 +209,7 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
     return {
       ...base,
       state: "loading",
-      headline: refused(`Loading the history of ${named(reading.engine)}…`, HISTORY_DEK),
+      headline: refused(`Loading the history of ${named(reading.engine)}…`, HISTORY_LOADING_DEK),
       chips: [engineChip(reading.engine), { label: "Buckets", value: "pending", tone: "refused" }],
     };
   }
@@ -210,8 +218,8 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
       ...base,
       state: "degraded",
       headline: refused(
-        `The durable rollup for ${named(reading.engine)} is unavailable.`,
-        sentence(reading.message ?? "the service named no reason"),
+        `No hourly history exists for ${named(reading.engine)} on this deployment yet.`,
+        `${sentence(reading.message ?? "the service named no reason")} ${HISTORY_DEGRADED_CLAUSE}`,
       ),
       chips: [engineChip(reading.engine), { label: "Rollup", value: "unavailable", tone: "refused" }],
       doctrine: [...HISTORY_DOCTRINE, HISTORY_DEGRADED_NOTE],
@@ -245,14 +253,14 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
   }
   const scale = response.usd_decimals;
   const axis = buildBucketAxis(response);
-  const newest = axis.newestPointIndex >= 0 ? (axis.entries[axis.newestPointIndex]?.point ?? null) : null;
-  // The data answered when a captured bucket backs the newest row; a withheld newest bucket or a window with no
-  // wire row is a refusal the takeaway states in its own words (R2).
-  const answered = newest !== null && !newest.refused;
+  // The series answered when its latest recorded hour stated a debt figure. A record is ink, never the colour of a
+  // health verdict — holes included: their severity is the census chip's. A withheld latest hour, one that states no
+  // debt, or a window with no recorded hour is a refusal the takeaway states in its own words.
+  const takeaway = observatoryTakeaway(response, axis, reading.engine);
   return {
     state: "ok",
     kicker,
-    headline: { emphasis: observatoryTakeaway(response, axis), rest: "", tone: answered ? "ok" : "refused", dek: HISTORY_DEK },
+    headline: { emphasis: takeaway.emphasis, rest: takeaway.rest, tone: takeaway.answered ? "neutral" : "refused", dek: takeaway.dek },
     chips: okChips(reading.engine, response, axis),
     tiles: HISTORY_TILES.map((spec) => tileOf(spec, axis, response, scale)),
     finding: gridReadingLine(response, axis),
@@ -463,9 +471,9 @@ export function pointRecord(entry: BucketEntry, response: ObservatorySeriesRespo
       ratesOutside: false,
     };
   }
-  const usd = (value: string | null): string =>
-    renderNullableDecimal(value, { decimals: response.usd_decimals, prefix: "$" });
-  const count = (value: number | null): string => (value === null ? EM_DASH : String(readWirePopulation(value, "count")));
+  // The four totals print through the one chokepoint the chart's labels use: grouped money at the engine's own
+  // scale, grouped counts after the population guard, an em dash for a null — never 0.
+  const total = (metric: BucketMetric): string => displayMetric(point, metric, response.usd_decimals);
 
   const maxEpochAtCompute = readWirePopulation(point.max_epoch_at_compute, "max_epoch_at_compute");
   const ackedEpoch = readWirePopulation(point.acked_epoch, "acked_epoch");
@@ -493,11 +501,11 @@ export function pointRecord(entry: BucketEntry, response: ObservatorySeriesRespo
 
   const answer: RecordRow[] = [
     stateRow,
-    { ...plain("debt", "debt (usd)", usd(point.debt_usd), point.debt_usd === null ? NULL_TOTAL_CLAUSE : null), mono: true },
-    { ...plain("collateral", "collateral (usd)", usd(point.collateral_usd), point.collateral_usd === null ? NULL_TOTAL_CLAUSE : null), mono: true },
-    plain("accounts", "accounts", count(point.accounts)),
-    plain("refused-rows", "refused position rows", String(readWirePopulation(point.refused_positions, "refused_positions"))),
-    plain("liquidatable", "liquidatable positions", count(point.liquidatable_positions)),
+    { ...plain("debt", "debt (usd)", total("debt_usd"), point.debt_usd === null ? NULL_TOTAL_CLAUSE : null), mono: true },
+    { ...plain("collateral", "collateral (usd)", total("collateral_usd"), point.collateral_usd === null ? NULL_TOTAL_CLAUSE : null), mono: true },
+    plain("accounts", "accounts", total("accounts")),
+    plain("refused-rows", "refused position rows", groupInt(readWirePopulation(point.refused_positions, "refused_positions"))),
+    plain("liquidatable", "liquidatable positions", total("liquidatable_positions")),
     // Hazard rows surface in the answer, exactly when they bite.
     ...(unacked ? [reorgRow] : []),
     ...(sweepUnrecorded ? [sweepRow] : []),

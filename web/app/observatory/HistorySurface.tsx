@@ -8,7 +8,8 @@
 //
 // Laws carried here:
 //   - ENGINE SEPARATION IS VISUAL LAW: one engine per view, an explicit
-//     switcher, never a combined total;
+//     switcher, never a combined total. The page opens on Cash — the
+//     product's book — and the switch lists it first (the lib's order);
 //   - points derive only from complete servable batches — an absent bucket is
 //     an honest gap, a withheld bucket is a named refusal, and NULL never
 //     renders as 0;
@@ -24,12 +25,11 @@ import { useEffect, useState } from "react";
 import { ChartCard, VerdictHeader } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { solventBaseUrl } from "@/lib/api";
-import { deriveHistoryView, type HistoryReading } from "@/lib/history-view";
+import { deriveHistoryView, HISTORY_ENGINES, type HistoryReading } from "@/lib/history-view";
 import { engineName } from "@/lib/inspector-headline";
 import {
   fetchObservatorySeries,
   isRollupUnavailable,
-  OBSERVATORY_ENGINES,
   type ObservatoryEngine,
   type ObservatorySeriesResponse,
 } from "@/lib/observatory-data";
@@ -47,7 +47,7 @@ type SeriesState =
   | { phase: "error"; message: string };
 
 export function HistorySurface() {
-  const [engine, setEngine] = useState<ObservatoryEngine>("aave_v3_etherfi");
+  const [engine, setEngine] = useState<ObservatoryEngine>(HISTORY_ENGINES[0]);
   // Keyed by engine: switching engines REMOUNTS the view, so state resets to
   // loading without a synchronous setState inside the effect, and no stale
   // engine's data can bleed across the switch.
@@ -127,7 +127,7 @@ function EngineHistory({
       />
 
       <div className={styles.controls} role="group" aria-label="engine">
-        {OBSERVATORY_ENGINES.map((candidate) => (
+        {HISTORY_ENGINES.map((candidate) => (
           <button
             key={candidate}
             type="button"

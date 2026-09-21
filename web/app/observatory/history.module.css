@@ -1,15 +1,16 @@
 /* History: one engine's durable record, set in the Console register. Page-local rules only — the header, tiles,
- * card, table and drawer are the kit's; these are the page grid, the two selector rows (a pressed ghost button
- * wears the accent), the sparse-window state line, the 1:1 chart frame, the bucket record's key-value grid and
- * folds, and the drawer body. Tokens throughout; every figure on the page is the wire's or the view model's. */
+ * card, table and drawer are the kit's, and so is the pressed toggle (a pressed ghost button wears the kit's accent;
+ * no page restates it). These are the page grid, the two selector rows at chip size, the sparse-window state line,
+ * the 1:1 chart frame, the bucket record's key-value grid and folds, and the drawer body. Tokens throughout; every
+ * figure on the page is the wire's or the view model's. */
 .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; padding: 28px 0 24px; }
 
-/* ---- selectors: the engine switcher (one engine per view) and the metric row inside the chart card ---- */
+/* ---- selectors: the engine switcher (one engine per view) and the metric row inside the chart card — the kit's
+ * ghost buttons at chip size, the same size as every filter toggle on the product ---- */
 .controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
+.controls button { padding: 4px 10px; font-size: var(--type-small); }
 .metrics { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
 .metrics button { font-size: var(--type-small); padding: var(--sp-1) var(--sp-3); }
-.controls button[aria-pressed="true"],
-.metrics button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); background: var(--chip-bg); }
 
 /* ---- the finding line and, beside it, the key to the chart's two hole marks (the same glyphs the plot draws) ---- */
 .findingRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-4); }

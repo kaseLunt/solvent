@@ -3,6 +3,10 @@
 // bucket"), a withheld bucket is a gap carrying its refusal code, a null
 // metric is null-not-zero, nothing is ever interpolated across any of them,
 // and a stride serves every Nth bucket VERBATIM (gap detection respects it).
+// The two sentences the page leads with are pinned in their parts: the
+// reader's tier (compact money, grouped counts, the instant from the wire's
+// own UTC fields against the envelope's served_at), every arm, and a missing
+// or withheld hour named as such — never as a zero.
 
 import { expect, test } from "@playwright/test";
 import {
@@ -21,7 +25,17 @@ import {
   sparseCaptureLine,
 } from "../../lib/observatory-series";
 import { EM_DASH, formatBlock } from "../../lib/format";
+import { humanUsd } from "../../lib/human-usd";
+import { humanUtc } from "../../lib/human-utc";
+import type { ObservatorySeriesPoint, ObservatorySeriesResponse } from "../../lib/observatory-data";
+import { groupInt } from "../../lib/prose";
+import { WireIntegerError } from "../../lib/wireGuard";
+import { DEMO_OBSERVATORY_AAVE, DEMO_OBSERVATORY_DM } from "../fixtures/demo";
 import { OBSERVATORY_SERIES_AAVE, OBSERVATORY_SERIES_DM } from "../fixtures/observatory";
+
+// humanUtc joins an instant's tokens with U+00A0: a literal instant is written through `nb`, the prose around it
+// keeps its ordinary spaces.
+const nb = (text: string): string => text.replaceAll(" ", "\u00a0");
 
 const DM_CAPTURED = OBSERVATORY_SERIES_DM.points.find((point) => !point.refused);
 const DM_WITHHELD = OBSERVATORY_SERIES_DM.points.find((point) => point.refused);
@@ -144,6 +158,28 @@ test("exact displays: usd through the engine's own scale, counts verbatim, null 
   expect(displayMetric(DM_CAPTURED, "liquidatable_positions", 6)).toBe("1");
   expect(displayMetric(DM_WITHHELD, "collateral_usd", 6)).toBe(EM_DASH);
   expect(displayMetric(DM_WITHHELD, "liquidatable_positions", 6)).toBe(EM_DASH);
+});
+
+test("exact displays are GROUPED: money and counts at or above a thousand wear separators, the digits untouched", () => {
+  // One chokepoint: the chart's labels, the hover titles and the bucket record all print these strings.
+  const dm = DEMO_OBSERVATORY_DM.points[DEMO_OBSERVATORY_DM.points.length - 1];
+  const aave = DEMO_OBSERVATORY_AAVE.points[DEMO_OBSERVATORY_AAVE.points.length - 1];
+  if (dm === undefined || aave === undefined) throw new Error("fixture invariant: the demo series carry points");
+  expect(displayMetric(dm, "debt_usd", DEMO_OBSERVATORY_DM.usd_decimals)).toBe("$27,828,808.216758");
+  expect(displayMetric(dm, "collateral_usd", DEMO_OBSERVATORY_DM.usd_decimals)).toBe("$153,171,572.777189");
+  expect(displayMetric(dm, "accounts", DEMO_OBSERVATORY_DM.usd_decimals)).toBe("1,412");
+  expect(displayMetric(aave, "debt_usd", DEMO_OBSERVATORY_AAVE.usd_decimals)).toBe("$1,900,000");
+  expect(displayMetric(aave, "accounts", DEMO_OBSERVATORY_AAVE.usd_decimals)).toBe("8,552");
+  // Grouping is string surgery: strip the separators and the exact decimal is what the wire stated at its scale.
+  expect(displayMetric(dm, "debt_usd", 6).replaceAll(",", "")).toBe("$27828808.216758");
+  // The hover title and the chart's direct labels carry the same grouped string.
+  const axis = buildBucketAxis(DEMO_OBSERVATORY_AAVE);
+  const debt = buildMetricSeries(axis, DEMO_OBSERVATORY_AAVE, "debt_usd");
+  expect(debt.titles[debt.titles.length - 1]).toContain("debt (usd) $1,900,000 @ block");
+  expect(seriesNewestPoint(axis, DEMO_OBSERVATORY_AAVE, "debt_usd", debt)?.directLabel).toBe("$1,900,000");
+  expect(seriesMaxPoint(axis, DEMO_OBSERVATORY_AAVE, "debt_usd", debt)?.label).toBe("$1,919,760");
+  // A count outside the contract is refused at the chokepoint, never grouped into a different number.
+  expect(() => displayMetric({ ...dm, accounts: -1 }, "accounts", 6)).toThrow(WireIntegerError);
 });
 
 test("the stride is disclosed verbatim-or-native — a stride never averages", () => {
@@ -309,71 +345,312 @@ test("W-OBS: the sparse STATE line appears exactly when one or fewer captured po
 });
 
 // ---------------------------------------------------------------------------
-// W-3L — the computed reading lines. Expectations are FIXTURE-COMPOSED (the
-// same fields, composed independently), never the helper echoed back.
+// The computed sentences. Expectations are FIXTURE-COMPOSED (the same fields,
+// composed independently through the tier's own formatters), never the helper
+// echoed back — plus one literal per demo arm, so the words themselves are
+// pinned and not only their plumbing.
 // ---------------------------------------------------------------------------
 
-test.describe("W-3L — observatoryTakeaway", () => {
-  test("newest captured: the bucket's own numbers plus the gap tally, full string", () => {
+const HOLES_GLOSS = "no complete batch was observed";
+const lastOf = <T>(items: readonly T[]): T => {
+  const item = items[items.length - 1];
+  if (item === undefined) throw new Error("fixture invariant: a non-empty list");
+  return item;
+};
+
+test.describe("observatoryTakeaway — the headline's parts and the dek", () => {
+  test("answered, legacy: emphasis = the debt in the compact tier, named for ONE engine; rest = accounts and the hour; the holes are the dek", () => {
     const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
     const newest = axis.entries[axis.newestPointIndex]?.point;
-    if (newest === null || newest === undefined || newest.refused) {
-      throw new Error("fixture invariant: the aave newest bucket is captured");
+    if (newest === null || newest === undefined || newest.refused || newest.debt_usd === null || newest.accounts === null) {
+      throw new Error("fixture invariant: the aave newest bucket is captured and states its debt and accounts");
     }
-    const gaps: string[] = [];
-    if (axis.absentCount > 0) {
-      gaps.push(
-        `${String(axis.absentCount)} of the ${String(axis.entries.length)} bucket(s) in this window have no complete batch`,
-      );
-    }
-    if (axis.withheldCount > 0) gaps.push(`${String(axis.withheldCount)} bucket(s) withheld`);
-    const gapClause = gaps.length > 0 ? `; ${gaps.join(", ")}` : "";
-    expect(observatoryTakeaway(OBSERVATORY_SERIES_AAVE, axis)).toBe(
-      `Debt ${displayMetric(newest, "debt_usd", OBSERVATORY_SERIES_AAVE.usd_decimals)} across ` +
-        `${String(newest.accounts)} account(s) as of bucket ${newest.bucket_start}${gapClause}.`,
+    const t = observatoryTakeaway(OBSERVATORY_SERIES_AAVE, axis, "aave_v3_etherfi");
+    expect(t.emphasis).toBe(
+      `${humanUsd(BigInt(newest.debt_usd), OBSERVATORY_SERIES_AAVE.usd_decimals)} of legacy Aave v3 debt is outstanding,`,
     );
-    // The exact ledger figure, anchored — a retyped or re-scaled number fails.
-    expect(observatoryTakeaway(OBSERVATORY_SERIES_AAVE, axis)).toContain("$619.186008");
+    expect(t.rest).toBe(
+      `across ${groupInt(newest.accounts)} accounts in the hour starting ${humanUtc(newest.bucket_start, OBSERVATORY_SERIES_AAVE.served_at)}.`,
+    );
+    expect(t.answered).toBe(true);
+    // 4 of 5 recorded: below the promotion threshold, so the holes live in the dek — one absent hour, "it is".
+    expect(t.dek).toBe(
+      `${String(axis.capturedCount)} of the ${String(axis.entries.length)} hours in this window were recorded. ` +
+        `1 is absent — ${HOLES_GLOSS}; it is a gap on the chart, never a zero.`,
+    );
+    expect(t.holes).toBe(t.dek);
+    expect(axis.absentCount).toBe(1);
+    expect(axis.withheldCount).toBe(0);
+    // The exact ledger figure is NOT the headline's tier: it stays on the chart's labels and in the bucket record.
+    expect(t.emphasis).toBe("$619.18 of legacy Aave v3 debt is outstanding,");
+    expect(`${t.emphasis} ${t.rest}`).not.toContain("619.186008");
   });
 
-  test("newest REFUSED: the takeaway states the withholding — the captured bucket's numbers never leak", () => {
+  test("the demo, both engines, literally: the ruled words — and no figure of one engine in the other's sentence", () => {
+    const dm = observatoryTakeaway(DEMO_OBSERVATORY_DM, buildBucketAxis(DEMO_OBSERVATORY_DM), "debt_manager");
+    expect(dm.emphasis).toBe("$27.8M of Cash debt is outstanding,");
+    expect(dm.rest).toBe(`across 1,412 accounts in the hour starting ${nb("Aug 8, 20:00 UTC")}.`);
+    const aave = observatoryTakeaway(DEMO_OBSERVATORY_AAVE, buildBucketAxis(DEMO_OBSERVATORY_AAVE), "aave_v3_etherfi");
+    expect(aave.emphasis).toBe("$1.9M of legacy Aave v3 debt is outstanding,");
+    expect(aave.rest).toBe(`across 8,552 accounts in the hour starting ${nb("Aug 8, 20:00 UTC")}.`);
+    const holes =
+      "165 of the 168 hours in this window were recorded. 2 are absent — no complete batch was observed — and 1 was withheld; each is a gap on the chart, never a zero.";
+    expect(dm.dek).toBe(holes);
+    expect(aave.dek).toBe(holes);
+    expect(dm.answered && aave.answered).toBe(true);
+    // One engine per sentence: never a sum, never a comparison.
+    for (const part of [dm.emphasis, dm.rest, dm.dek]) expect(part).not.toMatch(/legacy|Aave|\$1\.9M|8,552/);
+    for (const part of [aave.emphasis, aave.rest, aave.dek]) expect(part).not.toMatch(/Cash|\$27\.8M|1,412/);
+    // The grammar: no "(s)", no ISO instant, no semicolon-joined second finding, no bucket in the headline.
+    for (const t of [dm, aave]) {
+      expect(`${t.emphasis} ${t.rest}`).not.toMatch(/\(s\)|\d{4}-\d{2}-\d{2}T|;|bucket/);
+      expect(t.emphasis.endsWith(",")).toBe(true);
+      expect(t.rest.startsWith(" ")).toBe(false);
+      expect(t.rest.endsWith(".")).toBe(true);
+    }
+  });
+
+  test("the year prints exactly when the hour is not in the year the envelope was served", () => {
+    const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
+    const nextYear = { ...DEMO_OBSERVATORY_DM, served_at: "2027-01-02T00:00:00Z" };
+    expect(observatoryTakeaway(nextYear, axis, "debt_manager").rest).toBe(
+      `across 1,412 accounts in the hour starting ${nb("Aug 8, 2026, 20:00 UTC")}.`,
+    );
+    // A served_at that is no UTC instant names no year, so the year prints: never the browser's clock, never a guess.
+    const unread = { ...DEMO_OBSERVATORY_DM, served_at: "yesterday" };
+    expect(observatoryTakeaway(unread, axis, "debt_manager").rest).toContain(nb("Aug 8, 2026, 20:00 UTC"));
+    // A bucket start that is no UTC instant prints verbatim — never repaired into a time the wire did not state.
+    const odd = {
+      ...OBSERVATORY_SERIES_DM,
+      points: [{ ...DM_CAPTURED, bucket_start: "2026-07-29T08:00:00+02:00" }],
+    };
+    expect(observatoryTakeaway(odd, buildBucketAxis(odd), "debt_manager").rest).toBe(
+      "across 3 accounts in the hour starting 2026-07-29T08:00:00+02:00.",
+    );
+  });
+
+  test("newest WITHHELD: the headline states the withholding, the dek its cause then the holes — the older hour's numbers never leak", () => {
     const axis = buildBucketAxis(OBSERVATORY_SERIES_DM);
-    const line = observatoryTakeaway(OBSERVATORY_SERIES_DM, axis);
-    expect(line).toBe(
-      `Newest bucket ${DM_WITHHELD.bucket_start} withheld (${DM_WITHHELD.refusal_code ?? "unnamed"}) — ` +
-        `no numbers served for it; 1 bucket(s) withheld.`,
+    const t = observatoryTakeaway(OBSERVATORY_SERIES_DM, axis, "debt_manager");
+    expect(t.emphasis).toBe("The latest hour's figures were withheld,");
+    expect(t.rest).toBe(
+      `so no current debt figure is shown (${humanUtc(DM_WITHHELD.bucket_start, OBSERVATORY_SERIES_DM.served_at)}).`,
     );
-    expect(line).not.toContain(
-      displayMetric(DM_CAPTURED, "debt_usd", OBSERVATORY_SERIES_DM.usd_decimals),
+    expect(t.rest).toBe(`so no current debt figure is shown (${nb("Jul 29, 09:00 UTC")}).`);
+    expect(t.answered).toBe(false);
+    expect(t.holes).toBe("1 of the 2 hours in this window was recorded. 1 was withheld; it is a gap on the chart, never a zero.");
+    expect(t.dek).toBe(
+      `The engine's whole book was refused in that hour (collateral-flag custody unproven · ${DM_WITHHELD.refusal_code ?? "NEVER"}). ${t.holes}`,
     );
+    const whole = `${t.emphasis} ${t.rest} ${t.dek}`;
+    expect(whole).not.toContain(displayMetric(DM_CAPTURED, "debt_usd", OBSERVATORY_SERIES_DM.usd_decimals));
+    expect(whole).not.toContain(humanUsd(BigInt(DM_CAPTURED.debt_usd ?? "0"), OBSERVATORY_SERIES_DM.usd_decimals));
+    expect(whole).not.toContain("$");
+  });
+
+  test("a withheld hour's cause: a code the phrasebook does not know is named once; a refusal with no code says so", () => {
+    const withCode = (refusal_code: string | null) => {
+      const body = { ...OBSERVATORY_SERIES_DM, points: [DM_CAPTURED, { ...DM_WITHHELD, refusal_code }] };
+      return observatoryTakeaway(body, buildBucketAxis(body), "debt_manager").dek;
+    };
+    expect(withCode("NEW_CODE")).toContain("was refused in that hour (refused (NEW_CODE)). ");
+    expect(withCode(null)).toContain("was refused in that hour (the engine gave no reason). ");
+    expect(withCode("")).toContain("was refused in that hour (the engine gave no reason). ");
+    expect(withCode("SWEEP_FAILED")).toContain("(collateral sweep failed · SWEEP_FAILED)");
+  });
+
+  test("newest captured with NO debt figure: said as not stated — dashed, never $0; an unreadable decimal is said as unreadable", () => {
+    const at = (debt_usd: string | null) => {
+      const body = { ...OBSERVATORY_SERIES_DM, points: [{ ...DM_CAPTURED, debt_usd }] };
+      return observatoryTakeaway(body, buildBucketAxis(body), "debt_manager");
+    };
+    const hour = humanUtc(DM_CAPTURED.bucket_start, OBSERVATORY_SERIES_DM.served_at);
+    const none = at(null);
+    expect(none.emphasis).toBe("The latest hour states no debt figure,");
+    expect(none.rest).toBe(`in the hour starting ${hour}. Not stated is not zero.`);
+    expect(none.answered).toBe(false);
+    expect(none.dek).toBe("The only hour in this window was recorded.");
+    for (const bad of ["", "12.5", "1e9", "0x10"]) {
+      const unread = at(bad);
+      expect(unread.emphasis).toBe("The latest hour's debt figure cannot be read,");
+      expect(unread.rest).toBe(`in the hour starting ${hour}. Unreadable is not zero.`);
+      expect(unread.answered).toBe(false);
+    }
+    expect(`${none.emphasis} ${none.rest}`).not.toContain("$");
+  });
+
+  test("accounts not stated: the debt still answers, and the missing count is named — never 0 accounts", () => {
+    const body = { ...OBSERVATORY_SERIES_DM, points: [{ ...DM_CAPTURED, accounts: null }] };
+    const t = observatoryTakeaway(body, buildBucketAxis(body), "debt_manager");
+    expect(t.emphasis).toBe("$309.59 of Cash debt is outstanding,");
+    expect(t.rest).toBe(
+      `in the hour starting ${humanUtc(DM_CAPTURED.bucket_start, body.served_at)}; the account count was not stated.`,
+    );
+    expect(t.answered).toBe(true);
+    // One account is one account.
+    const one = { ...OBSERVATORY_SERIES_DM, points: [{ ...DM_CAPTURED, accounts: 1 }] };
+    expect(observatoryTakeaway(one, buildBucketAxis(one), "debt_manager").rest).toContain("across 1 account in the hour");
+    // An out-of-contract count is refused before the sentence, never formatted.
+    const bad = { ...OBSERVATORY_SERIES_DM, points: [{ ...DM_CAPTURED, accounts: -0 }] };
+    expect(() => observatoryTakeaway(bad, buildBucketAxis(bad), "debt_manager")).toThrow(WireIntegerError);
+  });
+
+  test("no recorded hour in the window: a missing record, named for the engine — not a zero", () => {
+    const empty = { ...OBSERVATORY_SERIES_DM, points: [] };
+    const axis = buildBucketAxis(empty);
+    expect(observatoryTakeaway(empty, axis, "debt_manager")).toEqual({
+      emphasis: "No hour in this window was recorded.",
+      rest: "",
+      holes: "",
+      dek: "No complete batch was observed for Cash in this range, so there is nothing to chart. That is a missing record, not a zero.",
+      answered: false,
+    });
+    expect(observatoryTakeaway(empty, axis, "aave_v3_etherfi").dek).toBe(
+      "No complete batch was observed for the Aave v3 market (legacy) in this range, so there is nothing to chart. That is a missing record, not a zero.",
+    );
+  });
+
+  test("more hole than record (captured * 2 <= total): the recorded count is promoted into the headline, and the dek keeps what each hole is", () => {
+    const at = (hour: string) => ({ ...DM_CAPTURED, bucket_start: `2026-07-29T${hour}:00:00Z` });
+    // 06 captured · 07, 08 absent · 09 captured: 2 of 4 — the boundary, promoted.
+    const half = { ...OBSERVATORY_SERIES_DM, points: [at("06"), at("09")] };
+    const halfAxis = buildBucketAxis(half);
+    expect([halfAxis.capturedCount, halfAxis.entries.length]).toEqual([2, 4]);
+    const t = observatoryTakeaway(half, halfAxis, "debt_manager");
+    expect(t.emphasis).toBe("$309.59 of Cash debt is outstanding,");
+    expect(t.rest).toBe(
+      `across 3 accounts in the hour starting ${nb("Jul 29, 09:00 UTC")} — but only 2 of the 4 hours in this window were recorded.`,
+    );
+    expect(t.dek).toBe(`2 are absent — ${HOLES_GLOSS}; each is a gap on the chart, never a zero.`);
+    expect(t.answered).toBe(true);
+    // 06 captured · 07 absent · 08 captured: 2 of 3 — one hour past the boundary, so the holes stay in the dek.
+    const most = { ...OBSERVATORY_SERIES_DM, points: [at("06"), at("08")] };
+    const kept = observatoryTakeaway(most, buildBucketAxis(most), "debt_manager");
+    expect(kept.rest).toBe(`across 3 accounts in the hour starting ${nb("Jul 29, 08:00 UTC")}.`);
+    expect(kept.dek).toBe(`2 of the 3 hours in this window were recorded. 1 is absent — ${HOLES_GLOSS}; it is a gap on the chart, never a zero.`);
+    // One recorded hour of many: the verb follows the count.
+    const lone = { ...OBSERVATORY_SERIES_DM, points: [{ ...DM_WITHHELD, bucket_start: "2026-07-29T06:00:00Z" }, at("08")] };
+    expect(observatoryTakeaway(lone, buildBucketAxis(lone), "debt_manager").rest).toContain(
+      "— but only 1 of the 3 hours in this window was recorded.",
+    );
+  });
+
+  test("the holes sentence, every arm: whole · one hour · none recorded · either clause alone · the sampled unit", () => {
+    const at = (hour: string) => ({ ...DM_CAPTURED, bucket_start: `2026-07-29T${hour}:00:00Z` });
+    const holesOf = (body: ObservatorySeriesResponse) =>
+      observatoryTakeaway(body, buildBucketAxis(body), "debt_manager").holes;
+    expect(holesOf({ ...OBSERVATORY_SERIES_DM, points: [at("06"), at("07"), at("08")] })).toBe(
+      "All 3 hours in this window were recorded.",
+    );
+    expect(holesOf({ ...OBSERVATORY_SERIES_DM, points: [at("06")] })).toBe("The only hour in this window was recorded.");
+    expect(holesOf({ ...OBSERVATORY_SERIES_DM, points: [DM_WITHHELD] })).toBe(
+      "The only hour in this window was not recorded. 1 was withheld; it is a gap on the chart, never a zero.",
+    );
+    expect(
+      holesOf({ ...OBSERVATORY_SERIES_DM, points: [DM_WITHHELD, { ...DM_WITHHELD, bucket_start: "2026-07-29T11:00:00Z" }] }),
+    ).toBe(
+      `None of the 3 hours in this window was recorded. 1 is absent — ${HOLES_GLOSS} — and 2 were withheld; each is a gap on the chart, never a zero.`,
+    );
+    // A stride the service applied: the unit is a SAMPLED hour, and what the stride is, is said once.
+    const stepped = { ...OBSERVATORY_SERIES_DM, step_seconds: 7200, points: [at("04"), at("06"), at("08"), at("12")] };
+    expect(holesOf(stepped)).toBe(
+      `4 of the 5 sampled hours in this window were recorded. 1 is absent — ${HOLES_GLOSS}; it is a gap on the chart, never a zero. ` +
+        "The hours are sampled: the service serves at most one in every 2.",
+    );
+    expect(holesOf({ ...stepped, step_seconds: 5000, points: [at("06")] })).toBe(
+      "The only sampled hour in this window was recorded. The hours are sampled: the service serves at most one per 5,000 seconds.",
+    );
+    // The native stride echoed back is still the native hour.
+    expect(holesOf({ ...OBSERVATORY_SERIES_DM, step_seconds: 3600, points: [at("06")] })).toBe(
+      "The only hour in this window was recorded.",
+    );
+    // No hole is ever worded as a zero, a none or a nothing of value.
+    expect(holesOf(OBSERVATORY_SERIES_DM)).not.toMatch(/\b0\b|\$0|zero debt/);
   });
 });
 
-test.describe("W-3L — gridReadingLine", () => {
-  test("movement between first and last CAPTURED buckets, in the exact ledger strings", () => {
-    const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
-    const captured = axis.entries.filter(
-      (entry) => entry.point !== null && !entry.point.refused,
-    );
+test.describe("gridReadingLine — the chart's finding, as deltas", () => {
+  test("movement between the first and last RECORDED hours: one subtraction per metric, in the reader's tier", () => {
+    const axis = buildBucketAxis(DEMO_OBSERVATORY_AAVE);
+    const captured = axis.entries.filter((entry) => entry.point !== null && !entry.point.refused);
     const first = captured[0]?.point;
-    const last = captured[captured.length - 1]?.point;
-    if (first === null || first === undefined || last === null || last === undefined) {
-      throw new Error("fixture invariant: aave carries captured buckets");
+    const last = lastOf(captured).point;
+    if (first === null || first === undefined || last === null) throw new Error("fixture invariant: aave carries captured buckets");
+    if (first.debt_usd === null || last.debt_usd === null || first.accounts === null || last.accounts === null) {
+      throw new Error("fixture invariant: the demo's end hours state debt and accounts");
     }
-    expect(captured.length).toBeGreaterThan(1);
-    const usd = OBSERVATORY_SERIES_AAVE.usd_decimals;
-    expect(gridReadingLine(OBSERVATORY_SERIES_AAVE, axis)).toBe(
-      `between captured buckets ${first.bucket_start} and ${last.bucket_start}: ` +
-        `debt ${displayMetric(first, "debt_usd", usd)} → ${displayMetric(last, "debt_usd", usd)}, ` +
-        `accounts ${String(first.accounts)} → ${String(last.accounts)}, ` +
-        `liquidatable ${String(first.liquidatable_positions)} → ${String(last.liquidatable_positions)}.`,
+    if (first.liquidatable_positions === null || last.liquidatable_positions === null) {
+      throw new Error("fixture invariant: the demo's end hours state their liquidatable counts");
+    }
+    const usd = DEMO_OBSERVATORY_AAVE.usd_decimals;
+    const served = DEMO_OBSERVATORY_AAVE.served_at;
+    // Composed independently: the deltas by this spec's own subtraction, the fixture's direction asserted first.
+    const debtFall = BigInt(first.debt_usd) - BigInt(last.debt_usd);
+    const accountsFall = first.accounts - last.accounts;
+    const liquidatableRise = last.liquidatable_positions - first.liquidatable_positions;
+    expect(debtFall > 0n && accountsFall > 0 && liquidatableRise > 0).toBe(true);
+    const span = `${humanUtc(first.bucket_start, served).replace(/\u00a0UTC$/, "")} → ${humanUtc(last.bucket_start, served)}`;
+    expect(gridReadingLine(DEMO_OBSERVATORY_AAVE, axis)).toBe(
+      `Between the first and last recorded hours (${span}), ` +
+        `debt fell ${humanUsd(debtFall, usd)} to ${humanUsd(BigInt(last.debt_usd), usd)}, ` +
+        `accounts fell ${groupInt(accountsFall)} to ${groupInt(last.accounts)}, ` +
+        `and liquidatable positions rose ${groupInt(liquidatableRise)} to ${groupInt(last.liquidatable_positions)}.`,
     );
   });
 
-  test("one captured bucket: no movement is stated, and no refused number stands in", () => {
+  test("the demo, both engines, literally — a delta, never a percentage, never an arrow pair the compact tier would flatten", () => {
+    const span = `${nb("Aug 1, 21:00")} → ${nb("Aug 8, 20:00 UTC")}`;
+    const aave = gridReadingLine(DEMO_OBSERVATORY_AAVE, buildBucketAxis(DEMO_OBSERVATORY_AAVE));
+    expect(aave).toBe(
+      `Between the first and last recorded hours (${span}), debt fell $11K to $1.9M, accounts fell 91 to 8,552, and liquidatable positions rose 1 to 46.`,
+    );
+    const dm = gridReadingLine(DEMO_OBSERVATORY_DM, buildBucketAxis(DEMO_OBSERVATORY_DM));
+    expect(dm).toBe(
+      `Between the first and last recorded hours (${span}), debt rose $1.8M to $27.8M, accounts fell 52 to 1,412, and liquidatable positions rose 1 to 49.`,
+    );
+    for (const line of [aave, dm]) expect(line).not.toMatch(/%|\$[0-9.,KMB]+ → \$|\d{4}-\d{2}-\d{2}T/);
+    expect(dm).not.toMatch(/legacy|Aave|8,552/);
+    expect(aave).not.toMatch(/Cash|1,412/);
+  });
+
+  test("unchanged, and not stated: an equal end is said as unchanged; a null end gives no change — never a delta against zero", () => {
+    // The contract's aave example: debt and liquidatable equal at both ends, accounts 5 → 6.
+    const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
+    expect(gridReadingLine(OBSERVATORY_SERIES_AAVE, axis)).toBe(
+      `Between the first and last recorded hours (${nb("Jul 29, 06:00")} → ${nb("Jul 29, 10:00 UTC")}), ` +
+        "debt unchanged at $619.18, accounts rose 1 to 6, and liquidatable positions unchanged at 0.",
+    );
+    const two = (change: Partial<ObservatorySeriesPoint>, both = false) => {
+      const body = {
+        ...OBSERVATORY_SERIES_DM,
+        points: [{ ...DM_CAPTURED, ...(both ? change : {}) }, { ...DM_CAPTURED, bucket_start: "2026-07-29T09:00:00Z", ...change }],
+      };
+      return gridReadingLine(body, buildBucketAxis(body));
+    };
+    expect(two({ accounts: null })).toContain(", accounts not stated at one end, so no change is given, and ");
+    expect(two({ accounts: null }, true)).toContain(", accounts not stated at either end, so no change is given, and ");
+    expect(two({ debt_usd: null })).toContain("debt not stated at one end, so no change is given, accounts unchanged at 3,");
+    expect(two({ debt_usd: "12.5" })).toContain("debt unreadable at one end, so no change is given,");
+    expect(two({ debt_usd: "" }, true)).toContain("debt unreadable at either end, so no change is given,");
+    expect(two({ liquidatable_positions: null })).toContain("and liquidatable positions not stated at one end, so no change is given.");
+    for (const line of [two({ accounts: null }), two({ debt_usd: null }), two({ liquidatable_positions: null })]) {
+      expect(line).not.toMatch(/\$0\b|fell 3 to|to 0\b/);
+    }
+    // A count outside the contract is refused before the subtraction.
+    expect(() => two({ accounts: 2.5 })).toThrow(WireIntegerError);
+  });
+
+  test("one recorded hour: no movement is stated, and no refused number stands in; none: nothing to read", () => {
     const axis = buildBucketAxis(OBSERVATORY_SERIES_DM);
     expect(gridReadingLine(OBSERVATORY_SERIES_DM, axis)).toBe(
-      `only one captured bucket in this window (${DM_CAPTURED.bucket_start}) — no movement to state.`,
+      `Only one hour in this window was recorded (${humanUtc(DM_CAPTURED.bucket_start, OBSERVATORY_SERIES_DM.served_at)}), so there is no movement to state.`,
+    );
+    expect(gridReadingLine(OBSERVATORY_SERIES_DM, axis)).toBe(
+      `Only one hour in this window was recorded (${nb("Jul 29, 08:00 UTC")}), so there is no movement to state.`,
+    );
+    const none = { ...OBSERVATORY_SERIES_DM, points: [DM_WITHHELD] };
+    expect(gridReadingLine(none, buildBucketAxis(none))).toBe(
+      "No hour in this window was recorded, so there is no movement to read.",
     );
   });
 });

@@ -1,8 +1,10 @@
 // web/tests/unit/history-view.spec.ts
 // History's one view model: header, chips, tiles, finding and doctrine, derived
-// once from a series reading. The headline IS observatoryTakeaway(...) and the
-// finding IS gridReadingLine(...) — pinned equal to the functions called
-// directly, so the header and the module's own sentence cannot drift. The
+// once from a series reading. The headline's parts and the dek ARE
+// observatoryTakeaway(...)'s and the finding IS gridReadingLine(...) — pinned
+// equal to the functions called directly, so the header and the module's own
+// sentence cannot drift, and once literally on the demo. A record is ink: an
+// answered series is `neutral`, holes and all; only a refusal is dashed. The
 // tiles are the demo Book's aggregates at the newest bucket (the weld's law)
 // through the Book's money tier and the population guard; a withheld, absent
 // or null newest bucket is a dashed tile with the gap's word, never a 0.
@@ -10,10 +12,12 @@ import { expect, test } from "@playwright/test";
 import {
   deriveHistoryView,
   HISTORY_ABSENT_NOTE,
+  HISTORY_DEGRADED_CLAUSE,
   HISTORY_DEGRADED_NOTE,
-  HISTORY_DEK,
   HISTORY_DOCTRINE,
+  HISTORY_ENGINES,
   HISTORY_INTRO,
+  HISTORY_LOADING_DEK,
   HISTORY_MARKS,
   HISTORY_PROVENANCE,
   HISTORY_RATE_COLUMNS,
@@ -25,7 +29,7 @@ import {
 import { EM_DASH, formatBlock } from "../../lib/format";
 import { humanUsd } from "../../lib/human-usd";
 import { sentence } from "../../lib/lab-headline";
-import type { ObservatorySeriesResponse } from "../../lib/observatory-data";
+import { OBSERVATORY_ENGINES, type ObservatorySeriesResponse } from "../../lib/observatory-data";
 import {
   buildBucketAxis,
   describeRange,
@@ -53,28 +57,47 @@ const card = (engine: string) => DEMO_BOOK.engines.find((e) => e.engine === engi
 const newestOf = (response: ObservatorySeriesResponse) => response.points[response.points.length - 1]!;
 const tile = (v: ReturnType<typeof deriveHistoryView>, key: string) => v.tiles.find((t) => t.key === key)!;
 const chip = (v: ReturnType<typeof deriveHistoryView>, label: string) => v.chips.find((c) => c.label === label);
+// humanUtc joins an instant's tokens with U+00A0: a literal instant is written through `nb`, the prose around it
+// keeps its ordinary spaces.
+const nb = (text: string): string => text.replaceAll(" ", "\u00a0");
 
-test("ok, Cash: state ok; the kicker names the engine; the headline IS observatoryTakeaway, tone ok, rest empty; the dek is the one clause; the finding IS gridReadingLine", () => {
+test("the page's engines: Cash first — the page opens on it — then the legacy market; every engine the contract serves, once", () => {
+  expect(HISTORY_ENGINES).toEqual(["debt_manager", "aave_v3_etherfi"]);
+  expect(HISTORY_ENGINES[0]).toBe("debt_manager");
+  expect([...HISTORY_ENGINES].sort()).toEqual([...OBSERVATORY_ENGINES].sort());
+});
+
+test("ok, Cash: state ok; the kicker names the engine; the headline's parts and the dek ARE observatoryTakeaway's, in ink (neutral); the finding IS gridReadingLine", () => {
   const v = deriveHistoryView(ok(DEMO_OBSERVATORY_DM));
   const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
+  const takeaway = observatoryTakeaway(DEMO_OBSERVATORY_DM, axis, "debt_manager");
   expect(v.state).toBe("ok");
   expect(v.kicker).toBe("History · Cash");
+  expect(v.headline).toEqual({ emphasis: takeaway.emphasis, rest: takeaway.rest, tone: "neutral", dek: takeaway.dek });
+  // The demo arm, literally. The window HAS holes and the headline is still ink: their severity is the census chip's.
   expect(v.headline).toEqual({
-    emphasis: observatoryTakeaway(DEMO_OBSERVATORY_DM, axis),
-    rest: "",
-    tone: "ok",
-    dek: HISTORY_DEK,
+    emphasis: "$27.8M of Cash debt is outstanding,",
+    rest: `across 1,412 accounts in the hour starting ${nb("Aug 8, 20:00 UTC")}.`,
+    tone: "neutral",
+    dek: "165 of the 168 hours in this window were recorded. 2 are absent — no complete batch was observed — and 1 was withheld; each is a gap on the chart, never a zero.",
   });
-  expect(HISTORY_DEK).toBe("One engine per view; a missing hour is a hole, never a zero.");
+  expect(chip(v, "Buckets")?.tone).toBe("warn");
   expect(v.finding).toBe(gridReadingLine(DEMO_OBSERVATORY_DM, axis));
+  expect(v.finding).toBe(
+    `Between the first and last recorded hours (${nb("Aug 1, 21:00")} → ${nb("Aug 8, 20:00 UTC")}), debt rose $1.8M to $27.8M, accounts fell 52 to 1,412, and liquidatable positions rose 1 to 49.`,
+  );
   expect(v.chartLabel).toBe("debt (usd) for Cash across rollup buckets");
   expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM, "accounts")).chartLabel).toBe("accounts for Cash across rollup buckets");
 });
 
-test("ok, legacy: the kicker names the legacy market as legacy", () => {
+test("ok, legacy: the kicker names the legacy market as legacy, and the sentence counts the legacy market's debt alone", () => {
   const v = deriveHistoryView(ok(DEMO_OBSERVATORY_AAVE));
+  const takeaway = observatoryTakeaway(DEMO_OBSERVATORY_AAVE, buildBucketAxis(DEMO_OBSERVATORY_AAVE), "aave_v3_etherfi");
   expect(v.kicker).toBe("History · Aave v3 market (legacy)");
-  expect(v.headline.emphasis).toBe(observatoryTakeaway(DEMO_OBSERVATORY_AAVE, buildBucketAxis(DEMO_OBSERVATORY_AAVE)));
+  expect(v.headline).toEqual({ emphasis: takeaway.emphasis, rest: takeaway.rest, tone: "neutral", dek: takeaway.dek });
+  expect(v.headline.emphasis).toBe("$1.9M of legacy Aave v3 debt is outstanding,");
+  expect(v.headline.rest).toBe(`across 8,552 accounts in the hour starting ${nb("Aug 8, 20:00 UTC")}.`);
+  expect(`${v.headline.emphasis} ${v.headline.rest} ${v.headline.dek} ${v.finding ?? ""}`).not.toMatch(/Cash|\$27\.8M|1,412/);
   expect(chip(v, "Engine")?.value).toBe("Aave v3 market (legacy)");
 });
 
@@ -107,7 +130,7 @@ test("chips: Engine · Stride · Range · Buckets · Served, in that order; the 
   expect(chip(deriveHistoryView(ok(whole)), "Buckets")).toEqual({ label: "Buckets", value: "3 captured · 0 withheld · 0 absent", tone: "ok" });
 });
 
-test("a withheld newest bucket: every tile is a dashed tile with the word withheld; the headline stays observatoryTakeaway and turns refused", () => {
+test("a withheld newest bucket: every tile is a dashed tile with the word withheld; the headline is observatoryTakeaway's withholding and turns refused; the dek names the cause, then the holes", () => {
   const withheld = {
     ...DEMO_OBSERVATORY_DM,
     points: DEMO_OBSERVATORY_DM.points.map((p, i, all) =>
@@ -120,9 +143,15 @@ test("a withheld newest bucket: every tile is a dashed tile with the word withhe
   expect(v.state).toBe("ok");
   expect(tile(v, "debt")).toEqual({ key: "debt", label: "Debt", value: "—", sub: "withheld", tone: "refused" });
   for (const t of v.tiles) expect(t).toMatchObject({ value: "—", sub: "withheld", tone: "refused" });
-  expect(v.headline.emphasis).toBe(observatoryTakeaway(withheld, buildBucketAxis(withheld)));
-  expect(v.headline.emphasis).toContain("withheld");
-  expect(v.headline.tone).toBe("refused");
+  const takeaway = observatoryTakeaway(withheld, buildBucketAxis(withheld), "debt_manager");
+  expect(v.headline).toEqual({ emphasis: takeaway.emphasis, rest: takeaway.rest, tone: "refused", dek: takeaway.dek });
+  expect(v.headline.emphasis).toBe("The latest hour's figures were withheld,");
+  expect(v.headline.rest).toBe(`so no current debt figure is shown (${nb("Aug 8, 20:00 UTC")}).`);
+  expect(v.headline.dek).toBe(
+    "The engine's whole book was refused in that hour (collateral-flag custody unproven · FLAG_CUSTODY_UNPROVEN). 164 of the 168 hours in this window were recorded. 2 are absent — no complete batch was observed — and 2 were withheld; each is a gap on the chart, never a zero.",
+  );
+  // An older hour's figure never stands in for the withheld one — not in the headline, not in the dek.
+  expect(`${v.headline.emphasis} ${v.headline.rest} ${v.headline.dek}`).not.toContain("$");
   // The contract's own example: the newest bucket withheld, one captured before it.
   const example = deriveHistoryView(ok(OBSERVATORY_SERIES_DM));
   expect(example.tiles.every((t) => t.sub === "withheld" && t.value === "—")).toBe(true);
@@ -137,7 +166,19 @@ test("a null metric on a captured newest bucket is its own dashed tile — not s
   const v = deriveHistoryView(ok(nulled));
   expect(tile(v, "debt")).toEqual({ key: "debt", label: "Debt", value: "—", sub: "not stated", tone: "refused" });
   expect(tile(v, "accounts").tone).toBe("neutral");
-  expect(v.headline.tone).toBe("ok");
+  // The headline's finding IS the debt: an hour that states none is said as such, dashed — not stated is not zero.
+  expect(v.headline.emphasis).toBe("The latest hour states no debt figure,");
+  expect(v.headline.rest).toBe(`in the hour starting ${nb("Aug 8, 20:00 UTC")}. Not stated is not zero.`);
+  expect(v.headline.tone).toBe("refused");
+  // Another metric's null leaves the debt's answer standing, in ink, and names the missing count.
+  const noAccounts = {
+    ...DEMO_OBSERVATORY_DM,
+    points: DEMO_OBSERVATORY_DM.points.map((p, i, all) => (i === all.length - 1 ? { ...p, accounts: null } : p)),
+  };
+  const answered = deriveHistoryView(ok(noAccounts));
+  expect(answered.headline.tone).toBe("neutral");
+  expect(answered.headline.rest).toBe(`in the hour starting ${nb("Aug 8, 20:00 UTC")}; the account count was not stated.`);
+  expect(tile(answered, "accounts")).toMatchObject({ value: "—", sub: "not stated", tone: "refused" });
 });
 
 test("an unreadable scale: the record cannot be read — state unavailable, the field named, no tiles, before any figure is formatted at it", () => {
@@ -169,30 +210,46 @@ test("an empty window: every tile says no complete batch; the headline is the mo
   const axis = buildBucketAxis(empty);
   expect(v.state).toBe("ok");
   for (const t of v.tiles) expect(t).toMatchObject({ value: "—", sub: "no complete batch", tone: "refused" });
-  expect(v.headline.emphasis).toBe(observatoryTakeaway(empty, axis));
-  expect(v.headline.tone).toBe("refused");
+  const takeaway = observatoryTakeaway(empty, axis, "debt_manager");
+  expect(v.headline).toEqual({ emphasis: takeaway.emphasis, rest: "", tone: "refused", dek: takeaway.dek });
+  expect(v.headline.emphasis).toBe("No hour in this window was recorded.");
+  expect(v.headline.dek).toBe(
+    "No complete batch was observed for Cash in this range, so there is nothing to chart. That is a missing record, not a zero.",
+  );
   expect(v.finding).toBe(gridReadingLine(empty, axis));
+  expect(v.finding).toBe("No hour in this window was recorded, so there is no movement to read.");
   expect(chip(v, "Buckets")).toEqual({ label: "Buckets", value: "0 captured · 0 withheld · 0 absent", tone: "ok" });
 });
 
-test("degraded: state degraded; the refused headline names the engine; the dek is the wire's message as a sentence; no tiles; the deployment note joins the doctrine", () => {
+test("degraded: state degraded; the refused headline names the engine and the deployment; the dek is the wire's message as a sentence, then the deployment clause; no tiles; the deployment note joins the doctrine", () => {
   const message = OBSERVATORY_DEGRADED.error.message;
   const v = deriveHistoryView({ engine: "debt_manager", metric: "debt_usd", phase: "degraded", response: null, message });
   expect(v.state).toBe("degraded");
-  expect(v.headline).toEqual({ emphasis: "The durable rollup for Cash is unavailable.", rest: "", tone: "refused", dek: sentence(message) });
+  expect(v.headline).toEqual({
+    emphasis: "No hourly history exists for Cash on this deployment yet.",
+    rest: "",
+    tone: "refused",
+    dek: `${sentence(message)} ${HISTORY_DEGRADED_CLAUSE}`,
+  });
+  expect(HISTORY_DEGRADED_CLAUSE).toBe("That is a fact about this deployment, not an empty history; live figures are on the Book.");
   expect(v.tiles).toEqual([]);
   expect(v.finding).toBeNull();
   expect(v.chips[0]).toEqual({ label: "Engine", value: "Cash", title: "debt_manager" });
   expect(v.chips).toContainEqual({ label: "Rollup", value: "unavailable", tone: "refused" });
   expect(v.doctrine).toEqual([...HISTORY_DOCTRINE, HISTORY_DEGRADED_NOTE]);
   const legacy = deriveHistoryView({ engine: "aave_v3_etherfi", metric: "debt_usd", phase: "degraded", response: null, message });
-  expect(legacy.headline.emphasis).toBe("The durable rollup for the Aave v3 market (legacy) is unavailable.");
+  expect(legacy.headline.emphasis).toBe("No hourly history exists for the Aave v3 market (legacy) on this deployment yet.");
+  // A service that named no reason is said as such; the deployment clause still stands.
+  const silent = deriveHistoryView({ engine: "debt_manager", metric: "debt_usd", phase: "degraded", response: null, message: null });
+  expect(silent.headline.dek).toBe(`The service named no reason. ${HISTORY_DEGRADED_CLAUSE}`);
 });
 
-test("loading: the refused tone, tiles empty, the dek stands, the Buckets chip pending", () => {
+test("loading: the refused tone, tiles empty, the dek says what will be here and counts nothing, the Buckets chip pending", () => {
   const v = deriveHistoryView({ engine: "debt_manager", metric: "debt_usd", phase: "loading", response: null, message: null });
   expect(v.state).toBe("loading");
-  expect(v.headline).toEqual({ emphasis: "Loading the history of Cash…", rest: "", tone: "refused", dek: HISTORY_DEK });
+  expect(v.headline).toEqual({ emphasis: "Loading the history of Cash…", rest: "", tone: "refused", dek: HISTORY_LOADING_DEK });
+  expect(HISTORY_LOADING_DEK).toBe("The hourly record of this engine's debt, collateral, accounts and liquidatable positions.");
+  expect(HISTORY_LOADING_DEK).not.toMatch(/\d/);
   expect(v.tiles).toEqual([]);
   expect(v.chips).toEqual([
     { label: "Engine", value: "Cash", title: "debt_manager" },
@@ -233,21 +290,31 @@ test("doctrine: the intro, the chart's method notes and the source note verbatim
   ]);
   expect(v.doctrine).toEqual([...HISTORY_DOCTRINE, ...DEMO_OBSERVATORY_DM.notes]);
   expect(DEMO_OBSERVATORY_DM.notes.length).toBeGreaterThan(0);
-  // The dek's clause is the intro's law restated in one line; the drawer holds the paragraph, the header the clause.
+  // The slogan lives here, in the drawer's paragraph; the header's dek states the window's holes as a fact, and keeps
+  // the law inside it ("never a zero").
   expect(HISTORY_INTRO).toContain("one engine per view");
   expect(HISTORY_INTRO).toContain("never drawn as a zero");
+  expect(v.headline.dek).toContain("never a zero");
+  expect(v.headline.dek).not.toContain("One engine per view");
 });
 
-test("the headline begins with a capital at its source: observatoryTakeaway's three sentences, and the view prints them by identity", () => {
-  const capital = /^[A-Z]/;
-  expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM)).headline.emphasis).toMatch(capital);
-  expect(deriveHistoryView(ok(OBSERVATORY_SERIES_DM)).headline.emphasis).toMatch(capital);
-  expect(deriveHistoryView(ok({ ...DEMO_OBSERVATORY_DM, points: [] })).headline.emphasis).toMatch(capital);
-  expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM)).headline.emphasis.startsWith("Debt $")).toBe(true);
-  expect(deriveHistoryView(ok(OBSERVATORY_SERIES_DM)).headline.emphasis.startsWith("Newest bucket ")).toBe(true);
+test("the headline opens as a sentence at its source: a capital or the money figure itself, in observatoryTakeaway's three arms, and the view prints them by identity", () => {
+  const opening = /^(?:[A-Z]|\$\d)/;
+  expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM)).headline.emphasis).toMatch(opening);
+  expect(deriveHistoryView(ok(OBSERVATORY_SERIES_DM)).headline.emphasis).toMatch(opening);
+  expect(deriveHistoryView(ok({ ...DEMO_OBSERVATORY_DM, points: [] })).headline.emphasis).toMatch(opening);
+  expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM)).headline.emphasis.startsWith("$27.8M of Cash debt ")).toBe(true);
+  expect(deriveHistoryView(ok(OBSERVATORY_SERIES_DM)).headline.emphasis.startsWith("The latest hour's figures ")).toBe(true);
   expect(deriveHistoryView(ok({ ...DEMO_OBSERVATORY_DM, points: [] })).headline.emphasis).toBe(
-    "No bucket in this window is backed by a wire row.",
+    "No hour in this window was recorded.",
   );
+  // The H1 is the parts joined by one space: no part carries a leading space, and the emphasis of an answer ends with its comma.
+  for (const body of [DEMO_OBSERVATORY_DM, DEMO_OBSERVATORY_AAVE, OBSERVATORY_SERIES_DM]) {
+    const { emphasis, rest } = deriveHistoryView(ok(body)).headline;
+    expect(emphasis.endsWith(",")).toBe(true);
+    expect(/^\s/.test(rest)).toBe(false);
+    expect(`${emphasis} ${rest}`).not.toMatch(/\(s\)|\d{4}-\d{2}-\d{2}T/);
+  }
 });
 
 test("the chart's mark key: two marks, the lib's words, in the plot's order", () => {
@@ -277,9 +344,13 @@ test.describe("pointRecord — the bucket record's rows and sentences", () => {
     expect(r.answer[0]).toEqual({ key: "state", label: "state", value: "captured", note: null, tone: "neutral", mono: false, testId: null });
     expect(r.answer[1]).toEqual({ key: "debt", label: "debt (usd)", value: displayMetric(newest, "debt_usd", DEMO_OBSERVATORY_DM.usd_decimals), note: null, tone: "neutral", mono: true, testId: null });
     expect(r.answer[2]?.value).toBe(displayMetric(newest, "collateral_usd", DEMO_OBSERVATORY_DM.usd_decimals));
-    expect(r.answer[3]?.value).toBe(String(newest.accounts));
-    expect(r.answer[4]?.value).toBe(String(newest.refused_positions));
-    expect(r.answer[5]?.value).toBe(String(newest.liquidatable_positions));
+    // The record is the exact layer the headline and the finding lean on: grouped, the digits the wire's own.
+    expect(r.answer[1]?.value).toBe("$27,828,808.216758");
+    expect(r.answer[2]?.value).toBe("$153,171,572.777189");
+    expect(r.answer[3]?.value).toBe(groupInt(newest.accounts!));
+    expect(r.answer[3]?.value).toBe("1,412");
+    expect(r.answer[4]?.value).toBe(groupInt(newest.refused_positions));
+    expect(r.answer[5]?.value).toBe(groupInt(newest.liquidatable_positions!));
     // No hazard bites: the reorg and sweep rows live in the fold, after the four provenance rows.
     expect(labels(r.forensic)).toEqual(["bucket (its own as-of)", "watermark", "observed batch", "materialization key", "reorg posture at compute", "sweep stamp (the count's collateral clock)"]);
     expect(r.forensic[0]).toMatchObject({ value: newest.bucket_start, mono: true });

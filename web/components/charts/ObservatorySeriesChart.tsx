@@ -11,6 +11,10 @@
 //     form, the W0 severity ruling) so a refusal never reads as a mere hole;
 //   - the zero floor is drawn whenever `includeZero` holds (the default):
 //     scales never fabricate drama by cropping the floor away;
+//   - no direct label is struck through: each sits ABOVE the reference it
+//     names (the y-max above the line, the newest figure above its point, the
+//     0 on top of the floor rule), is painted after the line and the points,
+//     and wears a halo in the panel's ground;
 //   - Wave W-OBS: the panel answers WITHOUT a click — the drawn y-max wears
 //     its exact display string, the x-axis states its extent buckets (and the
 //     selected bucket's time), and the newest captured point prints the same
@@ -80,6 +84,22 @@ export interface ObservatorySeriesChartProps {
 /** Height (rendered px) of each axis-label strip ADDED below the plot budget. */
 const X_LABEL_STRIP = 14;
 
+/** A plotted point's pointer radius (rendered px) — held whatever radius the visible dot is drawn at. */
+const POINT_HIT_RADIUS = 2.4;
+
+/**
+ * The halo a direct label wears: its own glyphs stroked in the panel's ground and painted under the fill, so a
+ * residual overlap can never strike a figure, in either theme. Inline, because the shared label atoms serve other
+ * charts. A label is not a target: the points beneath it keep their hover and their click.
+ */
+const LABEL_HALO = {
+  paintOrder: "stroke",
+  stroke: "var(--panel)",
+  strokeWidth: 3,
+  strokeLinejoin: "round",
+  pointerEvents: "none",
+} as const;
+
 export function ObservatorySeriesChart({
   values,
   titles,
@@ -97,19 +117,23 @@ export function ObservatorySeriesChart({
   charPx,
   newestValueLabel,
 }: ObservatorySeriesChartProps) {
-  const pad = 6;
+  // The pads are split: the top pad is a label's height, so the y-max and the newest figure sit ABOVE the line they
+  // name and never across it; the sides and the floor keep the hairline pad.
+  const padX = 6;
+  const padTop = 22;
+  const padBottom = 6;
   const finite = values.filter((v): v is number => v !== null && Number.isFinite(v));
   const domain = includeZero ? [...finite, 0] : finite;
   const min = domain.length > 0 ? Math.min(...domain) : 0;
   const max = domain.length > 0 ? Math.max(...domain) : 1;
   const span = max - min || 1;
-  const step = values.length > 1 ? (width - pad * 2) / (values.length - 1) : 0;
+  const step = values.length > 1 ? (width - padX * 2) / (values.length - 1) : 0;
 
-  const x = (index: number) => pad + index * step;
-  const y = (value: number) => height - pad - ((value - min) / span) * (height - pad * 2);
+  const x = (index: number) => padX + index * step;
+  const y = (value: number) => height - padBottom - ((value - min) / span) * (height - padTop - padBottom);
 
   // The axis strips are ADDED below the `height` plot budget, so the plot
-  // keeps its size and the existing geometry stays byte-identical.
+  // keeps its size whether or not a strip is drawn.
   const hasExtents = xStartLabel !== undefined || xEndLabel !== undefined;
   const extentsStrip = hasExtents ? X_LABEL_STRIP : 0;
   const selectedStrip =
@@ -140,6 +164,10 @@ export function ObservatorySeriesChart({
 
   const hitHalf = Math.max(3, step * 0.35);
   const selectable = onSelect !== undefined;
+  // At rest a dense series reads as a LINE, not a bead chain: below a 10px step the visible dot shrinks. Its pointer
+  // target does not — a transparent stroke keeps the painted radius at POINT_HIT_RADIUS.
+  const dotRadius = step > 0 && step < 10 ? 1.5 : POINT_HIT_RADIUS;
+  const dotHitStroke = (POINT_HIT_RADIUS - dotRadius) * 2;
 
   const select = (index: number) => {
     if (onSelect !== undefined) onSelect(index);
@@ -178,33 +206,13 @@ export function ObservatorySeriesChart({
       {includeZero && (
         <g data-testid="obs-zero-floor">
           <line
-            x1={pad}
-            x2={width - pad}
+            x1={padX}
+            x2={width - padX}
             y1={y(0)}
             y2={y(0)}
             className={styles.baseline}
           />
-          <text x={pad} y={Math.min(height - 2, y(0) + 10)} className={styles.axisLabel}>
-            0
-          </text>
         </g>
-      )}
-
-      {yMaxLabel !== undefined && (
-        // The drawn y-max, labelled in the panel's own exact register — the
-        // domain is [0, max of finite values], so this string IS that point's
-        // ledger display, derived, never retyped (LAW-5).
-        <text
-          className={styles.axisLabel}
-          data-testid="obs-ymax-label"
-          // Starts PAST the first point's dot (cx = pad, r = 2.4): when the
-          // max IS the first captured bucket, a label at x = pad prints
-          // through the dot itself.
-          x={pad + 10}
-          y={Math.max(12, y(max) + 4)}
-        >
-          {yMaxLabel}
-        </text>
       )}
 
       {hasExtents && (
@@ -213,7 +221,7 @@ export function ObservatorySeriesChart({
             <text
               className={styles.axisLabel}
               data-testid="obs-x-start"
-              x={pad}
+              x={padX}
               y={height + extentsStrip - 3}
             >
               {xStartLabel}
@@ -223,7 +231,7 @@ export function ObservatorySeriesChart({
             <text
               className={styles.axisLabel}
               data-testid="obs-x-end"
-              x={width - pad}
+              x={width - padX}
               y={height + extentsStrip - 3}
               textAnchor="end"
             >
@@ -258,8 +266,8 @@ export function ObservatorySeriesChart({
               data-kind={kind}
               x1={x(index)}
               x2={x(index)}
-              y1={pad}
-              y2={height - pad}
+              y1={padTop}
+              y2={height - padBottom}
             >
               {title !== undefined && <title>{title}</title>}
             </line>
@@ -268,7 +276,7 @@ export function ObservatorySeriesChart({
               <rect
                 data-testid="obs-gap-warn"
                 x={x(index) - 3}
-                y={pad}
+                y={padTop}
                 width={6}
                 height={6}
                 style={{ fill: "transparent", stroke: "var(--warn)", strokeWidth: 1.5 }}
@@ -314,8 +322,12 @@ export function ObservatorySeriesChart({
             className={styles.endDot}
             cx={x(index)}
             cy={y(value)}
-            r={2.4}
-            style={selectable ? { cursor: "pointer" } : undefined}
+            r={dotRadius}
+            style={{
+              stroke: "transparent",
+              strokeWidth: dotHitStroke,
+              ...(selectable ? { cursor: "pointer" } : {}),
+            }}
             role={selectable ? "button" : undefined}
             aria-label={title}
             tabIndex={selectable ? 0 : undefined}
@@ -326,24 +338,6 @@ export function ObservatorySeriesChart({
           </circle>
         );
       })}
-
-      {newestValueLabel !== undefined &&
-        newestIndex !== undefined &&
-        newestValue !== null &&
-        newestValue !== undefined && (
-          // The newest captured point's figure, printed at the point — the
-          // summary card's exact string (one source), so the picture answers
-          // without a click.
-          <text
-            className={styles.valueLabel}
-            data-testid="obs-newest-value"
-            x={x(newestIndex) > width / 2 ? x(newestIndex) - 6 : x(newestIndex) + 6}
-            y={Math.max(12, Math.min(height - 8, y(newestValue) - 7))}
-            textAnchor={x(newestIndex) > width / 2 ? "end" : "start"}
-          >
-            {newestValueLabel}
-          </text>
-        )}
 
       {selectedIndex !== null &&
         selectedIndex >= 0 &&
@@ -360,6 +354,50 @@ export function ObservatorySeriesChart({
             r={5}
             style={{ fill: "transparent", stroke: "var(--accent)", strokeWidth: 1.5 }}
           />
+        )}
+
+      {/* The three direct labels are painted LAST, each ABOVE the reference it names and haloed in the panel's own
+          ground: no rule, line or ring is ever drawn through a figure — a struck figure reads as a retracted one. */}
+      {includeZero && (
+        <text x={padX} y={y(0) - 4} className={styles.axisLabel} data-testid="obs-zero-label" style={LABEL_HALO}>
+          0
+        </text>
+      )}
+
+      {yMaxLabel !== undefined && (
+        // The drawn y-max, labelled in the panel's own exact register — the
+        // domain is [0, max of finite values], so this string IS that point's
+        // ledger display, derived, never retyped.
+        <text
+          className={styles.axisLabel}
+          data-testid="obs-ymax-label"
+          // Starts PAST the first point's dot: when the max IS the first
+          // captured bucket, a label at x = padX would sit on the dot itself.
+          x={padX + 10}
+          y={y(max) - 6}
+          style={LABEL_HALO}
+        >
+          {yMaxLabel}
+        </text>
+      )}
+
+      {newestValueLabel !== undefined &&
+        newestIndex !== undefined &&
+        newestValue !== null &&
+        newestValue !== undefined && (
+          // The newest captured point's figure, printed at the point — the
+          // summary card's exact string (one source), so the picture answers
+          // without a click.
+          <text
+            className={styles.valueLabel}
+            data-testid="obs-newest-value"
+            x={x(newestIndex) > width / 2 ? x(newestIndex) - 6 : x(newestIndex) + 6}
+            y={Math.max(12, y(newestValue) - 8)}
+            textAnchor={x(newestIndex) > width / 2 ? "end" : "start"}
+            style={LABEL_HALO}
+          >
+            {newestValueLabel}
+          </text>
         )}
     </svg>
   );

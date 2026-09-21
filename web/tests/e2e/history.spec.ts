@@ -6,12 +6,16 @@
 // mock serves, through the pure layer (lib/observatory-series,
 // lib/history-view) — never pinned as a literal a hardcoding component could
 // coincidentally match — except the fixed words the plan rules (the kicker,
-// the dek, the tile labels, the gap words).
+// the tile labels, the gap words) and ONE literal per demo sentence, so the
+// words themselves are pinned and not only their plumbing.
 //
-// What this pins: the cold load (state, header, five chips, four tiles = the
-// Book's figures); the engine switch (remount, kicker, tiles, the request's
-// engine); the holes (the withheld and absent buckets as the chart's own gap
-// marks, never a zero; the bucket record naming each); the degraded rollup as
+// What this pins: the cold load (the page opens on Cash, Cash first in the
+// switch; the header in ink — a record wears no verdict's colour; the H1 =
+// the takeaway's emphasis + rest, the holes counted in the dek; five chips,
+// four tiles = the Book's figures); the engine switch (remount, kicker,
+// tiles, the request's engine); the holes (the withheld and absent buckets
+// as the chart's own gap marks, never a zero; the bucket record naming
+// each); the degraded rollup as
 // a named refused state with no tiles and no chart; the drawer (doctrine
 // verbatim, Escape, focus restored); the metric selector (the drawn series and
 // its labels move; the finding is the grid's and holds); the direct labels
@@ -21,7 +25,14 @@
 // the error arm; answer before evidence.
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { EM_DASH, formatBlock } from "../../lib/format";
-import { deriveHistoryView, HISTORY_DEK, HISTORY_INTRO, HISTORY_MARKS, HISTORY_UNAVAILABLE_CLAUSE } from "../../lib/history-view";
+import {
+  deriveHistoryView,
+  HISTORY_DEGRADED_CLAUSE,
+  HISTORY_INTRO,
+  HISTORY_LOADING_DEK,
+  HISTORY_MARKS,
+  HISTORY_UNAVAILABLE_CLAUSE,
+} from "../../lib/history-view";
 import { humanUsd } from "../../lib/human-usd";
 import type { ObservatorySeriesResponse } from "../../lib/observatory-data";
 import {
@@ -84,37 +95,51 @@ const card = (engine: string) => DEMO_BOOK.engines.find((e) => e.engine === engi
 const money = (value: string | null, decimals: number) => humanUsd(BigInt(value!), decimals);
 const newestOf = (response: ObservatorySeriesResponse) => response.points[response.points.length - 1]!;
 const TILES = ["debt", "collateral", "accounts", "liquidatable"] as const;
+/** The H1 is the takeaway's parts joined by one space — the one sentence, from the one function. */
+const headlineOf = (response: ObservatorySeriesResponse) => {
+  const takeaway = observatoryTakeaway(response, buildBucketAxis(response), engineOf(response));
+  return { ...takeaway, h1: takeaway.rest === "" ? takeaway.emphasis : `${takeaway.emphasis} ${takeaway.rest}` };
+};
 
-test("cold load: state ok, the legacy engine pressed; the kicker names it as legacy; the headline IS the weld's sentence and the H1; the dek's one clause; five chips; four tiles with the Book's figures", async ({
+test("cold load: the page opens on Cash, Cash first in the switch; state ok; the header is ink (neutral); the H1 IS the takeaway's emphasis + rest and the holes are counted in the dek; five chips; four tiles with the Book's figures", async ({
   page,
 }) => {
-  await mockHistory(page);
+  const asked = await mockHistory(page);
   await page.goto("/observatory");
   const surface = page.getByTestId("history-surface");
   await expect(surface).toHaveAttribute("data-state", "ok");
-  await expect(surface).toHaveAttribute("data-engine", "aave_v3_etherfi");
-  await expect(page.getByTestId("history-engine-aave_v3_etherfi")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("history-engine-debt_manager")).toHaveAttribute("aria-pressed", "false");
+  await expect(surface).toHaveAttribute("data-engine", "debt_manager");
+  await expect(page.getByTestId("history-engine-debt_manager")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("history-engine-aave_v3_etherfi")).toHaveAttribute("aria-pressed", "false");
+  // Cash leads the switch, and the first request the page makes is Cash's.
+  await expect(page.locator('[data-testid^="history-engine-"]')).toHaveText(["Cash", "Aave v3 market (legacy)"]);
+  expect(asked[0]).toBe("debt_manager");
 
-  const axis = buildBucketAxis(DEMO_OBSERVATORY_AAVE);
-  const sentence = observatoryTakeaway(DEMO_OBSERVATORY_AAVE, axis);
-  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "ok");
-  await expect(page.getByTestId("history-verdict")).toContainText("History · Aave v3 market (legacy)");
-  await expect(page.getByTestId("history-verdict-headline")).toHaveText(sentence);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(sentence);
-  await expect(page.getByTestId("history-verdict-dek")).toHaveText(HISTORY_DEK);
-  await expect(page.getByTestId("history-verdict-dek")).toHaveText("One engine per view; a missing hour is a hole, never a zero.");
+  const takeaway = headlineOf(DEMO_OBSERVATORY_DM);
+  // A statement of record wears ink — holes and all; their severity is the census chip's.
+  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "neutral");
+  await expect(page.getByTestId("history-verdict")).toContainText("History · Cash");
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText(takeaway.h1);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(takeaway.h1);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "$27.8M of Cash debt is outstanding, across 1,412 accounts in the hour starting Aug 8, 20:00 UTC.",
+  );
+  await expect(page.getByTestId("history-verdict-headline").locator("b")).toHaveText(takeaway.emphasis);
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(takeaway.dek);
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(
+    "165 of the 168 hours in this window were recorded. 2 are absent — no complete batch was observed — and 1 was withheld; each is a gap on the chart, never a zero.",
+  );
 
-  await expect(chip(page, "Engine")).toContainText("Aave v3 market (legacy)");
+  await expect(chip(page, "Engine")).toContainText("Cash");
   await expect(chip(page, "Stride")).toContainText("native hourly buckets · every captured bucket served verbatim");
-  await expect(chip(page, "Range")).toContainText(`${DEMO_OBSERVATORY_AAVE.from ?? "unbounded"} → unbounded`);
+  await expect(chip(page, "Range")).toContainText(`${DEMO_OBSERVATORY_DM.from ?? "unbounded"} → unbounded`);
   await expect(chip(page, "Buckets")).toContainText("165 captured · 1 withheld · 2 absent");
   // The envelope carries served_at and no age: the wire's own instant, verbatim.
-  await expect(chip(page, "Served")).toContainText(DEMO_OBSERVATORY_AAVE.served_at);
+  await expect(chip(page, "Served")).toContainText(DEMO_OBSERVATORY_DM.served_at);
 
-  // The four tiles ARE the Book's legacy card at the newest bucket (the demo weld), through the Book's money tier.
-  const c = card("aave_v3_etherfi");
-  const newest = newestOf(DEMO_OBSERVATORY_AAVE);
+  // The four tiles ARE the Book's Cash card at the newest bucket (the demo weld), through the Book's money tier.
+  const c = card("debt_manager");
+  const newest = newestOf(DEMO_OBSERVATORY_DM);
   await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(4);
   await expect(page.getByTestId("history-kpi-debt")).toContainText(money(c.total_debt, c.value_decimals));
   await expect(page.getByTestId("history-kpi-collateral")).toContainText(money(c.total_collateral, c.value_decimals));
@@ -122,41 +147,50 @@ test("cold load: state ok, the legacy engine pressed; the kicker names it as leg
   await expect(page.getByTestId("history-kpi-liquidatable")).toContainText(groupInt(c.liquidatable_positions));
   for (const key of TILES) {
     await expect(page.getByTestId(`history-kpi-${key}`)).toHaveAttribute("data-tone", "neutral");
+    // The exact instant the headline humanised stays one glance away, verbatim.
     await expect(page.getByTestId(`history-kpi-${key}`)).toContainText(`bucket ${newest.bucket_start}`);
   }
-  // No Cash figure leaks into the legacy view (engines never combined).
-  const dm = card("debt_manager");
-  await expect(page.locator("body")).not.toContainText(money(dm.total_debt, dm.value_decimals));
+  // No legacy figure leaks into the Cash view (engines never combined).
+  const aave = card("aave_v3_etherfi");
+  await expect(page.locator("body")).not.toContainText(money(aave.total_debt, aave.value_decimals));
 });
 
-test("engine switch: explicit, one engine per view — the view remounts, the kicker and tiles become the Cash book's, the request carried the engine", async ({
+test("engine switch: explicit, one engine per view — the view remounts, the kicker, the sentence and the tiles become the legacy market's, the request carried the engine", async ({
   page,
 }) => {
   const asked = await mockHistory(page);
   await page.goto("/observatory");
   const aave = card("aave_v3_etherfi");
   const dm = card("debt_manager");
-  await expect(page.getByTestId("history-kpi-debt")).toContainText(money(aave.total_debt, aave.value_decimals));
-
-  await page.getByTestId("history-engine-debt_manager").click();
-
-  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-engine", "debt_manager");
-  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "ok");
-  await expect(page.getByTestId("history-engine-debt_manager")).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByTestId("history-engine-aave_v3_etherfi")).toHaveAttribute("aria-pressed", "false");
-  await expect(page.getByTestId("history-verdict")).toContainText("History · Cash");
-  await expect(page.getByTestId("history-verdict-headline")).toHaveText(
-    observatoryTakeaway(DEMO_OBSERVATORY_DM, buildBucketAxis(DEMO_OBSERVATORY_DM)),
-  );
-  await expect(chip(page, "Engine")).toContainText("Cash");
-  // The Cash view replaces the legacy view wholesale — no legacy total remains.
   await expect(page.getByTestId("history-kpi-debt")).toContainText(money(dm.total_debt, dm.value_decimals));
-  await expect(page.getByTestId("history-kpi-debt")).not.toContainText(money(aave.total_debt, aave.value_decimals));
-  await expect(page.getByTestId("history-kpi-accounts")).toContainText(groupInt(dm.positions));
-  await expect(page.locator("body")).not.toContainText(money(aave.total_collateral, aave.value_decimals));
+
+  await page.getByTestId("history-engine-aave_v3_etherfi").click();
+
+  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-engine", "aave_v3_etherfi");
+  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("history-engine-aave_v3_etherfi")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("history-engine-debt_manager")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("history-verdict")).toContainText("History · Aave v3 market (legacy)");
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText(headlineOf(DEMO_OBSERVATORY_AAVE).h1);
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText(
+    "$1.9M of legacy Aave v3 debt is outstanding, across 8,552 accounts in the hour starting Aug 8, 20:00 UTC.",
+  );
+  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "neutral");
+  await expect(chip(page, "Engine")).toContainText("Aave v3 market (legacy)");
+  // The legacy view replaces the Cash view wholesale — no Cash total remains, in a tile or in a sentence.
+  await expect(page.getByTestId("history-kpi-debt")).toContainText(money(aave.total_debt, aave.value_decimals));
+  await expect(page.getByTestId("history-kpi-debt")).not.toContainText(money(dm.total_debt, dm.value_decimals));
+  await expect(page.getByTestId("history-kpi-accounts")).toContainText(groupInt(aave.positions));
+  await expect(page.locator("body")).not.toContainText(money(dm.total_collateral, dm.value_decimals));
+  await expect(page.locator("body")).not.toContainText(money(dm.total_debt, dm.value_decimals));
   // The wire was asked for exactly the selected engines, in order.
-  expect(asked[0]).toBe("aave_v3_etherfi");
-  expect(asked[asked.length - 1]).toBe("debt_manager");
+  expect(asked[0]).toBe("debt_manager");
+  expect(asked[asked.length - 1]).toBe("aave_v3_etherfi");
+
+  // And back: the switch is a toggle pair, not a one-way door.
+  await page.getByTestId("history-engine-debt_manager").click();
+  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-engine", "debt_manager");
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText(headlineOf(DEMO_OBSERVATORY_DM).h1);
 });
 
 test("the holes are the chart's own marks, never a zero: two absent ticks, one withheld tick wearing the warn square, the line broken at each; the record names the kind on click and the tiles hold", async ({
@@ -164,8 +198,8 @@ test("the holes are the chart's own marks, never a zero: two absent ticks, one w
 }) => {
   await mockHistory(page);
   await page.goto("/observatory");
-  const axis = buildBucketAxis(DEMO_OBSERVATORY_AAVE);
-  const debt = buildMetricSeries(axis, DEMO_OBSERVATORY_AAVE, "debt_usd");
+  const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
+  const debt = buildMetricSeries(axis, DEMO_OBSERVATORY_DM, "debt_usd");
   const chart = page.getByTestId("history-chart");
 
   // (toBeAttached / count: a stroke-only SVG tick has a zero-width box, which the visibility heuristic reports hidden.)
@@ -226,10 +260,14 @@ test("the degraded rollup is a NAMED refused state: no tiles, no chart, the wire
   await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "degraded");
   await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "refused");
   await expect(page.getByTestId("history-verdict-headline")).toHaveText(
-    "The durable rollup for the Aave v3 market (legacy) is unavailable.",
+    "No hourly history exists for Cash on this deployment yet.",
   );
-  // The server's own message, verbatim, as the dek's sentence.
+  // The server's own message, verbatim, as the dek's first sentence; then what the state is and where the live figures are.
   await expect(page.getByTestId("history-verdict-dek")).toContainText("observatory_points does not exist on this database");
+  await expect(page.getByTestId("history-verdict-dek")).toContainText(HISTORY_DEGRADED_CLAUSE);
+  await expect(page.getByTestId("history-verdict-dek")).toContainText(
+    "That is a fact about this deployment, not an empty history; live figures are on the Book.",
+  );
   await expect(chip(page, "Rollup")).toContainText("unavailable");
   await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(0);
   await expect(page.getByTestId("history-chart")).toHaveCount(0);
@@ -247,9 +285,11 @@ test("the doctrine lives in the drawer, verbatim — the intro, the chart's meth
 }) => {
   await mockHistory(page);
   await page.goto("/observatory");
-  const view = viewOf(DEMO_OBSERVATORY_AAVE);
+  const view = viewOf(DEMO_OBSERVATORY_DM);
   await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "ok");
   await expect(page.locator("main")).not.toContainText("in a record that outlives batch retention");
+  // The slogan is the drawer's; the header's dek is a fact about this window.
+  await expect(page.getByTestId("history-verdict-dek")).not.toContainText("One engine per view");
   await expect(page.getByTestId("history-drawer-body")).toHaveCount(0);
 
   await page.getByTestId("history-drawer").click();
@@ -259,7 +299,7 @@ test("the doctrine lives in the drawer, verbatim — the intro, the chart's meth
   await expect(body).toContainText("the line never interpolates across a gap");
   await expect(body).toContainText("withheld bucket · the book was refused, so totals are null and never 0");
   await expect(body).toContainText("zero floor drawn · the scale never crops it away");
-  await expect(body).toContainText(DEMO_OBSERVATORY_AAVE.notes[0] ?? "NEVER");
+  await expect(body).toContainText(DEMO_OBSERVATORY_DM.notes[0] ?? "NEVER");
 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("history-drawer-body")).toHaveCount(0);
@@ -271,28 +311,32 @@ test("the metric selector redraws the chart: the pressed metric, the chart's nam
 }) => {
   await mockHistory(page);
   await page.goto("/observatory");
-  const axis = buildBucketAxis(DEMO_OBSERVATORY_AAVE);
+  const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
   const chart = page.getByTestId("history-chart");
-  const finding = gridReadingLine(DEMO_OBSERVATORY_AAVE, axis);
+  const finding = gridReadingLine(DEMO_OBSERVATORY_DM, axis);
   await expect(page.getByTestId("history-chart-finding")).toHaveText(finding);
+  // The finding states DELTAS on one engine at one scale — the compact tier would flatten an "A → B" pair.
+  await expect(page.getByTestId("history-chart-finding")).toHaveText(
+    "Between the first and last recorded hours (Aug 1, 21:00 → Aug 8, 20:00 UTC), debt rose $1.8M to $27.8M, accounts fell 52 to 1,412, and liquidatable positions rose 1 to 49.",
+  );
 
-  const debt = buildMetricSeries(axis, DEMO_OBSERVATORY_AAVE, "debt_usd");
-  const debtNewest = seriesNewestPoint(axis, DEMO_OBSERVATORY_AAVE, "debt_usd", debt);
+  const debt = buildMetricSeries(axis, DEMO_OBSERVATORY_DM, "debt_usd");
+  const debtNewest = seriesNewestPoint(axis, DEMO_OBSERVATORY_DM, "debt_usd", debt);
   if (debtNewest === null) throw new Error("fixture invariant: the debt series plots a newest point");
   await expect(page.getByTestId("history-metric-debt_usd")).toHaveAttribute("aria-pressed", "true");
-  await expect(chart.locator("svg[role='img']")).toHaveAttribute("aria-label", viewOf(DEMO_OBSERVATORY_AAVE, "debt_usd").chartLabel ?? "NEVER");
+  await expect(chart.locator("svg[role='img']")).toHaveAttribute("aria-label", viewOf(DEMO_OBSERVATORY_DM, "debt_usd").chartLabel ?? "NEVER");
   await expect(chart.getByTestId("obs-newest-value")).toHaveText(debtNewest.directLabel);
 
   await page.getByTestId("history-metric-accounts").click();
-  const accounts = buildMetricSeries(axis, DEMO_OBSERVATORY_AAVE, "accounts");
-  const accountsNewest = seriesNewestPoint(axis, DEMO_OBSERVATORY_AAVE, "accounts", accounts);
+  const accounts = buildMetricSeries(axis, DEMO_OBSERVATORY_DM, "accounts");
+  const accountsNewest = seriesNewestPoint(axis, DEMO_OBSERVATORY_DM, "accounts", accounts);
   if (accountsNewest === null) throw new Error("fixture invariant: the accounts series plots a newest point");
   await expect(page.getByTestId("history-metric-accounts")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("history-metric-debt_usd")).toHaveAttribute("aria-pressed", "false");
-  await expect(chart.locator("svg[role='img']")).toHaveAttribute("aria-label", "accounts for Aave v3 market (legacy) across rollup buckets");
+  await expect(chart.locator("svg[role='img']")).toHaveAttribute("aria-label", "accounts for Cash across rollup buckets");
   await expect(chart.getByTestId("obs-newest-value")).toHaveText(accountsNewest.directLabel);
   expect(accountsNewest.directLabel).not.toBe(debtNewest.directLabel);
-  // The finding reads the grid — debt, accounts and liquidatable between the first and last captured buckets — and does not move with the metric.
+  // The finding reads the grid — debt, accounts and liquidatable between the first and last recorded hours — and does not move with the metric.
   await expect(page.getByTestId("history-chart-finding")).toHaveText(finding);
   // The tiles above are not the chart's: they hold.
   await expect(page.getByTestId("history-kpi-debt")).toHaveAttribute("data-tone", "neutral");
@@ -304,10 +348,10 @@ test("W-OBS: the direct labels — the drawn y-max's ledger string, the x extent
   await mockHistory(page);
   await page.goto("/observatory");
   const chart = page.getByTestId("history-chart");
-  const axis = buildBucketAxis(DEMO_OBSERVATORY_AAVE);
-  const debt = buildMetricSeries(axis, DEMO_OBSERVATORY_AAVE, "debt_usd");
-  const maxPoint = seriesMaxPoint(axis, DEMO_OBSERVATORY_AAVE, "debt_usd", debt);
-  const newestPoint = seriesNewestPoint(axis, DEMO_OBSERVATORY_AAVE, "debt_usd", debt);
+  const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
+  const debt = buildMetricSeries(axis, DEMO_OBSERVATORY_DM, "debt_usd");
+  const maxPoint = seriesMaxPoint(axis, DEMO_OBSERVATORY_DM, "debt_usd", debt);
+  const newestPoint = seriesNewestPoint(axis, DEMO_OBSERVATORY_DM, "debt_usd", debt);
   if (maxPoint === null || newestPoint === null) throw new Error("fixture invariant: the debt series plots a max and a newest point");
   expect(newestPoint.atNewestBucket).toBe(true);
 
@@ -316,6 +360,41 @@ test("W-OBS: the direct labels — the drawn y-max's ledger string, the x extent
   if (maxPoint.index === newestPoint.index) await expect(chart.getByTestId("obs-ymax-label")).toHaveCount(0);
   else await expect(chart.getByTestId("obs-ymax-label")).toHaveText(maxPoint.label);
   await expect(chart.getByTestId("obs-newest-value")).toHaveText(newestPoint.label);
+  // The labels are the exact layer the finding leans on: grouped, the digits the wire's own.
+  await expect(chart.getByTestId("obs-newest-value")).toHaveText("$27,828,808.216758");
+  await expect(chart.getByTestId("obs-ymax-label")).toHaveText("$27,942,906.330446");
+
+  // No label is struck through. Each sits ABOVE the reference it names — its baseline over the floor rule, over the
+  // highest plotted point, over the newest point — and all three are painted after the line and the points, haloed.
+  const geometry = await chart.locator("svg[role='img']").evaluate((svg) => {
+    const all = Array.from(svg.querySelectorAll("*"));
+    const num = (el: Element | null, name: string) => Number(el?.getAttribute(name) ?? Number.NaN);
+    const points = Array.from(svg.querySelectorAll('[data-testid="obs-point"]'));
+    const lastDrawn = Math.max(...points.map((el) => all.indexOf(el)), ...Array.from(svg.querySelectorAll("path")).map((el) => all.indexOf(el)));
+    const label = (id: string) => svg.querySelector(`[data-testid="${id}"]`);
+    const labels = ["obs-zero-label", "obs-ymax-label", "obs-newest-value"].map(label);
+    return {
+      height: num(svg, "height"),
+      floorY: num(svg.querySelector('[data-testid="obs-zero-floor"] line'), "y1"),
+      zeroY: num(labels[0] ?? null, "y"),
+      topPointY: Math.min(...points.map((el) => num(el, "cy"))),
+      maxY: num(labels[1] ?? null, "y"),
+      newestPointY: num(points[points.length - 1] ?? null, "cy"),
+      newestY: num(labels[2] ?? null, "y"),
+      paintedLast: labels.every((el) => el !== null && all.indexOf(el) > lastDrawn),
+      haloed: labels.every((el) => el instanceof SVGElement && el.style.paintOrder.startsWith("stroke") && el.style.stroke !== ""),
+      dotRadius: num(points[0] ?? null, "r"),
+    };
+  });
+  expect(geometry.zeroY).toBeLessThan(geometry.floorY);
+  expect(geometry.maxY).toBeLessThan(geometry.topPointY);
+  expect(geometry.newestY).toBeLessThan(geometry.newestPointY);
+  expect(geometry.paintedLast).toBe(true);
+  expect(geometry.haloed).toBe(true);
+  // The plot is sized to what it shows: 120px of plot plus the one extents strip (the selection is the newest hour).
+  expect(geometry.height).toBe(134);
+  // A week of hours at rest reads as a line, not a bead chain: the visible dot is small; the click target is not.
+  expect(geometry.dotRadius).toBe(1.5);
 
   const oldestEntry = axis.entries[0]!;
   const newestEntry = axis.entries[axis.entries.length - 1]!;
@@ -336,13 +415,26 @@ test("W-OBS-B, the contract's own example: a withheld NEWEST bucket dashes every
 }) => {
   await mockHistory(page, CONTRACT);
   await page.goto("/observatory");
-  await page.getByTestId("history-engine-debt_manager").click();
+  // The page opens on Cash, and the contract's Cash example IS the withheld-newest one.
+  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-engine", "debt_manager");
   await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "ok");
 
   const axis = buildBucketAxis(OBSERVATORY_SERIES_DM);
+  const takeaway = headlineOf(OBSERVATORY_SERIES_DM);
   await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "refused");
-  await expect(page.getByTestId("history-verdict-headline")).toHaveText(observatoryTakeaway(OBSERVATORY_SERIES_DM, axis));
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText(takeaway.h1);
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText(
+    "The latest hour's figures were withheld, so no current debt figure is shown (Jul 29, 09:00 UTC).",
+  );
   await expect(page.getByTestId("history-verdict-headline")).toContainText("withheld");
+  // The dek names the cause in plain words with the wire's code, then counts the window's holes.
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(takeaway.dek);
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(
+    "The engine's whole book was refused in that hour (collateral-flag custody unproven · FLAG_CUSTODY_UNPROVEN). 1 of the 2 hours in this window was recorded. 1 was withheld; it is a gap on the chart, never a zero.",
+  );
+  // No older figure stands in for the withheld hour, in the header's words either.
+  await expect(page.getByTestId("history-verdict-headline")).not.toContainText("$");
+  await expect(page.getByTestId("history-verdict-dek")).not.toContainText("$");
   await expect(chip(page, "Buckets")).toContainText("1 captured · 1 withheld · 0 absent");
 
   // The tiles refuse honestly: the dash and the gap's word, never the older figure presented as newest.
@@ -373,6 +465,11 @@ test("W-OBS-B, the contract's own example: a withheld NEWEST bucket dashes every
   await expect(page.getByTestId("history-chart-sparse")).toHaveText(
     "1 captured bucket plots in this window · 1 withheld bucket stays a named refusal",
   );
+  await expect(page.getByTestId("history-chart-finding")).toHaveText(
+    "Only one hour in this window was recorded (Jul 29, 08:00 UTC), so there is no movement to state.",
+  );
+  // A sparse window's one dot keeps the full radius: the small dot is for a dense line only.
+  await expect(chart.getByTestId("obs-point")).toHaveAttribute("r", "2.4");
 
   // The record opens on the newest wire bucket — the withheld one — and keeps the refusal outside any fold.
   const record = page.getByTestId("history-point");
@@ -388,7 +485,7 @@ test("provenance on a point: the record pins as-of, watermark, batch, key and ra
 }) => {
   await mockHistory(page);
   await page.goto("/observatory");
-  await page.getByTestId("history-engine-debt_manager").click();
+  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-engine", "debt_manager");
   const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
   const entry = axis.entries[axis.newestPointIndex]!;
   const point = newestOf(DEMO_OBSERVATORY_DM);
@@ -401,7 +498,10 @@ test("provenance on a point: the record pins as-of, watermark, batch, key and ra
   // The record's ANSWER stays visible without a click...
   await expect(record.getByText("debt (usd)")).toBeVisible();
   await expect(record.getByText("liquidatable positions")).toBeVisible();
-  await expect(record).toContainText(groupInt(point.accounts!).replace(/,/g, ""));
+  // The record's figures are grouped — the exact layer the headline and the finding lean on.
+  await expect(record).toContainText(groupInt(point.accounts!));
+  await expect(record).toContainText("$27,828,808.216758");
+  await expect(record).toContainText("$153,171,572.777189");
   // ...while pure provenance is closed by default, counted in its summary.
   const forensics = page.getByTestId("history-point-forensics");
   await expect(forensics.locator("summary")).toHaveText("6 provenance row(s) + the rate snapshot");
@@ -435,6 +535,8 @@ test("the sweep clock renders all three states honestly — stamped, recorded no
   // (a) RECORDED NONE: the legacy market has no collateral sweep, and the record SAYS so — never an em dash.
   await mockHistory(page);
   await page.goto("/observatory");
+  await page.getByTestId("history-engine-aave_v3_etherfi").click();
+  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-engine", "aave_v3_etherfi");
   await page.getByTestId("history-point-forensics").locator("summary").click();
   const sweep = page.getByTestId("history-point-sweep");
   await expect(sweep).toContainText("none");
@@ -463,8 +565,8 @@ test("the sweep clock renders all three states honestly — stamped, recorded no
 // ---------------------------------------------------------------------------
 
 const newestMutated = (change: (point: ObservatorySeriesResponse["points"][number]) => ObservatorySeriesResponse["points"][number]) => ({
-  ...DEMO_OBSERVATORY_AAVE,
-  points: DEMO_OBSERVATORY_AAVE.points.map((point, i, all) => (i === all.length - 1 ? change(point) : point)),
+  ...DEMO_OBSERVATORY_DM,
+  points: DEMO_OBSERVATORY_DM.points.map((point, i, all) => (i === all.length - 1 ? change(point) : point)),
 });
 
 const HAZARDS = [
@@ -519,7 +621,7 @@ for (const hazard of HAZARDS) {
   });
 }
 
-test("loading: the refused tone, the pending tiles, no chart — the state named while the series is in flight", async ({
+test("loading: the refused tone, the pending tiles, no chart — the state named while the series is in flight, and nothing counted before it answers", async ({
   page,
 }) => {
   await mockShell(page);
@@ -529,8 +631,12 @@ test("loading: the refused tone, the pending tiles, no chart — the state named
   await expect(surface).toHaveAttribute("data-state", "loading");
   await expect(surface).toHaveAttribute("aria-busy", "true");
   await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "refused");
-  await expect(page.getByTestId("history-verdict-headline")).toHaveText("Loading the history of the Aave v3 market (legacy)…");
-  await expect(page.getByTestId("history-verdict-dek")).toHaveText(HISTORY_DEK);
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText("Loading the history of Cash…");
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(HISTORY_LOADING_DEK);
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(
+    "The hourly record of this engine's debt, collateral, accounts and liquidatable positions.",
+  );
+  await expect(page.getByTestId("history-verdict")).not.toContainText(/\d/);
   await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(4);
   await expect(page.getByTestId("history-kpi-debt")).toHaveAttribute("aria-busy", "true");
   await expect(chip(page, "Buckets")).toContainText("pending");
@@ -545,7 +651,7 @@ test("a failed fetch is the unavailable state: refused, the message and the neve
   await page.goto("/observatory");
   await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "unavailable");
   await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "refused");
-  await expect(page.getByTestId("history-verdict-headline")).toHaveText("The history of the Aave v3 market (legacy) could not be fetched.");
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText("The history of Cash could not be fetched.");
   await expect(page.getByTestId("history-verdict-dek")).toContainText(HISTORY_UNAVAILABLE_CLAUSE);
   await expect(chip(page, "Record")).toContainText("unavailable");
   await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(0);
@@ -560,8 +666,11 @@ test("answer before evidence: header above the engine switcher above the tiles a
   await page.goto("/observatory");
   await expect(page.getByTestId("history-point")).toBeVisible();
   const y = async (id: string) => (await page.getByTestId(id).boundingBox())?.y ?? Number.NaN;
-  expect(await y("history-verdict")).toBeLessThan(await y("history-engine-aave_v3_etherfi"));
-  expect(await y("history-engine-aave_v3_etherfi")).toBeLessThan(await y("history-kpi-debt"));
+  expect(await y("history-verdict")).toBeLessThan(await y("history-engine-debt_manager"));
+  expect(await y("history-engine-debt_manager")).toBeLessThan(await y("history-kpi-debt"));
+  // Cash leads the switch: it sits left of the legacy market on the same row.
+  const x = async (id: string) => (await page.getByTestId(id).boundingBox())?.x ?? Number.NaN;
+  expect(await x("history-engine-debt_manager")).toBeLessThan(await x("history-engine-aave_v3_etherfi"));
   expect(await y("history-kpi-debt")).toBeLessThan(await y("history-chart"));
   expect(await y("history-chart")).toBeLessThan(await y("history-point"));
 });
