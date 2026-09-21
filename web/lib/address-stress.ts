@@ -138,7 +138,7 @@ export function stressReading(lookup: StressLookup, account: string): StressRead
  * non-negative — the Inspector's rule for a position. A negative wire decimal
  * is a legal string and not a figure: nothing prints from it, the room included.
  */
-export function readableSide(side: StressSide | null): { readonly debt: bigint; readonly cap: bigint; readonly room: bigint } | null {
+function readableSide(side: StressSide | null): { readonly debt: bigint; readonly cap: bigint; readonly room: bigint } | null {
   if (side === null || side.debt === null || side.cap === null || side.debt < 0n || side.cap < 0n) return null;
   return { debt: side.debt, cap: side.cap, room: side.cap - side.debt };
 }
@@ -230,7 +230,12 @@ export interface StressVerdictWords {
   readonly title: string | null;
 }
 
-/** The Inspector's "Becomes liquidatable?" cell, spoken from `rowVerdict`: a projection answers only in its horizons' terms, never a bare "No". */
+/**
+ * The "Becomes liquidatable?" cell, spoken from `rowVerdict` — the ONE word function for the Inspector's table and the
+ * Scenarios page's one-address table, so the same row under the same header reads the same on both. A projection
+ * answers only in its horizons' terms: "Within 90d" for the first horizon it flips within, "Not within 90d" through
+ * its longest — never a bare "Yes" or "No", which are a spot shock's words.
+ */
 export function stressVerdictWords(verdict: RowVerdict): StressVerdictWords {
   switch (verdict.kind) {
     case "not-applicable":

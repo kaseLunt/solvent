@@ -1,13 +1,16 @@
 // The one-address workspace is the Inspector's own reading: its stress rows,
 // its decimals, its Cash position as "today". Every state has a sentence; the
 // before/after tiles print the Inspector's registers.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { lookup } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
-import { sideRoomWords } from "../../lib/address-stress";
+import { rowVerdict, sideRoomWords, stressVerdictWords, type StressRow } from "../../lib/address-stress";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { deriveInspectorView, stressBatchNote } from "../../lib/inspector-view";
-import { addressWorkspace, rowOutcome, rowVerdictWord } from "../../lib/lab-address";
+import * as labAddress from "../../lib/lab-address";
+import { addressWorkspace, rowOutcome } from "../../lib/lab-address";
 import { DEMO_ADDRESS_NEAR, DEMO_ADDRESS_REFUSED, DEMO_NEAR_ADDR, DEMO_REFUSED_ADDR, DEMO_STRESS_NEAR } from "../fixtures/demo";
 import { ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, NOT_FOUND_ADDR, UNKNOWABLE_ADDR } from "../fixtures/inspector";
 
@@ -329,27 +332,29 @@ test("rowOutcome: the library word is the row's own verdict — the same judgeme
   expect(rowOutcome(undefined)).toEqual({ key: "not-covered", text: "Not on this address", tone: "dim" });
 });
 
-test("rowVerdictWord and sideRoomWords: the table's cells are the lib's own words — the row verdict the headline speaks from, and the tiles' room register", () => {
+test("the table's cells are the lib's own words — the one verdict word function the Inspector's table prints from, over the row verdict the headline speaks from, and the tiles' room register", () => {
+  const cellWords = (row: StressRow) => stressVerdictWords(rowVerdict(row));
   const near = (body: StressBody) => addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(body), selectedId: "eth_minus_30" }).rows;
   const rows = near(DEMO_STRESS_NEAR);
   const eth = rows.find((r) => r.id === "eth_minus_30")!;
   const dm = rows.find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
-  expect(rowVerdictWord(eth)).toEqual({ text: "Yes", tone: "crit", title: null });
-  expect(rowVerdictWord(dm)).toEqual({ text: "No", tone: null, title: "stays inside its cap through 90d, the longest horizon projected" });
-  // A projection whose horizon flips says so, in the projection's warn tone — never a "No" read off its unchanged spot side.
+  expect(cellWords(eth)).toEqual({ text: "Yes", tone: "crit", title: null });
+  // A projection answers in its horizons' terms on both pages: it holds "Not within" its longest horizon — never a bare "No".
+  expect(cellWords(dm)).toEqual({ text: "Not within 90d", tone: null, title: "a projection speaks only through its longest horizon" });
+  // A projection whose horizon flips names the horizon, in the projection's warn tone — never a "No" read off its unchanged spot side, never a bare "Yes".
   const within = near(projected(1, true)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
   expect(within.flips).toBe(false);
-  expect(rowVerdictWord(within)).toEqual({ text: "Yes · within 90d", tone: "warn", title: null });
-  expect(rowVerdictWord(near(projected(0, null)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!)).toEqual({ text: "Cannot say", tone: "refused", title: "the 30d horizon carries no verdict" });
+  expect(cellWords(within)).toEqual({ text: "Within 90d", tone: "warn", title: null });
+  expect(cellWords(near(projected(0, null)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!)).toEqual({ text: "Cannot say", tone: "refused", title: "the 30d horizon carries no verdict" });
   // A side that is not a position: no verdict word, whatever the wire's booleans say.
   const negative = near(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, debt_usd: "-4822000000" } }))).find((r) => r.id === "eth_minus_30")!;
   expect(negative.flips).toBe(true);
-  expect(rowVerdictWord(negative)).toEqual({ text: "Cannot say", tone: "refused", title: "the shocked figures are not a position" });
-  expect(rowVerdictWord({ ...eth, after: null })).toEqual({ text: "Cannot say", tone: "refused", title: "one side of the comparison is withheld or unknowable" });
-  expect(rowVerdictWord({ ...eth, flips: false })).toEqual({ text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" });
-  expect(rowVerdictWord({ ...eth, flips: false, after: eth.before })).toEqual({ text: "No", tone: null, title: null });
-  expect(rowVerdictWord({ ...eth, applicable: false, reason: "no Cash position" })).toEqual({ text: "no Cash position", tone: null, title: null });
-  expect(rowVerdictWord({ ...eth, applicable: false, reason: null })).toEqual({ text: "the engine gave no reason", tone: null, title: null });
+  expect(cellWords(negative)).toEqual({ text: "Cannot say", tone: "refused", title: "the shocked figures are not a position" });
+  expect(cellWords({ ...eth, after: null })).toEqual({ text: "Cannot say", tone: "refused", title: "one side of the comparison is withheld or unknowable" });
+  expect(cellWords({ ...eth, flips: false })).toEqual({ text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" });
+  expect(cellWords({ ...eth, flips: false, after: eth.before })).toEqual({ text: "No", tone: null, title: null });
+  expect(cellWords({ ...eth, applicable: false, reason: "no Cash position" })).toEqual({ text: "no Cash position", tone: null, title: null });
+  expect(cellWords({ ...eth, applicable: false, reason: null })).toEqual({ text: "the engine gave no reason", tone: null, title: null });
   // The room cells: the tiles' words — a negative room "over cap by", a refused side "not computed", an unreadable scale its word; never a minus on a dollar figure.
   expect(sideRoomWords(eth.before, 6)).toBe("$190.50");
   expect(sideRoomWords(eth.after, 6)).toBe("over cap by $1,069");
@@ -406,4 +411,22 @@ test("a stress result for another batch than the position is not compared: both 
   const same = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(DEMO_STRESS_NEAR), selectedId: "eth_minus_30" });
   expect(same.stressBatchId).toBe(same.batchId);
   expect(same.tiles).not.toBeNull();
+});
+
+test("one row, one header, one set of words on both pages — by construction: the Inspector's table and the one-address table print the verdict cell from the same function over the same judge", () => {
+  // The shared fixture: the demo account's rate projection, as served (it holds through 90d) and with its 90d horizon flipping.
+  const rowsOf = (body: StressBody) => addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(body), selectedId: "eth_minus_30" }).rows;
+  const holding = rowsOf(DEMO_STRESS_NEAR).find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
+  const flipping = rowsOf(projected(1, true)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
+  expect(stressVerdictWords(rowVerdict(holding))).toEqual({ text: "Not within 90d", tone: null, title: "a projection speaks only through its longest horizon" });
+  expect(stressVerdictWords(rowVerdict(flipping))).toEqual({ text: "Within 90d", tone: "warn", title: null });
+  // A projection never answers a bare "Yes" or "No" on either page: those are a spot shock's words.
+  for (const row of [holding, flipping]) expect(["Yes", "No"]).not.toContain(stressVerdictWords(rowVerdict(row)).text);
+  // Both tables call that one function over that one judge, and no second word function stands beside it.
+  const source = (path: string): string => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+  for (const table of ["../../app/inspector/[addr]/StressTable.tsx", "../../app/lab/AddressWorkspace.tsx"]) {
+    expect(source(table)).toContain("stressVerdictWords(rowVerdict(r))");
+    expect(source(table)).toMatch(/import \{[^}]*\bstressVerdictWords\b[^}]*\} from "@\/lib\/address-stress";/);
+  }
+  expect(Object.keys(labAddress).filter((name) => /verdictword/i.test(name))).toEqual([]);
 });

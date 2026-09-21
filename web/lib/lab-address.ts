@@ -117,7 +117,7 @@ function rowHeadline(short: string, row: StressRow, decimals: number): LabHeadli
         case "no-horizon":
           return refused(cannot, `Room today ${today}. The projection carries no horizon.`);
         case "horizon-unknowable":
-          return refused(cannot, `${horizonsDek} The ${horizonLabel(verdict.horizon.seconds)} horizon carries no verdict.`);
+          return refused(cannot, `${horizonsDek} ${sentence(cannotSayTitle(verdict))}`);
       }
       break;
     case "liquidatable":
@@ -228,33 +228,5 @@ export function rowOutcome(row: StressRow | undefined): LibraryOutcome {
       return { key: "result", text: verdict.already ? "Liquidatable today and after" : "Becomes liquidatable", tone: "crit" };
     case "inside":
       return { key: "result", text: verdict.through === null ? "Stays inside its cap" : `Stays inside its cap through ${horizonLabel(verdict.through.seconds)}`, tone: "ok" };
-  }
-}
-
-/** The verdict column's cell: its words, the pill tone it wears (null for plain text), and the demoted detail for the hover — the Inspector's shape. */
-export interface RowVerdictWord {
-  readonly text: string;
-  readonly tone: "crit" | "warn" | "refused" | null;
-  readonly title: string | null;
-}
-
-/**
- * The table's "Becomes liquidatable?" cell in one-address mode, spoken from `rowVerdict` — the same judgement the
- * headline and the library word speak from, so the three can never disagree about one row. A projection's yes names
- * the horizon it happens within, in the projection's warn tone; a side the tiles refuse is a cannot-say, never a yes
- * or a no from the wire's booleans; an inapplicable row carries the engine's reason as plain text.
- */
-export function rowVerdictWord(row: StressRow): RowVerdictWord {
-  const verdict = rowVerdict(row);
-  switch (verdict.kind) {
-    case "not-applicable":
-      return { text: verdict.reason, tone: null, title: null };
-    case "cannot-say":
-      return { text: "Cannot say", tone: "refused", title: cannotSayTitle(verdict) };
-    case "liquidatable":
-      if (verdict.within !== null) return { text: `Yes · within ${horizonLabel(verdict.within.seconds)}`, tone: "warn", title: null };
-      return verdict.already ? { text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" } : { text: "Yes", tone: "crit", title: null };
-    case "inside":
-      return verdict.through === null ? { text: "No", tone: null, title: null } : { text: "No", tone: null, title: `stays inside its cap through ${horizonLabel(verdict.through.seconds)}, the longest horizon projected` };
   }
 }

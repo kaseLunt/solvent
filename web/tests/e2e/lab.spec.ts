@@ -573,6 +573,10 @@ test("one-address mode via ?address=: the Inspector's reading — before/after t
   await expect(page.getByTestId("lab-address-kpi-status-after")).toContainText("Liquidatable");
   await expect(page.getByTestId("lab-address-kpi-room-after")).toContainText("over cap by $");
   await expect(page.getByTestId("lab-address-table").locator("tbody tr")).toHaveCount(DEMO_STRESS_NEAR.scenarios.length);
+  // The projection that holds reads as it does on the Inspector under the same header: through its longest horizon, never a bare "No".
+  const holding = page.getByTestId("lab-address-table").locator("tbody tr").filter({ hasText: "Debt Manager borrow APY +200bps" }).locator("td").nth(3);
+  await expect(holding).toHaveText("Not within 90d");
+  await expect(holding.locator("[title]")).toHaveAttribute("title", "a projection speaks only through its longest horizon");
   // The library's words are the rows' own verdicts, not book-mode outcomes.
   await expect(row(page, "eth_minus_30")).toContainText("Becomes liquidatable");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "result");
@@ -935,7 +939,7 @@ test("one-address mode: the table's verdict column is the row's own verdict and 
   await expect(eth.locator("td").nth(3)).toHaveText("Yes");
   await expect(eth.locator("td").nth(3).locator("[data-tone='crit']")).toHaveCount(1);
   // A projection judged by its horizons: the verdict names the horizon in the warn tone the headline and the library use.
-  await expect(projection.locator("td").nth(3)).toHaveText("Yes · within 90d");
+  await expect(projection.locator("td").nth(3)).toHaveText("Within 90d");
   await expect(projection.locator("td").nth(3).locator("[data-tone='warn']")).toHaveCount(1);
   await expect(row(page, "dm_rate_horizon_plus_200bps")).toContainText("Becomes liquidatable within 90d");
   // A side that is not a position: no verdict word and no figure, whatever the wire's booleans say.
@@ -1155,12 +1159,12 @@ test("two consecutive answers that do not read keep the last result that read: a
   // Both bodies that follow name another batch, so the batch the banner names can only be the first result's.
   const later = { ...DEMO_RUN_BOOK_ETH.batch, id: 18252 };
   const malformed = { ...withCash((e) => ({ ...e, eligible_debt_delta_usd: "1e6" })), batch: later };
-  const noCoverage = { ...DEMO_RUN_BOOK_ETH, batch: later, coverage: undefined };
+  const malformedAgain = { ...withCash((e) => ({ ...e, bad_debt_delta_usd: "" })), batch: later };
   let answers = 0;
   await page.route("**/v1/scenarios/*/run-book", (route) => {
     if (route.request().method() === "OPTIONS") return preflight(route);
     answers += 1;
-    return json(route, answers === 1 ? malformed : noCoverage, 200, POST_CORS);
+    return json(route, answers === 1 ? malformed : malformedAgain, 200, POST_CORS);
   });
   const banner = page.getByTestId("lab-banner");
   await page.getByTestId("lab-run").click();
@@ -1168,7 +1172,7 @@ test("two consecutive answers that do not read keep the last result that read: a
   await expect(banner).toContainText("The result below stands for batch 18,251.");
   // The second answer that does not read: the hold is still the result that read, never the first malformed body.
   await page.getByTestId("lab-banner-rerun").click();
-  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. coverage is outside the wire contract. Nothing from it is drawn.");
+  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. bad_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
   await expect(banner).toContainText("The result below stands for batch 18,251.");
   await expect(banner).not.toContainText("18,252");
   expect(answers).toBe(2);
@@ -1213,4 +1217,62 @@ test("compare: a set whose envelope is outside the contract is a failed Compare 
   );
   await expect(page.getByTestId("lab-dotplot").locator("circle")).toHaveCount(2);
   await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
+});
+
+test("a service that answered 200 is never unreachable: a run-book without its engines names the field in the classifier's words; a body that is no JSON object says so; over a held result, the hold stands under the banner", async ({ page }) => {
+  // `undefined` does not survive JSON: the body arrives with no `engines` member at all.
+  await mockLab(page, { runBook: { ...DEMO_RUN_BOOK_ETH, engines: undefined } });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
+  await expect(headline(page)).toHaveText("The result for ETH -30 percent contradicts itself.");
+  await expect(dek(page)).toHaveText("engines is outside the wire contract. Nothing from it is drawn.");
+  await expect(page.getByTestId("lab-verdict")).not.toContainText("could not be reached");
+  await expect(page.getByTestId("lab-verdict")).not.toContainText("Cannot read properties");
+  await expect(tile(page, "newly")).toContainText("contradictory");
+  await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
+  await expect(row(page, "eth_minus_30")).not.toContainText("Unreachable");
+  await expectNoCashZero(page);
+  await expect(page.getByTestId("lab-run")).toBeEnabled();
+  // With a result already on the page: the same answer stands behind it, named, and the held figures stand.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page);
+  await page.goto("/lab");
+  await runIt(page);
+  let answers = 0;
+  await page.route("**/v1/scenarios/*/run-book", (route) => {
+    if (route.request().method() === "OPTIONS") return preflight(route);
+    answers += 1;
+    // First a body without its engines, then a body that is JSON null.
+    return json(route, answers === 1 ? { ...DEMO_RUN_BOOK_ETH, engines: undefined } : null, 200, POST_CORS);
+  });
+  const banner = page.getByTestId("lab-banner");
+  await page.getByTestId("lab-run").click();
+  await expect(banner).toHaveAttribute("data-kind", "rerun-failed");
+  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. engines is outside the wire contract. Nothing from it is drawn.");
+  await expect(banner).toContainText("The result below stands for batch 18,251.");
+  await expect(banner).not.toContainText("could not be reached");
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  await expect(tile(page, "newly")).toContainText("118");
+  await page.getByTestId("lab-banner-rerun").click();
+  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. the response body is not a JSON object. Nothing from it is drawn.");
+  await expect(banner).toContainText("The result below stands for batch 18,251.");
+  expect(answers).toBe(2);
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  await expect(headline(page)).toContainText("$1.2M more Cash debt becomes liquidatable");
+  await expect(page.getByTestId("lab-heatmap")).toBeVisible();
+  await expect(row(page, "eth_minus_30")).toContainText("+$1.2M liquidatable · 118 accounts");
+});
+
+test("compare: a set 2xx whose body is JSON null is a failed Compare that says so — never a crashed route", async ({ page }) => {
+  await mockLab(page);
+  // The later route wins: the set route answers 200 with the JSON literal `null`.
+  await page.route("**/v1/scenarios/run-book-set", (route) => (route.request().method() === "OPTIONS" ? preflight(route) : json(route, null, 200, POST_CORS)));
+  await page.goto("/lab?scenarios=eth_minus_30,ethfi_minus_50");
+  const state = page.getByTestId("lab-compare-state");
+  await expect(state).toHaveAttribute("data-kind", "failed");
+  await expect(state).toHaveText("The set does not answer the request. Faults: the response body is not a JSON object. Nothing from it is drawn.");
+  await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
+  await expect(page.getByRole("banner")).toBeVisible();
+  await expect(page.getByTestId("lab-compare")).toBeEnabled();
 });

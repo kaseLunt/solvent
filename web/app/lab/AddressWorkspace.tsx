@@ -2,8 +2,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { KitTable, KpiTile, SectionHead, StatusPill, VerdictHeader, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { horizonLabel, sideRoomWords } from "@/lib/address-stress";
-import { rowVerdictWord, type AddressTile, type AddressWorkspace as Space } from "@/lib/lab-address";
+import { horizonLabel, rowVerdict, sideRoomWords, stressVerdictWords } from "@/lib/address-stress";
+import type { AddressTile, AddressWorkspace as Space } from "@/lib/lab-address";
 import { groupInt } from "@/lib/prose";
 import styles from "./lab.module.css";
 import { accountMoney } from "./money";
@@ -31,10 +31,11 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
   const tile = (key: string, side: "before" | "after", label: string, v: AddressTile | undefined) => (
     <KpiTile testId={`lab-address-kpi-${key}-${side}`} label={label} value={v?.value ?? "—"} tone={v?.tone ?? "refused"} pending={space.state === "loading"} />
   );
-  // The room cells and the verdict cell speak from the lib's own words — the tiles' room register and the one row
-  // verdict the headline and the library word share — so the table can never say what the header refuses.
+  // The room cells and the verdict cell speak from the lib's own words — the tiles' room register, and the one row
+  // verdict in the one set of words the Inspector's table prints under the same header — so the table can never say
+  // what the header refuses, and the two pages can never word one row two ways.
   const rows: KitRow[] = space.rows.map((r) => {
-    const verdict = rowVerdictWord(r);
+    const verdict = stressVerdictWords(rowVerdict(r));
     return {
       key: r.id,
       dim: !r.applicable,
