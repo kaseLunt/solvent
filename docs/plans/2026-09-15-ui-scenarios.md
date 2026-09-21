@@ -110,7 +110,7 @@ The integrator builds the visual tasks personally: **Task 1** (kit parts), **Tas
 
 | Element | `data-testid` | Notes |
 |---|---|---|
-| Surface root | `lab-surface` | `data-mode` ∈ `book · address`; `data-state` ∈ `listing-loading · listing-unavailable · not-run · running · result · not-covered · withheld · contradictory · definition-changed · not-served · no-batch · rate-limited · unreachable · failed` (book; `busy` is a set-run outcome, never a book state) or `idle · invalid · loading · unavailable · no-position · withheld · rows` (address); `data-banner` ∈ `stale-input · superseded · rerun-failed · retained-refused` when present (a computed result is never replaced by a failed re-run: it is held under `rerun-failed`, or disclosed as `retained-refused` when its definition changed) |
+| Surface root | `lab-surface` | `data-mode` ∈ `book · address`; `data-state` ∈ `listing-loading · listing-unavailable · not-run · running · result · not-covered · withheld · contradictory · definition-changed · not-served · no-batch · rate-limited · unreachable · refused-locally · failed` (book; `busy` is a set-run outcome, never a book state; `refused-locally` is a run whose id is outside the contract's pattern — nothing was sent) or `idle · invalid · loading · unavailable · no-position · withheld · rows` (address); `data-banner` ∈ `stale-input · superseded · rerun-failed · retained-refused` when present (a computed result is never replaced by a failed re-run: it is held under `rerun-failed`, or disclosed as `retained-refused` when its definition changed) |
 | Library | `lab-library`, rows `lab-library-row-{id}` (`data-outcome` = the outcome key: `not-run · running · result · withheld · not-covered · failed · definition-changed`), checkbox `lab-library-check-{id}`, mode toggle `lab-mode-book` / `lab-mode-address`, footer `lab-run`, `lab-compare` | from `ScenarioLibrary` |
 | Address slot (address mode) | `lab-address`, `-input`, `-inspect`, `-refused` | from `AddressField` |
 | Verdict header | `lab-verdict`, `-headline`, `-dek`, `-identity` | chips carry `data-chip="{label}"`; the PROJECTION pill has `data-testid="lab-projection"` |
@@ -2822,7 +2822,7 @@ export function useLabReading(): LabReading {
 }
 ```
 
-`runBookScenario` never rejects for wire outcomes (it returns `unreachable`/`failed`); the rejection arms only catch a thrown id-shape error, which the surface prevents by passing listed ids. `describeLookupError` is Plan 2's message mapper. The `react-hooks/refs` rule: `runsRef.current = runs` assignments happen during render on purpose (the latest records without a stale closure) — if lint flags them, move both into a `useEffect` with no deps and say so in the report.
+`runBookScenario` never rejects for wire outcomes (it returns `unreachable`/`failed`), and an id outside the contract's pattern resolves `refused-locally` as the set path does (it no longer throws); the rejection arms remain only as a guard, and the surface passes listed ids. `describeLookupError` is Plan 2's message mapper. The `react-hooks/refs` rule: `runsRef.current = runs` assignments happen during render on purpose (the latest records without a stale closure) — if lint flags them, move both into a `useEffect` with no deps and say so in the report.
 
 - [ ] **Step 4: Run to verify it passes, then the gates**
 
