@@ -117,3 +117,23 @@ test("readsAsAnswer: the envelope inside the contract, and the Cash row — wher
   expect(readsAsAnswer(runBookOf([]))).toBe(true);
   expect(readsAsAnswer(runBookOf([cashEngine(DEMO_CASH_TABLE, { usd_decimals: 1.5 })], undefined, { excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }] }))).toBe(true);
 });
+
+test("a settled body that is not a JSON object, or a refusal without a code, never throws inside the record and never moves into a hold — for a run and for a set", () => {
+  const result = runBookOf([cashEngine(DEMO_CASH_TABLE)]);
+  const held = { response: result, at: 2, atMonotonicMs: 2 };
+  let runs: ReadonlyMap<string, RunRecord> = withSettled(withRunning(new Map(), "a", 1, readsAsAnswer), "a", { kind: "ok", response: result }, 2, 2, readsAsAnswer);
+  const noCode = { ...result, excluded_engines: [{ engine: "debt_manager" }] } as unknown as typeof result;
+  for (const [at, body] of [[3, null], [5, 7], [7, []], [9, noCode]] as const) {
+    runs = withSettled(withRunning(runs, "a", at, readsAsAnswer), "a", { kind: "ok", response: body as unknown as typeof result }, at + 1, at + 1, readsAsAnswer);
+    expect(runs.get("a")?.held).toEqual(held);
+  }
+  expect(withRunning(runs, "a", 11, readsAsAnswer).get("a")?.held).toEqual(held);
+  // The set: the updater that settles a null body answers "does not answer its request" instead of throwing, and the comparison it had stands.
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  const answering = demoSetFor(asked);
+  let set = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: answering }, 2);
+  for (const body of [null, 7, "ok", []]) {
+    set = withSetSettled(withSetRunning(set, asked, 3), asked, { kind: "ok", response: body as unknown as typeof answering }, 4);
+    expect(set.held).toEqual({ ids: asked, response: answering, at: 2 });
+  }
+});

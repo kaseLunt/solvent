@@ -7,7 +7,6 @@ import { engineName } from "./inspector-headline";
 import { LEGACY } from "./inspector-position";
 import type { CompareRow, CompareView } from "./lab-compare";
 import type { HeatmapView } from "./lab-transitions";
-import type { Banner, HeldCondition, Retained } from "./lab-view";
 import { formatTenths } from "./percent";
 import { groupInt, joinAnd } from "./prose";
 
@@ -205,9 +204,22 @@ const failureWords = (failure: LabHeadline | null): string =>
  */
 const rerunFailedLine = (action: "Run" | "Compare", failure: LabHeadline | null, stands: string): string => `${action} again failed — ${failureWords(failure)} ${stands}`;
 
+/** A failed Compare with nothing held beneath it: the failure's own words are the finding. */
+export const compareFailedLine = (failure: LabHeadline): string => failureWords(failure);
+
 /** A failed Compare over the comparison it left standing: the failure named, and the batch the dots below are for. */
 export const compareRerunFailedLine = (failure: LabHeadline, batchId: number): string =>
   rerunFailedLine("Compare", failure, `The comparison below stands for batch ${groupInt(batchId)}.`);
+
+/** What stands over a result that keeps its figures, or beside a retained body that is not shown. */
+export type Banner = "stale-input" | "superseded" | "rerun-failed" | "retained-refused" | null;
+/** The held result's own condition, said beside the failure that left it standing. */
+export type HeldCondition = "stale-input" | "superseded" | null;
+/** A retained body the page does not show: its definition changed since it was computed. */
+export interface Retained {
+  readonly batchId: number;
+  readonly skew: readonly string[];
+}
 
 export interface StaleBannerInput {
   readonly kind: Exclude<Banner, null>;

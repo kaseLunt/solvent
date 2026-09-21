@@ -15,9 +15,11 @@
 // What this module still does that the method does not, and why it therefore
 // still exists: it SEALS the outcome into a union, so a deployment that does
 // not serve the route yet renders as a first-class "not yet served" rather than
-// as an error, never a spinner and never fake data; and it refines projections
-// through the client's `refineProjection` before any component sees them, so no
-// nullable-boolean verdict reaches the UI. Re-homing that union on top of the
+// as an error, never a spinner and never fake data; and it refines each
+// projection horizon through the client's `refineProjectionHorizon` before any
+// component sees it, so no nullable-boolean verdict reaches the UI — a horizon
+// it cannot refine stays verbatim and is named by the Lab's classifier, never
+// read. Re-homing that union on top of the
 // real method is a `web/` refactor with its own test surface and no bearing on
 // the contract; it is deliberately NOT this wave's work.
 //
@@ -27,7 +29,7 @@
 // `web/` that touches a `/v1` route outside `SolventClient`.
 
 import {
-  refineProjection,
+  refineProjectionHorizon,
   type components,
   type ErrorBody,
   type RefinedProjection,
@@ -36,6 +38,7 @@ import {
 export type RunBookResponse = components["schemas"]["RunBookResponse"];
 export type RunBookEngine = components["schemas"]["RunBookEngine"];
 export type RunBookAggregate = components["schemas"]["RunBookAggregate"];
+type RunBookHorizon = NonNullable<RunBookEngine["projection"]>["horizons"][number];
 
 // Contract 1.7.0 — the transition matrix. `RunBookEngine` widens through the
 // regenerated schema, so `LabRunBookEngine` carries `hf_transitions` with no
@@ -68,6 +71,34 @@ export type RunBookOutcome =
   | { kind: "rate-limited"; retryAfterSeconds: number | null }
   | { kind: "unreachable"; message: string }
   | { kind: "failed"; status: number; message: string };
+
+/** A JSON object: never null, a primitive, or a list standing where one belongs. */
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A horizon is sealed only when it is an object carrying one of the contract's three wire verdicts (true, false, null); anything else is not guessed at. */
+function sealable(horizon: unknown): horizon is RunBookHorizon {
+  return isObject(horizon) && (horizon.becomes_liquidatable === null || typeof horizon.becomes_liquidatable === "boolean");
+}
+
+/** A projection's horizons, each sealed where it can be and left verbatim where it cannot; a projection that is no object, or carries no list of horizons, is left whole. */
+function sealProjection(projection: unknown): unknown {
+  if (!isObject(projection) || !Array.isArray(projection.horizons)) return projection;
+  return { ...projection, horizons: projection.horizons.map((h: unknown) => (sealable(h) ? refineProjectionHorizon(h) : h)) };
+}
+
+/**
+ * SEAL A 2xx BODY, TOTALLY. The sealing refines what it can read and never throws on what it cannot: a body that is
+ * not a JSON object, an `engines` that is not a list, an engine that is not an object, a projection that is not one
+ * and a horizon the refinement cannot read each pass through VERBATIM, so the Lab's classifiers name them by the
+ * field and the page says which. A service that answered 2xx has answered: its body is a named malformed answer,
+ * never "unreachable" — that word is a transport failure's alone. A null projection is the wire's own "no
+ * projection" and stays null; a horizon left unsealed carries no verdict, and the engine classifier names it.
+ */
+export function sealRunBook(body: unknown): LabRunBook {
+  if (!isObject(body) || !Array.isArray(body.engines)) return body as unknown as LabRunBook;
+  const engines = body.engines.map((engine: unknown) => (isObject(engine) && "projection" in engine ? { ...engine, projection: sealProjection(engine.projection) } : engine));
+  return { ...body, engines } as unknown as LabRunBook;
+}
 
 /** The contract's committed-scenario id shape, refused BEFORE a request is made. */
 export const SCENARIO_ID_PATTERN = /^[a-z0-9_]{1,64}$/;
@@ -135,23 +166,13 @@ export async function runBookScenario(
   }
 
   if (res.ok) {
-    let body: RunBookResponse;
+    let body: unknown;
     try {
-      body = (await res.json()) as RunBookResponse;
+      body = await res.json();
     } catch {
       return { kind: "failed", status: res.status, message: "2xx response body is not JSON" };
     }
-    const { engines, ...rest } = body;
-    return {
-      kind: "ok",
-      response: {
-        ...rest,
-        engines: engines.map((engine) => ({
-          ...engine,
-          projection: engine.projection === null ? null : refineProjection(engine.projection),
-        })),
-      },
-    };
+    return { kind: "ok", response: sealRunBook(body) };
   }
 
   const raw = await res.text().catch(() => "");

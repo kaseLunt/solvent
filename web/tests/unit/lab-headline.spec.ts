@@ -3,6 +3,7 @@
 import { expect, test } from "@playwright/test";
 import {
   compareCaption,
+  compareFailedLine,
   compareHeadline,
   compareRerunFailedLine,
   compareRowWords,
@@ -278,6 +279,9 @@ test("the rerun sentences are the lib's: a failed Compare and a failed Run over 
   expect(staleBannerLine({ kind: "rerun-failed", skew: [], batchId: 18251, failure: limited, heldCondition: null, retained: null })).toBe(
     "Run again failed — Rate limited (429). Retry after 3s. The result below stands for batch 18,251.",
   );
+  // With nothing held the failure's own words are the finding — the same words, its rest kept where it has one.
+  expect(compareFailedLine(limited)).toBe("Rate limited (429). Retry after 3s.");
+  expect(compareFailedLine({ emphasis: "The evaluator is busy,", rest: "as it said.", tone: "refused", dek: "1 of 1 slots in use." })).toBe("The evaluator is busy, as it said. 1 of 1 slots in use.");
   // A contradiction is a failure like any other: its sentence, then the batch that stands.
   const contradiction = contradictoryHeadline("ETH -30 percent", ["batch is outside the wire contract"]);
   expect(staleBannerLine({ kind: "rerun-failed", skew: [], batchId: 18251, failure: contradiction, heldCondition: null, retained: null })).toBe(

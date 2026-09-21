@@ -16,8 +16,11 @@ import {
   type FieldCheck,
 } from "./wireGuard";
 
+/** The three sealed liquidation verdicts a refined horizon carries. */
+const SEALED_VERDICTS: ReadonlySet<unknown> = new Set(["liquidatable", "not-liquidatable", "unknowable"]);
+
 /** A runtime object gate: the JSON cast guarantees nothing. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
@@ -282,6 +285,10 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
             `${at}.additional_interest_usd`,
             isWireDecimal(horizon.additional_interest_usd),
           ]);
+          // The Lab holds a run-book's projection SEALED: the wire's nullable boolean became one of three verdicts on
+          // receipt. A horizon that carries none was never sealed — its wire verdict was outside the contract's
+          // true / false / null — and is named by the wire's own field, never read as a verdict.
+          checks.push([`${at}.becomes_liquidatable`, SEALED_VERDICTS.has(horizon.liquidation_verdict)]);
         });
       }
     }
@@ -357,18 +364,52 @@ export function classifySetRunEngine(engine: SetRunEngineSummary): { malformedFi
 
 
 /**
- * A list member of an envelope: not a list, it is named by the field; a list, each element the contract does not
- * admit is named per index. A list that is not one is never dereferenced, and an element that is not what the list
- * holds is never read as one.
+ * The one name for a 2xx body that is not a JSON object at all — null, a primitive, a list. It is a sentence of its
+ * own, not a field: nothing in such a body has a name to refuse by.
  */
-function listChecks(field: string, value: unknown, admits: (element: unknown) => boolean): FieldCheck[] {
-  if (!Array.isArray(value)) return [[field, false]];
-  return value.map((element: unknown, index): FieldCheck => [`${field}[${String(index)}]`, admits(element)]);
+export const BODY_NOT_OBJECT = "the response body is not a JSON object";
+
+/** A classifier's names as the reasons a reader sees: each field outside the wire contract; a body that is no object, in its own sentence. */
+export function contractFaults(names: readonly string[]): string[] {
+  return names.map((name) => (name === BODY_NOT_OBJECT ? name : `${name} is outside the wire contract`));
 }
 
 const isString = (value: unknown): boolean => typeof value === "string";
 /** An object member or element of an envelope: a JSON object, never a list standing where one belongs. */
 const isObject = (value: unknown): value is Record<string, unknown> => isRecord(value) && !Array.isArray(value);
+
+/** What one element of a list must be: its checks, named under the element's own index. */
+type ElementChecks = (at: string, element: unknown) => FieldCheck[];
+const aString: ElementChecks = (at, element) => [[at, isString(element)]];
+const anObject: ElementChecks = (at, element) => [[at, isObject(element)]];
+/** An object whose named members are strings the page prints or compares: each that is not one is named; an element that is no object is named whole. */
+const anObjectWithStrings =
+  (...members: readonly string[]): ElementChecks =>
+  (at, element) =>
+    isObject(element) ? members.map((member): FieldCheck => [`${at}.${member}`, isString(element[member])]) : [[at, false]];
+
+/**
+ * An engine refusal (`EngineRefusal`): the engine it speaks for and the code its cause is read from. A refusal that
+ * names no engine speaks for none, and a code that is not a string is never handed to the phrasebook. An EMPTY code
+ * is a string the contract admits — the phrasebook has its own sentence for a refusal that names no code.
+ */
+const aRefusal: ElementChecks = (at, element) =>
+  isObject(element)
+    ? [
+        [`${at}.engine`, typeof element.engine === "string" && element.engine.trim() !== ""],
+        [`${at}.code`, isString(element.code)],
+      ]
+    : [[at, false]];
+
+/**
+ * A list member of an envelope: not a list, it is named by the field; a list, each element the contract does not
+ * admit is named per index, by the member that fails where the element is an object. A list that is not one is
+ * never dereferenced, and an element that is not what the list holds is never read as one.
+ */
+function listChecks(field: string, value: unknown, element: ElementChecks): FieldCheck[] {
+  if (!Array.isArray(value)) return [[field, false]];
+  return value.flatMap((each: unknown, index) => element(`${field}[${String(index)}]`, each));
+}
 
 /** The schema's `number | null` batch id (`newest_servable_batch_id`): null is the wire's own "none was servable". */
 function isNullableBatchId(value: unknown): boolean {
@@ -393,36 +434,47 @@ function batchChecks(batch: unknown, reads: { readonly age: boolean; readonly su
 
 /**
  * CLASSIFY THE RUN-BOOK ENVELOPE, in wire read order, before anything is read from the body. Empty list = the
- * envelope is inside the contract; a non-empty list names every fault: an object member (`batch`, `coverage`) that is
- * missing or not an object, the batch fields the page reads, every list that is not a list, and every element that
- * is not what its list holds. A version-skewed 2xx is a refusal by the field's name, never a throw at render. The
- * engine rows themselves are `classifyRunBookEngine`'s; this is the law of what carries them.
+ * envelope is inside the contract; a non-empty list names every fault: a body that is no JSON object (its own
+ * sentence, and nothing else is asked of it), the string members the page prints or compares, an object member
+ * (`batch`, `coverage`) that is missing or not an object, the batch fields the page reads, every list that is not a
+ * list, and every element that is not what its list holds. A version-skewed 2xx is a refusal by the field's name,
+ * never a throw at render. The engine rows themselves are `classifyRunBookEngine`'s; this is the law of what carries
+ * them.
  */
 export function classifyRunBookEnvelope(run: LabRunBook): string[] {
-  const r = run as unknown as Record<string, unknown>;
+  const r: unknown = run;
+  if (!isObject(r)) return [BODY_NOT_OBJECT];
   return malformedFields([
+    ["served_at", isString(r.served_at)],
     ...batchChecks(r.batch, { age: true, supersession: true }),
-    ...listChecks("shocks", r.shocks, isObject),
-    ...listChecks("out_of_model", r.out_of_model, isString),
-    ...listChecks("applied_shocks", r.applied_shocks, isObject),
-    ...listChecks("held_flat", r.held_flat, isObject),
-    ...listChecks("engines", r.engines, isObject),
-    ...listChecks("excluded_engines", r.excluded_engines, isObject),
+    ["scenario_config_version", isString(r.scenario_config_version)],
+    ["scenario_id", isString(r.scenario_id)],
+    ["scenario_version", isString(r.scenario_version)],
+    ["label", isString(r.label)],
+    ["path_assumption", isString(r.path_assumption)],
+    ...listChecks("shocks", r.shocks, anObject),
+    ...listChecks("out_of_model", r.out_of_model, aString),
+    ...listChecks("applied_shocks", r.applied_shocks, anObjectWithStrings("asset", "source")),
+    ...listChecks("held_flat", r.held_flat, anObjectWithStrings("asset", "source")),
+    ...listChecks("engines", r.engines, anObject),
+    ...listChecks("excluded_engines", r.excluded_engines, aRefusal),
     ["coverage", isObject(r.coverage)],
-    ...listChecks("notes", r.notes, isString),
+    ...listChecks("notes", r.notes, aString),
   ]);
 }
 
 const SET_FRESHNESS: ReadonlySet<unknown> = new Set(["still_newest", "superseded", "newest_is_older", "none_servable"]);
 
 /**
- * CLASSIFY THE SET ENVELOPE, in wire read order, before anything is read from the body: `batch`, `evaluation` and
- * `coverage` as objects, the evaluation's own fields the comparison prints, every list, and each result an object.
- * A result's own engine lists are `classifySetResult`'s — a result that breaks them is one refused row, never the
- * refusal of the rows beside it.
+ * CLASSIFY THE SET ENVELOPE, in wire read order, before anything is read from the body: a body that is no JSON
+ * object (its own sentence), `batch`, `evaluation` and `coverage` as objects, the evaluation's own fields the
+ * comparison prints, every list, and each result an object carrying the id it is asked for by and the label its row
+ * prints. A result's own engine lists are `classifySetResult`'s — a result that breaks them is one refused row,
+ * never the refusal of the rows beside it.
  */
 export function classifySetEnvelope(set: RunBookSetResponse): string[] {
-  const s = set as unknown as Record<string, unknown>;
+  const s: unknown = set;
+  if (!isObject(s)) return [BODY_NOT_OBJECT];
   const evaluation = s.evaluation;
   return malformedFields([
     ...batchChecks(s.batch, { age: false, supersession: false }),
@@ -433,25 +485,25 @@ export function classifySetEnvelope(set: RunBookSetResponse): string[] {
           ["evaluation.newest_servable_batch_id", isNullableBatchId(evaluation.newest_servable_batch_id)],
         ] satisfies FieldCheck[])
       : ([["evaluation", false]] satisfies FieldCheck[])),
-    ...listChecks("requested_scenario_ids", s.requested_scenario_ids, isString),
-    ...listChecks("results", s.results, isObject),
-    ...listChecks("excluded_engines", s.excluded_engines, isObject),
+    ...listChecks("requested_scenario_ids", s.requested_scenario_ids, aString),
+    ...listChecks("results", s.results, anObjectWithStrings("scenario_id", "label")),
+    ...listChecks("excluded_engines", s.excluded_engines, aRefusal),
     ["coverage", isObject(s.coverage)],
-    ...listChecks("notes", s.notes, isString),
+    ...listChecks("notes", s.notes, aString),
   ]);
 }
 
 /**
  * CLASSIFY ONE SET RESULT'S ENGINE LISTS, in wire read order: the coverage and the three parts that partition it.
- * Each that is not a list is named, and each element that is not what its list holds — before the census reads an
- * id from any of them.
+ * Each that is not a list is named, and each element that is not what its list holds — an absence by the engine it
+ * speaks for and the reason its row prints — before the census reads an id from any of them.
  */
 export function classifySetResult(result: SetRunScenarioResult): string[] {
   const r = result as unknown as Record<string, unknown>;
   return malformedFields([
-    ...listChecks("covered_engines", r.covered_engines, isString),
-    ...listChecks("withheld_engines", r.withheld_engines, isString),
-    ...listChecks("unmeasurable_engines", r.unmeasurable_engines, isObject),
-    ...listChecks("engines", r.engines, isObject),
+    ...listChecks("covered_engines", r.covered_engines, aString),
+    ...listChecks("withheld_engines", r.withheld_engines, aString),
+    ...listChecks("unmeasurable_engines", r.unmeasurable_engines, anObjectWithStrings("engine", "reason")),
+    ...listChecks("engines", r.engines, anObject),
   ]);
 }

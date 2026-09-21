@@ -4,7 +4,7 @@
 // scenario that did not answer for the engine keeps its own kind; it is never
 // a dot at zero.
 import type { components } from "@solvent/client";
-import { classifySetEnvelope, classifySetResult, classifySetRunEngine } from "./lab-classify";
+import { classifySetEnvelope, classifySetResult, classifySetRunEngine, contractFaults } from "./lab-classify";
 import { signedUsd } from "./lab-headline";
 import { formatTenths, percentTenths } from "./percent";
 import { isWireDecimal, isWireScale } from "./wireGuard";
@@ -167,7 +167,7 @@ export function setMembership(asked: readonly string[], set: RunBookSetResponse)
   // The envelope first: a body whose envelope is outside the contract is refused by the names of its fields before
   // any set question is posed of it, never dereferenced — a version-skewed 2xx is a refusal, not a throw.
   const envelope = classifySetEnvelope(set);
-  if (envelope.length > 0) return envelope.map((field) => `${field} is outside the wire contract`);
+  if (envelope.length > 0) return contractFaults(envelope);
   const faults: string[] = [];
   const counts = new Map<string, number>();
   for (const id of set.requested_scenario_ids) counts.set(id, (counts.get(id) ?? 0) + 1);

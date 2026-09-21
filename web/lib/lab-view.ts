@@ -7,7 +7,7 @@ import type { ReceivedAt } from "./freshness";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import type { LoadPhase } from "./inspector-view";
-import { classifyRunBookEnvelope } from "./lab-classify";
+import { classifyRunBookEnvelope, contractFaults } from "./lab-classify";
 import { compareRows, setMembership, type CompareView } from "./lab-compare";
 import { readEngine, type EngineReading } from "./lab-engine";
 import {
@@ -23,7 +23,10 @@ import {
   runningHeadline,
   setMembershipHeadline,
   withheldHeadline,
+  type Banner,
+  type HeldCondition,
   type LabHeadline,
+  type Retained,
 } from "./lab-headline";
 import { definitionSkew, libraryRows, type HeldResult, type LibraryRow, type RunRecord, type ScenarioDefinition, type ScenariosResponse } from "./lab-library";
 import type { LabReading } from "./lab-reading";
@@ -33,6 +36,7 @@ import type { LabRunBook, RunBookOutcome } from "./runbook";
 
 export { readEngine } from "./lab-engine";
 export type { EngineReading, EngineResult } from "./lab-engine";
+export type { Banner, HeldCondition, Retained } from "./lab-headline";
 
 /** A chip on the identity strip; structurally the kit's IdentityChip, kept out of the component layer. */
 export interface LabChip {
@@ -58,14 +62,6 @@ export type BookState =
   | "busy"
   | "unreachable"
   | "failed";
-export type Banner = "stale-input" | "superseded" | "rerun-failed" | "retained-refused" | null;
-/** The held result's own condition, said beside the failure that left it standing. */
-export type HeldCondition = "stale-input" | "superseded" | null;
-/** A retained body the page does not show: its definition changed since it was computed. */
-export interface Retained {
-  readonly batchId: number;
-  readonly skew: readonly string[];
-}
 
 export interface BookWorkspace {
   readonly state: BookState;
@@ -145,9 +141,6 @@ function enginesChip(run: LabRunBook, cash: EngineReading): LabChip {
   return { label: "Engines", value: parts.join(" · "), tone: withheld.length > 0 || cash.kind === "withheld" ? "warn" : undefined };
 }
 
-/** A classifier's field names as the contradiction's reasons: each field, outside the wire contract. */
-const outsideContract = (fields: readonly string[]): string[] => fields.map((f) => `${f} is outside the wire contract`);
-
 function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunBook, receivedAt: ReceivedAt): BookWorkspace {
   // The envelope first, before any member of it is read: a body whose envelope is outside the contract is the
   // contradictory state naming every field, and nothing of it is carried — no run for the drawer or the age to
@@ -155,7 +148,7 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
   const envelope = classifyRunBookEnvelope(run);
   if (envelope.length > 0) {
     return {
-      ...emptyBook("contradictory", contradictoryHeadline(def.label, outsideContract(envelope)), def, definitionChips(def, configVersion)),
+      ...emptyBook("contradictory", contradictoryHeadline(def.label, contractFaults(envelope)), def, definitionChips(def, configVersion)),
       cash: readEngine(run, CASH, def),
       legacy: def.engines.includes(LEGACY) ? readEngine(run, LEGACY, def) : null,
     };
@@ -189,7 +182,7 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
     case "contradictory":
       return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, cash.reasons) };
     case "unreadable":
-      return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, outsideContract(cash.fields)) };
+      return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, contractFaults(cash.fields)) };
     case "result": {
       const r = cash.result;
       const headline = resultHeadline({

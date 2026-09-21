@@ -53,7 +53,8 @@ export type EngineReading =
 export function readEngine(run: LabRunBook, engine: string, definition: ScenarioDefinition): EngineReading {
   // The envelope first, before the definition is consulted or a list is searched: a body whose envelope is outside
   // the contract is unreadable by the names of its fields, never dereferenced and never "not modelled" — a
-  // version-skewed 2xx is a refusal, not a throw at render.
+  // version-skewed 2xx is a refusal, not a throw at render. Past this line every refusal names its engine and
+  // carries a string code, so the phrasebook below is never handed anything else.
   const envelope = classifyRunBookEnvelope(run);
   if (envelope.length > 0) return { kind: "unreadable", fields: envelope };
   if (!definition.engines.includes(engine)) return { kind: "not-covered" };
@@ -102,6 +103,13 @@ export function readEngine(run: LabRunBook, engine: string, definition: Scenario
  * result. A body with no Cash row, or with Cash among its refusals, reads too — withheld, or not modelled, is an
  * honest answer. A malformed or self-contradicting body is a failed answer: it never moves into the hold, so the
  * last body that read stands behind every one that does not.
+ *
+ * The view's release rule is this rule asked under the definition, and the two agree wherever the view judges the
+ * Cash row: what it calls contradictory never reads, and what reads is never contradictory. They part only where the
+ * view's state is decided BEFORE the row is judged — a body computed under another version of the definition, or a
+ * definition that does not model Cash — while the body carries a malformed Cash row: the view releases, and this
+ * rule still refuses the body the hold. This rule governs the hold: a malformed row is never held, whatever the
+ * definition would have said of it, and the older result is what a later failure stands.
  */
 export function readsAsAnswer(run: LabRunBook): boolean {
   if (classifyRunBookEnvelope(run).length > 0) return false;

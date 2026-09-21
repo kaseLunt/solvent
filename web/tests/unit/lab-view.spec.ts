@@ -2,6 +2,7 @@
 // the chips, and the per-engine readings — derived once, read by the surface
 // and by these pins alike.
 import { expect, test } from "@playwright/test";
+import { readsAsAnswer } from "../../lib/lab-engine";
 import type { LabReading } from "../../lib/lab-reading";
 import type { RunRecord, SetRecord } from "../../lib/lab-library";
 import { deriveLabView, readEngine } from "../../lib/lab-view";
@@ -385,4 +386,86 @@ test("compare: a set whose envelope is outside the contract is a failed Compare 
   const standing = deriveLabView(reading({ set: over({ batch: undefined }, held) }), ui()).compare;
   expect(standing.kind).toBe("failed");
   if (standing.kind === "failed") expect(standing.held?.cash.batchId).toBe(18251);
+});
+
+test("a refusal without a string code is named and never read — no code reaches the phrasebook, the body does not read as an answer, and a held result stands; an empty code is still a refusal and reads", () => {
+  const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
+  for (const refusal of [{ engine: "debt_manager" }, { engine: "debt_manager", code: null, detail: "", note: "" }, { engine: "debt_manager", code: 503, detail: null, note: "" }]) {
+    const noCode = { ...run, excluded_engines: [refusal] } as unknown as typeof run;
+    expect(readsAsAnswer(noCode)).toBe(false);
+    expect(readEngine(noCode, "debt_manager", DEFINITION_ETH)).toEqual({ kind: "unreadable", fields: ["excluded_engines[0].code"] });
+    const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: noCode }) }), ui());
+    expect(v.book.state).toBe("contradictory");
+    expect(v.book.headline.dek).toBe("excluded_engines[0].code is outside the wire contract. Nothing from it is drawn.");
+    expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
+    const over = new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "ok", response: noCode }, at: 2, atMonotonicMs: 2, held: { response: run, at: 1, atMonotonicMs: 1 } }]]);
+    const h = deriveLabView(reading({ runs: over }), ui());
+    expect(h.book.state).toBe("result");
+    expect(h.book.banner).toBe("rerun-failed");
+    expect(h.book.run).toBe(run);
+  }
+  // The contract floors no length on the code: a refusal that names none is still a refusal, said in the phrasebook's own sentence.
+  const emptyCode = runBookOf([legacyEngine({ 7: { 7: 1 } })], ETH_DEF, { excluded_engines: [{ engine: "debt_manager", code: "", detail: "", note: "" }] });
+  expect(readsAsAnswer(emptyCode)).toBe(true);
+  const w = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: emptyCode }) }), ui());
+  expect(w.book.state).toBe("withheld");
+  expect(w.book.headline.dek).toContain("Cash — the engine gave no reason.");
+});
+
+test("a 2xx body that is not a JSON object is a named answer on both paths, never a throw: the contradictory state for a run, a failed Compare for a set, and whatever was held stands", () => {
+  const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  for (const body of [null, 7, "ok", [], [run]]) {
+    const response = body as unknown as typeof run;
+    const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response }) }), ui());
+    expect(v.book.state).toBe("contradictory");
+    expect(v.book.headline).toEqual(contradictoryHeadline("ETH -30 percent", ["the response body is not a JSON object"]));
+    expect(v.book.headline.dek).toBe("the response body is not a JSON object. Nothing from it is drawn.");
+    expect(v.book.run).toBeNull();
+    expect(v.book.cash).toEqual({ kind: "unreadable", fields: ["the response body is not a JSON object"] });
+    expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome.text).toBe("Unreadable");
+    const over = new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "ok", response }, at: 2, atMonotonicMs: 2, held: { response: run, at: 1, atMonotonicMs: 1 } }]]);
+    const h = deriveLabView(reading({ runs: over }), ui());
+    expect(h.book.state).toBe("result");
+    expect(h.book.banner).toBe("rerun-failed");
+    expect(h.book.rerunFailure?.dek).toBe("the response body is not a JSON object. Nothing from it is drawn.");
+    // The set path: a failed Compare with the same name; a held comparison stands beside it.
+    const setBody = body as unknown as typeof DEMO_RUN_BOOK_SET;
+    const bare: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "ok", response: setBody }, at: 3, held: null };
+    const c = deriveLabView(reading({ set: bare }), ui()).compare;
+    expect(c.kind).toBe("failed");
+    if (c.kind === "failed") expect(c.headline.dek).toBe("Faults: the response body is not a JSON object. Nothing from it is drawn.");
+    const standing = deriveLabView(reading({ set: { ...bare, held: { ids: asked, response: demoSetFor(asked), at: 2 } } }), ui()).compare;
+    expect(standing.kind).toBe("failed");
+    if (standing.kind === "failed") expect(standing.held?.cash.batchId).toBe(18251);
+  }
+});
+
+test("the hold's rule and the view's release rule, where they part: the record asks the body alone, the view asks it under the definition — a malformed Cash row the view never judges is released by the view and still never held", () => {
+  const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
+  const held = { response: run, at: 1, atMonotonicMs: 1 };
+  const over = (response: typeof run) => new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "ok", response }, at: 2, atMonotonicMs: 2, held }]]);
+  // Corner one — a body computed under another version of the definition, its Cash row malformed: the view's state is
+  // decided at the version, before any row is judged, so it says "definition changed" and releases; the record, asking
+  // the body alone, does not hold it. Nothing false prints; a later failure stands the older result, never this body.
+  const skewedMalformed = runBookOf([demoCash({ eligible_debt_delta_usd: "1e6" })], { ...ETH_DEF, version: "v2" });
+  const one = deriveLabView(reading({ runs: over(skewedMalformed) }), ui());
+  expect(one.book.state).toBe("definition-changed");
+  expect(one.book.banner).toBeNull();
+  expect(readsAsAnswer(skewedMalformed)).toBe(false);
+  // Corner two — a definition that does not model Cash beside a body that carries a malformed Cash row anyway: the
+  // view says "not modelled" before the row is judged, and releases; the record does not hold the body.
+  const legacyOnly = { ...ETH_DEF, engines: ["aave_v3_etherfi"] };
+  const listing = { ...SCENARIOS, scenarios: SCENARIOS.scenarios.map((s) => (s.id === "eth_minus_30" ? legacyOnly : s)) };
+  const strayMalformed = runBookOf([legacyEngine({ 7: { 7: 1 } }), demoCash({ usd_decimals: 1.5 })], legacyOnly);
+  const two = deriveLabView(reading({ listing: { phase: "ready", value: listing }, runs: over(strayMalformed) }), ui());
+  expect(two.book.state).toBe("not-covered");
+  expect(two.book.banner).toBeNull();
+  expect(readsAsAnswer(strayMalformed)).toBe(false);
+  // Everywhere else the two agree: what the view calls contradictory never reads, and what reads is never contradictory.
+  const malformed = runBookOf([demoCash({ eligible_debt_delta_usd: "1e6" })], ETH_DEF);
+  expect(deriveLabView(reading({ runs: over(malformed) }), ui()).book.banner).toBe("rerun-failed");
+  expect(readsAsAnswer(malformed)).toBe(false);
+  expect(deriveLabView(reading({ runs: over(run) }), ui()).book.banner).toBeNull();
+  expect(readsAsAnswer(run)).toBe(true);
 });
