@@ -1,6 +1,6 @@
 // The deep-link law for /lab: `?scenario=` runs one, `?scenarios=` runs the
-// committed set, both together run nothing. Moved verbatim from the old Lab's
-// tornadoLines.ts; the unit pins moved with it.
+// committed set, both together run nothing. The decision is about the link the
+// page was OPENED with; the page's own URL writes are never decided again.
 
 import { MAX_SET_RUN_SCENARIOS } from "./runbookSet";
 

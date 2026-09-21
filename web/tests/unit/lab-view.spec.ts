@@ -17,7 +17,7 @@ function reading(overrides: Partial<LabReading>): LabReading {
 const settled = (id: string, outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): Map<string, RunRecord> => new Map([[id, { phase: "settled", outcome, at: 1, atMonotonicMs: 1, held: null }]]);
 const ui = (selectedId: string | null = "eth_minus_30", checked: string[] = []) => ({ selectedId, checked: new Set(checked) });
 
-/** The demo's Cash engine: the plan's R16 figures on the plan's movement table. */
+/** The demo's Cash engine: the demo Book's own figures on the demo movement table, so every headline pinned here is the one the demo page prints. */
 function demoCash(overrides: Partial<Engine> = {}): Engine {
   const e = cashEngine(DEMO_CASH_TABLE);
   return {
@@ -51,6 +51,18 @@ test("listing loading and unavailable; an empty listing; the library follows the
   expect(v.library[0]?.selected).toBe(true);
   expect(v.checked).toEqual(["ethfi_minus_50"]);
   expect(v.configVersion).toBe(SCENARIOS.scenario_config_version);
+});
+
+test("nothing can run until the listing answers: while it loads, and when it cannot be listed, no tick counts toward a Compare — the ids a link pre-ticked are not yet scenarios the listing names; once listed, they count", () => {
+  const linked = ui(null, ["eth_minus_30", "ethfi_minus_50", "ghost"]);
+  for (const listing of [{ phase: "loading" }, { phase: "error", message: "down" }] as const) {
+    const v = deriveLabView(reading({ listing }), linked);
+    expect(v.library).toEqual([]);
+    expect(v.checked).toEqual([]);
+    expect(v.book.definition).toBeNull();
+  }
+  // The listing in hand decides: the ticks it names count, in its own order; the one it does not name never does.
+  expect(deriveLabView(reading({}), linked).checked).toEqual(["eth_minus_30", "ethfi_minus_50"]);
 });
 
 test("not run: the definition, the dashed tone, no chips beyond identity, no engines", () => {
@@ -441,36 +453,82 @@ test("a 2xx body that is not a JSON object is a named answer on both paths, neve
   }
 });
 
-test("the hold's rule and the view's release rule, where they part: the record asks the body alone, the view asks it under the definition — a malformed Cash row the view never judges is released by the view and still never held", () => {
+test("one rule holds a result and releases it — does the body read: a malformed Cash row is a failed answer whatever else the body says, so under another version of the definition it is never 'definition changed', and beside a definition that does not model Cash never 'not modelled'; the result on the page stands from the moment the bad body settles, and no later failure brings back figures the page had withdrawn", () => {
   const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
   const held = { response: run, at: 1, atMonotonicMs: 1 };
-  const over = (response: typeof run) => new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "ok", response }, at: 2, atMonotonicMs: 2, held }]]);
-  // Corner one — a body computed under another version of the definition, its Cash row malformed: the view's state is
-  // decided at the version, before any row is judged, so it says "definition changed" and releases; the record, asking
-  // the body alone, does not hold it. Nothing false prints; a later failure stands the older result, never this body.
+  const over = (response: typeof run, h: typeof held | null = held) => new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "ok", response }, at: 2, atMonotonicMs: 2, held: h }]]);
+  const word = (v: ReturnType<typeof deriveLabView>) => v.library.find((r) => r.id === "eth_minus_30")?.outcome;
+  // Corner one — a body computed under another version of the definition, its Cash row malformed. The body is asked
+  // whether it reads BEFORE its version is: it does not, so it is the contradiction, the fault named — and the result
+  // already on the page stands under it, its figures never withdrawn.
   const skewedMalformed = runBookOf([demoCash({ eligible_debt_delta_usd: "1e6" })], { ...ETH_DEF, version: "v2" });
-  const one = deriveLabView(reading({ runs: over(skewedMalformed) }), ui());
-  expect(one.book.state).toBe("definition-changed");
-  expect(one.book.banner).toBeNull();
+  const fault = contradictoryHeadline("ETH -30 percent", ["eligible_debt_delta_usd is outside the wire contract"]);
   expect(readsAsAnswer(skewedMalformed)).toBe(false);
+  const one = deriveLabView(reading({ runs: over(skewedMalformed) }), ui());
+  expect(one.book.state).toBe("result");
+  expect(one.book.banner).toBe("rerun-failed");
+  expect(one.book.rerunFailure).toEqual(fault);
+  expect(one.book.run).toBe(run);
+  expect(one.book.headline.emphasis).toBe("$1.2M more Cash debt becomes liquidatable,");
+  expect(word(one)).toEqual({ key: "result", text: "+$1.2M liquidatable · 118 accounts", tone: "crit" });
+  // The consequence: the bad body never entered the hold, so the re-run that fails next stands the SAME figures the
+  // page never stopped showing — nothing reappears, because nothing was withdrawn.
+  const afterwards = new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "not-served" }, at: 3, atMonotonicMs: 3, held }]]);
+  const later = deriveLabView(reading({ runs: afterwards }), ui());
+  expect(later.book.run).toBe(one.book.run);
+  expect(later.book.headline).toEqual(one.book.headline);
+  expect(later.book.banner).toBe("rerun-failed");
+  // With nothing held the same body is the contradiction by the names of its fields — in the workspace, the tiles and the library's word.
+  const bareOne = deriveLabView(reading({ runs: over(skewedMalformed, null) }), ui());
+  expect(bareOne.book.state).toBe("contradictory");
+  expect(bareOne.book.headline).toEqual(fault);
+  expect(bareOne.book.cash).toEqual({ kind: "unreadable", fields: ["eligible_debt_delta_usd"] });
+  expect(word(bareOne)).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
+  // A body under another version that READS is still "definition changed", and releases the hold: an honest answer.
+  const skewedClean = runBookOf([demoCash()], { ...ETH_DEF, version: "v2" });
+  expect(readsAsAnswer(skewedClean)).toBe(true);
+  const changed = deriveLabView(reading({ runs: over(skewedClean) }), ui());
+  expect(changed.book.state).toBe("definition-changed");
+  expect(changed.book.banner).toBeNull();
+  expect(word(changed)).toEqual({ key: "definition-changed", text: "Definition changed", tone: "refused" });
+
   // Corner two — a definition that does not model Cash beside a body that carries a malformed Cash row anyway: the
-  // view says "not modelled" before the row is judged, and releases; the record does not hold the body.
+  // row is judged before the definition's coverage is asked, so the body is the contradiction, never "not modelled".
   const legacyOnly = { ...ETH_DEF, engines: ["aave_v3_etherfi"] };
   const listing = { ...SCENARIOS, scenarios: SCENARIOS.scenarios.map((s) => (s.id === "eth_minus_30" ? legacyOnly : s)) };
   const strayMalformed = runBookOf([legacyEngine({ 7: { 7: 1 } }), demoCash({ usd_decimals: 1.5 })], legacyOnly);
-  const two = deriveLabView(reading({ listing: { phase: "ready", value: listing }, runs: over(strayMalformed) }), ui());
-  expect(two.book.state).toBe("not-covered");
-  expect(two.book.banner).toBeNull();
+  const stray = contradictoryHeadline("ETH -30 percent", ["usd_decimals is outside the wire contract"]);
   expect(readsAsAnswer(strayMalformed)).toBe(false);
-  // Everywhere else the two agree: what the view calls contradictory never reads, and what reads is never contradictory.
+  const bareTwo = deriveLabView(reading({ listing: { phase: "ready", value: listing }, runs: over(strayMalformed, null) }), ui());
+  expect(bareTwo.book.state).toBe("contradictory");
+  expect(bareTwo.book.headline).toEqual(stray);
+  expect(bareTwo.book.cash).toEqual({ kind: "unreadable", fields: ["usd_decimals"] });
+  expect(word(bareTwo)).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
+  // Over a held answer — here an honest "not modelled" — the hold stands, the contradiction named beside it.
+  const legacyRun = runBookOf([legacyEngine({ 7: { 7: 1 } })], legacyOnly);
+  const two = deriveLabView(reading({ listing: { phase: "ready", value: listing }, runs: over(strayMalformed, { response: legacyRun, at: 1, atMonotonicMs: 1 }) }), ui());
+  expect(two.book.state).toBe("not-covered");
+  expect(two.book.banner).toBe("rerun-failed");
+  expect(two.book.rerunFailure).toEqual(stray);
+  expect(two.book.run).toBe(legacyRun);
+  // A clean stray Cash row beside that definition reads, and is "not modelled" as before.
+  const strayClean = runBookOf([legacyEngine({ 7: { 7: 1 } }), demoCash()], legacyOnly);
+  expect(readsAsAnswer(strayClean)).toBe(true);
+  expect(deriveLabView(reading({ listing: { phase: "ready", value: listing }, runs: over(strayClean) }), ui()).book.state).toBe("not-covered");
+
+  // The one rule, everywhere: over a held result, a body stands behind the hold exactly when it does not read.
   const malformed = runBookOf([demoCash({ eligible_debt_delta_usd: "1e6" })], ETH_DEF);
-  expect(deriveLabView(reading({ runs: over(malformed) }), ui()).book.banner).toBe("rerun-failed");
-  expect(readsAsAnswer(malformed)).toBe(false);
-  expect(deriveLabView(reading({ runs: over(run) }), ui()).book.banner).toBeNull();
-  expect(readsAsAnswer(run)).toBe(true);
+  const contradictory = runBookOf([demoCash({ hf_transitions: { ...transitionsOf(DEMO_CASH_TABLE), total_rows: 5 } })], ETH_DEF);
+  const withheld = runBookOf([legacyEngine({ 7: { 7: 1 } })], ETH_DEF, { excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }] });
+  for (const body of [run, malformed, contradictory, withheld, skewedMalformed, skewedClean, strayMalformed, strayClean]) {
+    for (const value of [SCENARIOS, listing]) {
+      const v = deriveLabView(reading({ listing: { phase: "ready", value }, runs: over(body) }), ui());
+      expect(v.book.banner === "rerun-failed").toBe(!readsAsAnswer(body));
+    }
+  }
 });
 
-test("a mover without an account, or a note that is not text, is named and never drawn: the body does not read as an answer, no mover row reaches the table, the library says so, and a held result stands", () => {
+test("a mover without an account or without its flip, a lane label or a note that is not text, is named and never drawn: the body does not read as an answer, no mover row reaches the table — an absent flip is never the word No, a string never Yes — the library says so, and a held result stands", () => {
   const mover = (account: unknown) => ({
     account,
     engine: "debt_manager",
@@ -501,6 +559,13 @@ test("a mover without an account, or a note that is not text, is named and never
     [{ note: null }, "note"],
     [{ hf_transitions: { ...demoCash().hf_transitions, note: ["helper"] } }, "hf_transitions.note"],
     [{ hf_transitions: { ...demoCash().hf_transitions, note: undefined } }, "hf_transitions.note"],
+    // The flip the verdict word is read from: absent is not "No", a string is not "Yes".
+    [{ movers: [Object.fromEntries(Object.entries(good).filter(([member]) => member !== "became_eligible"))] }, "movers[0].became_eligible"],
+    [{ movers: [good, { ...good, became_eligible: "false" }] }, "movers[1].became_eligible"],
+    // The lane's name is a header cell, the movers' note a tooltip: text, or named.
+    [{ hf_transitions: { ...demoCash().hf_transitions, lanes: demoCash().hf_transitions.lanes.map((lane, i) => (i === 2 ? { ...lane, label: { text: "1.00 – 1.05" } } : lane)) } }, "hf_transitions.lanes[2].label"],
+    [{ movers_note: { text: "the top 20 of 118" } }, "movers_note"],
+    [{ movers_note: undefined }, "movers_note"],
   ];
   for (const [overrides, name] of cases) {
     const body = cashWith(overrides);
@@ -523,7 +588,7 @@ test("a mover without an account, or a note that is not text, is named and never
 });
 
 test("a run refused locally has its own state and the set path's sentence — nothing was sent, never 'could not be reached'; the library says so, and a held result stands", () => {
-  const message = '"ETH-30" is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent';
+  const message = '"ETH-30" is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$)';
   const refusedLocally = { kind: "refused-locally", message } as const;
   const v = deriveLabView(reading({ runs: settled("eth_minus_30", refusedLocally) }), ui());
   expect(v.book.state).toBe("refused-locally");

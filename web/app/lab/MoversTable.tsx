@@ -12,7 +12,7 @@ const COLUMNS = [
   { key: "flips", header: "Becomes liquidatable?", align: "right" as const },
 ];
 
-/** The wire's movers, one row each; rows open the Inspector; sub-$100 rows dim (plan R4, R5). */
+/** The wire's movers, one row each, in the wire's own ranking; rows open the Inspector; a row under the small line is dimmed, never dropped. */
 export function MoversTable({ table }: { table: Table }) {
   const rows: KitRow[] = table.rows.map((m) => ({
     key: m.account,

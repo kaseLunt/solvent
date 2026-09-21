@@ -3,25 +3,17 @@
 //
 // # Why this file exists
 //
-// CORRECTED at contract 1.7.0. This preamble used to say the run-book route's
-// client method "lands LATER" and to close "Replace with
-// `client.runBookScenario()` when the client grows it." The client GREW IT:
-// `SolventClient.runBookScenario(id, signal?)` is shipped
-// (`packages/client-ts/src/client.ts`), refuses an off-pattern id locally, and
-// is published on `dist/client.d.ts`. A stale "until then" standing beside a
-// shipped method is the same defect class this repo's contract waves exist to
-// remove, one file over.
-//
-// What this module still does that the method does not, and why it therefore
-// still exists: it SEALS the outcome into a union, so a deployment that does
-// not serve the route yet renders as a first-class "not yet served" rather than
-// as an error, never a spinner and never fake data; and it refines each
-// projection horizon through the client's `refineProjectionHorizon` before any
-// component sees it, so no nullable-boolean verdict reaches the UI — a horizon
-// it cannot refine stays verbatim and is named by the Lab's classifier, never
-// read. Re-homing that union on top of the
-// real method is a `web/` refactor with its own test surface and no bearing on
-// the contract; it is deliberately NOT this wave's work.
+// The client ships `SolventClient.runBookScenario(id, signal?)`
+// (`packages/client-ts/src/client.ts`), which refuses an off-pattern id locally.
+// What this module does that the method does not: it SEALS the outcome into a
+// union, so a deployment that does not serve the route renders as a first-class
+// "not served" rather than as an error, never a spinner and never fake data;
+// and it refines each projection horizon through the client's
+// `refineProjectionHorizon` before any component sees it, so no
+// nullable-boolean verdict reaches the UI — a horizon it cannot refine stays
+// verbatim and is named by the Lab's classifier, never read. Re-homing the
+// union on top of the client's method is a `web/` refactor with its own test
+// surface and no bearing on the contract.
 //
 // The only-data-path law is kept as far as the contract allows: the response is
 // typed by the client's OWN generated `RunBookResponse`, errors are read through
@@ -71,7 +63,7 @@ export type RunBookOutcome =
   | { kind: "rate-limited"; retryAfterSeconds: number | null }
   | { kind: "unreachable"; message: string }
   | { kind: "failed"; status: number; message: string }
-  /** Nothing was sent: the id is outside the contract's pattern, refused before a request is spent. */
+  /** Refused before a request is spent: the id is outside the contract's pattern. The message is the reason alone — that nothing was sent is the headline's to say, once. */
   | { kind: "refused-locally"; message: string };
 
 /** A JSON object: never null, a primitive, or a list standing where one belongs. */
@@ -146,7 +138,7 @@ export async function runBookScenario(
   // Refused locally, in the set path's own words for the same condition. The refusal RESOLVES: a rejection here is
   // read as a transport failure, and a request that was never sent is not a service that could not be reached.
   if (!SCENARIO_ID_PATTERN.test(scenarioId)) {
-    return { kind: "refused-locally", message: `${JSON.stringify(scenarioId)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent` };
+    return { kind: "refused-locally", message: `${JSON.stringify(scenarioId)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$)` };
   }
   const url = `${baseUrl.replace(/\/+$/, "")}/v1/scenarios/${scenarioId}/run-book`;
   const doFetch = options?.fetchImpl ?? fetch;

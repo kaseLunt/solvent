@@ -1,7 +1,7 @@
-// The Scenarios verdict header's sentences (spec §3.5 templates, plan R3).
+// The Scenarios verdict header's sentences (spec §3.5 templates).
 // Every state the workspace can be in has its own sentence; a definition, a
 // run in flight and every refusal use the dashed tone, because none of them is
-// a verdict. Money is the Book's tiers (plan R11).
+// a verdict. Money is the Book's tiers: a book-level figure is never printed to the cent.
 import { humanUsd, MINUS } from "./human-usd";
 import { engineName } from "./inspector-headline";
 import { LEGACY } from "./inspector-position";

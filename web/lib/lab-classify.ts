@@ -1,8 +1,8 @@
 // The run-book and set-run classifiers: the envelope that carries a result and
 // every field an engine of it carries, checked against the wire contract
 // before anything is read from it. A malformed body is refused by the names of
-// its fields. The engine classifiers moved verbatim from the old Lab's
-// engineClassification.ts and setRunClassification.ts.
+// its fields: one law, one function per body, so every surface that reads a
+// result refuses on the same classification.
 
 import type { LabRunBook, LabRunBookEngine } from "./runbook";
 import type { RunBookSetResponse, SetRunEngineSummary, SetRunScenarioResult } from "./runbookSet";
@@ -135,6 +135,10 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
         return;
       }
       checks.push([`${at}.index`, isWirePopulation(lane.index)]);
+      // The lane's own name, printed as a header cell wherever the grid keeps the wire's lanes (the legacy market's
+      // always; the Cash book's when its edges are not the contract's): the schema's required string. Text that is
+      // not text never reaches the page.
+      checks.push([`${at}.label`, typeof lane.label === "string"]);
       checks.push([`${at}.upper_wad`, isNullableWireDecimal(lane.upper_wad)]);
     });
   }
@@ -241,18 +245,27 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
       // read for its length at render.
       checks.push([`movers[${String(index)}].account`, typeof mover.account === "string"]);
       // The four mover fields the detail subtree feeds into BigInt or the
-      // money renderers. All four are the schema's NullableDecimal — the
-      // Aave and Debt Manager arms differ in WHICH are null, and a null on
-      // either engine is that engine's own statement, never malformed.
-      for (const field of ["hf_before_wad", "hf_after_wad", "hf_drop_wad", "debt_usd"] as const) {
+      // money renderers — the three ratio wads here, the debt below, in wire
+      // order. All four are the schema's NullableDecimal — the Aave and Debt
+      // Manager arms differ in WHICH are null, and a null on either engine
+      // is that engine's own statement, never malformed.
+      for (const field of ["hf_before_wad", "hf_after_wad", "hf_drop_wad"] as const) {
         checks.push([`movers[${String(index)}].${field}`, isNullableWireDecimal(mover[field])]);
       }
+      // The flip the row's verdict word is read from: the schema's required boolean, nullable — null is the legacy
+      // market's own statement (its movers are ranked by a drop, not a flip). Anything else is no verdict: an
+      // ABSENT member is never the word "No", and a string is never the word "Yes".
+      checks.push([`movers[${String(index)}].became_eligible`, mover.became_eligible === null || typeof mover.became_eligible === "boolean"]);
+      checks.push([`movers[${String(index)}].debt_usd`, isNullableWireDecimal(mover.debt_usd)]);
     });
   }
   // The FULL mover count — the movers caption's own denominator ("showing 20
   // of N"). Unjudged, a malformed total renders "NaN are not on this page" as
   // a computed-looking clause.
   checks.push(["movers_total", isWirePopulation(e.movers_total)]);
+  // The wire's own words about its ranking and its truncation, carried to the movers caption's tooltip: the
+  // schema's required string, judged like the two notes the drawer prints.
+  checks.push(["movers_note", typeof e.movers_note === "string"]);
 
   const realization = e.market_realization;
   if (realization !== null) {
@@ -292,10 +305,12 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
             `${at}.additional_interest_usd`,
             isWireDecimal(horizon.additional_interest_usd),
           ]);
-          // The Lab holds a run-book's projection SEALED: the wire's nullable boolean became one of three verdicts on
-          // receipt. A horizon that carries none was never sealed — its wire verdict was outside the contract's
-          // true / false / null — and is named by the wire's own field, never read as a verdict.
-          checks.push([`${at}.becomes_liquidatable`, SEALED_VERDICTS.has(horizon.liquidation_verdict)]);
+          // The Lab holds a run-book's projection SEALED: on receipt the wire's nullable boolean is taken OUT of the
+          // horizon and one of three verdicts put in its place. A horizon that still carries the wire's field was
+          // never sealed — its wire verdict was outside the contract's true / false / null — and is named by that
+          // field, never read as a verdict: `liquidation_verdict` is the client's name, the contract has no such
+          // member, and a stray wire member of that name beside an unsealed verdict seals nothing.
+          checks.push([`${at}.becomes_liquidatable`, !("becomes_liquidatable" in horizon) && SEALED_VERDICTS.has(horizon.liquidation_verdict)]);
         });
       }
     }

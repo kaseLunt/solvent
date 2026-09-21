@@ -9,7 +9,7 @@ import { CASH, LEGACY } from "./inspector-position";
 import type { LoadPhase } from "./inspector-view";
 import { classifyRunBookEnvelope, contractFaults } from "./lab-classify";
 import { compareRows, setMembership, type CompareView } from "./lab-compare";
-import { readEngine, type EngineReading } from "./lab-engine";
+import { answerFault, readEngine, type EngineReading } from "./lab-engine";
 import {
   contradictoryHeadline,
   definitionChangedHeadline,
@@ -170,20 +170,21 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
     { label: "Config", value: run.scenario_config_version, tone: skew.includes("config version") ? "warn" : undefined },
   ];
   const base = { kicker, chips, identity, receivedAt, definition: def, run, cash, legacy, skew, rerunFailure: null, heldCondition: null, retained: null };
-  // Precedence: a version skew is its own state before any reading is consulted; on a
-  // result, a superseded batch outranks a stale input as the banner, and a banner sits
-  // on the result state rather than replacing it.
-  if (skew.includes("version")) return { ...base, state: "definition-changed", banner: null, headline: definitionChangedHeadline(def.label, skew), cash: null, legacy: null };
+  // Precedence. A body that does not read is a failed answer whatever else it says, so its Cash row is judged FIRST
+  // — before the body's version and before the definition's coverage: the contradictory state, the fault named. That
+  // is the hold's own rule (`answerFault`), so what releases a held result is exactly what may be held. Then a
+  // version skew is its own state before any reading is consulted; on a result, a superseded batch outranks a stale
+  // input as the banner, and a banner sits on the result state rather than replacing it.
   const banner: Banner = superseded ? "superseded" : skew.length > 0 ? "stale-input" : null;
+  if (cash.kind === "contradictory" || cash.kind === "unreadable") {
+    return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, cash.kind === "contradictory" ? cash.reasons : contractFaults(cash.fields)) };
+  }
+  if (skew.includes("version")) return { ...base, state: "definition-changed", banner: null, headline: definitionChangedHeadline(def.label, skew), cash: null, legacy: null };
   switch (cash.kind) {
     case "withheld":
       return { ...base, state: "withheld", banner, headline: withheldHeadline(def.label, cash.cause) };
     case "not-covered":
       return { ...base, state: "not-covered", banner, headline: notCoveredHeadline(def.label, def.engines, legacy !== null) };
-    case "contradictory":
-      return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, cash.reasons) };
-    case "unreadable":
-      return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, contractFaults(cash.fields)) };
     case "result": {
       const r = cash.result;
       const headline = resultHeadline({
@@ -215,8 +216,10 @@ function bookOf(listing: ScenariosResponse, def: ScenarioDefinition, record: Run
     // A 2xx body READS as an answer — a result, a withheld book, a scenario that does not model Cash, a definition
     // that changed — or it does not: malformed or self-contradicting, it is a failed answer, and a failed answer
     // never replaces the result the page had. The honest answers release the hold; the malformed classes stand
-    // behind it with the contradiction named as the failure.
-    if (book.state !== "contradictory" || record.held === null) return book;
+    // behind it with the contradiction named as the failure. The question is the record's own (`answerFault`): one
+    // rule decides what moves into the hold and what releases it, and a body it faults is the contradictory state
+    // above, so the failure named here is that state's headline.
+    if (record.held === null || answerFault(o.response) === null) return book;
     return overHeld(def, configVersion, record.held, { state: "contradictory", headline: book.headline }, chips);
   }
   const failure = failureOf(o);
@@ -293,11 +296,14 @@ const loadPhase = (p: LabReading["listing"]): LoadPhase => (p.phase === "error" 
 export function deriveLabView(reading: LabReading, ui: LabUi): LabView {
   const listingLoad = loadPhase(reading.listing);
   const compare = compareOf(reading);
+  // Nothing can run until the listing answers. The ticks that count are the ones the listing names; while it loads,
+  // and when it cannot be listed, it names none — so no tick a link brought counts toward a Compare, and the controls
+  // that would dispatch one stay disabled beside the sentence that says nothing can run.
   if (reading.listing.phase === "loading") {
-    return { listingLoad, library: [], selectedId: null, checked: [...ui.checked], configVersion: null, book: emptyBook("listing-loading", LISTING_LOADING), compare };
+    return { listingLoad, library: [], selectedId: null, checked: [], configVersion: null, book: emptyBook("listing-loading", LISTING_LOADING), compare };
   }
   if (reading.listing.phase === "error") {
-    return { listingLoad, library: [], selectedId: null, checked: [...ui.checked], configVersion: null, book: emptyBook("listing-unavailable", listingUnavailableHeadline(reading.listing.message)), compare };
+    return { listingLoad, library: [], selectedId: null, checked: [], configVersion: null, book: emptyBook("listing-unavailable", listingUnavailableHeadline(reading.listing.message)), compare };
   }
   const listing = reading.listing.value;
   const def = listing.scenarios.find((s) => s.id === ui.selectedId) ?? listing.scenarios[0] ?? null;

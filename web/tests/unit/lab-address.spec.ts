@@ -1,8 +1,6 @@
 // The one-address workspace is the Inspector's own reading: its stress rows,
 // its decimals, its Cash position as "today". Every state has a sentence; the
 // before/after tiles print the Inspector's registers.
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { lookup } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
@@ -413,20 +411,62 @@ test("a stress result for another batch than the position is not compared: both 
   expect(same.tiles).not.toBeNull();
 });
 
-test("one row, one header, one set of words on both pages — by construction: the Inspector's table and the one-address table print the verdict cell from the same function over the same judge", () => {
+test("one row, one header, one set of words on both pages: the verdict words the one-address view model hands its table are the Inspector's own function over the Inspector's own judge, row for row", () => {
   // The shared fixture: the demo account's rate projection, as served (it holds through 90d) and with its 90d horizon flipping.
-  const rowsOf = (body: StressBody) => addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(body), selectedId: "eth_minus_30" }).rows;
+  const spaceOf = (body: StressBody) => addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(body), selectedId: "eth_minus_30" });
+  const rowsOf = (body: StressBody) => spaceOf(body).rows;
   const holding = rowsOf(DEMO_STRESS_NEAR).find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
   const flipping = rowsOf(projected(1, true)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
   expect(stressVerdictWords(rowVerdict(holding))).toEqual({ text: "Not within 90d", tone: null, title: "a projection speaks only through its longest horizon" });
   expect(stressVerdictWords(rowVerdict(flipping))).toEqual({ text: "Within 90d", tone: "warn", title: null });
   // A projection never answers a bare "Yes" or "No" on either page: those are a spot shock's words.
   for (const row of [holding, flipping]) expect(["Yes", "No"]).not.toContain(stressVerdictWords(rowVerdict(row)).text);
-  // Both tables call that one function over that one judge, and no second word function stands beside it.
-  const source = (path: string): string => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
-  for (const table of ["../../app/inspector/[addr]/StressTable.tsx", "../../app/lab/AddressWorkspace.tsx"]) {
-    expect(source(table)).toContain("stressVerdictWords(rowVerdict(r))");
-    expect(source(table)).toMatch(/import \{[^}]*\bstressVerdictWords\b[^}]*\} from "@\/lib\/address-stress";/);
+  // At runtime, for every shared demo row — the served body and the flipping one, a spot shock that flips, one that
+  // holds, a withheld side, an inapplicable row: the words the view model hands the one-address table are what the
+  // Inspector's word function says of the Inspector's judge. The table prints them and words nothing of its own.
+  const shared = [DEMO_STRESS_NEAR, projected(1, true), projected(0, null), withResult("eth_minus_30", (r) => ({ ...r, after: null })), withResult("ethfi_minus_50", (r) => ({ ...r, applicable: false, reason: "no ETHFI collateral" }))];
+  let judged = 0;
+  for (const body of shared) {
+    const space = spaceOf(body);
+    expect(space.rows.length).toBeGreaterThan(0);
+    expect(space.table.map((t) => t.row)).toEqual(space.rows);
+    for (const { row, verdict } of space.table) {
+      expect(verdict).toEqual(stressVerdictWords(rowVerdict(row)));
+      judged += 1;
+    }
   }
+  expect(judged).toBeGreaterThanOrEqual(shared.length * 3);
+  // No second word function stands beside the Inspector's in the lab's own module.
   expect(Object.keys(labAddress).filter((name) => /verdictword/i.test(name))).toEqual([]);
+});
+
+test("a stress result that names no readable batch is not compared: the chip says so in the Inspector note's own words, the tiles are refused, the rows kept — never read as the position's batch", () => {
+  const unreadable = { ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: -1 } };
+  const v = nearWith(unreadable);
+  expect(v.stressBatchId).toBeNull();
+  const w = addressWorkspace({ address: DEMO_NEAR_ADDR, view: v, selectedId: "eth_minus_30" });
+  expect(w.state).toBe("rows");
+  expect(w.rows.length).toBeGreaterThan(0);
+  expect(w.stressBatchId).toBeNull();
+  // The chip is the Inspector note's: one author for the stress batch's words on both pages.
+  const note = stressBatchNote(v);
+  if (note === null) throw new Error("the Inspector discloses a stress body with no readable batch");
+  expect(w.stressBatchChip).toBe("not readable");
+  expect(w.stressBatchChip).toBe(note.chipValue);
+  // Not compared: no tile, a refusal that names what is and is not known, and no batch number invented for the stress.
+  expect(w.tiles).toBeNull();
+  expect(w.headline.tone).toBe("refused");
+  expect(w.headline.emphasis).toBe("Cannot say — the stress result names no readable batch; the position above is batch 18,251.");
+  expect(w.headline.dek).toBe("The scenarios below are the stress result's own. A stress result and a position are compared only when both name the same batch.");
+  expect(w.qualifier).toBe("applied to this account at a batch the stress result does not name readably · the position above is batch 18,251 · shocked figures are projections, not readings");
+  // After a resume repair the dek is the Inspector's disclosure, as it is for two readable batches.
+  const kept = deriveInspectorView(reading({ lookup: { phase: "ready", value: lookup(DEMO_ADDRESS_NEAR) }, stress: { phase: "ready", value: lookup(unreadable) }, lookupRepaired: true }), TIER_FALLBACK);
+  const k = addressWorkspace({ address: DEMO_NEAR_ADDR, view: kept, selectedId: "eth_minus_30" });
+  expect(k.tiles).toBeNull();
+  expect(k.stressBatchChip).toBe("not readable · stress from the previous lookup");
+  expect(k.headline.dek).toBe(stressBatchNote(kept)?.disclosure);
+  // The section's qualifier is the lib's in every arm: one batch, two batches.
+  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "eth_minus_30" }).qualifier).toBe("applied to this account · shocked figures are projections, not readings");
+  const other = { ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: DEMO_STRESS_NEAR.batch.id + 1 } };
+  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(other), selectedId: "eth_minus_30" }).qualifier).toBe("applied to this account at batch 18,252 · the position above is batch 18,251 · shocked figures are projections, not readings");
 });

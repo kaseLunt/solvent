@@ -228,12 +228,12 @@ for (const drawer of DRAWERS) {
     await open(tab, drawer.page);
     await openByKeyboard(tab, tab.getByTestId(drawer.button));
     expect((await dialogFocus(tab)).inside).toBe(true);
-    // Observed defect: an open drawer's focus rests on the panel itself, which the Tab handler does not count as its first stop, so Shift+Tab walks out onto the page behind.
-    test.fail();
-    await pressInside(tab, "Shift+Tab");
-    // And the way back is still a way inside.
+    // An open drawer's focus rests on the panel itself, which is no stop: the key before the first stop is the last one.
+    const entered = await pressInside(tab, "Shift+Tab");
+    expect(entered, "Shift+Tab left focus on the panel itself instead of a stop").toBeGreaterThanOrEqual(0);
+    // And the way back is still a way inside: Tab past the last stop, Shift+Tab back onto it.
     await pressInside(tab, "Tab");
-    await pressInside(tab, "Shift+Tab");
+    expect(await pressInside(tab, "Shift+Tab")).toBe(entered);
   });
 }
 

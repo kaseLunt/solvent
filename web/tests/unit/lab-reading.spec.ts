@@ -45,7 +45,7 @@ test("a computed result is held through a re-run and stands beside a failed one;
   expect(failed.get("a")).toEqual({ phase: "settled", outcome: { kind: "not-served" }, at: 4, atMonotonicMs: 4, held: { response: run, at: 2, atMonotonicMs: 2 } });
   const third = withSettled(withRunning(failed, "a", 5, readsAsAnswer), "a", { kind: "unreachable", message: "down" }, 6, 6, readsAsAnswer);
   expect(third.get("a")?.held).toEqual({ response: run, at: 2, atMonotonicMs: 2 });
-  // A new ok settle keeps the hold: whether its body releases the hold is the view's question, asked with the definition in hand.
+  // A new ok settle keeps the hold: the view releases it exactly when the new body reads — this same question, asked first.
   const fresh = withSettled(withRunning(third, "a", 7, readsAsAnswer), "a", { kind: "ok", response: run }, 8, 8, readsAsAnswer);
   expect(fresh.get("a")?.held).toEqual({ response: run, at: 2, atMonotonicMs: 2 });
   // The next run holds the newest ok result, with its own settle clocks.

@@ -21,7 +21,7 @@ function refusedWord(reading: EngineReading | null): string {
 }
 
 /**
- * Newly liquidatable · Liquidatable debt Δ · Bad debt at liquidation Δ · Accounts moved — the same four in every state (plan R2).
+ * Newly liquidatable · Liquidatable debt Δ · Bad debt at liquidation Δ · Accounts moved — the same four in every state, so a refusal keeps its place on the page and never reads as an absence.
  * The newly tile wears the headline's own tone (`newlyTone`): a net at or below zero beside crossings or band changes is never ok.
  */
 export function LabTiles({

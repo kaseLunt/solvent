@@ -27,7 +27,7 @@ export interface LabReading {
 export const canDispatch = (runs: ReadonlyMap<string, RunRecord>, id: string): boolean => runs.get(id)?.phase !== "running";
 export const canDispatchSet = (set: SetRecord | null): boolean => set === null || set.phase !== "running";
 
-/** Whether a 2xx run-book reads as an answer: the record's one question of a body, supplied by the caller (`readsAsAnswer` in lab-engine on the page). */
+/** Whether a 2xx run-book reads as an answer: the record's one question of a body, supplied by the caller (`readsAsAnswer` in lab-engine on the page) — the same question the view asks first, so one rule decides what is held and what releases the hold. */
 export type ReadsAsAnswer = (response: LabRunBook) => boolean;
 
 /**
@@ -49,9 +49,9 @@ export function withRunning(runs: ReadonlyMap<string, RunRecord>, id: string, no
 
 export function withSettled(runs: ReadonlyMap<string, RunRecord>, id: string, outcome: RunBookOutcome, now: number, monotonicNow: number, reads: ReadsAsAnswer): Map<string, RunRecord> {
   const next = new Map(runs);
-  // The hold survives every settle, an ok one included: whether the new body releases it is the view's question,
-  // asked with the definition in hand. The hold is always the last body that read before this settle; a new answer
-  // stands in front of it, a failure or a body that does not read behind it.
+  // The hold survives every settle, an ok one included: the view releases it exactly when the new body reads — the
+  // question asked here, of the body alone. The hold is always the last body that read before this settle; a new
+  // answer stands in front of it, a failure or a body that does not read behind it.
   next.set(id, { phase: "settled", outcome, at: now, atMonotonicMs: monotonicNow, held: heldOf(runs.get(id), reads) });
   return next;
 }

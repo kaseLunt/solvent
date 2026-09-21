@@ -13,7 +13,7 @@ const flags = (s: AppliedShock): string =>
   [s.snapped ? "snapped" : null, s.base_snapped ? "base snapped" : null, s.cap_bound ? "cap bound" : null].filter((f): f is string => f !== null).join(" · ");
 const exact = (v: string): string => (isWireDecimal(v) ? v : `unreadable (${JSON.stringify(v)})`);
 
-/** Path assumption, applied shocks, held-flat inputs, out of model, config, wire notes verbatim, the exact wire values (plan R10). */
+/** Path assumption, applied shocks, held-flat inputs, out of model, config, wire notes verbatim, the exact wire values: every figure the page rounds can be opened to the value the wire sent. */
 export function AssumptionsDrawer({ open, onClose, run, cash }: { open: boolean; onClose: () => void; run: LabRunBook | null; cash: EngineResult | null }) {
   return (
     <Drawer open={open} onClose={onClose} title="Assumptions & out of model">

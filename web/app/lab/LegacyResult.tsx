@@ -4,7 +4,7 @@ import styles from "./lab.module.css";
 import { LabTiles } from "./LabTiles";
 import { TransitionCard } from "./TransitionCard";
 
-/** The legacy market's result: the same four tiles and its own lanes, in its own decimals, never beside a Cash sum (plan R10). */
+/** The legacy market's result: the same four tiles and its own lanes, in its own decimals, in its own fold — Cash and the legacy market are never summed or set on one axis. */
 export function LegacyResult({ reading }: { reading: EngineReading }) {
   return (
     <details className={styles.legacy} data-testid="lab-legacy">

@@ -308,6 +308,49 @@ test("deep links: ?scenarios= posts exactly the listed ids it names, once, and p
   expect(counts.posted()[1]).toBe('{"scenario_ids":["eth_minus_30"]}');
 });
 
+test("a selection names itself in the URL: the address bar names the scenario on screen, a reload opens the same subject, and a link nobody selected from is never rewritten", async ({ page }) => {
+  const counts = await mockLab(page);
+  // The link as it arrived: the page writes nothing of its own until the reader selects.
+  await page.goto("/lab?scenario=eth_minus_30");
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  expect(new URL(page.url()).search).toBe("?scenario=eth_minus_30");
+  // Another scenario is selected: the URL names it, and a selection runs nothing.
+  await row(page, "ethfi_minus_50").getByRole("button").click();
+  await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
+  await expect(page).toHaveURL(/\/lab\?scenario=ethfi_minus_50$/);
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  await expect(headline(page)).toContainText("ETHFI -50 percent");
+  await page.waitForTimeout(300);
+  expect(counts.runs()).toBe(1);
+  // Reload: the same subject. The link is a ?scenario= link like any other, so it runs the scenario it names.
+  await page.reload();
+  await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
+  await expect(row(page, "eth_minus_30")).not.toHaveAttribute("data-selected", "true");
+  await expect(page.getByTestId("lab-verdict")).toContainText("ETHFI -50 percent");
+  await expect(page.getByTestId("lab-run")).toHaveText("Run ETHFI -50 percent");
+  await expect.poll(() => counts.runs()).toBe(2);
+  await expect(page).toHaveURL(/\/lab\?scenario=ethfi_minus_50$/);
+
+  // One-address mode: the selection joins the address in the URL, and a reload opens that account under that scenario.
+  await page.goto(`/lab?address=${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  await row(page, "ethfi_minus_50").getByRole("button").click();
+  await expect(page).toHaveURL(new RegExp(`/lab\\?address=${DEMO_NEAR_ADDR}&scenario=ethfi_minus_50$`));
+  await page.reload();
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
+  await expect(headline(page)).toContainText("ETHFI -50 percent");
+
+  // A set link: one URL names one scenario or a set, never both, so the selection takes the set's place in it — and
+  // the notice about the link that was opened stands, because the page's own write is no link to decide again.
+  await page.goto("/lab?scenarios=eth_minus_30,ghost");
+  await expect(page.getByTestId("lab-deeplink-notice")).toContainText("ghost");
+  await row(page, "ethfi_minus_50").getByRole("button").click();
+  await expect(page).toHaveURL(/\/lab\?scenario=ethfi_minus_50$/);
+  await expect(page.getByTestId("lab-deeplink-notice")).toContainText("ghost");
+  await expect(page.getByTestId("lab-deeplink-notice")).not.toContainText("mutually exclusive");
+});
+
 test("the selection is per scenario and a result stays with its scenario", async ({ page }) => {
   await mockLab(page);
   await page.goto("/lab");
@@ -467,7 +510,22 @@ test("a listing that cannot be fetched says so in the library and the workspace,
   await expect(headline(page)).toHaveText("The committed scenarios could not be listed.");
   await expect(page.getByTestId("lab-library")).toContainText("The committed scenarios could not be listed.");
   await expect(page.locator("[data-testid^='lab-library-row-']")).toHaveCount(0);
+  // Nothing can run, and no control beside that sentence looks as if it could: disabled, and wearing the disabled look.
+  for (const id of ["lab-run", "lab-compare"]) {
+    await expect(page.getByTestId(id)).toBeDisabled();
+    await expect(page.getByTestId(id)).toHaveCSS("cursor", "not-allowed");
+    await expect(page.getByTestId(id)).toHaveCSS("opacity", "0.45");
+  }
+  await page.waitForTimeout(300);
+  expect(counts.runs()).toBe(0);
+  expect(counts.sets()).toBe(0);
+  // A link that pre-ticks two scenarios enables nothing either: the listing names the ticks that count, and it named none.
+  await page.goto("/lab?scenarios=eth_minus_30,ethfi_minus_50");
+  await expect(surface(page)).toHaveAttribute("data-state", "listing-unavailable");
+  await expect(page.getByTestId("lab-compare")).toBeDisabled();
+  await expect(page.getByTestId("lab-compare")).toHaveText("Compare…");
   await expect(page.getByTestId("lab-run")).toBeDisabled();
+  await expect(page.getByTestId("lab-compare-state")).toHaveCount(0);
   await page.waitForTimeout(300);
   expect(counts.runs()).toBe(0);
   expect(counts.sets()).toBe(0);
@@ -630,6 +688,27 @@ test("one-address mode, resume: a repair that moves the position replays no stre
   await expect(page.getByTestId("lab-address-table").locator("tbody tr")).toHaveCount(DEMO_STRESS_NEAR.scenarios.length);
   // The premise, pinned: the repair refreshed the position alone.
   expect(stressRequests).toBe(stressBefore);
+});
+
+test("one-address mode: a stress result that names no readable batch is not compared — the chip says so in the Inspector's words, the tiles are refused, the rows stay", async ({ page }) => {
+  await mockLab(page, { stress: { ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: -1 } } });
+  await page.goto(`/lab?address=${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  await expect(chip(page, "Result for batch")).toContainText("18,251");
+  await expect(chip(page, "Stress for batch")).toContainText("not readable");
+  await expect(headline(page)).toHaveText("Cannot say — the stress result names no readable batch; the position above is batch 18,251.");
+  await expect(dek(page)).toHaveText("The scenarios below are the stress result's own. A stress result and a position are compared only when both name the same batch.");
+  // No tile sets the position beside a stress nobody can place: every one is the refused dash, none a figure.
+  for (const key of ["debt", "cap", "room", "status"]) {
+    for (const side of ["before", "after"]) {
+      const kpi = page.getByTestId(`lab-address-kpi-${key}-${side}`);
+      await expect(kpi).toContainText("—");
+      await expect(kpi).not.toContainText("$");
+    }
+  }
+  // The rows are the stress result's own and stay, under a qualifier that says what is not known of them.
+  await expect(page.getByTestId("lab-address-table").locator("tbody tr")).toHaveCount(DEMO_STRESS_NEAR.scenarios.length);
+  await expect(page.getByTestId("lab-address-section")).toContainText("applied to this account at a batch the stress result does not name readably · the position above is batch 18,251");
 });
 
 test("one-address mode: an invalid address is an inline refusal and never a request; a not-found address is a complete answer", async ({ page }) => {
@@ -981,7 +1060,7 @@ test("one-address mode: the highlighted library row is the workspace's subject �
   await expect(headline(page)).toContainText("ETHFI -50 percent");
   await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "eth_minus_30")).not.toHaveAttribute("data-selected", "true");
-  // A row not on the address: the subject falls back to the first row the address carries (R15), and the highlight follows the subject — never the row clicked.
+  // A row not on the address: the subject falls back to the first row the address carries, and the highlight follows the subject — never the row clicked.
   await row(page, "weeth_market_depeg_oracles_held").getByRole("button").click();
   await expect(headline(page)).toHaveText("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");

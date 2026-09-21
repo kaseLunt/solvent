@@ -1,7 +1,7 @@
 // The one-address workspace. It is the Inspector's reading — its stress rows,
 // its decimals, its Cash position as today — arranged under the selected
 // scenario. No second stress reader exists; the Inspector's laws hold here.
-import { cannotSayTitle, computableSide, horizonLabel, roomWords, rowVerdict, sideRoomWords, type StressRow, type StressSide } from "./address-stress";
+import { cannotSayTitle, computableSide, horizonLabel, roomWords, rowVerdict, sideRoomWords, stressVerdictWords, type StressRow, type StressSide, type StressVerdictWords } from "./address-stress";
 import { truncateAddress } from "./format";
 import { headroomBand } from "./headroom";
 import { humanUsdFull } from "./human-price";
@@ -28,31 +28,46 @@ export interface AddressTiles {
   readonly statusBefore: AddressTile;
   readonly statusAfter: AddressTile;
 }
+/** One row of the scenarios table as it prints: the stress row, and its verdict cell — the Inspector's words for the Inspector's judgement of that row. */
+export interface AddressTableRow {
+  readonly row: StressRow;
+  readonly verdict: StressVerdictWords;
+}
 export interface AddressWorkspace {
   readonly state: AddressWorkspaceState;
   readonly address: string;
   readonly rows: readonly StressRow[];
+  /**
+   * Every row with its verdict cell, in the rows' order. The table prints these and words nothing of its own, so one
+   * row can never be worded two ways on two pages: the words are the Inspector's word function over the Inspector's judge.
+   */
+  readonly table: readonly AddressTableRow[];
   readonly selected: StressRow | null;
   readonly headline: LabHeadline;
   readonly tiles: AddressTiles | null;
   readonly batchId: number | null;
-  /** The stress response's own batch; when it differs from the position's the comparison is refused and both are named. */
+  /** The stress response's own batch, null when it names none readably; unless it is the position's, the comparison is refused and what is known of both is named. */
   readonly stressBatchId: number | null;
   /**
    * The "Stress for batch" chip's value, from the Inspector's own batch note: present exactly when the stress result's
-   * batch is readable and is not the position's. After a resume repair — which refreshes the position and replays no
-   * stress — it says the stress is from the previous lookup, in the note's words.
+   * batch is not known to be the position's — another batch, or no readable batch at all, which the chip says in the
+   * note's words. After a resume repair — which refreshes the position and replays no stress — it says the stress is
+   * from the previous lookup, in the note's words.
    */
   readonly stressBatchChip: string | null;
+  /** The scenarios section's qualifier: what the rows were applied to, and at which batch when that is not the position's. */
+  readonly qualifier: string;
   readonly decimals: number | null;
   readonly cause: string | null;
 }
 
 const REFUSED_TILE: AddressTile = { value: "—", tone: "refused" };
 const NOT_COMPUTED: AddressTile = { value: "Not computed", tone: "refused" };
+const PROJECTIONS_NOT_READINGS = "shocked figures are projections, not readings";
+const QUALIFIER = `applied to this account · ${PROJECTIONS_NOT_READINGS}`;
 
 function empty(state: AddressWorkspaceState, address: string, headline: LabHeadline, cause: string | null = null): AddressWorkspace {
-  return { state, address, rows: [], selected: null, headline, tiles: null, batchId: null, stressBatchId: null, stressBatchChip: null, decimals: null, cause };
+  return { state, address, rows: [], table: [], selected: null, headline, tiles: null, batchId: null, stressBatchId: null, stressBatchChip: null, qualifier: QUALIFIER, decimals: null, cause };
 }
 
 const STATUS_WORD: Record<CashStatus, AddressTile> = {
@@ -154,13 +169,22 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
     return empty("withheld", address, refused(`Cannot say — the Cash book is withheld for ${short}.`, `${sentence(stress.cause)} A withheld book is not a computed book.`), stress.cause);
   }
   const rows = stress.rows;
+  const table: AddressTableRow[] = rows.map((row) => ({ row, verdict: stressVerdictWords(rowVerdict(row)) }));
   const selected = rows.find((r) => r.id === selectedId) ?? rows[0] ?? null;
   const decimals = view.decimals !== null && isWireScale(view.decimals) ? view.decimals : null;
-  const crossBatch = batchId !== null && stressBatchId !== null && stressBatchId !== batchId;
-  // The Inspector's note is the one author of the stress batch's words: the chip and, after a repair, the dek are its own.
-  const note = crossBatch ? stressBatchNote(view) : null;
+  // A stress result is the position's only when both name the same readable batch. Another batch, or a stress body
+  // that names no readable batch at all, is not compared — an unreadable batch is never read as the position's.
+  const sameBatch = batchId !== null && stressBatchId !== null && stressBatchId === batchId;
+  // The Inspector's note is the one author of the stress batch's words: the chip and, after a repair, the dek are its
+  // own. It is null exactly where the two batches agree.
+  const note = sameBatch ? null : stressBatchNote(view);
   const stressBatchChip = note?.chipValue ?? null;
-  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, selected, headline, tiles: null, batchId, stressBatchId, stressBatchChip, decimals, cause: null });
+  const stressBatchWords = stressBatchId === null ? "the stress result names no readable batch" : `the stress result is for batch ${groupInt(stressBatchId)}`;
+  const positionBatchWords = batchId === null ? "the position above names no readable batch" : `the position above is batch ${groupInt(batchId)}`;
+  const qualifier = sameBatch
+    ? QUALIFIER
+    : `applied to this account at ${stressBatchId === null ? "a batch the stress result does not name readably" : `batch ${groupInt(stressBatchId)}`} · ${positionBatchWords} · ${PROJECTIONS_NOT_READINGS}`;
+  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, table, selected, headline, tiles: null, batchId, stressBatchId, stressBatchChip, qualifier, decimals, cause: null });
   if (selected === null) return bare(refused(`No scenario applies to ${short}.`, "The stress response carried no scenario for this account."));
   // Rows beside no Cash position are two responses disagreeing; a position at a scale the guard refused prints no figure.
   // Neither is the scenarios' doing, so neither borrows their sentence. The position is asked before its scale: no
@@ -172,16 +196,19 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   }
   if (view.cash === null) return bare(refused(`No Cash position for ${short} to stress.`, "The stress response carries scenarios, but the lookup found no Cash position — the two answers disagree."));
   if (decimals === null) return bare(refused("The Cash position's scale could not be read.", "No figure prints at an unreadable scale."));
-  // A position and a stress result from different batches are not compared: the rows are the stress result's own, at
-  // its batch; the tiles would set two batches side by side, so they are refused and both batches are named. The
-  // lookup's own answers (withheld, no position, an unreadable scale) come first — there is nothing to compare there.
-  if (batchId !== null && stressBatchId !== null && stressBatchId !== batchId) {
+  // A position and a stress result are compared only when both name the same batch: the rows are the stress
+  // result's own, at its batch; the tiles would set two batches side by side — or a batch beside one nobody can name
+  // — so they are refused and what is known of both is named. The lookup's own answers (withheld, no position, an
+  // unreadable scale) come first — there is nothing to compare there.
+  if (!sameBatch) {
     // A repaired lookup beside the stress it kept is disclosed in the Inspector's sentence — never a second copy of it.
     const dek =
       note !== null && view.stressFromPreviousLookup
         ? note.disclosure
-        : "The scenarios below are the stress result's own. A position and a stress result from different batches are not compared.";
-    return bare(refused(`Cannot say — the stress result is for batch ${groupInt(stressBatchId)}; the position above is batch ${groupInt(batchId)}.`, dek));
+        : batchId !== null && stressBatchId !== null
+          ? "The scenarios below are the stress result's own. A position and a stress result from different batches are not compared."
+          : "The scenarios below are the stress result's own. A stress result and a position are compared only when both name the same batch.";
+    return bare(refused(`Cannot say — ${stressBatchWords}; ${positionBatchWords}.`, dek));
   }
   const money = (v: bigint | null): AddressTile => (v === null || v < 0n ? REFUSED_TILE : { value: humanUsdFull(v, decimals), tone: "neutral" });
   const before = view.cash;
@@ -206,7 +233,7 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
     roomAfter: after === null ? REFUSED_TILE : roomTile(after.room, decimals, roomToneAfter),
     statusAfter,
   };
-  return { state: "rows", address, rows, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, stressBatchId, stressBatchChip, decimals, cause: null };
+  return { state: "rows", address, rows, table, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, stressBatchId, stressBatchChip, qualifier, decimals, cause: null };
 }
 
 /**

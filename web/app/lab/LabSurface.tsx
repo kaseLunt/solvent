@@ -63,6 +63,12 @@ function replaceUrl(url: string): void {
   window.history.replaceState(null, "", url);
 }
 
+/** The link this page was OPENED with: its two scenario params as they arrived, before the page wrote anything of its own. */
+interface InboundLink {
+  readonly single: string | null;
+  readonly set: string | null;
+}
+
 export function LabSurface() {
   const params = useSearchParams();
   const reading = useLabReading();
@@ -80,6 +86,12 @@ export function LabSurface() {
   );
   const [address, setAddress] = useState(linkedAddress ?? "");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // A deep link is the link somebody opened, so it is read once, at mount. The page goes on to write its own URL —
+  // a selection names itself there — and its own writes are never a link to decide again or to word a notice about.
+  const [inbound] = useState<InboundLink>(() => ({
+    single: params.get("scenario"),
+    set: params.get("scenarios"),
+  }));
 
   const view = deriveLabView(reading, { selectedId, checked });
   const book = view.book;
@@ -107,13 +119,13 @@ export function LabSurface() {
       : resultReceipt(identity, book.run.batch.age_seconds, book.receivedAt),
   );
 
-  // Deep links are decided from the listing at render (the notice is derived, never stored) and dispatched once.
-  const single = params.get("scenario");
+  // The inbound link is decided from the listing at render (the notice is derived, never stored) and dispatched once.
+  const single = inbound.single;
   const decision =
     reading.listing.phase === "ready"
       ? deepLinkDecision(
           single,
-          params.get("scenarios"),
+          inbound.set,
           reading.listing.value.scenarios.map((s) => s.id),
         )
       : null;
@@ -213,7 +225,16 @@ export function LabSurface() {
             replaceUrl(labUrl(next));
           }}
           items={items}
-          onSelect={setSelectedId}
+          onSelect={(id) => {
+            setSelectedId(id);
+            // The address bar names the subject on screen, so a reload or a shared link opens the scenario the
+            // reader was looking at — never the one the page was opened with. One URL names one scenario or a set,
+            // never both (a link naming both runs nothing), so the selection takes the set's place in it.
+            const next = new URLSearchParams(params.toString());
+            next.set("scenario", id);
+            next.delete("scenarios");
+            replaceUrl(labUrl(next));
+          }}
           onCheck={(id, on) =>
             setChecked((prev) => {
               const next = new Set(prev);

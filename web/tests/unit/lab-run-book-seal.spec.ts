@@ -6,6 +6,7 @@
 import { expect, test } from "@playwright/test";
 import { classifyRunBookEngine, classifyRunBookEnvelope } from "../../lib/lab-classify";
 import { readsAsAnswer } from "../../lib/lab-engine";
+import { failureHeadline } from "../../lib/lab-headline";
 import { runBookScenario, type LabRunBookEngine, type RunBookOutcome } from "../../lib/runbook";
 import { runBookSet } from "../../lib/runbookSet";
 import { RUN_BOOK_ETH } from "../fixtures/lab-book";
@@ -101,11 +102,31 @@ test("an id outside the committed-scenario pattern is refused locally — the sa
   };
   for (const id of ["ETH-30", "", "eth minus 30", "../run-book", "a".repeat(65)]) {
     const outcome = await runBookScenario("http://x", id, { fetchImpl: counting });
-    expect(outcome).toEqual({ kind: "refused-locally", message: `${JSON.stringify(id)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent` });
+    expect(outcome).toEqual({ kind: "refused-locally", message: `${JSON.stringify(id)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$)` });
   }
   expect(sent).toBe(0);
   // The set path's words for the same condition, to the letter.
   const viaSet = await runBookSet("http://x", ["ETH-30"], { fetchImpl: counting });
   expect(viaSet).toEqual(await runBookScenario("http://x", "ETH-30", { fetchImpl: counting }));
   expect(sent).toBe(0);
+});
+
+test("a request refused before dispatch says nothing was sent ONCE: the headline says it, and the reason beside it — from the run path and from every arm of the set path — does not say it again", async () => {
+  const never: typeof fetch = () => Promise.reject(new Error("a request refused locally is never sent"));
+  const refusals = [
+    await runBookScenario("http://x", "ETH-30", { fetchImpl: never }),
+    await runBookSet("http://x", ["ETH-30"], { fetchImpl: never }),
+    await runBookSet("http://x", ["eth_minus_30", "eth_minus_30"], { fetchImpl: never }),
+    await runBookSet("http://x", [], { fetchImpl: never }),
+    await runBookSet("http://x", Array.from({ length: 25 }, (_, i) => `id_${String(i)}`), { fetchImpl: never }),
+  ];
+  for (const refusal of refusals) {
+    if (refusal.kind !== "refused-locally") throw new Error(`expected a local refusal, got ${refusal.kind}`);
+    const words = failureHeadline("refused-locally", { message: refusal.message });
+    expect(words.emphasis).toBe("Nothing was sent.");
+    expect(`${words.emphasis} ${words.rest} ${words.dek}`.match(/nothing was sent/gi)).toHaveLength(1);
+    // The reason is still the reason: a sentence of its own, naming what was wrong.
+    expect(words.dek).toMatch(/^\S.*\.$/);
+  }
+  expect(failureHeadline("refused-locally", { message: refusals[2]?.kind === "refused-locally" ? refusals[2].message : "" }).dek).toBe('"eth_minus_30" appears twice, and a set names each id once.');
 });

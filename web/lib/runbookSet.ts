@@ -57,7 +57,7 @@ export type SetRunOutcome =
   | { kind: "ok"; response: RunBookSetResponse }
   | { kind: "not-served" }
   /**
-   * A null gauge is an UNREADABLE gauge (p1b-13, Codex round 5): the busy
+   * A null gauge is an UNREADABLE gauge: the busy
    * envelope's `max_in_flight`/`in_flight` did not survive `positiveInt` —
    * absent, non-numeric, fractional-rounded -0, out of range. Null rides to
    * every consumer, which renders the unknown register; NOBODY substitutes a
@@ -70,12 +70,12 @@ export type SetRunOutcome =
   | { kind: "refused"; status: number; code: string; message: string }
   | { kind: "unreachable"; message: string }
   /**
-   * Local shape validation refused the ids BEFORE any request was sent
-   * (Codex r59-A). An OUTCOME, never a rejection: a promise that can reject
-   * is a promise some caller eventually forgets to catch, and the concrete
-   * failure was exactly that — a stranded in-flight guard permanently
-   * disabling the set surface when a listing published an id the wire
-   * pattern refuses.
+   * Local shape validation refused the ids BEFORE any request was sent. An
+   * OUTCOME, never a rejection: a promise that can reject is a promise some
+   * caller eventually forgets to catch, and an uncaught rejection strands the
+   * in-flight guard — the set surface stays disabled for good when a listing
+   * publishes an id the wire pattern refuses. The message is the reason alone:
+   * that nothing was sent is the headline's to say, once.
    */
   | { kind: "refused-locally"; message: string };
 
@@ -114,7 +114,7 @@ function retryAfter(header: string | null, envelope: Envelope | null): number | 
 }
 
 /**
- * A nonnegative integer, or null. NEVER -0 (p1b-12, Codex round 4):
+ * A nonnegative integer, or null. NEVER -0:
  * `JSON.parse("-1e-324")` rounds to NEGATIVE ZERO, which passes
  * `Number.isInteger` and `>= 0`, so a fractional token would ride into the
  * busy arm as a capacity gauge (`maxInFlight`/`inFlight` render in the busy
@@ -123,11 +123,10 @@ function retryAfter(header: string | null, envelope: Envelope | null): number | 
  * refused to null (the wire guard's law, applied at this local gate; see
  * wireGuard.ts).
  *
- * The null CARRIES (p1b-13, Codex round 5). Both call sites used to
- * substitute `?? 0`, so a malformed busy envelope rendered
- * `max_in_flight 0 · in_flight 0` — fabricated zeros wearing a measured
- * costume. An unreadable gauge is now stated as unknown at every surface,
- * never as a number the service did not send.
+ * The null CARRIES. A `?? 0` at a call site would render a malformed busy
+ * envelope as `max_in_flight 0 · in_flight 0` — fabricated zeros wearing a
+ * measured costume. An unreadable gauge is stated as unknown at every
+ * surface, never as a number the service did not send.
  */
 function positiveInt(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && !Object.is(value, -0)
@@ -208,8 +207,8 @@ export function classifySetRunRefusal(
  * function validates only the contract's own shape rules — the id pattern, the
  * per-request cap, non-emptiness and uniqueness — and refuses locally rather
  * than spending a request to be told. A local refusal RESOLVES to the
- * `refused-locally` arm; this function never rejects (r59-A: a rejection is
- * how an in-flight guard gets stranded).
+ * `refused-locally` arm; this function never rejects (a rejection is how an
+ * in-flight guard gets stranded).
  */
 export async function runBookSet(
   baseUrl: string,
@@ -235,13 +234,13 @@ export async function runBookSet(
     if (!SCENARIO_ID_PATTERN.test(id)) {
       return {
         kind: "refused-locally",
-        message: `${JSON.stringify(id)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent`,
+        message: `${JSON.stringify(id)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$)`,
       };
     }
     if (seen.has(id)) {
       return {
         kind: "refused-locally",
-        message: `${JSON.stringify(id)} appears twice, and a set names each id once; nothing was sent`,
+        message: `${JSON.stringify(id)} appears twice, and a set names each id once`,
       };
     }
     seen.add(id);

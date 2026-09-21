@@ -2,7 +2,7 @@
 // NOTHING and say so; ids the listing does not publish are filtered BEFORE
 // dispatch and NAMED with the asked/published counts; there is no
 // `?scenarios=*`; more published ids than the cap dispatches nothing and
-// truncates nothing. Moved verbatim with `lib/lab-deep-link.ts`.
+// truncates nothing.
 import { expect, test } from "@playwright/test";
 import { deepLinkDecision } from "../../lib/lab-deep-link";
 

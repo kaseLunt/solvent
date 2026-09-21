@@ -1,4 +1,4 @@
-// The page's three money registers (plan R11): book-level in the Book's tiers,
+// The page's three money registers, one per altitude: book-level in the Book's tiers,
 // account-level in full dollars, exact wire values in the drawer. A scale that
 // fails the guard prints "unreadable scale"; a null value prints a dash.
 import { humanUsdFull } from "@/lib/human-price";

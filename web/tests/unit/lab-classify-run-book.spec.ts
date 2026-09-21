@@ -1,10 +1,10 @@
-// p1b-2 — THE FULL RunBookEngine SUBTREE CLASSIFIER (closes Codex r3
-// finding 1). The p0-9 gate validated 4 of ~40+ numeric wire fields the
-// run-book detail consumes; every other field fed a THROWING renderer (the
-// route boundary took the page) or a silently-permissive `BigInt` coercion
-// (a malformed body wearing a measured-zero costume). `classifyRunBookEngine`
-// is exhaustive over that inventory, one law one function, with array fields
-// named PER INDEX — `movers[2].hf_before_wad`, never a bare group name.
+// THE FULL RunBookEngine SUBTREE CLASSIFIER. Every numeric wire field the
+// run-book detail consumes is judged before it is read: an unjudged field
+// feeds a THROWING renderer (the route boundary takes the page) or a
+// silently-permissive `BigInt` coercion (a malformed body wearing a
+// measured-zero costume). `classifyRunBookEngine` is exhaustive over that
+// inventory, one law one function, with array fields named PER INDEX —
+// `movers[2].hf_before_wad`, never a bare group name.
 //
 // The skeleton is the COMMITTED run-book fixture's own engine
 // (`run-book.eth_minus_30.json`, the contract's 200 example): each test
@@ -78,12 +78,12 @@ function legalProjection(): NonNullable<LabRunBookEngine["projection"]> {
 // The clean arm: the committed fixture, and every schema-legal null in it.
 // ---------------------------------------------------------------------------
 
-test("p1b-2: both committed engines classify CLEAN — the law does not refuse the served book", () => {
+test("both committed engines classify CLEAN — the law does not refuse the served book", () => {
   expect(classifyRunBookEngine(engineOf("aave_v3_etherfi")).malformedFields).toEqual([]);
   expect(classifyRunBookEngine(engineOf("debt_manager")).malformedFields).toEqual([]);
 });
 
-test("p1b-2: schema-legal nulls are statements, never malformed", () => {
+test("schema-legal nulls are statements, never malformed", () => {
   // The fixture already carries them all — an unpriced collateral entry
   // (value_usd null), the open-ended top bucket (upper_wad null), the
   // non-bucket lanes, the (N+1,N+1) cell's null debts, the aave mover's null
@@ -123,11 +123,11 @@ test("p1b-2: schema-legal nulls are statements, never malformed", () => {
 // The engine scalars and the two aggregates.
 // ---------------------------------------------------------------------------
 
-test("p1b-2: a fractional usd_decimals is named — the scale the money renderers exponentiate", () => {
+test("a fractional usd_decimals is named — the scale the money renderers exponentiate", () => {
   expect(corrupted((engine) => (engine.usd_decimals = 2.5))).toEqual(["usd_decimals"]);
 });
 
-test("p1b-2: an aggregate Decimal outside the contract is named by side and field", () => {
+test("an aggregate Decimal outside the contract is named by side and field", () => {
   expect(corrupted((engine) => (engine.before.total_debt_usd = ""))).toEqual([
     "before.total_debt_usd",
   ]);
@@ -140,20 +140,20 @@ test("p1b-2: an aggregate Decimal outside the contract is named by side and fiel
   ).toEqual(["after.eligible_debt_usd"]);
 });
 
-test("p1b-2: an aggregate count outside integrality is named", () => {
+test("an aggregate count outside integrality is named", () => {
   expect(corrupted((engine) => (engine.before.accounts = 1.5))).toEqual(["before.accounts"]);
   expect(corrupted((engine) => (engine.after.eligible_accounts = Number.NaN))).toEqual([
     "after.eligible_accounts",
   ]);
 });
 
-test("p1b-2: a histogram scale outside the contract is named per side", () => {
+test("a histogram scale outside the contract is named per side", () => {
   expect(corrupted((engine) => (engine.before.hf_histogram.wad_scale = ""))).toEqual([
     "before.hf_histogram.wad_scale",
   ]);
 });
 
-test("p1b-2: a bucket bound is named PER INDEX", () => {
+test("a bucket bound is named PER INDEX", () => {
   expect(
     corrupted((engine) => {
       const bucket = engine.before.hf_histogram.buckets[2];
@@ -163,7 +163,7 @@ test("p1b-2: a bucket bound is named PER INDEX", () => {
   ).toEqual(["before.hf_histogram.buckets[2].upper_wad"]);
 });
 
-test("p1b-2: a collateral entry's decimals, amount and value are named per side and index", () => {
+test("a collateral entry's decimals, amount and value are named per side and index", () => {
   expect(
     corrupted((engine) => {
       const asset = engine.before.collateral_by_asset[0];
@@ -188,19 +188,18 @@ test("p1b-2: a collateral entry's decimals, amount and value are named per side 
 });
 
 // ---------------------------------------------------------------------------
-// The transition matrix — the controller's explicit unit pins. Task 1's
-// review proved `hf_transitions.wad_scale: ""` passes `readTransitions`'
-// margin arithmetic untouched and coerces to a "0 entered / 0 exited"
-// costume in `belowOneLanes`; the classifier refuses the body FIRST.
+// The transition matrix. An unjudged `hf_transitions.wad_scale: ""` passes
+// `readTransitions`' margin arithmetic untouched and coerces to a "0 entered /
+// 0 exited" costume in `belowOneLanes`; the classifier refuses the body FIRST.
 // ---------------------------------------------------------------------------
 
-test("p1b-2: hf_transitions.wad_scale has its OWN unit pin — an empty scale is named, never a 0n costume", () => {
+test("hf_transitions.wad_scale has its OWN unit pin — an empty scale is named, never a 0n costume", () => {
   expect(corrupted((engine) => (engine.hf_transitions.wad_scale = ""))).toEqual([
     "hf_transitions.wad_scale",
   ]);
 });
 
-test("p1b-2: a lane bound is named PER INDEX", () => {
+test("a lane bound is named PER INDEX", () => {
   expect(
     corrupted((engine) => {
       const lane = engine.hf_transitions.lanes[1];
@@ -210,7 +209,7 @@ test("p1b-2: a lane bound is named PER INDEX", () => {
   ).toEqual(["hf_transitions.lanes[1].upper_wad"]);
 });
 
-test("p1b-2: a transition cell's debt is named per outflow and cell index", () => {
+test("a transition cell's debt is named per outflow and cell index", () => {
   // outflows[3].cells[0] is the fixture's occupied measured cell (3→0).
   expect(
     corrupted((engine) => {
@@ -232,7 +231,7 @@ test("p1b-2: a transition cell's debt is named per outflow and cell index", () =
 // Movers — per-index naming is the register's whole value on a capped list.
 // ---------------------------------------------------------------------------
 
-test("p1b-2: a mover wad is named PER INDEX — movers[2], never a bare group name", () => {
+test("a mover wad is named PER INDEX — movers[2], never a bare group name", () => {
   expect(
     corrupted((engine) => {
       const mover = engine.movers[0];
@@ -246,7 +245,7 @@ test("p1b-2: a mover wad is named PER INDEX — movers[2], never a bare group na
   ).toEqual(["movers[2].hf_before_wad"]);
 });
 
-test("p1b-2: a mover's debt_usd is judged under the same nullable law", () => {
+test("a mover's debt_usd is judged under the same nullable law", () => {
   expect(
     corrupted((engine) => {
       const mover = engine.movers[0];
@@ -260,7 +259,7 @@ test("p1b-2: a mover's debt_usd is judged under the same nullable law", () => {
 // The two optional subtrees — checked ONLY when served (null is a statement).
 // ---------------------------------------------------------------------------
 
-test("p1b-2: a served market_realization is judged whole; a null one is not judged at all", () => {
+test("a served market_realization is judged whole; a null one is not judged at all", () => {
   // the fixture serves null — pinned clean by the clean-arm test above
   expect(
     corrupted((engine) => (engine.market_realization = legalShortfall())),
@@ -279,7 +278,7 @@ test("p1b-2: a served market_realization is judged whole; a null one is not judg
   ).toEqual(["market_realization.usd_decimals"]);
 });
 
-test("p1b-2: a served projection's horizon Decimals are named per index; null projection is legal", () => {
+test("a served projection's horizon Decimals are named per index; null projection is legal", () => {
   expect(corrupted((engine) => (engine.projection = legalProjection()))).toEqual([]);
   expect(
     corrupted((engine) => {
@@ -292,11 +291,11 @@ test("p1b-2: a served projection's horizon Decimals are named per index; null pr
 });
 
 // ---------------------------------------------------------------------------
-// The folded p0-8/p0-9 four keep their exact names, and the order is the
+// The four top-level fields keep their exact wire names, and the order is the
 // wire's read order.
 // ---------------------------------------------------------------------------
 
-test("p1b-2: the four p0 fields fold in under their unchanged names", () => {
+test("the four p0 fields fold in under their unchanged names", () => {
   expect(corrupted((engine) => (engine.newly_eligible_accounts = 1.5))).toEqual([
     "newly_eligible_accounts",
   ]);
@@ -315,20 +314,20 @@ test("p1b-2: the four p0 fields fold in under their unchanged names", () => {
 });
 
 // ---------------------------------------------------------------------------
-// p1b-9 (Codex round, finding 2) — the COUNTS join the classifier.
+// The COUNTS are judged like the decimals.
 //
 // The histogram counts (`buckets[].count`, `infinite_count`, `refused_count`)
 // and every transition count the reductions consume (`lanes[].index`,
 // `outflows[].from`, `cells[].to`/`rows`, the two margins per index, the five
-// census totals, the two nullable movement counts, `movers_total`) bypassed
-// the p1b-2 gate: the schema types them `number`, but a JSON cast guarantees
-// nothing — `count: ""` passed the classifier and coerced to a zero share in
-// `belowOneCount`/`measuredCount` (`0 + ""` is `"0"`, a string costume), a
-// float or NaN walked into `readTransitions`' margin arithmetic. Each class
-// (string-as-never, float, NaN) is pinned by name, per side and per index.
+// census totals, the two nullable movement counts, `movers_total`): the schema
+// types them `number`, but a JSON cast guarantees nothing — an unjudged
+// `count: ""` coerces to a zero share in `belowOneCount`/`measuredCount`
+// (`0 + ""` is `"0"`, a string costume), and a float or NaN walks into
+// `readTransitions`' margin arithmetic. Each class (string-as-never, float,
+// NaN) is pinned by name, per side and per index.
 // ---------------------------------------------------------------------------
 
-test("p1b-9: a histogram bucket COUNT outside integrality is named per side and index", () => {
+test("a histogram bucket COUNT outside integrality is named per side and index", () => {
   expect(
     corrupted((engine) => {
       const bucket = engine.before.hf_histogram.buckets[0];
@@ -338,7 +337,7 @@ test("p1b-9: a histogram bucket COUNT outside integrality is named per side and 
   ).toEqual(["before.hf_histogram.buckets[0].count"]);
 });
 
-test("p1b-9: the histogram's two side tallies are named per side", () => {
+test("the histogram's two side tallies are named per side", () => {
   expect(corrupted((engine) => (engine.after.hf_histogram.infinite_count = 2.5))).toEqual([
     "after.hf_histogram.infinite_count",
   ]);
@@ -347,7 +346,7 @@ test("p1b-9: the histogram's two side tallies are named per side", () => {
   ).toEqual(["before.hf_histogram.refused_count"]);
 });
 
-test("p1b-9: the matrix's lane, outflow and cell counts are named per index", () => {
+test("the matrix's lane, outflow and cell counts are named per index", () => {
   expect(
     corrupted((engine) => {
       const lane = engine.hf_transitions.lanes[1];
@@ -378,7 +377,7 @@ test("p1b-9: the matrix's lane, outflow and cell counts are named per index", ()
   ).toEqual(["hf_transitions.outflows[3].cells[0].rows"]);
 });
 
-test("p1b-9: the two margins are named per index — the histograms' own tallies answer to them", () => {
+test("the two margins are named per index — the histograms' own tallies answer to them", () => {
   expect(
     corrupted((engine) => {
       engine.hf_transitions.from_rows[2] = "" as never;
@@ -391,7 +390,7 @@ test("p1b-9: the two margins are named per index — the histograms' own tallies
   ).toEqual(["hf_transitions.to_rows[0]"]);
 });
 
-test("p1b-9: the five census totals are named; a null movement count stays a statement", () => {
+test("the five census totals are named; a null movement count stays a statement", () => {
   expect(corrupted((engine) => (engine.hf_transitions.total_rows = Number.NaN))).toEqual([
     "hf_transitions.total_rows",
   ]);
@@ -427,15 +426,14 @@ test("p1b-9: the five census totals are named; a null movement count stays a sta
   ).toEqual(["hf_transitions.lane_changed_rows"]);
 });
 
-test("p1b-9: movers_total joins the classifier — the disclosure sentence's own denominator", () => {
+test("movers_total joins the classifier — the disclosure sentence's own denominator", () => {
   expect(corrupted((engine) => (engine.movers_total = "" as never))).toEqual(["movers_total"]);
   expect(corrupted((engine) => (engine.movers_total = 2.5))).toEqual(["movers_total"]);
 });
 
 // ---------------------------------------------------------------------------
-// p1b-10 (Codex round 2, finding 2 completion) — the counts are classified by
-// their SCHEMA SEMANTICS. p1b-9's `isWireCount` was Number.isInteger alone: it
-// admitted NEGATIVE populations (a bucket count of -1; movers_total -1 →
+// The counts are classified by their SCHEMA SEMANTICS. Number.isInteger alone
+// admits NEGATIVE populations (a bucket count of -1; movers_total -1 →
 // "Showing all -1 accounts" as a computed clause) and UNSAFE integers (JSON
 // parses 9007199254740992.5 into 2^53, and exact arithmetic over the rounded
 // value renders a computed-looking wrong answer). Populations — tallies of
@@ -444,7 +442,7 @@ test("p1b-9: movers_total joins the classifier — the disclosure sentence's own
 // count that also subtracts any flip back to healthy") and keeps its sign.
 // ---------------------------------------------------------------------------
 
-test("p1b-10: a NEGATIVE population is named — a tally of things that exist cannot be -1", () => {
+test("a NEGATIVE population is named — a tally of things that exist cannot be -1", () => {
   expect(
     corrupted((engine) => {
       const bucket = engine.before.hf_histogram.buckets[0];
@@ -459,7 +457,7 @@ test("p1b-10: a NEGATIVE population is named — a tally of things that exist ca
   ]);
 });
 
-test("p1b-10: an UNSAFE integer population is named — 2^53 is JSON's rounding, not a measurement", () => {
+test("an UNSAFE integer population is named — 2^53 is JSON's rounding, not a measurement", () => {
   expect(corrupted((engine) => (engine.hf_transitions.total_rows = 9007199254740992))).toEqual([
     "hf_transitions.total_rows",
   ]);
@@ -468,7 +466,7 @@ test("p1b-10: an UNSAFE integer population is named — 2^53 is JSON's rounding,
   ).toEqual(["after.hf_histogram.infinite_count"]);
 });
 
-test("p1b-10: newly_eligible_accounts is the schema's SIGNED net — negative stays legal, unsafe does not", () => {
+test("newly_eligible_accounts is the schema's SIGNED net — negative stays legal, unsafe does not", () => {
   // "a NET count that also subtracts any flip back to healthy" — a scenario
   // that flips accounts back to healthy nets negative, and that is an ANSWER.
   expect(corrupted((engine) => (engine.newly_eligible_accounts = -3))).toEqual([]);
@@ -478,18 +476,18 @@ test("p1b-10: newly_eligible_accounts is the schema's SIGNED net — negative st
 });
 
 // ---------------------------------------------------------------------------
-// p1b-11 (Codex round 3) — negative zero and the schema's occupancy floor.
+// Negative zero and the schema's occupancy floor.
 //
-// Finding A1: the guards judge the PARSED binary64, and JSON.parse("-1e-324")
-// rounds to -0 — which is === 0 and passed `>= 0`, so a fractional token wore
-// a legal population. Finding B: `RunBookTransitionCell.rows` is the schema's
+// The guards judge the PARSED binary64, and JSON.parse("-1e-324") rounds to
+// -0 — which is === 0 and passes `>= 0`, so without the sign check a fractional
+// token wears a legal population. And `RunBookTransitionCell.rows` is the schema's
 // `minimum: 1` ("A cell is emitted only when it holds at least one row"; an
 // empty cell is ABSENT, never a row of zeros), and a fake `{rows: 0}` cell
 // reconciles EVERY margin and census sum — 0 changes nothing — so the
 // classifier's occupancy floor is the only gate that can refuse it.
 // ---------------------------------------------------------------------------
 
-test("p1b-11: a NEGATIVE-ZERO population is named — -1e-324 parses to -0, and -0 passed >= 0", () => {
+test("a NEGATIVE-ZERO population is named — -1e-324 parses to -0, and -0 passed >= 0", () => {
   expect(corrupted((engine) => (engine.movers_total = -0))).toEqual(["movers_total"]);
   expect(
     corrupted((engine) => {
@@ -500,7 +498,7 @@ test("p1b-11: a NEGATIVE-ZERO population is named — -1e-324 parses to -0, and 
   ).toEqual(["before.hf_histogram.buckets[0].count"]);
 });
 
-test("p1b-11: a ZERO-ROW occupied cell is named per index — the schema floors rows at 1", () => {
+test("a ZERO-ROW occupied cell is named per index — the schema floors rows at 1", () => {
   expect(
     corrupted((engine) => {
       const cell = engine.hf_transitions.outflows[3]?.cells[0];
@@ -519,7 +517,7 @@ test("p1b-11: a ZERO-ROW occupied cell is named per index — the schema floors 
   ).toEqual([]);
 });
 
-test("p1b-2: fields are named in wire read order across the whole subtree", () => {
+test("fields are named in wire read order across the whole subtree", () => {
   expect(
     corrupted((engine) => {
       engine.usd_decimals = 2.5;
@@ -577,4 +575,86 @@ test("the two notes the drawer prints verbatim are text: the engine's `note` and
       set(engine, "note", 3);
     }),
   ).toEqual(["hf_transitions.note", "movers_total", "note"]);
+});
+
+test("a lane's label is text before it is a header cell: `hf_transitions.lanes[i].label` is named per index when it is not a string, after the lane's index and before its bound; an empty label is the wire's own and stays", () => {
+  for (const value of NOT_TEXT) {
+    expect(
+      corrupted((engine) => {
+        const lane = engine.hf_transitions.lanes[1];
+        if (!lane) throw new Error("fixture shape: lane missing");
+        set(lane, "label", value);
+      }),
+    ).toEqual(["hf_transitions.lanes[1].label"]);
+  }
+  expect(
+    corrupted((engine) => {
+      const lane = engine.hf_transitions.lanes[0];
+      if (!lane) throw new Error("fixture shape: lane missing");
+      lane.label = "";
+    }),
+  ).toEqual([]);
+  // Wire read order inside the lane: index, label, upper bound.
+  expect(
+    corrupted((engine) => {
+      const lane = engine.hf_transitions.lanes[0];
+      if (!lane) throw new Error("fixture shape: lane missing");
+      lane.index = -1;
+      set(lane, "label", { text: "below 1.00" });
+      lane.upper_wad = "1e18";
+    }),
+  ).toEqual(["hf_transitions.lanes[0].index", "hf_transitions.lanes[0].label", "hf_transitions.lanes[0].upper_wad"]);
+});
+
+test("a mover's flip is a boolean or the wire's own null: an ABSENT `became_eligible` is named and is never the word No, a string is named and is never the word Yes; null is a statement and stays", () => {
+  const withFlip = (value: unknown): string[] =>
+    corrupted((engine) => {
+      const mover = engine.movers[0];
+      if (!mover) throw new Error("fixture shape: mover missing");
+      set(mover, "became_eligible", value);
+    });
+  for (const value of [undefined, "false", "true", 0, 1, {}, []]) expect(withFlip(value)).toEqual(["movers[0].became_eligible"]);
+  for (const value of [true, false, null]) expect(withFlip(value)).toEqual([]);
+  // Wire read order inside the mover: the account, the ratio's decimals, the flip, the debt it is ranked by.
+  expect(
+    corrupted((engine) => {
+      const mover = engine.movers[0];
+      if (!mover) throw new Error("fixture shape: mover missing");
+      set(mover, "account", null);
+      mover.hf_drop_wad = "x";
+      set(mover, "became_eligible", "false");
+      mover.debt_usd = "x";
+    }),
+  ).toEqual(["movers[0].account", "movers[0].hf_drop_wad", "movers[0].became_eligible", "movers[0].debt_usd"]);
+});
+
+test("the movers' note is text like the two notes beside it: `movers_note` is named when it is not a string — an object never reaches a tooltip as [object Object]; an empty note is the wire's own and stays", () => {
+  for (const value of NOT_TEXT) expect(corrupted((engine) => set(engine, "movers_note", value))).toEqual(["movers_note"]);
+  expect(corrupted((engine) => set(engine, "movers_note", ""))).toEqual([]);
+  // Wire read order: the movers, their total, their note.
+  expect(
+    corrupted((engine) => {
+      engine.movers_total = -1;
+      set(engine, "movers_note", 3);
+      set(engine, "note", 3);
+    }),
+  ).toEqual(["movers_total", "movers_note", "note"]);
+});
+
+test("a horizon is sealed by the client, never by the wire: a horizon still carrying the wire's `becomes_liquidatable` was never sealed, and a stray wire member named `liquidation_verdict` beside it does not make it one", () => {
+  const withHorizon = (edit: (horizon: Record<string, unknown>) => void): string[] =>
+    corrupted((engine) => {
+      engine.projection = legalProjection();
+      const horizon = engine.projection.horizons[0];
+      if (!horizon) throw new Error("unreachable: just built one horizon");
+      edit(horizon as unknown as Record<string, unknown>);
+    });
+  // Unsealed — the wire's verdict was outside true / false / null — and carrying the sealed field's name as a stray member.
+  expect(withHorizon((h) => (h.becomes_liquidatable = "yes"))).toEqual(["projection.horizons[0].becomes_liquidatable"]);
+  // The stray member alone is no seal either, whatever the wire's own verdict says.
+  for (const wire of [true, false, null]) expect(withHorizon((h) => (h.becomes_liquidatable = wire))).toEqual(["projection.horizons[0].becomes_liquidatable"]);
+  // Neither field: never sealed.
+  expect(withHorizon((h) => delete h.liquidation_verdict)).toEqual(["projection.horizons[0].becomes_liquidatable"]);
+  // Sealed: the verdict alone, the wire's field gone.
+  expect(withHorizon(() => {})).toEqual([]);
 });

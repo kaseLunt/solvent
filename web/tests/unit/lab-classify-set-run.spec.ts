@@ -1,10 +1,9 @@
-// p1b-3 — THE SetRunEngineSummary CLASSIFIER (closes Codex r3 finding 3).
-// The tornado/set-run path had ZERO decimal validation: `barLength` called
-// bare `BigInt` (`""` → a silent 0n — measured-zero laundering; `"-"` → a
-// SyntaxError the route boundary ate), and the ledger's money renderers threw
-// on malformed deltas, scales, realization and projection fields.
+// THE SetRunEngineSummary CLASSIFIER. A set-run decimal that is not judged
+// reaches a bare `BigInt` (`""` → a silent 0n — measured-zero laundering; `"-"`
+// → a SyntaxError the route boundary eats) or a money renderer that throws on
+// a malformed delta, scale, realization or projection field.
 // `classifySetRunEngine` is the ONE law over the CONSUMED inventory, sibling
-// of `classifyRunBookEngine` (p1b-2): wireGuard primitives, per-index naming
+// of `classifyRunBookEngine`: wireGuard primitives, per-index naming
 // (`projection.horizons[1].projected_usd`), schema-exact nullability.
 //
 // The skeleton is the COMMITTED set fixture's own engines
@@ -55,7 +54,7 @@ function corrupted(
 // The clean arm: every committed set fixture, every engine row.
 // ---------------------------------------------------------------------------
 
-test("p1b-3: every engine of every committed set fixture classifies CLEAN", () => {
+test("every engine of every committed set fixture classifies CLEAN", () => {
   for (const name of [
     "run-book-set.json",
     "run-book-set.no-denominator.json",
@@ -72,7 +71,7 @@ test("p1b-3: every engine of every committed set fixture classifies CLEAN", () =
   }
 });
 
-test("p1b-3: the schema-legal nulls are statements, never malformed", () => {
+test("the schema-legal nulls are statements, never malformed", () => {
   // The fixture already carries all four (aave's null flipped_to_eligible,
   // the DM's null hf_dropped_accounts, null blocks) — each pinned explicitly
   // so a nullable arm cannot regress alone.
@@ -98,7 +97,7 @@ test("p1b-3: the schema-legal nulls are statements, never malformed", () => {
   ).toEqual([]);
 });
 
-test("p1b-3: served fields NO tornado surface consumes are OUT OF SCOPE — the recorded decision, pinned", () => {
+test("served fields NO tornado surface consumes are OUT OF SCOPE — the recorded decision, pinned", () => {
   // A classifier refusing a renderable row over a field no renderer reads
   // would refuse real answers over dead weight. A surface that starts
   // consuming one of these owes the module the check FIRST — this pin is
@@ -117,7 +116,7 @@ test("p1b-3: served fields NO tornado surface consumes are OUT OF SCOPE — the 
 // The consumed scalars, group by group. One documented corruption each.
 // ---------------------------------------------------------------------------
 
-test("p1b-3: a fractional usd_decimals is named — the scale every money renderer exponentiates", () => {
+test("a fractional usd_decimals is named — the scale every money renderer exponentiates", () => {
   expect(
     corrupted("eth_minus_30", "debt_manager", (engine) => {
       engine.usd_decimals = 2.5;
@@ -125,7 +124,7 @@ test("p1b-3: a fractional usd_decimals is named — the scale every money render
   ).toEqual(["usd_decimals"]);
 });
 
-test("p1b-3: the two ratio Decimals are named — the empty string that laundered and the dash that crashed", () => {
+test("the two ratio Decimals are named — the empty string that laundered and the dash that crashed", () => {
   expect(
     corrupted("eth_minus_30", "debt_manager", (engine) => {
       engine.eligible_debt_delta_usd = "";
@@ -144,7 +143,7 @@ test("p1b-3: the two ratio Decimals are named — the empty string that laundere
   ).toEqual(["eligible_debt_delta_usd"]);
 });
 
-test("p1b-3: the movement counts are named — the denominator's two inputs", () => {
+test("the movement counts are named — the denominator's two inputs", () => {
   expect(
     corrupted("ethfi_minus_50", "debt_manager", (engine) => {
       engine.accounts = 1.5;
@@ -157,15 +156,15 @@ test("p1b-3: the movement counts are named — the denominator's two inputs", ()
   ).toEqual(["movement_excluded_accounts"]);
 });
 
-// p1b-10 (Codex round 2, finding 2 completion): the set-run counts are
+// The set-run counts are
 // POPULATIONS by their schema descriptions ("Measurable positions of this
 // engine"; "accounts the movement rule could not TEST"; "flips FALSE to TRUE,
 // never a net"; "health factors that STRICTLY DROPPED") — nonnegative SAFE
 // integers, the same law as the run-book classifier. `eligible_accounts_delta`
-// (the schema's "NET — may be negative") stays out of scope by the recorded
-// p1b-3 decision; a surface that starts consuming it owes `isWireSignedCount`.
+// (the schema's "NET — may be negative") stays out of scope: no surface
+// consumes it, and one that starts to owes `isWireSignedCount`.
 
-test("p1b-10: a NEGATIVE or UNSAFE set-run population is named; the nullable subjects stay statements", () => {
+test("a NEGATIVE or UNSAFE set-run population is named; the nullable subjects stay statements", () => {
   expect(
     corrupted("ethfi_minus_50", "debt_manager", (engine) => {
       engine.accounts = -1;
@@ -191,7 +190,7 @@ test("p1b-10: a NEGATIVE or UNSAFE set-run population is named; the nullable sub
   ).toEqual([]);
 });
 
-test("p1b-3: the two nullable movement subjects are judged only when non-null", () => {
+test("the two nullable movement subjects are judged only when non-null", () => {
   expect(
     corrupted("eth_minus_30", "aave_v3_etherfi", (engine) => {
       engine.hf_dropped_accounts = 1.5;
@@ -208,7 +207,7 @@ test("p1b-3: the two nullable movement subjects are judged only when non-null", 
 // The two blocks — judged ONLY when served (null is a statement).
 // ---------------------------------------------------------------------------
 
-test("p1b-3: a served market_realization is judged whole, field by field", () => {
+test("a served market_realization is judged whole, field by field", () => {
   expect(
     corrupted("weeth_market_depeg_oracles_held", "aave_v3_etherfi", (engine) => {
       if (engine.market_realization === null) throw new Error("fixture shape: block missing");
@@ -235,7 +234,7 @@ test("p1b-3: a served market_realization is judged whole, field by field", () =>
   ).toEqual(["market_realization"]);
 });
 
-test("p1b-3: a served projection's horizon Decimals are named PER INDEX", () => {
+test("a served projection's horizon Decimals are named PER INDEX", () => {
   expect(
     corrupted("dm_rate_horizon_plus_200bps", "debt_manager", (engine) => {
       const horizon = engine.projection?.horizons[1];
@@ -274,7 +273,7 @@ test("p1b-3: a served projection's horizon Decimals are named PER INDEX", () => 
 // Read order.
 // ---------------------------------------------------------------------------
 
-test("p1b-3: fields are named in wire read order across the whole row", () => {
+test("fields are named in wire read order across the whole row", () => {
   expect(
     corrupted("dm_rate_horizon_plus_200bps", "debt_manager", (engine) => {
       engine.usd_decimals = 2.5;

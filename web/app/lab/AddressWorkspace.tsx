@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { KitTable, KpiTile, SectionHead, StatusPill, VerdictHeader, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { horizonLabel, rowVerdict, sideRoomWords, stressVerdictWords } from "@/lib/address-stress";
+import { horizonLabel, sideRoomWords } from "@/lib/address-stress";
 import type { AddressTile, AddressWorkspace as Space } from "@/lib/lab-address";
 import { groupInt } from "@/lib/prose";
 import styles from "./lab.module.css";
@@ -15,10 +15,9 @@ const COLUMNS = [
   { key: "flips", header: "Becomes liquidatable?", align: "right" as const },
 ];
 
-/** The one-address workspace: the Inspector's tiles for before and after the selected scenario, and every scenario's row (plan R8, R15). */
+/** The one-address workspace: the Inspector's tiles for before and after the selected scenario, and every scenario's row — the subject is the selected row the address carries, else the first it does. */
 export function AddressWorkspace({ space, kicker }: { space: Space; kicker: ReactNode }) {
   const money = accountMoney(space.decimals);
-  const crossBatch = space.batchId !== null && space.stressBatchId !== null && space.stressBatchId !== space.batchId;
   const chips =
     space.batchId === null
       ? []
@@ -31,11 +30,10 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
   const tile = (key: string, side: "before" | "after", label: string, v: AddressTile | undefined) => (
     <KpiTile testId={`lab-address-kpi-${key}-${side}`} label={label} value={v?.value ?? "—"} tone={v?.tone ?? "refused"} pending={space.state === "loading"} />
   );
-  // The room cells and the verdict cell speak from the lib's own words — the tiles' room register, and the one row
-  // verdict in the one set of words the Inspector's table prints under the same header — so the table can never say
-  // what the header refuses, and the two pages can never word one row two ways.
-  const rows: KitRow[] = space.rows.map((r) => {
-    const verdict = stressVerdictWords(rowVerdict(r));
+  // The room cells and the verdict cell speak from the lib's own words — the tiles' room register, and the verdict
+  // words the view model hands over, which are the Inspector's words for the same row under the same header — so the
+  // table can never say what the header refuses, and the two pages can never word one row two ways.
+  const rows: KitRow[] = space.table.map(({ row: r, verdict }) => {
     return {
       key: r.id,
       dim: !r.applicable,
@@ -101,7 +99,7 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
       <section data-testid="lab-address-section">
         <SectionHead
           title="Every committed scenario"
-          qualifier={crossBatch && space.stressBatchId !== null ? `applied to this account at batch ${groupInt(space.stressBatchId)} · the position above is batch ${groupInt(space.batchId ?? 0)} · shocked figures are projections, not readings` : "applied to this account · shocked figures are projections, not readings"}
+          qualifier={space.qualifier}
         />
         <KitTable columns={COLUMNS} rows={rows} testId="lab-address-table" emptyText={space.state === "rows" ? "No scenario applies to this address." : space.headline.emphasis} />
       </section>

@@ -19,21 +19,33 @@ export interface DrawerProps {
 }
 
 const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), details > summary:first-of-type, [tabindex]:not([tabindex="-1"])';
+
+/**
+ * The panel's Tab stops, in DOM order. A stop is what the browser itself would stop on: a control the selector
+ * names AND the page renders — a closed fold's controls match the selector and are no stop. The cycle below is
+ * decided against this list, so a list that disagreed with the browser would send Tab to the wrong place.
+ */
+function stopsOf(panel: HTMLElement): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((stop) =>
+    typeof stop.checkVisibility === "function" ? stop.checkVisibility() : stop.getClientRects().length > 0,
+  );
+}
 
 /**
  * The explain-this-number slide-over (spec §3.6): every important number
  * opens its evidentiary chain here. Keyboard-accessible: focus moves in on
- * open, Escape closes, Tab cycles inside, focus restores on close. Motion is
- * disabled under prefers-reduced-motion (CSS).
+ * open, Escape closes, Tab and Shift+Tab cycle inside from the first key —
+ * focus never reaches the page behind a modal — and focus restores on close.
+ * Motion is disabled under prefers-reduced-motion (CSS).
  *
  * While open, BODY SCROLL IS LOCKED (`overflow: hidden` on `document.body`
  * for the open lifetime; the prior inline value is restored on close AND on
  * unmount-while-open) — the page behind a modal drawer must not scroll.
  *
  * Entry animates via mount-then-open: the panel mounts in its closed pose and
- * the `.open` class lands on the next frame, so the CSS transitions actually
- * run (they were dead code when the element mounted already-open). Exit is
+ * the `.open` class lands on the next frame, so the CSS transitions have a
+ * start state to run from (an element mounted already-open has none). Exit is
  * deliberately immediate — the drawer unmounts on close.
  */
 export function Drawer({ open, onClose, title, children }: DrawerProps) {
@@ -86,18 +98,24 @@ export function Drawer({ open, onClose, title, children }: DrawerProps) {
       if (event.key !== "Tab") return;
       const panel = panelRef.current;
       if (panel === null) return;
-      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (first === undefined || last === undefined) return;
-      if (event.shiftKey && document.activeElement === first) {
+      const stops = stopsOf(panel);
+      const first = stops[0];
+      const last = stops[stops.length - 1];
+      // A modal never gives its focus to the page behind it: with no stop to move to, Tab moves nothing.
+      if (first === undefined || last === undefined) {
         event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
+        return;
       }
+      // Where focus stands in the cycle. -1 is OUTSIDE it: the panel itself — where focus rests when the drawer
+      // opens, and where a click on the panel's text puts it — or anything else that is not a stop. From outside
+      // the cycle the browser's own next / previous stop may be on the page behind, so the cycle is entered here:
+      // Shift+Tab at its last stop, Tab at its first. Between two stops the browser's own order stands.
+      const active = document.activeElement;
+      const at = active instanceof HTMLElement ? stops.indexOf(active) : -1;
+      const leavesTheCycle = event.shiftKey ? at <= 0 : at === -1 || at === stops.length - 1;
+      if (!leavesTheCycle) return;
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
     },
     [onClose],
   );

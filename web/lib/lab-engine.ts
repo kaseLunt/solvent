@@ -1,12 +1,15 @@
 // One engine of one result is read here, once, under the classifier and the
 // wire guards; the page's workspace and the library's row both consume this
 // reading, so one response can never earn two answers. The reading is by
-// engine id: not covered when the definition does not model the engine,
-// withheld by a listed refusal or by name (no row and no refusal), unreadable
-// when the envelope or any field the reading would consume is outside the
-// wire contract, contradictory when the lane matrix disagrees with itself, and
-// a result only once every guard has passed — every BigInt sits behind its own
-// named guard.
+// engine id, and what the BODY says comes before what the definition says:
+// unreadable when the envelope is outside the wire contract; withheld by a
+// listed refusal or by name (no row and no refusal); unreadable when any field
+// the reading would consume is outside the contract, contradictory when the
+// lane matrix disagrees with itself; not covered when the definition does not
+// model the engine; and a result only once every guard has passed — every
+// BigInt sits behind its own named guard. The same judgement of the Cash row,
+// asked of the body alone, is the one rule that holds a result and releases it
+// (`answerFault`).
 import type { components } from "@solvent/client";
 import { engineName } from "./inspector-headline";
 import { CASH } from "./inspector-position";
@@ -49,7 +52,29 @@ export type EngineReading =
   | { readonly kind: "contradictory"; readonly reasons: readonly string[] }
   | { readonly kind: "unreadable"; readonly fields: readonly string[] };
 
-/** One engine's result, read by id under the classifier and the guards. */
+/** A served row that does not read: outside the wire contract by the names of its fields, or a lane matrix that disagrees with itself. */
+export type RowFault = Extract<EngineReading, { readonly kind: "unreadable" | "contradictory" }>;
+
+/**
+ * One served row judged on its own, with no definition in hand. The classifier walks the whole subtree — the scale,
+ * both sides, the matrix, the signed net, every Decimal and every text the reading consumes, each behind its own
+ * named guard — and its faults are the row's before any nested field is touched: a null side or matrix is named by
+ * the field, never dereferenced. A row that classifies clean is then read for its lanes, which must agree with
+ * themselves.
+ */
+function judgeRow(e: LabRunBookEngine, engine: string): RowFault | { readonly kind: "reads"; readonly heat: HeatmapView } {
+  const malformed = classifyRunBookEngine(e).malformedFields;
+  if (malformed.length > 0) return { kind: "unreadable", fields: [...new Set(malformed)] };
+  const heat = laneReading(e, { merge: engine === CASH });
+  if (heat.kind === "contradictory") return { kind: "contradictory", reasons: heat.reasons };
+  return { kind: "reads", heat: heat.view };
+}
+
+/**
+ * One engine's result, read by id under the classifier and the guards. What the BODY says of the engine is asked
+ * before what the definition says of it: a served row that does not read is that fault under any definition — never
+ * "not modelled" — so the reading of the Cash row and `answerFault` below can never disagree about one body.
+ */
 export function readEngine(run: LabRunBook, engine: string, definition: ScenarioDefinition): EngineReading {
   // The envelope first, before the definition is consulted or a list is searched: a body whose envelope is outside
   // the contract is unreadable by the names of its fields, never dereferenced and never "not modelled" — a
@@ -57,18 +82,15 @@ export function readEngine(run: LabRunBook, engine: string, definition: Scenario
   // carries a string code, so the phrasebook below is never handed anything else.
   const envelope = classifyRunBookEnvelope(run);
   if (envelope.length > 0) return { kind: "unreadable", fields: envelope };
-  if (!definition.engines.includes(engine)) return { kind: "not-covered" };
+  const modelled = definition.engines.includes(engine);
+  // A listed refusal speaks for its engine: the row beside it, if the body carries one, is not judged.
   const refusal = run.excluded_engines.find((e) => e.engine === engine);
-  if (refusal !== undefined) return { kind: "withheld", cause: `${engineName(engine)} — ${plainCause(refusal.code, refusal.detail)}` };
+  if (refusal !== undefined) return modelled ? { kind: "withheld", cause: `${engineName(engine)} — ${plainCause(refusal.code, refusal.detail)}` } : { kind: "not-covered" };
   const e = run.engines.find((x) => x.engine === engine);
-  if (e === undefined) return { kind: "withheld", cause: `${engineName(engine)} — the result carries no row for this engine and no refusal` };
-  // The classifier walks the whole subtree — the scale, both sides, the matrix, the signed net, every Decimal the
-  // reading consumes, each behind its own named guard — and its faults are the reading's before any nested field
-  // is touched: a null side or matrix is named by the field, never dereferenced.
-  const malformed = classifyRunBookEngine(e).malformedFields;
-  if (malformed.length > 0) return { kind: "unreadable", fields: [...new Set(malformed)] };
-  const heat = laneReading(e, { merge: engine === CASH });
-  if (heat.kind === "contradictory") return { kind: "contradictory", reasons: heat.reasons };
+  if (e === undefined) return modelled ? { kind: "withheld", cause: `${engineName(engine)} — the result carries no row for this engine and no refusal` } : { kind: "not-covered" };
+  const row = judgeRow(e, engine);
+  if (row.kind !== "reads") return row;
+  if (!modelled) return { kind: "not-covered" };
   return {
     kind: "result",
     result: {
@@ -86,7 +108,7 @@ export function readEngine(run: LabRunBook, engine: string, definition: Scenario
       deltaBadDebt: BigInt(e.bad_debt_delta_usd),
       measured: e.hf_transitions.measured_rows,
       laneChanged: e.hf_transitions.lane_changed_rows,
-      heat: heat.view,
+      heat: row.heat,
       movers: moversTable(e),
       realization: e.market_realization,
       projection: e.projection,
@@ -97,24 +119,25 @@ export function readEngine(run: LabRunBook, engine: string, definition: Scenario
 }
 
 /**
- * A 2xx run-book READS as an answer, or it does not — asked of the body alone, so the record that holds a result may
- * ask it without a definition. It reads when its envelope is inside the contract and its Cash row, where the body
- * carries one that no listed refusal speaks for, classifies clean with a lane matrix that agrees with itself: a
- * result. A body with no Cash row, or with Cash among its refusals, reads too — withheld, or not modelled, is an
- * honest answer. A malformed or self-contradicting body is a failed answer: it never moves into the hold, so the
- * last body that read stands behind every one that does not.
+ * Why a 2xx run-book is a FAILED answer, asked of the body alone — or null when it READS. It reads when its envelope
+ * is inside the contract and its Cash row, where the body carries one that no listed refusal speaks for, classifies
+ * clean with a lane matrix that agrees with itself: a result. A body with no Cash row, or with Cash among its
+ * refusals, reads too — withheld, or not modelled, is an honest answer.
  *
- * The view's release rule is this rule asked under the definition, and the two agree wherever the view judges the
- * Cash row: what it calls contradictory never reads, and what reads is never contradictory. They part only where the
- * view's state is decided BEFORE the row is judged — a body computed under another version of the definition, or a
- * definition that does not model Cash — while the body carries a malformed Cash row: the view releases, and this
- * rule still refuses the body the hold. This rule governs the hold: a malformed row is never held, whatever the
- * definition would have said of it, and the older result is what a later failure stands.
+ * This is the ONE rule that holds a result and releases it. The record asks it to decide what may move into the
+ * hold; the view asks it FIRST — before the body's version and before the definition's coverage — to decide whether
+ * the hold stands. A malformed or self-contradicting body is a failed answer whatever else it says: it never moves
+ * into the hold, and it never takes a computed result off the page.
  */
-export function readsAsAnswer(run: LabRunBook): boolean {
-  if (classifyRunBookEnvelope(run).length > 0) return false;
-  if (run.excluded_engines.some((e) => e.engine === CASH)) return true;
+export function answerFault(run: LabRunBook): RowFault | null {
+  const envelope = classifyRunBookEnvelope(run);
+  if (envelope.length > 0) return { kind: "unreadable", fields: envelope };
+  if (run.excluded_engines.some((e) => e.engine === CASH)) return null;
   const cash = run.engines.find((e) => e.engine === CASH);
-  if (cash === undefined) return true;
-  return classifyRunBookEngine(cash).malformedFields.length === 0 && laneReading(cash, { merge: true }).kind !== "contradictory";
+  if (cash === undefined) return null;
+  const row = judgeRow(cash, CASH);
+  return row.kind === "reads" ? null : row;
 }
+
+/** A 2xx run-book reads as an answer exactly when it carries no fault: `answerFault`, as a yes or a no. */
+export const readsAsAnswer = (run: LabRunBook): boolean => answerFault(run) === null;

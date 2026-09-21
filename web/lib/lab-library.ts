@@ -94,18 +94,18 @@ export function outcomeLine(record: RunRecord | undefined, definition: ScenarioD
 function cashOutcome(response: LabRunBook, definition: ScenarioDefinition, configVersion: string): LibraryOutcome {
   // The envelope first, before the skew reads its lists: a body whose envelope is outside the contract is unreadable, whatever else it says.
   if (classifyRunBookEnvelope(response).length > 0) return failed("Unreadable");
+  // The workspace's precedence, in a word: a Cash row that does not read is a failed answer whatever else the body
+  // says, so it is judged before the body's version and before the definition's coverage.
+  const r = readEngine(response, CASH, definition);
+  if (r.kind === "unreadable") return failed("Unreadable");
+  if (r.kind === "contradictory") return failed("Contradictory");
   // A result computed under another version of the definition is not this definition's result.
   if (definitionSkew(definition, configVersion, response).includes("version")) return { key: "definition-changed", text: "Definition changed", tone: "refused" };
-  const r = readEngine(response, CASH, definition);
   switch (r.kind) {
     case "not-covered":
       return { key: "not-covered", text: "Not modelled for Cash", tone: "dim" };
     case "withheld":
       return { key: "withheld", text: "Withheld", tone: "refused" };
-    case "unreadable":
-      return failed("Unreadable");
-    case "contradictory":
-      return failed("Contradictory");
     case "result": {
       const { newly, deltaEligibleDebt, decimals, heat } = r.result;
       if (newly > 0) {
