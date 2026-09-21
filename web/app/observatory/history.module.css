@@ -2,7 +2,7 @@
  * card, table and drawer are the kit's; these are the page grid, the two selector rows (a pressed ghost button
  * wears the accent), the sparse-window state line, the 1:1 chart frame, the bucket record's key-value grid and
  * folds, and the drawer body. Tokens throughout; every figure on the page is the wire's or the view model's. */
-.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; }
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; padding: 28px 0 24px; }
 
 /* ---- selectors: the engine switcher (one engine per view) and the metric row inside the chart card ---- */
 .controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }

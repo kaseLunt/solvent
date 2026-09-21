@@ -30,9 +30,13 @@
 .kick { font-size: var(--type-small); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-text); font-weight: var(--w-semibold); margin: 0 0 8px; }
 .h1 { font-size: var(--type-h1); font-weight: var(--w-semibold); letter-spacing: -0.02em; line-height: 1.2; max-width: 860px; margin: 0; color: var(--ink); }
 .h1 b { font-weight: var(--w-semibold); }
+/* An instant is one token: it never breaks across lines, and its digits hold one width. */
+.nobr { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .emCrit { color: var(--crit-text); }
 .emWarn { color: var(--warn-text); }
 .emOk { color: var(--ok-text); }
+/* A statement of record is ink: tone is a verdict's, and green means health and nothing else. */
+.emNeutral { color: var(--ink); }
 .emRefused { color: var(--ink-2); }
 .dek { color: var(--ink-2); font-size: var(--type-dek); max-width: 800px; margin: 10px 0 0; }
 .dek b { color: var(--ink); font-weight: var(--w-medium); }
@@ -49,6 +53,8 @@
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; font-size: var(--type-body); font-weight: var(--w-medium); border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; white-space: nowrap; }
 .btnPrimary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .btnGhost { background: none; }
+/* One pressed-toggle grammar: a ghost button that is a toggle wears the accent when pressed. */
+.btnGhost[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 
 /* ---- section head ---- */
 .sec { display: flex; align-items: baseline; justify-content: space-between; margin-top: 26px; gap: 12px; }

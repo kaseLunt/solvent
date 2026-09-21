@@ -2,7 +2,7 @@
  * table are the kit's; these are the contract's own vocabulary (verb, path, params, response codes), the base-URL
  * strip, and the terminal treatment for code, which the kit does not carry. Every figure on the page is the
  * contract's own text; the styling only sets it. */
-.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 28px 0 24px; }
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 /* A URL is an identifier: mono wherever the page prints it, the identity chip included. */
 .page [data-chip="Base URL"] b { font-family: var(--mono); font-size: var(--type-mono-sm); }
@@ -38,6 +38,9 @@
 .codeWrap { position: relative; min-width: 0; }
 .code { margin: 0; padding: 12px 44px 12px 14px; border-radius: 8px; background: var(--term-bg); color: var(--term-ink); font-family: var(--mono); font-size: var(--type-mono); line-height: 1.6; overflow-x: auto; }
 .codeCopy { position: absolute; top: 8px; right: 8px; }
+/* The copy chip on the terminal ground wears the terminal's palette: --term-bg is one colour in both themes, so a chip on a page token would glow on it in light. */
+.codeCopy button { background: transparent; border-color: var(--term-dim); color: var(--term-dim); }
+.codeCopy button:hover { color: var(--term-accent); border-color: var(--term-accent); }
 
 /* ---- response codes above the sample fold: the non-2xx vocabulary never trails the happy path ---- */
 .responses { display: flex; flex-wrap: wrap; gap: 8px; }

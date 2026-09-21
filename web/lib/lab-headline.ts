@@ -13,7 +13,7 @@ import { groupInt, joinAnd } from "./prose";
 export interface LabHeadline {
   readonly emphasis: string;
   readonly rest: string;
-  readonly tone: "crit" | "warn" | "ok" | "refused";
+  readonly tone: "crit" | "warn" | "ok" | "neutral" | "refused";
   readonly dek: string;
 }
 

@@ -13,6 +13,8 @@
 //   4. the refused chip leads with the plain cause — a wire code never
 //      leads (§5 D5 + §8 anti-state law).
 import { expect, test } from "@playwright/test";
+import type { VerdictHeaderProps } from "../../components/kit/VerdictHeader";
+import type { LabHeadline } from "../../lib/lab-headline";
 import {
   CHIP_TONE_CLASS,
   exactAriaLabel,
@@ -188,5 +190,30 @@ test.describe("refused chip (§5 D5) — the plain cause leads", () => {
       { text: "WITHHELD", register: "state" },
       { text: "missing observation", register: "cause" },
     ]);
+  });
+});
+
+// Type-only imports: the unit project cannot load a CSS module, and a type import is erased before it could try. The
+// pins below are held by tsc — a union that loses `neutral`, or two unions that drift apart, fails the type gate.
+type SameUnion<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+test.describe("the header's tones — a record is ink, only a verdict wears tone", () => {
+  test("neutral is a tone of the header and of the headline a lib returns, and the two unions are one", () => {
+    const sameUnion: SameUnion<VerdictHeaderProps["tone"], LabHeadline["tone"]> = true;
+    expect(sameUnion).toBe(true);
+
+    // Exhaustive over the header's union: a tone added to or dropped from it is a missing or an unknown key here.
+    const wearsVerdictColor: Record<VerdictHeaderProps["tone"], boolean> = {
+      crit: true,
+      warn: true,
+      ok: true,
+      neutral: false,
+      refused: false,
+    };
+    expect(Object.keys(wearsVerdictColor)).toEqual(["crit", "warn", "ok", "neutral", "refused"]);
+
+    const record: LabHeadline = { emphasis: "50 chain actions loaded,", rest: "more exist beyond these.", tone: "neutral", dek: "" };
+    const tone: VerdictHeaderProps["tone"] = record.tone;
+    expect(wearsVerdictColor[tone]).toBe(false);
   });
 });

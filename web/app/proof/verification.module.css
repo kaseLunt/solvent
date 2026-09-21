@@ -2,7 +2,7 @@
  * tiles, table and drawer are the kit's; these are the architecture strip's sentence grid and receipt line, the two
  * subject cards' rows and provenance folds, the identifier + copy pairing, and the raw-JSON terminal. The proof card
  * is accent-ruled and the live card ok-ruled: the split is the product, and neither may borrow the other's rule. */
-.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 28px 0 24px; }
 
 /* ---- Architecture & verification: the anchor the Overview lands on clears the 56px app bar ---- */
 .architecture { scroll-margin-top: 72px; }

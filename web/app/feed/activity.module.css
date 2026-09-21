@@ -3,7 +3,7 @@
  * (a separate instrument, labelled as such), the honest state strips, the table's unit and tx cells, and the foot.
  * Every sentence on the page is lib/activity-view.ts's or the surface's own state machine's; the styling only
  * sets it. */
-.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 28px 0 24px; }
 .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 
 /* ---- live posture strip: the CURRENT connection only, never history ---- */

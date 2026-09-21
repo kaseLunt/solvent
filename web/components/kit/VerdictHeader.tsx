@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { splitInstants } from "@/lib/instant-split";
 import { IdentityChips, type IdentityChip } from "./IdentityChips";
 import styles from "./kit.module.css";
 
@@ -7,7 +8,8 @@ export interface VerdictHeaderProps {
   /** The money phrase that carries the verdict color. */
   emphasis: string;
   rest?: string;
-  tone: "crit" | "warn" | "ok" | "refused";
+  /** `neutral` is a statement of record and wears ink; a tone's color is a verdict's, and `ok` means health only. */
+  tone: "crit" | "warn" | "ok" | "neutral" | "refused";
   dek: string;
   chips: IdentityChip[];
   actions?: ReactNode;
@@ -18,8 +20,27 @@ const EM_CLASS = {
   crit: styles.emCrit,
   warn: styles.emWarn,
   ok: styles.emOk,
+  neutral: styles.emNeutral,
   refused: styles.emRefused,
 } as const;
+
+/** The sentence as written, each UTC instant inside it kept whole on one line. The text is the lib's; only the break opportunity goes. */
+function unbroken(text: string): ReactNode {
+  const parts = splitInstants(text);
+  if (!parts.some((part) => part.instant)) return text;
+  let offset = 0;
+  return parts.map((part) => {
+    const key = offset;
+    offset += part.text.length;
+    return part.instant ? (
+      <span key={key} className={styles.nobr}>
+        {part.text}
+      </span>
+    ) : (
+      part.text
+    );
+  });
+}
 
 /** The page answer. Never renders without identity: an empty chip list renders the refusal chip. */
 export function VerdictHeader({ kicker, emphasis, rest = "", tone, dek, chips, actions, testId }: VerdictHeaderProps) {
@@ -30,8 +51,8 @@ export function VerdictHeader({ kicker, emphasis, rest = "", tone, dek, chips, a
     <header data-testid={testId} data-variant={tone}>
       <p className={styles.kick}>{kicker}</p>
       <h1 className={styles.h1} data-testid={sub("headline")}>
-        <b className={EM_CLASS[tone]}>{emphasis}</b>
-        {rest === "" ? null : /^\s/.test(rest) ? rest : ` ${rest}`}
+        <b className={EM_CLASS[tone]}>{unbroken(emphasis)}</b>
+        {rest === "" ? null : unbroken(/^\s/.test(rest) ? rest : ` ${rest}`)}
       </h1>
       <p className={styles.dek} data-testid={sub("dek")}>
         {dek}
