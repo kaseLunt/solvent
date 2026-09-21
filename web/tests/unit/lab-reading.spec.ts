@@ -1,11 +1,12 @@
 // The run records' law: one run per id in flight, a settled record replaces
 // the running one and nothing else, a second click while running is a no-op.
 import { expect, test } from "@playwright/test";
+import { setFault, setMembership } from "../../lib/lab-compare";
 import { readsAsAnswer } from "../../lib/lab-engine";
 import { canDispatch, canDispatchSet, withRunning, withSetRunning, withSetSettled, withSettled } from "../../lib/lab-reading";
 import type { RunRecord } from "../../lib/lab-library";
 import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
-import { cashEngine, DEMO_CASH_TABLE, runBookOf, transitionsOf } from "./helpers/run-book-engine";
+import { cashEngine, DEMO_CASH_TABLE, legacyEngine, runBookOf, transitionsOf } from "./helpers/run-book-engine";
 
 test("withRunning marks one id and leaves the others; canDispatch refuses an id in flight", () => {
   const empty = new Map<string, RunRecord>();
@@ -106,7 +107,7 @@ test("the hold survives consecutive answers that do not read: only a body that r
   expect(withRunning(ask(thrice, withheld, 13), "a", 15, readsAsAnswer).get("a")?.held).toEqual({ response: withheld, at: 14, atMonotonicMs: 14 });
 });
 
-test("readsAsAnswer: the envelope inside the contract, and the Cash row — where the body carries one and no refusal names it — classified clean with a matrix that agrees with itself", () => {
+test("readsAsAnswer: the envelope inside the contract, and every row the page would draw — the Cash book's and the legacy market's, where the body carries one and no refusal names it — classified clean with a matrix that agrees with itself", () => {
   const result = runBookOf([cashEngine(DEMO_CASH_TABLE)]);
   expect(readsAsAnswer(result)).toBe(true);
   expect(readsAsAnswer({ ...result, batch: undefined } as unknown as typeof result)).toBe(false);
@@ -115,6 +116,10 @@ test("readsAsAnswer: the envelope inside the contract, and the Cash row — wher
   expect(readsAsAnswer(runBookOf([cashEngine(DEMO_CASH_TABLE, { hf_transitions: { ...transitionsOf(DEMO_CASH_TABLE), total_rows: 5 } })]))).toBe(false);
   // No Cash row is withheld or not modelled — an honest answer; a listed refusal is the answer whatever row rides beside it.
   expect(readsAsAnswer(runBookOf([]))).toBe(true);
+  // The legacy market's row is drawn too, so it is judged too — beside a Cash row that reads, and on its own.
+  expect(readsAsAnswer(runBookOf([legacyEngine({ 7: { 7: 1 } }), cashEngine(DEMO_CASH_TABLE)]))).toBe(true);
+  expect(readsAsAnswer(runBookOf([legacyEngine({ 7: { 7: 1 } }, { eligible_debt_delta_usd: "1e6" }), cashEngine(DEMO_CASH_TABLE)]))).toBe(false);
+  expect(readsAsAnswer(runBookOf([legacyEngine({ 7: { 7: 1 } }, { usd_decimals: 1.5 })]))).toBe(false);
   expect(readsAsAnswer(runBookOf([cashEngine(DEMO_CASH_TABLE, { usd_decimals: 1.5 })], undefined, { excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }] }))).toBe(true);
 });
 
@@ -136,4 +141,48 @@ test("a settled body that is not a JSON object, or a refusal without a code, nev
     set = withSetSettled(withSetRunning(set, asked, 3), asked, { kind: "ok", response: body as unknown as typeof answering }, 4);
     expect(set.held).toEqual({ ids: asked, response: answering, at: 2 });
   }
+});
+
+/** The answering set with one result's engine row rewritten — the same request answered, one figure changed. */
+const withEngineOf = (set: typeof DEMO_RUN_BOOK_SET, scenarioId: string, engine: string, overrides: Record<string, unknown>): typeof DEMO_RUN_BOOK_SET => ({
+  ...set,
+  results: set.results.map((r) => (r.scenario_id !== scenarioId ? r : { ...r, engines: r.engines.map((e) => (e.engine !== engine ? e : ({ ...e, ...overrides } as typeof e))) })),
+});
+
+test("the set's one predicate covers what the comparison draws, not membership alone: a set that answers its request with an engine figure outside the contract, or with parts that do not partition a result's coverage, is a failed Compare like any other — the comparison that read stands behind it however many follow, and it never becomes the next hold", () => {
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  const answering = demoSetFor(asked);
+  const held = { ids: asked, response: answering, at: 2 };
+  const garbageCash = withEngineOf(answering, "eth_minus_30", "debt_manager", { eligible_debt_delta_usd: "garbage" });
+  const garbageLegacy = withEngineOf(answering, "eth_minus_30", "aave_v3_etherfi", { total_debt_usd_before: "" });
+  const brokenCensus = { ...answering, results: answering.results.map((r) => (r.scenario_id === "ethfi_minus_50" ? { ...r, withheld_engines: ["debt_manager"] } : r)) };
+  // Each answers the request: membership alone would admit it.
+  for (const body of [garbageCash, garbageLegacy, brokenCensus]) expect(setMembership(asked, body)).toEqual([]);
+  expect(setFault(asked, answering)).toBeNull();
+  expect(setFault(asked, garbageCash)).toEqual({ kind: "unreadable", faults: ["eth_minus_30: eligible_debt_delta_usd is outside the wire contract"] });
+  expect(setFault(asked, garbageLegacy)).toEqual({ kind: "unreadable", faults: ["eth_minus_30: Aave v3 market (legacy): total_debt_usd_before is outside the wire contract"] });
+  expect(setFault(asked, brokenCensus)).toEqual({ kind: "unreadable", faults: ["ethfi_minus_50: engines, withheld_engines and unmeasurable_engines do not partition covered_engines; overlap: debt_manager"] });
+  // A body that does not answer its request is refused on membership, before any result is read.
+  expect(setFault(asked, DEMO_RUN_BOOK_SET)?.kind).toBe("membership");
+  expect(setFault(asked, DEMO_RUN_BOOK_SET)?.faults).toEqual(setMembership(asked, DEMO_RUN_BOOK_SET));
+
+  // valid → garbage → garbage → a broken census → a transport failure: the same comparison stands throughout.
+  let set = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: answering }, 2);
+  expect(set.held).toBeNull();
+  for (const body of [garbageCash, garbageCash, garbageLegacy, brokenCensus]) {
+    const running = withSetRunning(set, asked, 3);
+    expect(running.held).toEqual(held);
+    set = withSetSettled(running, asked, { kind: "ok", response: body }, 4);
+    expect(set.held).toEqual(held);
+  }
+  set = withSetSettled(withSetRunning(set, asked, 5), asked, { kind: "rate-limited", message: "m", retryAfterSeconds: 3 }, 6);
+  expect(set.held).toEqual(held);
+  // A new set that reads releases the hold, and is what the next Compare holds.
+  const fresh = withSetSettled(withSetRunning(set, asked, 7), asked, { kind: "ok", response: answering }, 8);
+  expect(fresh.held).toBeNull();
+  expect(withSetRunning(fresh, asked, 9).held).toEqual({ ids: asked, response: answering, at: 8 });
+  // With nothing held, a set that does not read is never what the next Compare holds.
+  const bare = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: garbageCash }, 2);
+  expect(bare.held).toBeNull();
+  expect(withSetRunning(bare, asked, 3).held).toBeNull();
 });

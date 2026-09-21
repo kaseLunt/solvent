@@ -130,3 +130,20 @@ test("a request refused before dispatch says nothing was sent ONCE: the headline
   }
   expect(failureHeadline("refused-locally", { message: refusals[2]?.kind === "refused-locally" ? refusals[2].message : "" }).dek).toBe('"eth_minus_30" appears twice, and a set names each id once.');
 });
+
+test("only the client seals a horizon: a wire member named `liquidation_verdict` is taken off every horizon before the seal decides, so a horizon that OMITS `becomes_liquidatable` and carries the client's name is named as unsealed — never read as a verdict — and beside a wire verdict the client's own seal is the one that stands", async () => {
+  const { becomes_liquidatable: _verdict, ...noVerdict } = HORIZON;
+  void _verdict;
+  // The wire cannot seal: no `becomes_liquidatable`, and a stray verdict under the client's name.
+  for (const stray of ["liquidatable", "not-liquidatable", "unknowable"]) {
+    const response = await settled(withEngine({ ...ENGINE, projection: { ...PROJECTION, horizons: [{ ...noVerdict, liquidation_verdict: stray }] } }));
+    expect(engineOf(response)).toEqual(["projection.horizons[0].becomes_liquidatable"]);
+    const horizon = (response as { engines: { projection: { horizons: Record<string, unknown>[] } }[] }).engines[0]?.projection.horizons[0];
+    expect(horizon !== undefined && "liquidation_verdict" in horizon).toBe(false);
+    expect(readsAsAnswer(response as never)).toBe(false);
+  }
+  // A horizon the seal CAN read: the wire's own verdict decides, whatever a stray member beside it claims.
+  const sealed = (await settled(withEngine({ ...ENGINE, projection: { ...PROJECTION, horizons: [{ ...HORIZON, becomes_liquidatable: false, liquidation_verdict: "liquidatable" }] } }))) as { engines: LabRunBookEngine[] };
+  expect(sealed.engines[0]?.projection?.horizons[0]?.liquidation_verdict).toBe("not-liquidatable");
+  expect(engineOf(sealed)).toEqual([]);
+});

@@ -43,6 +43,13 @@ export interface AddressWorkspace {
    */
   readonly table: readonly AddressTableRow[];
   readonly selected: StressRow | null;
+  /**
+   * The disclosure when the scenario the reader or the link NAMED is not one this address was stressed under: the
+   * subject falls back to the first row the address carries, and the page says so — which scenario was not evaluated,
+   * and which is shown in its place. The URL follows the subject shown, so the fallback is never silent. Null when the
+   * named scenario is the subject, or none was named.
+   */
+  readonly fallback: string | null;
   readonly headline: LabHeadline;
   readonly tiles: AddressTiles | null;
   readonly batchId: number | null;
@@ -69,7 +76,7 @@ const PROJECTIONS_NOT_READINGS = "shocked figures are projections, not readings"
 const QUALIFIER = `applied to this account · ${PROJECTIONS_NOT_READINGS}`;
 
 function empty(state: AddressWorkspaceState, address: string, headline: LabHeadline, cause: string | null = null): AddressWorkspace {
-  return { state, address, rows: [], table: [], selected: null, headline, tiles: null, batchId: null, stressBatchId: null, stressBatchChip: null, qualifier: QUALIFIER, decimals: null, scaleAbsence: "no-lookup", cause };
+  return { state, address, rows: [], table: [], selected: null, fallback: null, headline, tiles: null, batchId: null, stressBatchId: null, stressBatchChip: null, qualifier: QUALIFIER, decimals: null, scaleAbsence: "no-lookup", cause };
 }
 
 const STATUS_WORD: Record<CashStatus, AddressTile> = {
@@ -147,7 +154,62 @@ function rowHeadline(short: string, row: StressRow, decimals: number): LabHeadli
   }
 }
 
-export function addressWorkspace(input: { address: string; view: InspectorView | null; selectedId: string | null }): AddressWorkspace {
+/**
+ * A stress response that reports no position. The negative is the STRESS response's own — a request of its own, which
+ * may answer another batch than the lookup did — so it is named with ITS batch and never the lookup's: "no position
+ * in batch N" beside a position the page loaded for batch N is a sentence neither response said. Where the lookup
+ * itself holds no Cash position the two agree and the negative stands as the finding. Where the lookup holds one, or
+ * withholds the book, the two answers are not one fact: what is known of both batches is disclosed first, and the
+ * stress response's negative is said after it, as that response's answer about its own batch.
+ */
+function noPosition(address: string, short: string, view: InspectorView): AddressWorkspace {
+  const batchId = view.batchId;
+  const stressBatchId = view.stressBatchId;
+  const sameBatch = batchId !== null && stressBatchId !== null && stressBatchId === batchId;
+  const stressAt = stressBatchId === null ? "a batch it does not name readably" : `batch ${groupInt(stressBatchId)}`;
+  const state = (headline: LabHeadline): AddressWorkspace => empty("no-position", address, headline);
+  // Where the lookup does not itself say "no Cash position", the strip names both batches, the stress batch in the Inspector's words.
+  const disclosed = (headline: LabHeadline): AddressWorkspace => ({ ...state(headline), batchId, stressBatchId, stressBatchChip: sameBatch ? null : (stressBatchNote(view)?.chipValue ?? null) });
+  // A withheld Cash book is asked first of all, as it is beside rows: the lookup's answer there is cannot-say, never "no position".
+  if (view.state === "cannot-compute") {
+    return disclosed(refused(`Cannot say — the Cash book is withheld for ${short}.`, `The stress response reports no position in ${stressAt} while the lookup's Cash book is withheld — the two answers disagree.`));
+  }
+  // The lookup's own negative — nothing found, or a legacy position alone — agrees with the stress response's.
+  if (view.cash === null) {
+    if (sameBatch) return state(refused(`No Cash position for ${short} in ${stressAt}.`, "The lookup is complete: there is nothing to stress."));
+    const lookupAt = batchId === null ? "names no readable batch" : `is batch ${groupInt(batchId)}`;
+    return state(
+      refused(
+        `No Cash position for ${short} in ${stressBatchId === null ? "a batch the stress response does not name readably" : stressAt}.`,
+        `That is the stress response's own answer, for its own batch; the lookup above ${lookupAt} and holds no Cash position either.`,
+      ),
+    );
+  }
+  if (sameBatch) {
+    return disclosed(
+      refused(
+        `Cannot say — the lookup holds a Cash position for ${short} in ${stressAt}, and the stress response reports none in the same batch.`,
+        "The two answers disagree about one batch. Nothing is stressed; the position above is the lookup's own.",
+      ),
+    );
+  }
+  const stressBatchWords = stressBatchId === null ? "the stress result names no readable batch" : `the stress result is for ${stressAt}`;
+  const positionBatchWords = batchId === null ? "the position above names no readable batch" : `the position above is batch ${groupInt(batchId)}`;
+  const reports = `reports no position for ${short} in ${stressAt}${stressBatchId === null ? "" : " — its own batch, not the position's"}.`;
+  const law = batchId !== null && stressBatchId !== null ? "A position and a stress result from different batches are not compared." : "A stress result and a position are compared only when both name the same batch.";
+  const dek = view.stressFromPreviousLookup
+    ? `The stress response was read for the previous lookup, and the position above was refreshed since. It ${reports} ${law}`
+    : `The stress response ${reports} ${law}`;
+  return disclosed(refused(`Cannot say — ${stressBatchWords}; ${positionBatchWords}.`, dek));
+}
+
+/** The scenario the reader or the link named, where one was: its label, as the listing prints it, for the fallback's disclosure. */
+export interface NamedScenario {
+  readonly id: string;
+  readonly label: string;
+}
+
+export function addressWorkspace(input: { address: string; view: InspectorView | null; selectedId: string | null; named?: NamedScenario | null }): AddressWorkspace {
   const { address, view, selectedId } = input;
   if (view === null || address === "") {
     return empty("idle", address, refused("Stress one address.", "Enter an address; the committed scenarios are applied to its Cash position."));
@@ -164,15 +226,20 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   if (stress === null) return empty("loading", address, refused(`Running the committed scenarios for ${short}…`, "One evaluation per scenario against this batch; nothing is written."));
   const batchId = view.batchId;
   const stressBatchId = view.stressBatchId;
-  if (stress.kind === "no-position") {
-    return empty("no-position", address, refused(`No Cash position for ${short} in batch ${batchId === null ? "?" : String(batchId)}.`, "The lookup is complete: there is nothing to stress."));
-  }
+  if (stress.kind === "no-position") return noPosition(address, short, view);
   if (stress.kind === "withheld") {
     return empty("withheld", address, refused(`Cannot say — the Cash book is withheld for ${short}.`, `${sentence(stress.cause)} A withheld book is not a computed book.`), stress.cause);
   }
   const rows = stress.rows;
   const table: AddressTableRow[] = rows.map((row) => ({ row, verdict: stressVerdictWords(rowVerdict(row)) }));
   const selected = rows.find((r) => r.id === selectedId) ?? rows[0] ?? null;
+  // A named scenario the address does not carry is never shown as if it were evaluated: the subject is the first row
+  // the address does carry, and the fallback is said in so many words — what was not evaluated, what is shown instead.
+  const named = input.named ?? null;
+  const fallback =
+    named !== null && selected !== null && selected.id !== named.id
+      ? `${named.label} was not evaluated for ${short}: the stress response carries no result for it. ${selected.label} is shown instead — the first scenario this address carries.`
+      : null;
   const decimals = view.decimals !== null && isWireScale(view.decimals) ? view.decimals : null;
   // A stress result is the position's only when both name the same readable batch. Another batch, or a stress body
   // that names no readable batch at all, is not compared — an unreadable batch is never read as the position's.
@@ -188,7 +255,7 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
     : `applied to this account at ${stressBatchId === null ? "a batch the stress result does not name readably" : `batch ${groupInt(stressBatchId)}`} · ${positionBatchWords} · ${PROJECTIONS_NOT_READINGS}`;
   // A scale the view handed over but the guard refused is the one case that IS an unreadable scale.
   const scaleAbsence: ScaleAbsence | null = decimals !== null ? null : (view.scaleAbsence ?? "unreadable");
-  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, table, selected, headline, tiles: null, batchId, stressBatchId, stressBatchChip, qualifier, decimals, scaleAbsence, cause: null });
+  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, table, selected, fallback, headline, tiles: null, batchId, stressBatchId, stressBatchChip, qualifier, decimals, scaleAbsence, cause: null });
   if (selected === null) return bare(refused(`No scenario applies to ${short}.`, "The stress response carried no scenario for this account."));
   // Rows beside no Cash position are two responses disagreeing; a position at a scale the guard refused prints no figure.
   // Neither is the scenarios' doing, so neither borrows their sentence. The position is asked before its scale: no
@@ -237,7 +304,7 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
     roomAfter: after === null ? REFUSED_TILE : roomTile(after.room, decimals, roomToneAfter),
     statusAfter,
   };
-  return { state: "rows", address, rows, table, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, stressBatchId, stressBatchChip, qualifier, decimals, scaleAbsence, cause: null };
+  return { state: "rows", address, rows, table, selected, fallback, headline: rowHeadline(short, selected, decimals), tiles, batchId, stressBatchId, stressBatchChip, qualifier, decimals, scaleAbsence, cause: null };
 }
 
 /**

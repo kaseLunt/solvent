@@ -16,7 +16,7 @@ import { humanAge } from "@/lib/freshness";
 import { deriveInspectorView } from "@/lib/inspector-view";
 import { CASH } from "@/lib/inspector-position";
 import { addressWorkspace, rowOutcome } from "@/lib/lab-address";
-import { deepLinkDecision } from "@/lib/lab-deep-link";
+import { conflictNotice, deepLinkDecision } from "@/lib/lab-deep-link";
 import { useLabReading } from "@/lib/lab-reading";
 import { deriveLabView, type LabChip } from "@/lib/lab-view";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
@@ -104,11 +104,38 @@ export function LabSurface() {
     mode === "address" && address !== ""
       ? deriveInspectorView(addressReading, meta.constants)
       : null;
+  // The scenario the reader or the link NAMED, as the listing resolved it: a name the listing does not publish names
+  // nothing, and with no name there is nothing to disclose a fallback from.
+  const named =
+    selectedId !== null && definition !== null && definition.id === selectedId
+      ? { id: definition.id, label: definition.label }
+      : null;
   const space = addressWorkspace({
     address,
     view: inspectorView,
     selectedId: view.selectedId,
+    named,
   });
+
+  // The URL names the subject the workspace SHOWS. The subject is book mode's selection as the listing resolved it,
+  // and one-address mode's selected row — which is NOT the row clicked when the address was not stressed under it,
+  // and not the id a link named when the listing does not publish it. Once a scenario has been named — by the link or
+  // by a selection — the address bar is held to the subject on screen, so a reload or a shared link opens what the
+  // reader is looking at; while no subject is determined, and on a page nobody named a scenario on, nothing is
+  // written. In one-address mode the account is part of the subject, and is held the same way. The write is
+  // `replaceState`, read against the live address bar: a same-route navigation that drops the query is put right too.
+  const subjectId =
+    mode === "book" ? view.selectedId : (space.selected?.id ?? null);
+  useEffect(() => {
+    // This page writes its own route's URL and no other: mid-navigation the bar may already name another route.
+    if (window.location.pathname !== "/lab") return;
+    const next = new URLSearchParams(window.location.search);
+    const before = next.toString();
+    if (selectedId !== null && subjectId !== null)
+      next.set("scenario", subjectId);
+    if (mode === "address" && isAddress(address)) next.set("address", address);
+    if (next.toString() !== before) replaceUrl(labUrl(next));
+  }, [params, selectedId, subjectId, mode, address]);
 
   // The batch's own age (the wire's number) anchored at the clocks this tab settled the result on,
   // so a re-selected older result does not restart its age at the moment of re-selection.
@@ -129,11 +156,16 @@ export function LabSurface() {
           reading.listing.value.scenarios.map((s) => s.id),
         )
       : null;
+  // The conflict's notice claims only what the conflict gates — the book run — and says so when an address is being
+  // evaluated on the page beside it: that evaluation is the address lookup's own, and is shown.
   const notice =
-    decision !== null &&
-    (decision.kind === "set" || decision.kind === "conflict")
-      ? decision.notice
-      : null;
+    decision === null
+      ? null
+      : decision.kind === "conflict"
+        ? conflictNotice(mode === "address" && isAddress(address))
+        : decision.kind === "set"
+          ? decision.notice
+          : null;
   const decided = useRef(false);
   useEffect(() => {
     if (
@@ -285,7 +317,8 @@ export function LabSurface() {
           emptyText={
             book.state === "listing-loading"
               ? "Loading the committed scenarios…"
-              : book.state === "listing-unavailable"
+              : book.state === "listing-unavailable" ||
+                  book.state === "listing-unreadable"
                 ? book.headline.emphasis
                 : "No committed scenarios are listed."
           }

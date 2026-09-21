@@ -7,13 +7,13 @@
 // the reading would consume is outside the contract, contradictory when the
 // lane matrix disagrees with itself; not covered when the definition does not
 // model the engine; and a result only once every guard has passed — every
-// BigInt sits behind its own named guard. The same judgement of the Cash row,
-// asked of the body alone, is the one rule that holds a result and releases it
-// (`answerFault`).
+// BigInt sits behind its own named guard. The same judgement, asked of the body
+// alone and of EVERY engine the page draws a card for, is the one rule that
+// holds a result and releases it (`answerFault`).
 import type { components } from "@solvent/client";
 import { engineName } from "./inspector-headline";
-import { CASH } from "./inspector-position";
-import { classifyRunBookEngine, classifyRunBookEnvelope } from "./lab-classify";
+import { CASH, LEGACY } from "./inspector-position";
+import { classifyRunBookEngine, classifyRunBookEnvelope, contractFaults } from "./lab-classify";
 import { moversTable, type MoversTable } from "./lab-movers";
 import { laneReading, type HeatmapView } from "./lab-transitions";
 import { plainCause } from "./refusal-phrasebook";
@@ -73,7 +73,7 @@ function judgeRow(e: LabRunBookEngine, engine: string): RowFault | { readonly ki
 /**
  * One engine's result, read by id under the classifier and the guards. What the BODY says of the engine is asked
  * before what the definition says of it: a served row that does not read is that fault under any definition — never
- * "not modelled" — so the reading of the Cash row and `answerFault` below can never disagree about one body.
+ * "not modelled" — so the reading of a row and `answerFault` below can never disagree about it.
  */
 export function readEngine(run: LabRunBook, engine: string, definition: ScenarioDefinition): EngineReading {
   // The envelope first, before the definition is consulted or a list is searched: a body whose envelope is outside
@@ -119,24 +119,60 @@ export function readEngine(run: LabRunBook, engine: string, definition: Scenario
 }
 
 /**
- * Why a 2xx run-book is a FAILED answer, asked of the body alone — or null when it READS. It reads when its envelope
- * is inside the contract and its Cash row, where the body carries one that no listed refusal speaks for, classifies
- * clean with a lane matrix that agrees with itself: a result. A body with no Cash row, or with Cash among its
- * refusals, reads too — withheld, or not modelled, is an honest answer.
- *
- * This is the ONE rule that holds a result and releases it. The record asks it to decide what may move into the
- * hold; the view asks it FIRST — before the body's version and before the definition's coverage — to decide whether
- * the hold stands. A malformed or self-contradicting body is a failed answer whatever else it says: it never moves
- * into the hold, and it never takes a computed result off the page.
+ * The engines the page draws a card for, in the page's own order: the Cash book, then the legacy market beneath it.
+ * A result's fault is asked of each — what the page would draw is what must read.
  */
-export function answerFault(run: LabRunBook): RowFault | null {
+const DISPLAYED_ENGINES: readonly string[] = [CASH, LEGACY];
+
+/**
+ * Why a body is a failed answer, in the words the page prints: every fault named, and whether the first of them is a
+ * field outside the wire contract (`unreadable`) or a lane matrix that disagrees with itself (`contradictory`) — the
+ * library's one word for it.
+ */
+export interface AnswerFault {
+  readonly kind: RowFault["kind"];
+  readonly reasons: readonly string[];
+}
+
+/**
+ * A row's fault as the BODY's fault. The page is the Cash book's, so a fault in the Cash row is named as the row names
+ * it; a fault in any other engine's row is named under that engine, so a reader never takes it for the Cash book's.
+ */
+function bodyReasons(engine: string, fault: RowFault): string[] {
+  const reasons = fault.kind === "unreadable" ? contractFaults(fault.fields) : [...fault.reasons];
+  return engine === CASH ? reasons : reasons.map((reason) => `${engineName(engine)}: ${reason}`);
+}
+
+/**
+ * Why a 2xx run-book is a FAILED answer, asked of the body alone — or null when it READS. It reads when its envelope
+ * is inside the contract and EVERY row the page would draw — the Cash book's and the legacy market's, where the body
+ * carries one that no listed refusal speaks for — classifies clean, its movers' ratio pairs included, with a lane
+ * matrix that agrees with itself. A body with no row for an engine, or with the engine among its refusals, reads too:
+ * withheld, or not modelled, is an honest answer.
+ *
+ * This is the ONE rule that holds a result and releases it, and it covers everything the result draws. The record
+ * asks it to decide what may move into the hold; the view asks it FIRST — before the body's version and before the
+ * definition's coverage — to decide whether the body is an answer at all and whether the hold stands. A malformed or
+ * self-contradicting body is a failed answer whatever else it says, in whichever engine's row: it never moves into
+ * the hold, it never takes a computed result off the page, and no figure of it is drawn — a Cash row that reads
+ * beside a legacy row that does not would be a result the page shows and the hold refuses, lost to the next failure.
+ */
+export function answerFault(run: LabRunBook): AnswerFault | null {
   const envelope = classifyRunBookEnvelope(run);
-  if (envelope.length > 0) return { kind: "unreadable", fields: envelope };
-  if (run.excluded_engines.some((e) => e.engine === CASH)) return null;
-  const cash = run.engines.find((e) => e.engine === CASH);
-  if (cash === undefined) return null;
-  const row = judgeRow(cash, CASH);
-  return row.kind === "reads" ? null : row;
+  if (envelope.length > 0) return { kind: "unreadable", reasons: contractFaults(envelope) };
+  let kind: RowFault["kind"] | null = null;
+  const reasons: string[] = [];
+  for (const engine of DISPLAYED_ENGINES) {
+    // A listed refusal speaks for its engine: the row beside it, if the body carries one, is not judged.
+    if (run.excluded_engines.some((e) => e.engine === engine)) continue;
+    const served = run.engines.find((e) => e.engine === engine);
+    if (served === undefined) continue;
+    const row = judgeRow(served, engine);
+    if (row.kind === "reads") continue;
+    kind ??= row.kind;
+    reasons.push(...bodyReasons(engine, row));
+  }
+  return kind === null ? null : { kind, reasons };
 }
 
 /** A 2xx run-book reads as an answer exactly when it carries no fault: `answerFault`, as a yes or a no. */

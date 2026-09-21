@@ -8,8 +8,7 @@
 import type { components } from "@solvent/client";
 import { engineName } from "./inspector-headline";
 import { CASH } from "./inspector-position";
-import { classifyRunBookEnvelope } from "./lab-classify";
-import { readEngine } from "./lab-engine";
+import { answerFault, readEngine } from "./lab-engine";
 import { signedCount, signedUsd } from "./lab-headline";
 import { groupInt, joinAnd } from "./prose";
 import type { LabRunBook, RunBookOutcome } from "./runbook";
@@ -31,7 +30,7 @@ export type RunRecord =
   // `at` is the wall clock and `atMonotonicMs` the monotonic clock at settle: the pair a later re-selection anchors the result's age on.
   | { readonly phase: "settled"; readonly outcome: RunBookOutcome; readonly at: number; readonly atMonotonicMs: number; readonly held: HeldResult | null };
 
-/** The last set response that answered its request, with its ask and its settle clock: a failed Compare stands beside it, never in its place. */
+/** The last set response that READ — it answered its request and every row it draws read — with its ask and its settle clock: a failed Compare stands beside it, never in its place. */
 export interface HeldSet {
   readonly ids: readonly string[];
   readonly response: RunBookSetResponse;
@@ -92,10 +91,11 @@ export function outcomeLine(record: RunRecord | undefined, definition: ScenarioD
 }
 
 function cashOutcome(response: LabRunBook, definition: ScenarioDefinition, configVersion: string): LibraryOutcome {
-  // The envelope first, before the skew reads its lists: a body whose envelope is outside the contract is unreadable, whatever else it says.
-  if (classifyRunBookEnvelope(response).length > 0) return failed("Unreadable");
-  // The workspace's precedence, in a word: a Cash row that does not read is a failed answer whatever else the body
-  // says, so it is judged before the body's version and before the definition's coverage.
+  // The workspace's precedence, in a word: a body that does not read — its envelope, or any row the page would draw —
+  // is a failed answer whatever else it says, so the hold's own question is asked before the skew reads the body's
+  // lists, before its version and before the definition's coverage.
+  const fault = answerFault(response);
+  if (fault !== null) return failed(fault.kind === "unreadable" ? "Unreadable" : "Contradictory");
   const r = readEngine(response, CASH, definition);
   if (r.kind === "unreadable") return failed("Unreadable");
   if (r.kind === "contradictory") return failed("Contradictory");

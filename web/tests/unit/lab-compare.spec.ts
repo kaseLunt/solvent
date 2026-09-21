@@ -193,3 +193,45 @@ test("the envelope is classified before any set question is posed: a body outsid
   expect(beside.map((r) => [r.id, r.kind])).toEqual([["a_one", "point"], ["z", "contradictory"]]);
   expect(beside[1]?.reason).toBe("unmeasurable_engines[0] is outside the wire contract");
 });
+
+test("a dot's tone is the sign of the UNROUNDED delta and a nonzero change is never drawn at zero: a rise too small for a tenth is a critical dot one step out on the rising side, a fall too small for a tenth an ok dot one step out on the falling side, and only a measured zero sits at zero — the words stay \"<0.1%\"", () => {
+  const book = "10000000000000";
+  const v = compareRows(
+    setOf([
+      result("rise", "Small rise", { engines: [summary({ eligible_debt_delta_usd: "1000000000", total_debt_usd_before: book })] }),
+      result("fall", "Small fall", { engines: [summary({ eligible_debt_delta_usd: "-1000000000", total_debt_usd_before: book })] }),
+      result("none", "No change", { engines: [summary({ eligible_debt_delta_usd: "0", total_debt_usd_before: book })] }),
+      result("big_rise", "Big rise", { engines: [summary({ eligible_debt_delta_usd: "450000000000", total_debt_usd_before: book })] }),
+      result("big_fall", "Big fall", { engines: [summary({ eligible_debt_delta_usd: "-450000000000", total_debt_usd_before: book })] }),
+      result("held", "Withheld one", { withheld_engines: ["debt_manager"] }),
+    ]),
+    "debt_manager",
+  );
+  const row = (id: string) => v.rows.find((r) => r.id === id)!;
+  // +$1,000 against $10M is +0.01%: the share truncates to zero tenths, and the delta's sign still decides.
+  expect(row("rise").shareTenths).toBe(0n);
+  expect(row("rise").shareText).toBe("<0.1%");
+  expect(row("rise").deltaText).toBe("+$1,000");
+  expect(row("rise").tone).toBe("crit");
+  expect(row("rise").plotTenths).toBe(1n);
+  expect(row("fall").shareTenths).toBe(0n);
+  expect(row("fall").shareText).toBe("<0.1%");
+  expect(row("fall").tone).toBe("ok");
+  expect(row("fall").plotTenths).toBe(-1n);
+  // A measured zero is the only dot at zero.
+  expect(row("none").shareText).toBe("0%");
+  expect(row("none").tone).toBe("ok");
+  expect(row("none").plotTenths).toBe(0n);
+  // A share the tenths resolve is drawn where it is.
+  expect([row("big_rise").tone, row("big_rise").plotTenths]).toEqual(["crit", 45n]);
+  expect([row("big_fall").tone, row("big_fall").plotTenths]).toEqual(["ok", -45n]);
+  // The law over every point: the dot's side of zero is the delta's sign, and its tone is the delta's.
+  for (const r of v.rows) {
+    if (r.kind !== "point" || r.deltaUsd === null || r.plotTenths === null) continue;
+    expect(r.plotTenths > 0n).toBe(r.deltaUsd > 0n);
+    expect(r.plotTenths < 0n).toBe(r.deltaUsd < 0n);
+    expect(r.tone).toBe(r.deltaUsd > 0n ? "crit" : "ok");
+  }
+  // A row that is no point draws no dot: no place, no tone.
+  expect([row("held").tone, row("held").plotTenths]).toEqual([null, null]);
+});

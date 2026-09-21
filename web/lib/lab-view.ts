@@ -8,7 +8,7 @@ import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import type { LoadPhase } from "./inspector-view";
 import { classifyRunBookEnvelope, contractFaults } from "./lab-classify";
-import { compareRows, setMembership, type CompareView } from "./lab-compare";
+import { compareRows, setFault, type CompareView } from "./lab-compare";
 import { answerFault, readEngine, type EngineReading } from "./lab-engine";
 import {
   contradictoryHeadline,
@@ -17,11 +17,13 @@ import {
   failureHeadline,
   LISTING_LOADING,
   listingUnavailableHeadline,
+  listingUnreadableHeadline,
   notCoveredHeadline,
   notRunHeadline,
   resultHeadline,
   runningHeadline,
   setMembershipHeadline,
+  setUnreadableHeadline,
   withheldHeadline,
   type Banner,
   type HeldCondition,
@@ -49,6 +51,7 @@ export interface LabChip {
 export type BookState =
   | "listing-loading"
   | "listing-unavailable"
+  | "listing-unreadable"
   | "not-run"
   | "running"
   | "result"
@@ -87,7 +90,7 @@ export type CompareState =
   | { readonly kind: "idle" }
   | { readonly kind: "running"; readonly ids: readonly string[] }
   | { readonly kind: "ok"; readonly cash: CompareView; readonly legacy: CompareView }
-  /** `held`: the comparison a failed Compare left standing — the last set that answered its request, both engines' views — or null when there is none. */
+  /** `held`: the comparison a failed Compare left standing — the last set that read, both engines' views — or null when there is none. */
   | { readonly kind: "failed"; readonly headline: LabHeadline; readonly held: HeldCompare | null };
 export interface HeldCompare {
   readonly cash: CompareView;
@@ -170,17 +173,30 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
     { label: "Config", value: run.scenario_config_version, tone: skew.includes("config version") ? "warn" : undefined },
   ];
   const base = { kicker, chips, identity, receivedAt, definition: def, run, cash, legacy, skew, rerunFailure: null, heldCondition: null, retained: null };
-  // Precedence. A body that does not read is a failed answer whatever else it says, so its Cash row is judged FIRST
-  // — before the body's version and before the definition's coverage: the contradictory state, the fault named. That
-  // is the hold's own rule (`answerFault`), so what releases a held result is exactly what may be held. Then a
-  // version skew is its own state before any reading is consulted; on a result, a superseded batch outranks a stale
-  // input as the banner, and a banner sits on the result state rather than replacing it.
+  // Precedence. A body that does not read is a failed answer whatever else it says, so it is judged FIRST — before
+  // the body's version and before the definition's coverage — and judged WHOLE: every engine the page would draw, the
+  // movers' ratio pairs with the aggregates. That is the hold's own rule (`answerFault`), so what releases a held
+  // result is exactly what may be held, and what the page shows as an answer is exactly what it may hold. Such a body
+  // is the contradictory state, every fault named, and no figure of it is drawn for ANY engine: a reading that would
+  // have been a result stands as the contradiction instead. It wears no banner of its own — a stale input or a
+  // superseded batch is said of a result, and this state shows none. Then a version skew is its own state before any
+  // reading is consulted; on a result, a superseded batch outranks a stale input as the banner, and a banner sits on
+  // the result state rather than replacing it.
+  const contradictory = (reasons: readonly string[]): BookWorkspace => {
+    const undrawn = (r: EngineReading | null): EngineReading | null => (r?.kind === "result" ? { kind: "contradictory", reasons } : r);
+    return { ...base, cash: undrawn(cash), legacy: undrawn(legacy), state: "contradictory", banner: null, headline: contradictoryHeadline(def.label, reasons) };
+  };
+  const fault = answerFault(run);
+  if (fault !== null) return contradictory(fault.reasons);
   const banner: Banner = superseded ? "superseded" : skew.length > 0 ? "stale-input" : null;
-  if (cash.kind === "contradictory" || cash.kind === "unreadable") {
-    return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, cash.kind === "contradictory" ? cash.reasons : contractFaults(cash.fields)) };
-  }
   if (skew.includes("version")) return { ...base, state: "definition-changed", banner: null, headline: definitionChangedHeadline(def.label, skew), cash: null, legacy: null };
   switch (cash.kind) {
+    // A Cash row that does not read is a fault of the body, answered above: these two arms keep the switch total
+    // rather than trusted, and say the same thing.
+    case "contradictory":
+      return contradictory(cash.reasons);
+    case "unreadable":
+      return contradictory(contractFaults(cash.fields));
     case "withheld":
       return { ...base, state: "withheld", banner, headline: withheldHeadline(def.label, cash.cause) };
     case "not-covered":
@@ -263,14 +279,17 @@ function compareOf(reading: LabReading): CompareState {
   if (set === null) return { kind: "idle" };
   if (set.phase === "running") return { kind: "running", ids: set.ids };
   const o = set.outcome;
-  // A failed Compare never replaces the comparison it had: the last set that answered its request stands beside the failure.
+  // A failed Compare never replaces the comparison it had: the last set that READ stands beside the failure.
   const held: HeldCompare | null = set.held === null ? null : { cash: compareRows(set.held.response, CASH), legacy: compareRows(set.held.response, LEGACY) };
   const failed = (headline: LabHeadline): CompareState => ({ kind: "failed", headline, held });
   switch (o.kind) {
     case "ok": {
-      // The asked ids are the authority on what was asked: a body that does not answer them is refused whole, every fault named.
-      const faults = setMembership(set.ids, o.response);
-      if (faults.length > 0) return failed(setMembershipHeadline(faults));
+      // The record's own question (`setFault`), so what is drawn is exactly what may be held. The asked ids are the
+      // authority on what was asked: a body that does not answer them is refused whole. A body that answers them and
+      // does not read — a figure outside the contract, parts that do not partition a coverage — is refused whole too,
+      // never drawn as one dashed row beside dots the next failure would take away. Every fault is named.
+      const fault = setFault(set.ids, o.response);
+      if (fault !== null) return failed(fault.kind === "membership" ? setMembershipHeadline(fault.faults) : setUnreadableHeadline(fault.faults));
       return { kind: "ok", cash: compareRows(o.response, CASH), legacy: compareRows(o.response, LEGACY) };
     }
     case "busy":
@@ -291,7 +310,19 @@ function compareOf(reading: LabReading): CompareState {
   }
 }
 
-const loadPhase = (p: LabReading["listing"]): LoadPhase => (p.phase === "error" ? { phase: "error", message: p.message } : p.phase === "loading" ? { phase: "loading" } : { phase: "ready" });
+/** The listing's load phase without its value. A listing that answered and cannot be read did not load: it is an error phase with its own message, never `ready`. */
+function loadPhase(p: LabReading["listing"]): LoadPhase {
+  switch (p.phase) {
+    case "error":
+      return { phase: "error", message: p.message };
+    case "unreadable":
+      return { phase: "error", message: "the listing answered outside the wire contract" };
+    case "loading":
+      return { phase: "loading" };
+    case "ready":
+      return { phase: "ready" };
+  }
+}
 
 export function deriveLabView(reading: LabReading, ui: LabUi): LabView {
   const listingLoad = loadPhase(reading.listing);
@@ -304,6 +335,11 @@ export function deriveLabView(reading: LabReading, ui: LabUi): LabView {
   }
   if (reading.listing.phase === "error") {
     return { listingLoad, library: [], selectedId: null, checked: [], configVersion: null, book: emptyBook("listing-unavailable", listingUnavailableHeadline(reading.listing.message)), compare };
+  }
+  // A listing that answered and cannot be read is its own state — never the library of whatever the body held, and
+  // never "unavailable", which is a fetch that failed. No tick and no selection counts: nothing here is a scenario.
+  if (reading.listing.phase === "unreadable") {
+    return { listingLoad, library: [], selectedId: null, checked: [], configVersion: null, book: emptyBook("listing-unreadable", listingUnreadableHeadline(reading.listing.faults)), compare };
   }
   const listing = reading.listing.value;
   const def = listing.scenarios.find((s) => s.id === ui.selectedId) ?? listing.scenarios[0] ?? null;

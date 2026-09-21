@@ -3,10 +3,10 @@
 // and by these pins alike.
 import { expect, test } from "@playwright/test";
 import { readsAsAnswer } from "../../lib/lab-engine";
-import type { LabReading } from "../../lib/lab-reading";
+import { listingPhase, withRunning, withSetRunning, withSetSettled, withSettled, type LabReading } from "../../lib/lab-reading";
 import type { RunRecord, SetRecord } from "../../lib/lab-library";
 import { deriveLabView, readEngine } from "../../lib/lab-view";
-import { contradictoryHeadline, failureHeadline } from "../../lib/lab-headline";
+import { compareRerunFailedLine, contradictoryHeadline, failureHeadline, staleBannerLine } from "../../lib/lab-headline";
 import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
 import { SCENARIOS } from "../fixtures/lab-book";
 import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, transitionsOf, type Engine } from "./helpers/run-book-engine";
@@ -602,4 +602,185 @@ test("a run refused locally has its own state and the set path's sentence — no
   expect(h.book.state).toBe("result");
   expect(h.book.banner).toBe("rerun-failed");
   expect(h.book.rerunFailure?.emphasis).toBe("Nothing was sent.");
+});
+
+test("one predicate admits a result to the hold and releases it, and it covers every figure the result draws — a mover's ratio pair and the legacy market's row as much as the Cash aggregates: valid then malformed, malformed again, malformed in the legacy row alone, each leaves the held result standing under the banner that names its batch, and none of them becomes the next hold", () => {
+  const mover = {
+    account: "0x7a3f19e2c8b4d0a6f1e3b5c7d9a2f4e6b8c0c21e",
+    engine: "debt_manager",
+    hf_before_wad: null,
+    hf_after_wad: null,
+    hf_drop_wad: null,
+    hf_before_num: "5012500000",
+    hf_before_den: "4822000000",
+    hf_after_num: "3752500000",
+    hf_after_den: "4822000000",
+    became_eligible: true,
+    debt_usd: "4822000000",
+  };
+  const legacy = legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } });
+  const valid = runBookOf([legacy, demoCash({ movers: [mover] })], ETH_DEF);
+  const emptyNumerator = runBookOf([legacy, demoCash({ movers: [{ ...mover, hf_after_num: "" }] })], ETH_DEF);
+  const loneNull = runBookOf([legacy, demoCash({ movers: [mover, { ...mover, hf_before_den: null } as unknown as typeof mover] })], ETH_DEF);
+  const legacyGarbage = runBookOf([{ ...legacy, bad_debt_delta_usd: "garbage" }, demoCash({ movers: [mover] })], ETH_DEF);
+  const legacyMatrix = runBookOf([{ ...legacy, hf_transitions: { ...legacy.hf_transitions, total_rows: 5 } }, demoCash({ movers: [mover] })], ETH_DEF);
+  const LEGACY_GARBAGE = "Aave v3 market (legacy): bad_debt_delta_usd is outside the wire contract";
+  const faults: [typeof valid, string][] = [
+    [emptyNumerator, "movers[0].hf_after_num is outside the wire contract"],
+    [loneNull, "movers[1].hf_before_den is outside the wire contract"],
+    [legacyGarbage, LEGACY_GARBAGE],
+  ];
+  expect(readsAsAnswer(valid)).toBe(true);
+  for (const [body] of faults) expect(readsAsAnswer(body)).toBe(false);
+  expect(readsAsAnswer(legacyMatrix)).toBe(false);
+
+  // The event order, through the record and the view together: every ask moves what it may into the hold, every settle is derived.
+  const ask = (runs: ReadonlyMap<string, RunRecord>, outcome: Extract<RunRecord, { phase: "settled" }>["outcome"], at: number) =>
+    withSettled(withRunning(runs, "eth_minus_30", at, readsAsAnswer), "eth_minus_30", outcome, at + 1, at + 1, readsAsAnswer);
+  const bannerLine = (v: ReturnType<typeof deriveLabView>) =>
+    staleBannerLine({ kind: "rerun-failed", skew: v.book.skew, batchId: v.book.run?.batch.id ?? null, failure: v.book.rerunFailure, heldCondition: v.book.heldCondition, retained: v.book.retained });
+  let runs: ReadonlyMap<string, RunRecord> = ask(new Map(), { kind: "ok", response: valid }, 1);
+  const first = deriveLabView(reading({ runs }), ui());
+  expect(first.book.state).toBe("result");
+  expect(first.book.banner).toBeNull();
+  let at = 3;
+  // valid → malformed → malformed → malformed in the legacy row alone → malformed again: the same figures throughout.
+  for (const [body, name] of [...faults, ...faults.slice(0, 1)]) {
+    runs = ask(runs, { kind: "ok", response: body }, at);
+    at += 2;
+    expect(runs.get("eth_minus_30")?.held).toEqual({ response: valid, at: 2, atMonotonicMs: 2 });
+    const v = deriveLabView(reading({ runs }), ui());
+    expect(v.book.state).toBe("result");
+    expect(v.book.banner).toBe("rerun-failed");
+    expect(v.book.run).toBe(valid);
+    expect(v.book.headline).toEqual(first.book.headline);
+    expect(v.book.rerunFailure).toEqual(contradictoryHeadline("ETH -30 percent", [name]));
+    expect(bannerLine(v)).toBe(`Run again failed — The result for ETH -30 percent contradicts itself. ${name}. Nothing from it is drawn. The result below stands for batch 18,251.`);
+    expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "result", text: "+$1.2M liquidatable · 118 accounts", tone: "crit" });
+  }
+  // A transport failure after them finds the same hold: none of the bodies above moved into it.
+  runs = ask(runs, { kind: "not-served" }, at);
+  expect(runs.get("eth_minus_30")?.held).toEqual({ response: valid, at: 2, atMonotonicMs: 2 });
+  const after = deriveLabView(reading({ runs }), ui());
+  expect(after.book.run).toBe(valid);
+  expect(after.book.banner).toBe("rerun-failed");
+  expect(bannerLine(after)).toContain("The result below stands for batch 18,251.");
+
+  // With nothing held, a body the predicate faults is the contradictory state whole: the fault named, and no figure
+  // of ANY engine drawn — a Cash row that reads beside a legacy row that does not is not a result the page may show
+  // and then lose to the next failure.
+  for (const [body, name] of faults) {
+    const bare = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: body }) }), ui());
+    expect(bare.book.state).toBe("contradictory");
+    expect(bare.book.banner).toBeNull();
+    expect(bare.book.headline).toEqual(contradictoryHeadline("ETH -30 percent", [name]));
+    expect(bare.book.cash?.kind === "result" || bare.book.legacy?.kind === "result").toBe(false);
+    expect(bare.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
+  }
+  // The legacy row's own card names its own field bare; the body's fault names it under its engine.
+  const bareLegacy = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: legacyGarbage }) }), ui());
+  expect(bareLegacy.book.legacy).toEqual({ kind: "unreadable", fields: ["bad_debt_delta_usd"] });
+  expect(bareLegacy.book.cash?.kind).toBe("contradictory");
+  // A legacy matrix that disagrees with itself is the same class, said as a contradiction.
+  const matrix = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: legacyMatrix }) }), ui());
+  expect(matrix.book.state).toBe("contradictory");
+  expect(matrix.book.headline.dek).toContain("Aave v3 market (legacy): ");
+  expect(matrix.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Contradictory", tone: "refused" });
+  // The question is asked of the body alone, as it is of a stray Cash row: beside a definition that does not model
+  // the legacy market, a legacy row that does not read still faults the body.
+  const cashOnly = { ...ETH_DEF, engines: ["debt_manager"] };
+  const listing = { ...SCENARIOS, scenarios: SCENARIOS.scenarios.map((s) => (s.id === "eth_minus_30" ? cashOnly : s)) };
+  const stray = deriveLabView(reading({ listing: { phase: "ready", value: listing }, runs: settled("eth_minus_30", { kind: "ok", response: runBookOf([{ ...legacy, bad_debt_delta_usd: "garbage" }, demoCash()], cashOnly) }) }), ui());
+  expect(stray.book.state).toBe("contradictory");
+  expect(stray.book.headline.dek).toBe(`${LEGACY_GARBAGE}. Nothing from it is drawn.`);
+  // A listed refusal speaks for the legacy market as it does for Cash: the row beside it is not judged.
+  const refusedLegacy = runBookOf([{ ...legacy, bad_debt_delta_usd: "garbage" }, demoCash()], ETH_DEF, { excluded_engines: [{ engine: "aave_v3_etherfi", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }] });
+  expect(readsAsAnswer(refusedLegacy)).toBe(true);
+});
+
+test("an engine row that names no engine can be placed under no card and printed in no chip: it is named by the envelope, per index, and the body does not read", () => {
+  const run = runBookOf([legacyEngine({ 7: { 7: 1 } }), demoCash()], ETH_DEF);
+  for (const engine of [undefined, null, 7, { id: "debt_manager" }]) {
+    const body = { ...run, engines: [run.engines[0], { ...run.engines[1], engine }] } as unknown as typeof run;
+    expect(readsAsAnswer(body)).toBe(false);
+    const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: body }) }), ui());
+    expect(v.book.state).toBe("contradictory");
+    expect(v.book.headline.dek).toBe("engines[1].engine is outside the wire contract. Nothing from it is drawn.");
+    expect(v.book.chips.map((c) => c.label)).toEqual(["Scenario", "Config"]);
+  }
+});
+
+test("a body that does not read wears no banner of its own when nothing is held: a stale input or a superseded batch is said of a RESULT, and the contradictory state shows none", () => {
+  const skewed = runBookOf([demoCash({ eligible_debt_delta_usd: "1e6" })], { ...ETH_DEF, version: "v2", path_assumption: "a different path" });
+  const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: skewed }) }), ui());
+  expect(v.book.state).toBe("contradictory");
+  expect(v.book.banner).toBeNull();
+  const clean = runBookOf([demoCash({ eligible_debt_delta_usd: "1e6" })], ETH_DEF);
+  const superseded = { ...clean, batch: { ...clean.batch, supersession: { ...clean.batch.supersession, superseded: true } } } as typeof clean;
+  const s = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: superseded }) }), ui());
+  expect(s.book.state).toBe("contradictory");
+  expect(s.book.banner).toBeNull();
+});
+
+test("compare: a set that answers its request but does not read never replaces the comparison it had — a garbage engine figure is a failed Compare naming the scenario and the field, the held dots stand under the line naming their batch, and nothing of the body is drawn; with nothing held it is the failure alone", () => {
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  const answering = demoSetFor(asked);
+  const garbage = { ...answering, results: answering.results.map((r) => (r.scenario_id !== "eth_minus_30" ? r : { ...r, engines: r.engines.map((e) => (e.engine !== "debt_manager" ? e : { ...e, eligible_debt_delta_usd: "garbage" })) })) };
+  // The event order through the record: valid → garbage → garbage.
+  let set: SetRecord = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: answering }, 2);
+  const ok = deriveLabView(reading({ set }), ui()).compare;
+  expect(ok.kind).toBe("ok");
+  for (const at of [3, 5]) {
+    set = withSetSettled(withSetRunning(set, asked, at), asked, { kind: "ok", response: garbage }, at + 1);
+    const c = deriveLabView(reading({ set }), ui()).compare;
+    expect(c.kind).toBe("failed");
+    if (c.kind !== "failed") return;
+    expect(c.headline.emphasis).toBe("The set cannot be read.");
+    expect(c.headline.tone).toBe("refused");
+    expect(c.headline.dek).toBe("Faults: eth_minus_30: eligible_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
+    // The comparison that read stands, its own rows and batch — never a row of the body that did not.
+    expect(c.held).toEqual(ok.kind === "ok" ? { cash: ok.cash, legacy: ok.legacy } : null);
+    expect(c.held?.cash.rows.map((r) => r.kind)).toEqual(["point", "point"]);
+    expect(compareRerunFailedLine(c.headline, c.held?.cash.batchId ?? 0)).toBe(
+      "Compare again failed — The set cannot be read. Faults: eth_minus_30: eligible_debt_delta_usd is outside the wire contract. Nothing from it is drawn. The comparison below stands for batch 18,251.",
+    );
+  }
+  // With nothing held, the same body is the failure alone: no row of it is a dashed "unreadable" beside drawn dots.
+  const bare = deriveLabView(reading({ set: withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: garbage }, 2) }), ui()).compare;
+  expect(bare.kind).toBe("failed");
+  if (bare.kind === "failed") expect(bare.held).toBeNull();
+});
+
+test("the listing is judged before it is ready: a 200 that is no listing — null, a body without its scenarios, a definition whose printed or compared members are not what the contract says — is the unreadable-listing state naming every fault, never `ready`, never a throw, and nothing can run", () => {
+  // The served listing reads, and is the same value the page goes on to use.
+  expect(listingPhase(SCENARIOS)).toEqual({ phase: "ready", value: SCENARIOS });
+  expect(listingPhase({ ...SCENARIOS, scenarios: [] })).toEqual({ phase: "ready", value: { ...SCENARIOS, scenarios: [] } });
+  const def = SCENARIOS.scenarios[0]!;
+  const cases: [unknown, string[]][] = [
+    [null, ["The response body is not a JSON object"]],
+    [[], ["The response body is not a JSON object"]],
+    [{ scenarios: null }, ["scenario_config_version is outside the wire contract", "scenarios is outside the wire contract"]],
+    [{ ...SCENARIOS, scenarios: null }, ["scenarios is outside the wire contract"]],
+    [{ ...SCENARIOS, scenarios: {} }, ["scenarios is outside the wire contract"]],
+    [{ ...SCENARIOS, scenario_config_version: 3 }, ["scenario_config_version is outside the wire contract"]],
+    [{ ...SCENARIOS, scenarios: [def, null] }, ["scenarios[1] is outside the wire contract"]],
+    [{ ...SCENARIOS, scenarios: [{ id: "a" }] }, ["version", "label", "description", "path_assumption", "engines", "shocks"].map((m) => `scenarios[0].${m} is outside the wire contract`)],
+    [{ ...SCENARIOS, scenarios: [def, { ...def, label: null, engines: ["debt_manager", 7], shocks: [null] }] }, ["scenarios[1].label", "scenarios[1].engines[1]", "scenarios[1].shocks[0]"].map((m) => `${m} is outside the wire contract`)],
+    [{ ...SCENARIOS, scenarios: [{ ...def, id: 7 }] }, ["scenarios[0].id is outside the wire contract"]],
+  ];
+  for (const [body, faults] of cases) {
+    const phase = listingPhase(body);
+    expect(phase).toEqual({ phase: "unreadable", faults });
+    // A link's ticks and selection arrive before the listing: none of them counts, and nothing is derived from the body.
+    const v = deriveLabView(reading({ listing: phase }), ui("eth_minus_30", ["eth_minus_30", "ethfi_minus_50"]));
+    expect(v.book.state).toBe("listing-unreadable");
+    expect(v.book.headline).toEqual({ emphasis: "The committed scenarios could not be read.", rest: "", tone: "refused", dek: `Faults: ${faults.join("; ")}. Nothing can run until the listing reads.` });
+    expect(v.library).toEqual([]);
+    expect(v.checked).toEqual([]);
+    expect(v.selectedId).toBeNull();
+    expect(v.configVersion).toBeNull();
+    expect(v.book.definition).toBeNull();
+  }
+  // An unreadable listing is not an unavailable one: the fetch answered, and the page says which it was.
+  expect(deriveLabView(reading({ listing: { phase: "error", message: "down" } }), ui()).book.state).toBe("listing-unavailable");
 });

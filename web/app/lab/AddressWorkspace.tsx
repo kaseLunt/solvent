@@ -64,6 +64,11 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
   });
   return (
     <>
+      {space.fallback !== null && (
+        <p className={styles.notice} data-testid="lab-address-fallback">
+          {space.fallback}
+        </p>
+      )}
       <VerdictHeader
         testId="lab-verdict"
         kicker={kicker}

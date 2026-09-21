@@ -337,6 +337,14 @@ export function compareCaption(view: CompareView): string {
 export const setMembershipHeadline = (faults: readonly string[]): LabHeadline =>
   refused("The set does not answer the request.", `Faults: ${terminated(faults.join("; "))} Nothing from it is drawn.`);
 
+/**
+ * A set that answers its request and does not read — an engine figure outside the contract, or a result whose parts
+ * do not partition its coverage: every fault in one sentence behind a fixed lead, each under the scenario it sits
+ * in, the dashed tone, nothing drawn.
+ */
+export const setUnreadableHeadline = (faults: readonly string[]): LabHeadline =>
+  refused("The set cannot be read.", `Faults: ${terminated(faults.join("; "))} Nothing from it is drawn.`);
+
 export const LISTING_LOADING: LabHeadline = refused(
   "Loading the committed scenarios…",
   "The library is the committed, versioned set this deployment serves. Nothing runs until it is listed.",
@@ -344,5 +352,12 @@ export const LISTING_LOADING: LabHeadline = refused(
 
 export const listingUnavailableHeadline = (message: string): LabHeadline =>
   refused("The committed scenarios could not be listed.", `${sentence(message)} Nothing can run until the listing answers.`);
+
+/**
+ * A listing that answered and cannot be read: not a failed fetch ("could not be listed") and not an empty set — the
+ * service answered 2xx with a body outside the wire contract, every fault named behind the fixed lead.
+ */
+export const listingUnreadableHeadline = (faults: readonly string[]): LabHeadline =>
+  refused("The committed scenarios could not be read.", `Faults: ${terminated(faults.join("; "))} Nothing can run until the listing reads.`);
 
 export const EMPTY_LISTING: LabHeadline = refused("No committed scenarios are listed.", "This deployment serves an empty committed set. Nothing can run.");

@@ -17,16 +17,15 @@ import { LegacyCompare, PLOT_MEASURE } from "./LegacyCompare";
 /** The value column's header, over the cells' "share · change" figures. */
 export const VALUE_HEADER = "share · change";
 
-/** One plot row per compare row, in the lib's words: a point is a signed dot toned by its sign; every other kind is a dashed track with its word and no value. */
+/** One plot row per compare row, in the lib's words and at the lib's place: a point is a dot where the lib puts it, in the tone the lib gives it; every other kind is a dashed track with its word and no value. Nothing is decided here. */
 function rowsOf(view: CompareView): DotPlotRow[] {
   return view.rows.map((r): DotPlotRow => {
     const words = compareRowWords(r, view.engine);
-    // A point carries its share by the lib's construction; a row without one is a track, never a dot at zero.
-    if (r.kind !== "point" || r.shareTenths === null) {
+    // A point carries its place and its tone by the lib's construction; a row without them is a track, never a dot at zero.
+    if (r.kind !== "point" || r.plotTenths === null || r.tone === null) {
       return { key: r.id, label: r.label, valueText: words, note: words, tenths: null, tone: "refused" };
     }
-    // More liquidatable debt is the critical sign; less, and a measured zero, are ok.
-    return { key: r.id, label: r.label, valueText: words, note: null, tenths: r.shareTenths, tone: r.shareTenths > 0n ? "crit" : "ok" };
+    return { key: r.id, label: r.label, valueText: words, note: null, tenths: r.plotTenths, tone: r.tone };
   });
 }
 

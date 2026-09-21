@@ -281,6 +281,8 @@ test("deep links: ?scenario= runs exactly one; an unlisted id runs nothing; both
   expect(one.runs()).toBe(1);
   await page.goto("/lab?scenario=eth_minus_30&scenarios=ethfi_minus_50");
   await expect(page.getByTestId("lab-deeplink-notice")).toBeVisible();
+  // The notice claims what the conflict gates — the book run — and no more.
+  await expect(page.getByTestId("lab-deeplink-notice")).toContainText("no book run was dispatched for either");
   await expect(surface(page)).toHaveAttribute("data-state", "not-run");
   await page.waitForTimeout(300);
   expect(one.runs()).toBe(1);
@@ -729,8 +731,10 @@ test("one-address mode: an invalid address is an inline refusal and never a requ
   await mockLab(page, { address: ADDRESS_NOT_FOUND, stress: { ...DEMO_STRESS_NEAR, address: NOT_FOUND_ADDR, found: false, scenarios: [] } });
   await page.goto(`/lab?address=${NOT_FOUND_ADDR}`);
   await expect(surface(page)).toHaveAttribute("data-state", "no-position");
-  // A definitive negative names the batch it was established in.
-  await expect(headline(page)).toHaveText(`No Cash position for 0xBBbB…0002 in batch ${String(ADDRESS_NOT_FOUND.batch.id)}.`);
+  // A definitive negative names the batch it was established in — the STRESS response's own (18,251), never the lookup's (1).
+  expect(ADDRESS_NOT_FOUND.batch.id).not.toBe(DEMO_STRESS_NEAR.batch.id);
+  await expect(headline(page)).toHaveText("No Cash position for 0xBBbB…0002 in batch 18,251.");
+  await expect(dek(page)).toHaveText(`That is the stress response's own answer, for its own batch; the lookup above is batch ${String(ADDRESS_NOT_FOUND.batch.id)} and holds no Cash position either.`);
   await expect(page.locator("main")).not.toContainText("Cannot say");
   await expect(row(page, "eth_minus_30")).toContainText("Not on this address");
 });
@@ -864,6 +868,13 @@ test("compare: two ticks enable the button, one POST posts exactly those ids, th
   await expect(page.getByTestId("lab-compare-row-eth_minus_30")).not.toContainText("Cash book");
   await expect(page.getByTestId("lab-compare-row-ethfi_minus_50")).toContainText("<0.1% · +$9,800");
   await expect(page.getByTestId("lab-compare-row-ethfi_minus_50")).not.toContainText("+<");
+  // A rise too small for a tenth is still a rise: a critical dot on the rising side of zero, never an ok dot AT zero.
+  const smallRise = page.getByTestId("lab-compare-row-ethfi_minus_50");
+  await expect(smallRise.locator("circle")).toHaveClass(/dotCrit/);
+  await expect(smallRise.locator("circle")).not.toHaveClass(/dotOk/);
+  const zeroX = Number(await smallRise.locator("line[data-role='stem']").getAttribute("x1"));
+  const dotX = Number(await smallRise.locator("circle").getAttribute("cx"));
+  expect(dotX).toBeGreaterThan(zeroX);
   // No label clips: the value column ends inside the plot's own box.
   const plotBox = await page.getByTestId("lab-dotplot").boundingBox();
   const valueBox = await page.getByTestId("lab-compare-row-eth_minus_30").locator("css=text").last().boundingBox();
@@ -1055,9 +1066,16 @@ test("one-address mode: the highlighted library row is the workspace's subject �
   await expect(chip(page, "Scenario")).toContainText("eth_minus_30");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "weeth_market_depeg_oracles_held")).not.toHaveAttribute("data-selected", "true");
+  // The fallback is never silent: the page says which scenario was not evaluated and which is shown, and the address
+  // bar names the subject SHOWN — never the scenario the link named.
+  const fallback = page.getByTestId("lab-address-fallback");
+  await expect(fallback).toHaveText("weETH market depeg to 0.95 (oracles held) was not evaluated for 0x7a3f…c21e: the stress response carries no result for it. ETH -30 percent is shown instead — the first scenario this address carries.");
+  await expect(page).toHaveURL(new RegExp(`/lab\\?address=${DEMO_NEAR_ADDR}&scenario=eth_minus_30$`));
   // A row the address carries moves the subject and the highlight together.
   await row(page, "ethfi_minus_50").getByRole("button").click();
   await expect(headline(page)).toContainText("ETHFI -50 percent");
+  await expect(fallback).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/lab\\?address=${DEMO_NEAR_ADDR}&scenario=ethfi_minus_50$`));
   await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "eth_minus_30")).not.toHaveAttribute("data-selected", "true");
   // A row not on the address: the subject falls back to the first row the address carries, and the highlight follows the subject — never the row clicked.
@@ -1066,6 +1084,10 @@ test("one-address mode: the highlighted library row is the workspace's subject �
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "ethfi_minus_50")).not.toHaveAttribute("data-selected", "true");
   await expect(row(page, "weeth_market_depeg_oracles_held")).not.toHaveAttribute("data-selected", "true");
+  // …and the URL names the subject shown, disclosed beside it: a reload opens this same screen, under the scenario it shows.
+  await expect(fallback).toContainText("was not evaluated for 0x7a3f…c21e");
+  await expect(page).toHaveURL(new RegExp(`/lab\\?address=${DEMO_NEAR_ADDR}&scenario=eth_minus_30$`));
+  await expect(page).not.toHaveURL(/weeth_market_depeg_oracles_held/);
 });
 
 test("a re-run that answers a body which does not read never replaces the result it had: the held figures stand under a banner naming the contradiction", async ({ page }) => {
@@ -1354,4 +1376,185 @@ test("compare: a set 2xx whose body is JSON null is a failed Compare that says s
   await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
   await expect(page.getByRole("banner")).toBeVisible();
   await expect(page.getByTestId("lab-compare")).toBeEnabled();
+});
+
+test("the hold's one predicate covers what the result draws: a re-run with a mover's ratio outside the contract, then one whose legacy row alone does not read, never replaces the result — each is named under the banner for the batch that stands, and neither becomes the result a later failure stands on", async ({ page }) => {
+  await mockLab(page);
+  await page.goto("/lab");
+  await runIt(page);
+  await expect(chip(page, "Result for batch")).toContainText("18,251");
+  // Every body that follows names another batch, so the batch the banner names can only be the first result's.
+  const later = { ...DEMO_RUN_BOOK_ETH.batch, id: 18252 };
+  const emptyRatio = { ...withCash((e) => ({ ...e, movers: e.movers.map((m, i) => (i === 0 ? { ...m, hf_after_num: "" } : m)) })), batch: later };
+  const legacyGarbage = { ...DEMO_RUN_BOOK_ETH, batch: later, engines: DEMO_RUN_BOOK_ETH.engines.map((e) => (e.engine === "aave_v3_etherfi" ? { ...e, bad_debt_delta_usd: "garbage" } : e)) };
+  let answers = 0;
+  await page.route("**/v1/scenarios/*/run-book", (route) => {
+    if (route.request().method() === "OPTIONS") return preflight(route);
+    answers += 1;
+    if (answers === 1) return json(route, emptyRatio, 200, POST_CORS);
+    if (answers === 2) return json(route, legacyGarbage, 200, POST_CORS);
+    return json(route, fixture("error-unavailable.json"), 503, POST_CORS);
+  });
+  const banner = page.getByTestId("lab-banner");
+  const stands = async () => {
+    await expect(banner).toHaveAttribute("data-kind", "rerun-failed");
+    await expect(banner).toContainText("The result below stands for batch 18,251.");
+    await expect(banner).not.toContainText("18,252");
+    await expect(surface(page)).toHaveAttribute("data-state", "result");
+    await expect(chip(page, "Result for batch")).toContainText("18,251");
+    await expect(headline(page)).toContainText("$1.2M more Cash debt becomes liquidatable");
+    await expect(tile(page, "debt")).toContainText("+$1.2M");
+    await expect(page.getByTestId("lab-movers").locator("tbody tr")).toHaveCount(20);
+    await expect(page.getByTestId("lab-movers-caption")).not.toContainText("unreadable");
+    await expect(row(page, "eth_minus_30")).toContainText("+$1.2M liquidatable · 118 accounts");
+  };
+  // valid → a mover's ratio that does not read: the fault is named, the result stands.
+  await page.getByTestId("lab-run").click();
+  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. movers[0].hf_after_num is outside the wire contract. Nothing from it is drawn.");
+  await stands();
+  // → the legacy row alone does not read: the same, named under its engine — the Cash figures beside it never stand in for the result.
+  await page.getByTestId("lab-banner-rerun").click();
+  await expect(banner).toContainText("Aave v3 market (legacy): bad_debt_delta_usd is outside the wire contract.");
+  await stands();
+  await page.getByTestId("lab-legacy").locator("summary").click();
+  await expect(page.getByTestId("lab-legacy-kpi-newly")).not.toContainText("contradictory");
+  // → a transport failure: neither body above moved into the hold, so the result that stands is still the first.
+  await page.getByTestId("lab-banner-rerun").click();
+  await expect(banner).toContainText("Run again failed — No servable batch.");
+  await stands();
+  expect(answers).toBe(3);
+
+  // With nothing held, a body whose legacy row alone does not read is the contradictory state whole: no Cash figure of it is drawn.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page, { runBook: legacyGarbage });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
+  await expect(dek(page)).toHaveText("Aave v3 market (legacy): bad_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
+  await expect(page.getByTestId("lab-banner")).toHaveCount(0);
+  for (const key of ["newly", "debt", "baddebt", "moved"]) await expect(tile(page, key)).toContainText("contradictory");
+  await expect(page.getByTestId("lab-movers")).toHaveCount(0);
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
+  await expectNoCashZero(page);
+});
+
+test("compare: the set's one predicate covers what the comparison draws — a Compare that answers the request with a garbage engine figure never replaces the comparison it had, however many follow, and with nothing held it is a failed Compare, never one dashed row beside drawn dots", async ({ page }) => {
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  const answering = shapeSet(DEMO_RUN_BOOK_SET, asked);
+  const garbage = { ...answering, results: answering.results.map((r) => (r.scenario_id !== "eth_minus_30" ? r : { ...r, engines: r.engines.map((e) => (e.engine !== "debt_manager" ? e : { ...e, eligible_debt_delta_usd: "garbage" })) })) };
+  await mockLab(page);
+  await page.goto(`/lab?scenarios=${asked.join(",")}`);
+  const state = page.getByTestId("lab-compare-state");
+  await expect(state).toHaveAttribute("data-kind", "ok");
+  await expect(page.getByTestId("lab-dotplot").locator("circle")).toHaveCount(2);
+  await page.route("**/v1/scenarios/run-book-set", (route) => (route.request().method() === "OPTIONS" ? preflight(route) : json(route, garbage, 200, POST_CORS)));
+  // valid → garbage → garbage: the comparison that read stands under the line naming its batch, both times.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.getByTestId("lab-compare").click();
+    await expect(state).toHaveAttribute("data-kind", "failed");
+    await expect(state).toHaveAttribute("data-held", "true");
+    await expect(state).toHaveText(
+      "Compare again failed — The set cannot be read. Faults: eth_minus_30: eligible_debt_delta_usd is outside the wire contract. Nothing from it is drawn. The comparison below stands for batch 18,251.",
+    );
+    await expect(page.getByTestId("lab-dotplot").locator("circle")).toHaveCount(2);
+    await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toHaveAttribute("data-kind", "point");
+    await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
+    await expect(page.getByTestId("lab-compare")).toBeEnabled();
+  }
+  // With nothing held, the same body is the failure alone.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page, { setVerbatim: garbage });
+  await page.goto(`/lab?scenarios=${asked.join(",")}`);
+  await expect(state).toHaveAttribute("data-kind", "failed");
+  await expect(state).toHaveText("The set cannot be read. Faults: eth_minus_30: eligible_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
+  await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
+  await expect(page.locator("[data-testid^='lab-compare-row-']")).toHaveCount(0);
+});
+
+test("a listing that ANSWERS and cannot be read is its own state — never ready, never a crashed route, never 'could not be listed': the fault is named, the library is empty, and nothing can run", async ({ page }) => {
+  for (const [body, faults] of [
+    [null, "The response body is not a JSON object."],
+    [{ ...DEMO_SCENARIOS, scenarios: null }, "scenarios is outside the wire contract."],
+    [{ ...DEMO_SCENARIOS, scenarios: [firstScenario(), { ...firstScenario(), id: "second", label: null, shocks: null }] }, "scenarios[1].label is outside the wire contract; scenarios[1].shocks is outside the wire contract."],
+  ] as const) {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    const counts = await mockLab(page);
+    // `mockLab` answers a nullish listing with the demo's, so the body under test is routed as given — JSON null included.
+    await page.route("**/v1/scenarios", (route) => route.fulfill({ status: 200, headers: CORS, contentType: "application/json", body: JSON.stringify(body) }));
+    await page.goto("/lab?scenario=eth_minus_30&scenarios=eth_minus_30,ethfi_minus_50");
+    await expect(surface(page)).toHaveAttribute("data-state", "listing-unreadable");
+    await expect(headline(page)).toHaveText("The committed scenarios could not be read.");
+    await expect(dek(page)).toHaveText(`Faults: ${faults} Nothing can run until the listing reads.`);
+    await expect(page.getByTestId("lab-library")).toContainText("The committed scenarios could not be read.");
+    await expect(page.locator("main")).not.toContainText("could not be listed");
+    await expect(page.locator("[data-testid^='lab-library-row-']")).toHaveCount(0);
+    for (const id of ["lab-run", "lab-compare"]) {
+      await expect(page.getByTestId(id)).toBeDisabled();
+      await expect(page.getByTestId(id)).toHaveCSS("cursor", "not-allowed");
+      await expect(page.getByTestId(id)).toHaveCSS("opacity", "0.45");
+    }
+    await expect(page.getByTestId("lab-compare")).toHaveText("Compare…");
+    // The route stands: the shell is on the page, and the link's asks dispatched nothing.
+    await expect(page.getByRole("banner")).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(counts.runs()).toBe(0);
+    expect(counts.sets()).toBe(0);
+  }
+});
+
+test("one-address mode: a stress response that reports no position names ITS batch and never contradicts the position on the page — the two batches are disclosed first, the negative is the stress response's own", async ({ page }) => {
+  // The lookup finds Cash in batch 18,251; the stress response, a request of its own, answers for batch 18,252 and reports none.
+  await mockLab(page, { stress: { ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: 18252 }, found: false, scenarios: [] } });
+  await page.goto(`/lab?address=${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "no-position");
+  await expect(headline(page)).toHaveText("Cannot say — the stress result is for batch 18,252; the position above is batch 18,251.");
+  await expect(dek(page)).toHaveText("The stress response reports no position for 0x7a3f…c21e in batch 18,252 — its own batch, not the position's. A position and a stress result from different batches are not compared.");
+  await expect(page.locator("main")).not.toContainText("No Cash position");
+  await expect(page.locator("main")).not.toContainText("in batch 18,251");
+  await expect(chip(page, "Result for batch")).toContainText("18,251");
+  await expect(chip(page, "Stress for batch")).toContainText("18,252");
+});
+
+test("a conflicting link with an address claims only what the conflict gates: no book run was dispatched for either selection, and the address's own evaluation — which neither selection gates — is shown and said to be", async ({ page }) => {
+  const counts = await mockLab(page);
+  await page.goto(`/lab?address=${DEMO_NEAR_ADDR}&scenario=eth_minus_30&scenarios=ethfi_minus_50`);
+  const notice = page.getByTestId("lab-deeplink-notice");
+  await expect(notice).toContainText("no book run was dispatched for either");
+  await expect(notice).toContainText("The address's own evaluation is shown below");
+  await expect(notice).not.toContainText("NOTHING was run");
+  // The evaluation the notice names is on the page…
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  await expect(page.getByTestId("lab-address-table").locator("tbody tr")).toHaveCount(DEMO_STRESS_NEAR.scenarios.length);
+  // …and what it says was not dispatched was not.
+  await page.waitForTimeout(300);
+  expect(counts.runs()).toBe(0);
+  expect(counts.sets()).toBe(0);
+  // Without an address the same link says the same of the book run, and claims nothing about an evaluation there is none of.
+  await page.goto("/lab?scenario=eth_minus_30&scenarios=ethfi_minus_50");
+  await expect(notice).toContainText("no book run was dispatched for either");
+  await expect(notice).not.toContainText("The address's own evaluation");
+  await expect(notice).not.toContainText("NOTHING was run");
+});
+
+test("the address bar names the subject shown after a same-route navigation: the shell's Scenarios link on a selected scenario leaves the selection on screen, and the URL names it again", async ({ page }) => {
+  await mockLab(page);
+  await page.goto("/lab");
+  await row(page, "ethfi_minus_50").getByRole("button").click();
+  await expect(page).toHaveURL(/\/lab\?scenario=ethfi_minus_50$/);
+  await page.getByRole("navigation", { name: "app surfaces" }).getByRole("link", { name: "Scenarios" }).click();
+  // Whatever the router keeps of the surface across that navigation, the bar and the screen agree: the scenario the
+  // URL names is the selected row, and a bar that names none stands only over the listing's own first row — never
+  // `/lab` over a scenario the reader selected.
+  await expect
+    .poll(async () => {
+      const selected = (await page.locator("[data-testid^='lab-library-row-'][data-selected='true']").getAttribute("data-testid"))?.replace("lab-library-row-", "");
+      const namedInUrl = new URL(page.url()).searchParams.get("scenario");
+      return namedInUrl === null ? selected === "eth_minus_30" : namedInUrl === selected;
+    })
+    .toBe(true);
+  // A link that names a scenario the listing does not publish shows the first listed one, and the bar names THAT.
+  await page.goto("/lab?scenario=ghost");
+  await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
+  await expect(page).toHaveURL(/\/lab\?scenario=eth_minus_30$/);
 });

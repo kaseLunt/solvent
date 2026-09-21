@@ -3,7 +3,8 @@
 .libCol { min-width: 0; }
 /* A control that cannot act does not wear the look of one that can: while no listing stands behind the library nothing can run, and its disabled buttons look disabled. */
 .page[data-state="listing-loading"] .libCol button:disabled,
-.page[data-state="listing-unavailable"] .libCol button:disabled { opacity: 0.45; cursor: not-allowed; }
+.page[data-state="listing-unavailable"] .libCol button:disabled,
+.page[data-state="listing-unreadable"] .libCol button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* One explicit column that can shrink: an implicit `auto` column would size to the tiles' max-content and overrun a narrow viewport. */
 .workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
 .notice { margin: 0; color: var(--warn-text); font-size: var(--type-small); }

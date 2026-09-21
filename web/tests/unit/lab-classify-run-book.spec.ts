@@ -658,3 +658,36 @@ test("a horizon is sealed by the client, never by the wire: a horizon still carr
   // Sealed: the verdict alone, the wire's field gone.
   expect(withHorizon(() => {})).toEqual([]);
 });
+
+test("a mover's ratio pair is judged where the room is read from it: each of `hf_*_num` / `hf_*_den` is a decimal or the wire's own null, and a pair is null together — an empty numerator, a lone null or an absent member is named per index, after the wads and before the flip; both null is a side with no debt and stays", () => {
+  const cash = (mutate: (mover: Record<string, unknown>) => void): string[] => {
+    const engine = engineOf("debt_manager");
+    const mover = engine.movers[0];
+    if (!mover) throw new Error("fixture shape: the Cash engine carries no mover");
+    mutate(mover as unknown as Record<string, unknown>);
+    return classifyRunBookEngine(engine).malformedFields;
+  };
+  // The served pair reads; so does a side with no debt — null on both members together — and the legacy market's four nulls.
+  expect(cash(() => {})).toEqual([]);
+  expect(cash((m) => Object.assign(m, { hf_before_num: null, hf_before_den: null }))).toEqual([]);
+  expect(classifyRunBookEngine(engineOf("aave_v3_etherfi")).malformedFields).toEqual([]);
+  // A member that is no decimal is named by its own name.
+  expect(cash((m) => (m.hf_after_num = ""))).toEqual(["movers[0].hf_after_num"]);
+  expect(cash((m) => (m.hf_after_den = "1e9"))).toEqual(["movers[0].hf_after_den"]);
+  expect(cash((m) => (m.hf_before_num = 2000000000))).toEqual(["movers[0].hf_before_num"]);
+  expect(cash((m) => delete m.hf_before_den)).toEqual(["movers[0].hf_before_den"]);
+  // A pair with one side null is a statement the wire cannot mean: the null side is named.
+  expect(cash((m) => (m.hf_before_num = null))).toEqual(["movers[0].hf_before_num"]);
+  expect(cash((m) => (m.hf_after_den = null))).toEqual(["movers[0].hf_after_den"]);
+  // Wire read order inside the mover: the account, the wads, the two pairs, the flip, the debt.
+  expect(
+    cash((m) => {
+      m.account = null;
+      m.hf_drop_wad = "x";
+      m.hf_before_num = "x";
+      m.hf_after_den = null;
+      m.became_eligible = "false";
+      m.debt_usd = "x";
+    }),
+  ).toEqual(["movers[0].account", "movers[0].hf_drop_wad", "movers[0].hf_before_num", "movers[0].hf_after_den", "movers[0].became_eligible", "movers[0].debt_usd"]);
+});

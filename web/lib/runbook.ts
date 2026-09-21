@@ -74,10 +74,26 @@ function sealable(horizon: unknown): horizon is RunBookHorizon {
   return isObject(horizon) && (horizon.becomes_liquidatable === null || typeof horizon.becomes_liquidatable === "boolean");
 }
 
-/** A projection's horizons, each sealed where it can be and left verbatim where it cannot; a projection that is no object, or carries no list of horizons, is left whole. */
+/**
+ * `liquidation_verdict` is the CLIENT's member: the contract has none of that name, and the seal is the only thing that
+ * may put one on a horizon. A wire member of that name is taken off every horizon BEFORE the seal decides, so a horizon
+ * the seal cannot read — one that omits `becomes_liquidatable` — never arrives looking like one the client sealed.
+ */
+function withoutWireVerdict(horizon: unknown): unknown {
+  if (!isObject(horizon) || !("liquidation_verdict" in horizon)) return horizon;
+  return Object.fromEntries(Object.entries(horizon).filter(([member]) => member !== "liquidation_verdict"));
+}
+
+/** A projection's horizons, each sealed where it can be and left as the wire sent it — less any verdict of the client's name — where it cannot; a projection that is no object, or carries no list of horizons, is left whole. */
 function sealProjection(projection: unknown): unknown {
   if (!isObject(projection) || !Array.isArray(projection.horizons)) return projection;
-  return { ...projection, horizons: projection.horizons.map((h: unknown) => (sealable(h) ? refineProjectionHorizon(h) : h)) };
+  return {
+    ...projection,
+    horizons: projection.horizons.map((h: unknown) => {
+      const wire = withoutWireVerdict(h);
+      return sealable(wire) ? refineProjectionHorizon(wire) : wire;
+    }),
+  };
 }
 
 /**

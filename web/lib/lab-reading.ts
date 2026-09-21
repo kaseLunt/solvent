@@ -7,7 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Phase } from "./address-lookup";
 import { getSolventClient, solventBaseUrl } from "./api";
-import { setMembership } from "./lab-compare";
+import { classifyScenarioListing, contractFaults } from "./lab-classify";
+import { setFault } from "./lab-compare";
 import { readsAsAnswer } from "./lab-engine";
 import type { HeldResult, HeldSet, RunRecord, ScenariosResponse, SetRecord } from "./lab-library";
 import { monotonicNowMs } from "./freshness";
@@ -15,8 +16,20 @@ import { describeLookupError } from "./lookup-error";
 import { runBookScenario, type LabRunBook, type RunBookOutcome } from "./runbook";
 import { runBookSet, type SetRunOutcome } from "./runbookSet";
 
+/**
+ * The committed listing's phase. `unreadable` is a fetch that ANSWERED — 2xx — with a body outside the wire contract:
+ * not a failed fetch (`error`), and never `ready`, because everything downstream reads a ready listing's members.
+ */
+export type ListingPhase = Phase<ScenariosResponse> | { readonly phase: "unreadable"; readonly faults: readonly string[] };
+
+/** A 2xx listing body, judged before it is committed: `ready` only when it reads, else `unreadable` with every fault named. */
+export function listingPhase(body: unknown): ListingPhase {
+  const faults = classifyScenarioListing(body);
+  return faults.length > 0 ? { phase: "unreadable", faults: contractFaults(faults) } : { phase: "ready", value: body as ScenariosResponse };
+}
+
 export interface LabReading {
-  readonly listing: Phase<ScenariosResponse>;
+  readonly listing: ListingPhase;
   readonly runs: ReadonlyMap<string, RunRecord>;
   readonly set: SetRecord | null;
   readonly run: (id: string) => void;
@@ -56,10 +69,14 @@ export function withSettled(runs: ReadonlyMap<string, RunRecord>, id: string, ou
   return next;
 }
 
-/** The set that stands: a settled ok that answered its request, else whatever the record already held. A set that did not answer its request is not a comparison to hold. */
+/**
+ * The set that stands: a settled ok that READS — it answers its request and every row it would draw reads
+ * (`setFault`) — else whatever the record already held. A set that does not read is not a comparison to hold, so the
+ * hold passes through it unchanged: however many follow one another, the last set that read stands behind them.
+ */
 function heldSetOf(prev: SetRecord | null): HeldSet | null {
   if (prev === null) return null;
-  if (prev.phase === "settled" && prev.outcome.kind === "ok" && setMembership(prev.ids, prev.outcome.response).length === 0) {
+  if (prev.phase === "settled" && prev.outcome.kind === "ok" && setFault(prev.ids, prev.outcome.response) === null) {
     return { ids: prev.ids, response: prev.outcome.response, at: prev.at };
   }
   return prev.held;
@@ -69,14 +86,19 @@ export function withSetRunning(prev: SetRecord | null, ids: readonly string[], n
   return { phase: "running", ids, startedAt: now, held: heldSetOf(prev) };
 }
 
-/** A computed comparison is never replaced by the Compare that follows it: it is held through every failure and released only by a new set that answers its request. */
+/**
+ * A computed comparison is never replaced by the Compare that follows it: it is held through every failure and
+ * released only by a new set that READS. What releases the hold is what may enter it — the one question `setFault`
+ * asks, of everything the comparison draws — so a 2xx set with a figure outside the contract is a failure the hold
+ * stands behind, exactly like a transport failure.
+ */
 export function withSetSettled(prev: SetRecord | null, ids: readonly string[], outcome: SetRunOutcome, now: number): SetRecord {
-  const answers = outcome.kind === "ok" && setMembership(ids, outcome.response).length === 0;
-  return { phase: "settled", ids, outcome, at: now, held: answers ? null : heldSetOf(prev) };
+  const reads = outcome.kind === "ok" && setFault(ids, outcome.response) === null;
+  return { phase: "settled", ids, outcome, at: now, held: reads ? null : heldSetOf(prev) };
 }
 
 export function useLabReading(): LabReading {
-  const [listing, setListing] = useState<Phase<ScenariosResponse>>({ phase: "loading" });
+  const [listing, setListing] = useState<ListingPhase>({ phase: "loading" });
   const [epoch, setEpoch] = useState(0);
   const [runs, setRuns] = useState<ReadonlyMap<string, RunRecord>>(new Map());
   const [set, setSet] = useState<SetRecord | null>(null);
@@ -101,7 +123,7 @@ export function useLabReading(): LabReading {
       .scenarios(controller.signal)
       .then(
         (value) => {
-          if (!controller.signal.aborted) setListing({ phase: "ready", value });
+          if (!controller.signal.aborted) setListing(listingPhase(value));
         },
         (cause: unknown) => {
           if (!controller.signal.aborted) setListing({ phase: "error", message: describeLookupError(cause) });

@@ -1,6 +1,9 @@
 // The deep-link law for /lab: `?scenario=` runs one, `?scenarios=` runs the
-// committed set, both together run nothing. The decision is about the link the
-// page was OPENED with; the page's own URL writes are never decided again.
+// committed set, both together dispatch no book run. The decision is about the
+// link the page was OPENED with; the page's own URL writes are never decided
+// again. The decision gates BOOK runs and nothing else, and its notice claims
+// no more than that: an `?address=` in the same link is evaluated by the
+// address lookup, which these two params do not gate.
 
 import { MAX_SET_RUN_SCENARIOS } from "./runbookSet";
 
@@ -12,8 +15,9 @@ export type DeepLinkDecision =
   | { kind: "single" }
   /**
    * BOTH `?scenario=` AND `?scenarios=` — two mutually exclusive selections in
-   * one URL is a link nobody wrote. Nothing runs, neither param is honoured,
-   * and no precedence is guessed.
+   * one URL is a link nobody wrote. No book run is dispatched, neither param is
+   * honoured, and no precedence is guessed. `notice` is `conflictNotice(false)`:
+   * the page adds the address's sentence when an address is evaluated on it.
    */
   | { kind: "conflict"; notice: string }
   | {
@@ -33,6 +37,22 @@ export type DeepLinkDecision =
        */
       notice: string | null;
     };
+
+/**
+ * The conflict's sentence. It claims what the conflict gates — no BOOK run was dispatched for either selection — and
+ * nothing wider: "nothing was run" would be false on a page that also evaluates an address, because the address
+ * lookup dispatches its own stress request whatever these two params say. Where an address is evaluated on the page,
+ * the notice says so, and that neither selection gates it.
+ */
+export function conflictNotice(addressEvaluated: boolean): string {
+  const gated =
+    "This link names both ?scenario= and ?scenarios=. They are two mutually exclusive selections and no " +
+    "precedence is guessed between them: no book run was dispatched for either. Remove one of the two and open the " +
+    "link again.";
+  return addressEvaluated
+    ? `${gated} The address's own evaluation is shown below: it applies every committed scenario to that one account, and neither selection gates it.`
+    : gated;
+}
 
 /** "a, b and c" — the house list vocabulary. */
 function listWords(items: readonly string[]): string {
@@ -59,13 +79,7 @@ export function deepLinkDecision(
     return scenarioParam === null ? { kind: "none" } : { kind: "single" };
   }
   if (scenarioParam !== null) {
-    return {
-      kind: "conflict",
-      notice:
-        "This link names both ?scenario= and ?scenarios=. They are two mutually exclusive selections and no " +
-        "precedence is guessed between them: NOTHING was run for either. Remove one of the two and open the " +
-        "link again.",
-    };
+    return { kind: "conflict", notice: conflictNotice(false) };
   }
 
   const askedIds: string[] = [];

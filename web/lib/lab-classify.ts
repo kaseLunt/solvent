@@ -244,13 +244,23 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
       // required `Address`, a string. Unjudged, a missing or null account is
       // read for its length at render.
       checks.push([`movers[${String(index)}].account`, typeof mover.account === "string"]);
-      // The four mover fields the detail subtree feeds into BigInt or the
-      // money renderers — the three ratio wads here, the debt below, in wire
-      // order. All four are the schema's NullableDecimal — the Aave and Debt
-      // Manager arms differ in WHICH are null, and a null on either engine
-      // is that engine's own statement, never malformed.
+      // The mover fields the detail subtree feeds into BigInt or the money
+      // renderers — the three ratio wads here, the two ratio pairs and the
+      // debt below, in wire order. All are the schema's NullableDecimal — the
+      // Aave and Debt Manager arms differ in WHICH are null, and a null on
+      // either engine is that engine's own statement, never malformed.
       for (const field of ["hf_before_wad", "hf_after_wad", "hf_drop_wad"] as const) {
         checks.push([`movers[${String(index)}].${field}`, isNullableWireDecimal(mover[field])]);
+      }
+      // The two ratio pairs the room cells are read from (cap ÷ debt, before and after): each member the schema's
+      // NullableDecimal, and a pair null TOGETHER — a side with no debt, and the legacy market's own statement, which
+      // speaks no ratio. A pair with one side null is a statement the wire cannot mean, so the null side is named like
+      // any other member that fails the guard: a room is never drawn from half a ratio.
+      for (const side of ["hf_before", "hf_after"] as const) {
+        const num = mover[`${side}_num`];
+        const den = mover[`${side}_den`];
+        checks.push([`movers[${String(index)}].${side}_num`, num === null ? den === null : isWireDecimal(num)]);
+        checks.push([`movers[${String(index)}].${side}_den`, den === null ? num === null : isWireDecimal(den)]);
       }
       // The flip the row's verdict word is read from: the schema's required boolean, nullable — null is the legacy
       // market's own statement (its movers are ranked by a drop, not a flip). Anything else is no verdict: an
@@ -432,6 +442,14 @@ const aRefusal: ElementChecks = (at, element) =>
     : [[at, false]];
 
 /**
+ * An engine row of a run-book, as far as the envelope reads it: the engine it answers for. The row is found by that
+ * id, placed under that engine's card and printed by it in the Engines chip; a row that names no engine can be placed
+ * under no card, and an id that is not text is never printed as one. The rest of the row is `classifyRunBookEngine`'s.
+ */
+const anEngineRow: ElementChecks = (at, element) =>
+  isObject(element) ? [[`${at}.engine`, typeof element.engine === "string" && element.engine.trim() !== ""]] : [[at, false]];
+
+/**
  * A list member of an envelope: not a list, it is named by the field; a list, each element the contract does not
  * admit is named per index, by the member that fails where the element is an object. A list that is not one is
  * never dereferenced, and an element that is not what the list holds is never read as one.
@@ -467,9 +485,9 @@ function batchChecks(batch: unknown, reads: { readonly age: boolean; readonly su
  * envelope is inside the contract; a non-empty list names every fault: a body that is no JSON object (its own
  * sentence, and nothing else is asked of it), the string members the page prints or compares, an object member
  * (`batch`, `coverage`) that is missing or not an object, the batch fields the page reads, every list that is not a
- * list, and every element that is not what its list holds. A version-skewed 2xx is a refusal by the field's name,
- * never a throw at render. The engine rows themselves are `classifyRunBookEngine`'s; this is the law of what carries
- * them.
+ * list, and every element that is not what its list holds — an engine row by the engine it answers for, a refusal
+ * by its engine and its code. A version-skewed 2xx is a refusal by the field's name, never a throw at render. The
+ * engine rows themselves are `classifyRunBookEngine`'s; this is the law of what carries them.
  */
 export function classifyRunBookEnvelope(run: LabRunBook): string[] {
   const r: unknown = run;
@@ -486,10 +504,39 @@ export function classifyRunBookEnvelope(run: LabRunBook): string[] {
     ...listChecks("out_of_model", r.out_of_model, aString),
     ...listChecks("applied_shocks", r.applied_shocks, anObjectWithStrings("asset", "source")),
     ...listChecks("held_flat", r.held_flat, anObjectWithStrings("asset", "source")),
-    ...listChecks("engines", r.engines, anObject),
+    ...listChecks("engines", r.engines, anEngineRow),
     ...listChecks("excluded_engines", r.excluded_engines, aRefusal),
     ["coverage", isObject(r.coverage)],
     ...listChecks("notes", r.notes, aString),
+  ]);
+}
+
+/**
+ * One committed definition, as far as the page reads it: the id it is selected, run and linked by, the version and
+ * label its chips print, the description and path assumption its not-run sentence is made of, the engines it is
+ * listed and judged under, and the shocks it counts and compares against a result's. Each that is not what the
+ * contract says is named under the definition's own index.
+ */
+const aDefinition: ElementChecks = (at, element) =>
+  isObject(element)
+    ? [
+        ...["id", "version", "label", "description", "path_assumption"].map((member): FieldCheck => [`${at}.${member}`, isString(element[member])]),
+        ...listChecks(`${at}.engines`, element.engines, aString),
+        ...listChecks(`${at}.shocks`, element.shocks, anObject),
+      ]
+    : [[at, false]];
+
+/**
+ * CLASSIFY THE COMMITTED LISTING, in wire read order, before it is `ready`: a body that is no JSON object (its own
+ * sentence), the config version every chip and every skew reads, `scenarios` as a list, and each definition's consumed
+ * members. Empty list = the listing reads — an EMPTY `scenarios` is the wire's own "none committed" and reads. A 200
+ * that is no listing is a named state on the page, never a library drawn from it and never a throw at render.
+ */
+export function classifyScenarioListing(listing: unknown): string[] {
+  if (!isObject(listing)) return [BODY_NOT_OBJECT];
+  return malformedFields([
+    ["scenario_config_version", isString(listing.scenario_config_version)],
+    ...listChecks("scenarios", listing.scenarios, aDefinition),
   ]);
 }
 
@@ -499,8 +546,8 @@ const SET_FRESHNESS: ReadonlySet<unknown> = new Set(["still_newest", "superseded
  * CLASSIFY THE SET ENVELOPE, in wire read order, before anything is read from the body: a body that is no JSON
  * object (its own sentence), `batch`, `evaluation` and `coverage` as objects, the evaluation's own fields the
  * comparison prints, every list, and each result an object carrying the id it is asked for by and the label its row
- * prints. A result's own engine lists are `classifySetResult`'s — a result that breaks them is one refused row,
- * never the refusal of the rows beside it.
+ * prints. A result's own engine lists are `classifySetResult`'s — a result that breaks them is named under its own
+ * scenario, the results beside it by theirs.
  */
 export function classifySetEnvelope(set: RunBookSetResponse): string[] {
   const s: unknown = set;

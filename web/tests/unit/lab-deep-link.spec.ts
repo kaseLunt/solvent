@@ -1,10 +1,10 @@
-// The deep-link law, pinned: `?scenario=` and `?scenarios=` together run
-// NOTHING and say so; ids the listing does not publish are filtered BEFORE
+// The deep-link law, pinned: `?scenario=` and `?scenarios=` together dispatch
+// NO book run and say exactly that; ids the listing does not publish are filtered BEFORE
 // dispatch and NAMED with the asked/published counts; there is no
 // `?scenarios=*`; more published ids than the cap dispatches nothing and
 // truncates nothing.
 import { expect, test } from "@playwright/test";
-import { deepLinkDecision } from "../../lib/lab-deep-link";
+import { conflictNotice, deepLinkDecision } from "../../lib/lab-deep-link";
 
 const LISTED = ["eth_minus_30", "ethfi_minus_50", "dm_rate_horizon_plus_200bps"];
 
@@ -14,12 +14,13 @@ test.describe("the deep-link decision", () => {
     expect(deepLinkDecision("eth_minus_30", null, LISTED)).toEqual({ kind: "single" });
   });
 
-  test("both params together run NOTHING and no precedence is guessed", () => {
+  test("both params together dispatch NO book run, say exactly that, and no precedence is guessed", () => {
     const decision = deepLinkDecision("eth_minus_30", "ethfi_minus_50", LISTED);
     expect(decision.kind).toBe("conflict");
     if (decision.kind !== "conflict") return;
     expect(decision.notice).toContain("both ?scenario= and ?scenarios=");
-    expect(decision.notice).toContain("NOTHING was run");
+    expect(decision.notice).toContain("no book run was dispatched for either");
+    expect(decision.notice).not.toContain("NOTHING was run");
     expect(decision.notice).toContain("no precedence is guessed");
   });
 
@@ -89,5 +90,26 @@ test.describe("the deep-link decision", () => {
     expect(decision.overCap).toBe(true);
     expect(decision.notice).toContain("caps one set-run at 24");
     expect(decision.notice).toContain("nothing was silently truncated");
+  });
+});
+
+test.describe("the conflict notice claims only what the conflict gates", () => {
+  test("the conflict gates the BOOK run and says exactly that — it never says nothing was run, because the address's own evaluation is not its to gate", () => {
+    const decision = deepLinkDecision("eth_minus_30", "ethfi_minus_50", LISTED);
+    if (decision.kind !== "conflict") throw new Error(decision.kind);
+    expect(decision.notice).toBe(conflictNotice(false));
+    expect(conflictNotice(false)).toBe(
+      "This link names both ?scenario= and ?scenarios=. They are two mutually exclusive selections and no precedence is guessed between them: no book run was dispatched for either. Remove one of the two and open the link again.",
+    );
+    for (const shown of [false, true]) {
+      expect(conflictNotice(shown)).not.toMatch(/nothing was run/i);
+      expect(conflictNotice(shown)).toContain("no book run was dispatched for either");
+    }
+  });
+
+  test("with an address on the page the notice says its evaluation is shown, and that neither selection gates it", () => {
+    expect(conflictNotice(true)).toBe(
+      `${conflictNotice(false)} The address's own evaluation is shown below: it applies every committed scenario to that one account, and neither selection gates it.`,
+    );
   });
 });

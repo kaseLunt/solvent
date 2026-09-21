@@ -81,7 +81,9 @@ test("no position and withheld are the stress reading's own words", () => {
     selectedId: null,
   });
   expect(none.state).toBe("no-position");
-  expect(none.headline.emphasis).toBe(`No Cash position for ${NOT_FOUND_ADDR.slice(0, 6)}…${NOT_FOUND_ADDR.slice(-4)} in batch 1.`);
+  // The negative is the stress response's, so the batch it names is that response's own (18,251) — never the lookup's (1).
+  expect(none.headline.emphasis).toBe(`No Cash position for ${NOT_FOUND_ADDR.slice(0, 6)}…${NOT_FOUND_ADDR.slice(-4)} in batch 18,251.`);
+  expect(none.headline.dek).toBe("That is the stress response's own answer, for its own batch; the lookup above is batch 1 and holds no Cash position either.");
   expect(none.headline.tone).toBe("refused");
   const withheld = addressWorkspace({
     address: DEMO_NEAR_ADDR,
@@ -486,4 +488,88 @@ test("where there is no scale to print at, the workspace carries the TRUE cause 
   expect(sideRoomWords(spot.before, badScale.decimals, badScale.scaleAbsence)).toBe("unreadable scale");
   // A readable scale carries no absence.
   expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: null }).scaleAbsence).toBeNull();
+});
+
+test("a stress response that reports no position is the STRESS response's negative: it names its own batch, never the lookup's, and where the lookup holds a Cash position — or withholds the book — the disagreement is disclosed first and the negative said after it, never as a fact about the position on the page", () => {
+  const short = "0x7a3f…c21e";
+  const negative = (batchId: unknown) => lookup({ ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: batchId as number }, found: false, scenarios: [] });
+  const over = (stress: ReturnType<typeof negative>, overrides: Partial<AddressReading> = {}) =>
+    addressWorkspace({ address: DEMO_NEAR_ADDR, view: view({ lookup: { phase: "ready", value: lookup(DEMO_ADDRESS_NEAR) }, stress: { phase: "ready", value: stress }, ...overrides }), selectedId: null });
+  // The lookup found Cash in batch 18,251; the stress response, fetched on its own, answers for batch 18,252.
+  const other = over(negative(18252));
+  expect(other.state).toBe("no-position");
+  expect(other.headline).toEqual({
+    emphasis: "Cannot say — the stress result is for batch 18,252; the position above is batch 18,251.",
+    rest: "",
+    tone: "refused",
+    dek: `The stress response reports no position for ${short} in batch 18,252 — its own batch, not the position's. A position and a stress result from different batches are not compared.`,
+  });
+  expect(`${other.headline.emphasis} ${other.headline.dek}`).not.toContain("No Cash position");
+  expect(other.headline.dek).not.toContain("in batch 18,251");
+  // Both batches are on the strip, the stress batch in the Inspector's words.
+  expect([other.batchId, other.stressBatchId, other.stressBatchChip]).toEqual([18251, 18252, "18,252"]);
+  // The same ordering after a resume repair, which refreshes the position alone and replays no stress.
+  const kept = over(negative(18252), { lookupRepaired: true });
+  expect(kept.headline.emphasis).toBe("Cannot say — the stress result is for batch 18,252; the position above is batch 18,251.");
+  expect(kept.headline.dek).toBe(
+    `The stress response was read for the previous lookup, and the position above was refreshed since. It reports no position for ${short} in batch 18,252 — its own batch, not the position's. A position and a stress result from different batches are not compared.`,
+  );
+  expect(kept.stressBatchChip).toBe("18,252 · stress from the previous lookup");
+  // A stress batch the guard refuses names no batch: the negative is never quoted for the position's.
+  const unnamed = over(negative("18251"));
+  expect(unnamed.headline.emphasis).toBe("Cannot say — the stress result names no readable batch; the position above is batch 18,251.");
+  expect(unnamed.headline.dek).toBe(`The stress response reports no position for ${short} in a batch it does not name readably. A stress result and a position are compared only when both name the same batch.`);
+  expect(unnamed.stressBatchChip).toBe("not readable");
+  // One batch, two answers: the disagreement is the sentence, and neither answer is printed as the fact.
+  const same = over(negative(18251));
+  expect(same.headline).toEqual({
+    emphasis: `Cannot say — the lookup holds a Cash position for ${short} in batch 18,251, and the stress response reports none in the same batch.`,
+    rest: "",
+    tone: "refused",
+    dek: "The two answers disagree about one batch. Nothing is stressed; the position above is the lookup's own.",
+  });
+  // A withheld Cash book is never "no position", whatever the stress response says.
+  const withheldLookup = addressWorkspace({ address: UNKNOWABLE_ADDR, view: view({ address: UNKNOWABLE_ADDR, lookup: { phase: "ready", value: lookup(ADDRESS_UNKNOWABLE) }, stress: { phase: "ready", value: negative(1) } }), selectedId: null });
+  expect(withheldLookup.headline.emphasis).toContain("Cannot say — the Cash book is withheld for ");
+  expect(withheldLookup.headline.dek).toBe("The stress response reports no position in batch 1 while the lookup's Cash book is withheld — the two answers disagree.");
+
+  // Where the lookup itself holds no Cash position the two agree, and the negative still names the stress response's batch.
+  const none = (batchId: unknown) =>
+    addressWorkspace({
+      address: NOT_FOUND_ADDR,
+      view: view({ address: NOT_FOUND_ADDR, lookup: { phase: "ready", value: lookup(ADDRESS_NOT_FOUND) }, stress: { phase: "ready", value: lookup({ ...DEMO_STRESS_NEAR, address: NOT_FOUND_ADDR, batch: { ...DEMO_STRESS_NEAR.batch, id: batchId as number }, found: false, scenarios: [] }) } }),
+      selectedId: null,
+    });
+  expect(none(1).headline).toEqual({ emphasis: "No Cash position for 0xBBbB…0002 in batch 1.", rest: "", tone: "refused", dek: "The lookup is complete: there is nothing to stress." });
+  expect([none(1).batchId, none(1).stressBatchChip]).toEqual([null, null]);
+  expect(none(2).headline).toEqual({
+    emphasis: "No Cash position for 0xBBbB…0002 in batch 2.",
+    rest: "",
+    tone: "refused",
+    dek: "That is the stress response's own answer, for its own batch; the lookup above is batch 1 and holds no Cash position either.",
+  });
+  expect(none("x").headline.emphasis).toBe("No Cash position for 0xBBbB…0002 in a batch the stress response does not name readably.");
+});
+
+test("a named scenario the address was not stressed under is never the silent subject: the workspace shows the first row the address carries and SAYS so — what was not evaluated, what is shown instead; a named scenario that is the subject, or no name at all, discloses nothing", () => {
+  const depeg = { id: "weeth_market_depeg_oracles_held", label: "weETH market depeg to 0.95 (oracles held)" };
+  // The listing names it; the address's stress response does not carry it.
+  const carried = near().stress;
+  if (carried?.kind !== "rows") throw new Error("the demo address carries stress rows");
+  expect(carried.rows.map((r) => r.id)).not.toContain(depeg.id);
+  const w = addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: depeg.id, named: depeg });
+  expect(w.state).toBe("rows");
+  expect(w.selected?.id).toBe("eth_minus_30");
+  expect(w.fallback).toBe("weETH market depeg to 0.95 (oracles held) was not evaluated for 0x7a3f…c21e: the stress response carries no result for it. ETH -30 percent is shown instead — the first scenario this address carries.");
+  // The headline is the shown subject's, as before: the disclosure stands beside it, never in its place.
+  expect(w.headline.emphasis).toBe("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
+  // A named scenario the address carries is the subject; no name is no disclosure, whatever the listing's default is.
+  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "ethfi_minus_50", named: { id: "ethfi_minus_50", label: "ETHFI -50 percent" } }).fallback).toBeNull();
+  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: depeg.id }).fallback).toBeNull();
+  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: depeg.id, named: null }).fallback).toBeNull();
+  // The disclosure stands under every rows headline — a refused comparison does not swallow it — and nowhere a subject is not shown.
+  const otherBatch = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith({ ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: 18252 } }), selectedId: depeg.id, named: depeg });
+  expect(otherBatch.tiles).toBeNull();
+  expect(otherBatch.fallback).toBe(w.fallback);
+  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: view({}), selectedId: depeg.id, named: depeg }).fallback).toBeNull();
 });
