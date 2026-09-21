@@ -35,9 +35,9 @@ export interface AddressReading {
   readonly reload: () => void;
   /**
    * The lookup on the page was landed by a resume repair. A repair refreshes the position alone and replays no
-   * stress, so a stress beside a repaired lookup was read for the lookup before it. Absent reads as false.
+   * stress, so a stress beside a repaired lookup was read for the lookup before it.
    */
-  readonly lookupRepaired?: boolean;
+  readonly lookupRepaired: boolean;
 }
 
 /** `repaired`: a background repair landed this result — it rode no load epoch, so nothing keyed by the epoch was replayed with it. */

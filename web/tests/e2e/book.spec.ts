@@ -253,11 +253,20 @@ test("while the walk is still running the verdict is pending — never 'Nothing 
   await expect(page.getByTestId("book-kpi-liquidatable")).toHaveAttribute("aria-busy", "true");
   await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("aria-busy", "true");
   await expect(page.getByTestId("book-attention")).toContainText("Walking the book…");
-  // The distance chart: a walk-derived zero is a dash, never "$0 sits within 10%", and the bars wear their own qualifier.
+  // The distance chart: a walk-derived zero is a dash — in the finding and on every bar — and the bars wear their own qualifier.
   await expect(page.getByTestId("book-bands-card")).toContainText(
     "— within 10% of the cap: a zero is claimed only by a complete walk · walking the book, figures are a lower bound",
   );
-  await expect(page.getByTestId("book-bands-card")).not.toContainText("$0 sits within 10%");
+  await expect(page.getByTestId("book-bands-card")).not.toContainText("$0");
+  // Nothing is read yet: every bar is a dash alone — no count beside it, no count on it, no height.
+  const pendingBars = page.getByTestId("book-bands").locator("[data-band]");
+  await expect(pendingBars).toHaveCount(7);
+  for (const bar of await pendingBars.all()) {
+    await expect(bar).toContainText("—");
+    await expect(bar.locator("small")).toHaveCount(0);
+    await expect(bar.locator("i")).toHaveCSS("height", "0px");
+  }
+  await expect(page.getByTestId("book-bands").locator("[data-count]")).toHaveCount(0);
   await expect(page.getByTestId("book-bands-note")).toHaveText(
     "Walking the book: every bar and every count is a lower bound over the accounts read so far.",
   );
@@ -305,7 +314,17 @@ test("a terminal page short of the advertised census stops the walk by name — 
   await expect(page.getByTestId("book-bands-card")).toContainText(
     "— within 10% of the cap: a zero is claimed only by a complete walk · the walk stopped, figures are a lower bound",
   );
-  await expect(page.getByTestId("book-bands-card")).not.toContainText("$0 sits within 10%");
+  await expect(page.getByTestId("book-bands-card")).not.toContainText("$0");
+  // The band the walk read in prints what it read; every other band is a dash alone, never "$0 · 0".
+  const stoppedBars = page.getByTestId("book-bands");
+  await expect(stoppedBars.locator('[data-band="breached"]')).toContainText("$4,200 · 1");
+  await expect(stoppedBars.locator("[data-count]")).toHaveCount(1);
+  for (const id of ["0-2", "2-5", "5-10", "10-25", "25-50", "50-plus"]) {
+    const bar = stoppedBars.locator(`[data-band="${id}"]`);
+    await expect(bar).toContainText("—");
+    await expect(bar.locator("small")).toHaveCount(0);
+    await expect(bar.locator("i")).toHaveCSS("height", "0px");
+  }
   await expect(page.getByTestId("book-bands-note")).toHaveText(
     "The walk stopped: every bar and every count is a lower bound over the accounts it read.",
   );
@@ -331,6 +350,7 @@ test("the distance chart over an incomplete walk: the figure is a floor in its o
   const card = page.getByTestId("book-bands-card");
   // Page one carries the least room first, so the near-cap accounts are read while page two is still out.
   await expect(card).toContainText(/at least \$[\d.,]+[KMB]? sits within 10% of the cap · walking the book, figures are a lower bound/);
+  await expect(card).not.toContainText("$0");
   await expect(page.getByTestId("book-bands-note")).toHaveText(
     "Walking the book: every bar and every count is a lower bound over the accounts read so far.",
   );
@@ -339,6 +359,19 @@ test("the distance chart over an incomplete walk: the figure is a floor in its o
   await expect(card).toContainText(/· \$[\d.,]+[KMB]? sits within 10% of the cap/);
   await expect(card).not.toContainText("at least");
   await expect(card).not.toContainText("lower bound");
+});
+
+test("a complete walk prints its empty bands as zeros — the dash is the unfinished walk's alone", async ({ page }) => {
+  await mockCommitted(page);
+  await page.goto("/book");
+  await expect(page.getByTestId("book-kpi-near")).not.toHaveAttribute("aria-busy", "true");
+  await expect(page.getByTestId("book-bands-note")).toHaveCount(0);
+  const bars = page.getByTestId("book-bands");
+  await expect(bars.locator('[data-band="breached"]')).toContainText("$4,200 · 1");
+  for (const id of ["0-2", "2-5", "5-10", "10-25", "25-50", "50-plus"]) {
+    await expect(bars.locator(`[data-band="${id}"]`)).toContainText("$0 · 0");
+    await expect(bars.locator(`[data-band="${id}"]`)).toHaveAttribute("data-count", "0");
+  }
 });
 
 test("a waterfall served with no points is a named refusal on the preview card — never 'not on the grid', never 'no stress grid'", async ({ page }) => {

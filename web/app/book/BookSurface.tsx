@@ -4,7 +4,7 @@ import { useState } from "react";
 import { BandBars, ChartCard, KpiTile, SectionHead, VerdictHeader, type Band } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { useCashBook } from "@/lib/cash-book";
-import { bandsFinding, walkQualifier } from "@/lib/cash-summary";
+import { bandsFinding, bandsSoFar, walkQualifier } from "@/lib/cash-summary";
 import { deriveCashView, deriveLegacyView, malformedSub, moneyText } from "@/lib/cash-view";
 import { humanUsd } from "@/lib/human-usd";
 import { MATERIAL_LINE_USD } from "@/lib/materiality";
@@ -31,7 +31,7 @@ export function BookSurface() {
   const { summary, decimals, refusedTiles, walking, walkStopped } = view;
   const cash = reading.cash;
 
-  const bands: Band[] = (summary?.bands ?? []).map((b) => ({
+  const bands: Band[] = (summary === null ? [] : bandsSoFar(summary)).map((b) => ({
     id: b.id,
     label: bandLabel(b.id, b.label),
     count: b.count,

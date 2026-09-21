@@ -11,7 +11,6 @@ import {
   BOOK_LOADING,
   bookAnswered,
   bookFailed,
-  cashCensus,
   deriveVerificationView,
   PROBE_COLUMNS,
   PROBES_EMPTY,
@@ -110,7 +109,7 @@ export function VerificationSurface() {
     document.getElementById(id)?.scrollIntoView({ block: "start" });
   }, [state.phase]);
 
-  const view = deriveVerificationView({ state, meta: meta.value, book: reading, cashAccounts: cashCensus(reading) });
+  const view = deriveVerificationView({ state, meta: meta.value, book: reading });
   const manifest = state.phase === "ok" ? state.manifest : null;
   const probeRows: KitRow[] = view.probes.map((row, index) => ({
     key: row.key,

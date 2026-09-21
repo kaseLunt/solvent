@@ -27,6 +27,7 @@ function reading(overrides: Partial<AddressReading>): AddressReading {
     evidence: EVIDENCE_MANIFEST,
     age: { seconds: 42, unresolved: false, refreshFailed: false },
     reload: () => {},
+    lookupRepaired: false,
     ...overrides,
   };
 }
@@ -484,6 +485,7 @@ test("the stress batch is the stress response's own: exposed as stressBatchId, d
   expect(stressBatchNote(skewed)).toEqual({
     disclosure: "Stress for batch 101; the position above is batch 100. Each row's before and after are read for batch 101 and are not compared against the position above.",
     rowLabel: "batch 101",
+    chipValue: "101",
   });
   expect(stressBatchNote(withStress({ ...STRESS_DM, batch: { ...STRESS_DM.batch, id: 18251 } }))?.disclosure).toContain("Stress for batch 18,251; the position above is batch 100.");
   // The withheld and no-position arms carry the batch too, so the disclosure stands beside the empty words.
@@ -497,6 +499,7 @@ test("the stress batch is the stress response's own: exposed as stressBatchId, d
   expect(stressBatchNote(unreadable)).toEqual({
     disclosure: "The stress response names no readable batch; the position above is batch 100. Its rows are not compared against the position above.",
     rowLabel: "batch not readable",
+    chipValue: "not readable",
   });
   // No stress answer yet: nothing to disclose.
   const pending = deriveInspectorView(reading({ lookup: { phase: "ready", value: found([nearWire()]) } }), TIER_FALLBACK);
@@ -505,12 +508,12 @@ test("the stress batch is the stress response's own: exposed as stressBatchId, d
 });
 
 test("a resume repair refreshes the lookup alone: the view carries that the stress was read for the previous lookup, and the batch note says so beside the stress batch", () => {
-  const at = (stressBatch: number, lookupRepaired: boolean | undefined, stress: AddressReading["stress"] | null = null) =>
+  const at = (stressBatch: number, lookupRepaired: boolean, stress: AddressReading["stress"] | null = null) =>
     deriveInspectorView(
       reading({
         lookup: { phase: "ready", value: found([nearWire()], { batch: { ...ADDRESS_FOUND.batch, id: 101 } }) },
         stress: stress ?? { phase: "ready", value: lookup({ ...STRESS_DM, batch: { ...STRESS_DM.batch, id: stressBatch } }) },
-        ...(lookupRepaired === undefined ? {} : { lookupRepaired }),
+        lookupRepaired,
       }),
       TIER_FALLBACK,
     );
@@ -521,13 +524,14 @@ test("a resume repair refreshes the lookup alone: the view carries that the stre
     disclosure:
       "Stress from the previous lookup, for batch 100; the position above was refreshed since and is batch 101. Each row's before and after are read for batch 100 and are not compared against the position above.",
     rowLabel: "batch 100 · stress from the previous lookup",
+    chipValue: "100 · stress from the previous lookup",
   });
   // The same skew with no repair behind it is two requests answering two batches: the plain disclosure, nothing about a previous lookup.
-  for (const plain of [at(100, false), at(100, undefined)]) {
-    expect(plain.stressFromPreviousLookup).toBe(false);
-    expect(stressBatchNote(plain)?.rowLabel).toBe("batch 100");
-    expect(stressBatchNote(plain)?.disclosure).not.toContain("previous lookup");
-  }
+  const plain = at(100, false);
+  expect(plain.stressFromPreviousLookup).toBe(false);
+  expect(stressBatchNote(plain)?.rowLabel).toBe("batch 100");
+  expect(stressBatchNote(plain)?.chipValue).toBe("100");
+  expect(stressBatchNote(plain)?.disclosure).not.toContain("previous lookup");
   // A repair that landed the same batch: the stress is that batch's own, and there is nothing to disclose.
   const sameBatch = at(101, true);
   expect(sameBatch.stressFromPreviousLookup).toBe(true);
@@ -537,6 +541,7 @@ test("a resume repair refreshes the lookup alone: the view carries that the stre
     disclosure:
       "The stress response names no readable batch and was read for the previous lookup; the position above was refreshed since and is batch 101. Its rows are not compared against the position above.",
     rowLabel: "batch not readable · stress from the previous lookup",
+    chipValue: "not readable · stress from the previous lookup",
   });
   // No stress answer on the page: nothing was kept, so nothing is from a previous lookup.
   expect(at(100, true, { phase: "loading" }).stressFromPreviousLookup).toBe(false);

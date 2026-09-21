@@ -6,7 +6,7 @@ import { truncateAddress } from "./format";
 import { headroomBand } from "./headroom";
 import { humanUsdFull } from "./human-price";
 import type { CashStatus } from "./inspector-position";
-import type { InspectorView } from "./inspector-view";
+import { stressBatchNote, type InspectorView } from "./inspector-view";
 import { refused, sentence, type LabHeadline } from "./lab-headline";
 import type { LibraryOutcome } from "./lab-library";
 import { groupInt } from "./prose";
@@ -38,6 +38,12 @@ export interface AddressWorkspace {
   readonly batchId: number | null;
   /** The stress response's own batch; when it differs from the position's the comparison is refused and both are named. */
   readonly stressBatchId: number | null;
+  /**
+   * The "Stress for batch" chip's value, from the Inspector's own batch note: present exactly when the stress result's
+   * batch is readable and is not the position's. After a resume repair — which refreshes the position and replays no
+   * stress — it says the stress is from the previous lookup, in the note's words.
+   */
+  readonly stressBatchChip: string | null;
   readonly decimals: number | null;
   readonly cause: string | null;
 }
@@ -46,7 +52,7 @@ const REFUSED_TILE: AddressTile = { value: "—", tone: "refused" };
 const NOT_COMPUTED: AddressTile = { value: "Not computed", tone: "refused" };
 
 function empty(state: AddressWorkspaceState, address: string, headline: LabHeadline, cause: string | null = null): AddressWorkspace {
-  return { state, address, rows: [], selected: null, headline, tiles: null, batchId: null, stressBatchId: null, decimals: null, cause };
+  return { state, address, rows: [], selected: null, headline, tiles: null, batchId: null, stressBatchId: null, stressBatchChip: null, decimals: null, cause };
 }
 
 const STATUS_WORD: Record<CashStatus, AddressTile> = {
@@ -150,7 +156,11 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   const rows = stress.rows;
   const selected = rows.find((r) => r.id === selectedId) ?? rows[0] ?? null;
   const decimals = view.decimals !== null && isWireScale(view.decimals) ? view.decimals : null;
-  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, selected, headline, tiles: null, batchId, stressBatchId, decimals, cause: null });
+  const crossBatch = batchId !== null && stressBatchId !== null && stressBatchId !== batchId;
+  // The Inspector's note is the one author of the stress batch's words: the chip and, after a repair, the dek are its own.
+  const note = crossBatch ? stressBatchNote(view) : null;
+  const stressBatchChip = note?.chipValue ?? null;
+  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, selected, headline, tiles: null, batchId, stressBatchId, stressBatchChip, decimals, cause: null });
   if (selected === null) return bare(refused(`No scenario applies to ${short}.`, "The stress response carried no scenario for this account."));
   // Rows beside no Cash position are two responses disagreeing; a position at a scale the guard refused prints no figure.
   // Neither is the scenarios' doing, so neither borrows their sentence. The position is asked before its scale: no
@@ -166,7 +176,12 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   // its batch; the tiles would set two batches side by side, so they are refused and both batches are named. The
   // lookup's own answers (withheld, no position, an unreadable scale) come first — there is nothing to compare there.
   if (batchId !== null && stressBatchId !== null && stressBatchId !== batchId) {
-    return bare(refused(`Cannot say — the stress result is for batch ${groupInt(stressBatchId)}; the position above is batch ${groupInt(batchId)}.`, "The scenarios below are the stress result's own. A position and a stress result from different batches are not compared."));
+    // A repaired lookup beside the stress it kept is disclosed in the Inspector's sentence — never a second copy of it.
+    const dek =
+      note !== null && view.stressFromPreviousLookup
+        ? note.disclosure
+        : "The scenarios below are the stress result's own. A position and a stress result from different batches are not compared.";
+    return bare(refused(`Cannot say — the stress result is for batch ${groupInt(stressBatchId)}; the position above is batch ${groupInt(batchId)}.`, dek));
   }
   const money = (v: bigint | null): AddressTile => (v === null || v < 0n ? REFUSED_TILE : { value: humanUsdFull(v, decimals), tone: "neutral" });
   const before = view.cash;
@@ -191,7 +206,7 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
     roomAfter: after === null ? REFUSED_TILE : roomTile(after.room, decimals, roomToneAfter),
     statusAfter,
   };
-  return { state: "rows", address, rows, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, stressBatchId, decimals, cause: null };
+  return { state: "rows", address, rows, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, stressBatchId, stressBatchChip, decimals, cause: null };
 }
 
 /**

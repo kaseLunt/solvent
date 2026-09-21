@@ -6,7 +6,7 @@ import { lookup } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
 import { sideRoomWords } from "../../lib/address-stress";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
-import { deriveInspectorView } from "../../lib/inspector-view";
+import { deriveInspectorView, stressBatchNote } from "../../lib/inspector-view";
 import { addressWorkspace, rowOutcome, rowVerdictWord } from "../../lib/lab-address";
 import { DEMO_ADDRESS_NEAR, DEMO_ADDRESS_REFUSED, DEMO_NEAR_ADDR, DEMO_REFUSED_ADDR, DEMO_STRESS_NEAR } from "../fixtures/demo";
 import { ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, NOT_FOUND_ADDR, UNKNOWABLE_ADDR } from "../fixtures/inspector";
@@ -22,6 +22,7 @@ function reading(overrides: Partial<AddressReading>): AddressReading {
     evidence: null,
     age: { seconds: null, unresolved: false, refreshFailed: false },
     reload: () => {},
+    lookupRepaired: false,
     ...overrides,
   };
 }
@@ -357,6 +358,38 @@ test("rowVerdictWord and sideRoomWords: the table's cells are the lib's own word
   expect(sideRoomWords({ ...eth.after!, verdict: "unknowable" }, 6)).toBe("not computed");
   expect(sideRoomWords(eth.after, null)).toBe("unreadable scale");
   expect(sideRoomWords(eth.after, 6)).not.toContain("−");
+});
+
+test("a repaired lookup beside the stress it kept: the workspace's stress-batch chip and its dek say 'from the previous lookup' in the Inspector note's own words; a fresh pair says nothing of it", () => {
+  const moved = { ...DEMO_ADDRESS_NEAR, batch: { ...DEMO_ADDRESS_NEAR.batch, id: DEMO_ADDRESS_NEAR.batch.id + 1 } };
+  const at = (lookupRepaired: boolean, address: typeof DEMO_ADDRESS_NEAR = moved) => {
+    const v = view({ lookup: { phase: "ready", value: lookup(address) }, stress: { phase: "ready", value: lookup(DEMO_STRESS_NEAR) }, lookupRepaired });
+    return { v, w: addressWorkspace({ address: DEMO_NEAR_ADDR, view: v, selectedId: "eth_minus_30" }) };
+  };
+  // The repair moved the position one batch on and replayed no stress.
+  const kept = at(true);
+  expect(kept.w.state).toBe("rows");
+  expect(kept.w.tiles).toBeNull();
+  expect(kept.w.headline.emphasis).toBe("Cannot say — the stress result is for batch 18,251; the position above is batch 18,252.");
+  expect(kept.w.stressBatchChip).toBe("18,251 · stress from the previous lookup");
+  // One sentence, one author: the dek is the Inspector's disclosure, and the chip is its row label's batch.
+  const note = stressBatchNote(kept.v);
+  if (note === null) throw new Error("the Inspector discloses this skew");
+  expect(kept.w.headline.dek).toBe(note.disclosure);
+  expect(kept.w.headline.dek).toContain("Stress from the previous lookup, for batch 18,251; the position above was refreshed since and is batch 18,252.");
+  expect(note.rowLabel).toBe(`batch ${note.chipValue}`);
+  expect(kept.w.stressBatchChip).toBe(note.chipValue);
+  // The same skew with no repair behind it: two requests answering two batches — the chip is the batch alone.
+  const plain = at(false);
+  expect(plain.w.stressBatchChip).toBe("18,251");
+  expect(plain.w.headline.dek).toBe("The scenarios below are the stress result's own. A position and a stress result from different batches are not compared.");
+  expect(plain.w.headline.dek).not.toContain("previous lookup");
+  // A fresh pair, and a repair that landed the same batch: one batch, no second chip, the tiles compare.
+  for (const same of [at(false, DEMO_ADDRESS_NEAR), at(true, DEMO_ADDRESS_NEAR)]) {
+    expect(same.w.stressBatchChip).toBeNull();
+    expect(same.w.tiles).not.toBeNull();
+    expect(same.w.headline.dek).not.toContain("previous lookup");
+  }
 });
 
 test("a stress result for another batch than the position is not compared: both batches named, the tiles refused, the rows kept", () => {

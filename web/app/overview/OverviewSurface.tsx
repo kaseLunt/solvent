@@ -187,7 +187,7 @@ export function OverviewSurface() {
         <h2>How it works</h2>
         <Link href="/proof#architecture">Architecture &amp; verification →</Link>
       </div>
-      <Pipeline meta={meta} evidence={evidence} reading={reading} cashAccounts={view.positions} />
+      <Pipeline meta={meta} evidence={evidence} reading={reading} />
       <div className={styles.foot}>
         <span>{FOOTER_STACK}</span>
         <span>

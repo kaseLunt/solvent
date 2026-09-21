@@ -201,6 +201,35 @@ test("the compute step reads the census only: /proof asks /v1/book once and neve
   expect(asked.positions).toBe(0);
 });
 
+test("a withheld Cash engine: the compute step prints the batch and names the census withheld, in the refused tone — never '0 Cash accounts', never neutral", async ({
+  page,
+}) => {
+  // The contract's withheld card: refused, its refusal, null totals, and placeholder counts — 0 in the contract's own example.
+  const refusal = { engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "collateral-flag custody is unproven for this window", note: "" };
+  const withheld = {
+    ...BOOK,
+    refused_engines: [refusal],
+    engines: BOOK.engines.map((e) =>
+      e.engine === "debt_manager"
+        ? { ...e, refused: true, refusal, positions: 0, computed_positions: 0, refused_positions: 0, total_debt: null, total_collateral: null }
+        : e,
+    ),
+  };
+  await mockAll(page);
+  await page.route("**/v1/book", (route) => json(route, withheld));
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-state", "ok");
+  const compute = page.getByTestId("verification-kpi-compute");
+  await expect(compute).toContainText("1");
+  await expect(compute).toContainText("batch · Cash accounts withheld");
+  await expect(compute).toHaveAttribute("data-tone", "refused");
+  await expect(compute).not.toContainText("0 Cash accounts");
+  await expect(page.getByTestId("verification-step-compute")).toContainText(
+    "Batch 1 computed at 2026-07-29T10:00:00Z; the Cash book is withheld this batch (collateral-flag custody unproven).",
+  );
+  await expect(page.locator("body")).not.toContainText("0 Cash accounts");
+});
+
 test("evidence unavailable: state unavailable, the refused header with the retry law, no subject invented, the other steps still answer", async ({
   page,
 }) => {

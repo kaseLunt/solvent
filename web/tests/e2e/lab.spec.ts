@@ -596,6 +596,38 @@ test("one-address mode via ?address=: the Inspector's reading — before/after t
   await expect(page).toHaveURL(new RegExp(`address=${DEMO_NEAR_ADDR}`));
 });
 
+test("one-address mode, resume: a repair that moves the position replays no stress — the stress-batch chip and the dek say the stress is from the previous lookup, in the Inspector's words", async ({ page }) => {
+  await mockLab(page);
+  let stressRequests = 0;
+  page.on("request", (request) => {
+    if (/\/v1\/address\/[^/]+\/stress/.test(request.url())) stressRequests += 1;
+  });
+  await page.goto(`/lab?address=${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  await expect(chip(page, "Result for batch")).toContainText("18,251");
+  // One batch, one lookup: no second chip.
+  await expect(chip(page, "Stress for batch")).toHaveCount(0);
+  const stressBefore = stressRequests;
+  // The repair lands the same account one batch on.
+  let repairs = 0;
+  await page.unroute("**/v1/address/*");
+  await page.route("**/v1/address/*", (route) => {
+    repairs += 1;
+    return json(route, { ...DEMO_ADDRESS_NEAR, batch: { ...DEMO_ADDRESS_NEAR.batch, id: DEMO_ADDRESS_NEAR.batch.id + 1 } });
+  });
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  await expect.poll(() => repairs).toBe(1);
+  await expect(chip(page, "Result for batch")).toContainText("18,252");
+  await expect(chip(page, "Stress for batch")).toContainText("18,251 · stress from the previous lookup");
+  await expect(headline(page)).toHaveText("Cannot say — the stress result is for batch 18,251; the position above is batch 18,252.");
+  await expect(dek(page)).toContainText("Stress from the previous lookup, for batch 18,251; the position above was refreshed since and is batch 18,252.");
+  await expect(page.getByTestId("lab-address-table").locator("tbody tr")).toHaveCount(DEMO_STRESS_NEAR.scenarios.length);
+  // The premise, pinned: the repair refreshed the position alone.
+  expect(stressRequests).toBe(stressBefore);
+});
+
 test("one-address mode: an invalid address is an inline refusal and never a request; a not-found address is a complete answer", async ({ page }) => {
   const counts = await mockLab(page);
   await page.goto("/lab");

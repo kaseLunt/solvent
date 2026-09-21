@@ -4,7 +4,7 @@
 import { expect, test } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
 import { readCashRow } from "../../lib/cash-rows";
-import { attentionEmptyText, bandsFinding, summarizeCash, unavailableHeadline, walkQualifier } from "../../lib/cash-summary";
+import { attentionEmptyText, bandsFinding, bandsSoFar, summarizeCash, unavailableHeadline, walkQualifier } from "../../lib/cash-summary";
 import { POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 
 const rows = POSITIONS_DM_PAGE_1.positions.map((p) => readCashRow(refinePositionSummary(p)));
@@ -131,6 +131,31 @@ test("the distance chart's finding: settled it states the figure; over an incomp
     expect(zero.barsNote).not.toBeNull();
     expect(`${zero.lead}${zero.figure}${zero.rest}`).not.toContain("$0");
   }
+});
+
+test("the distance chart's bars keep the card's own law: a band the walk has read nothing in is unknown so far — no figure, no count — and only a complete walk prints a zero", () => {
+  // The committed page: one liquidatable row ($4,200, the breached band), one refused row in no band.
+  const of = (walkComplete: boolean, walkStopped: string | null = null) =>
+    bandsSoFar(summarizeCash({ rows, decimals: 6, refusedPositions: 1, refusedWhole: null, walkComplete, walkStopped }));
+  const settled = of(true);
+  expect(settled.map((b) => b.id)).toEqual(["breached", "0-2", "2-5", "5-10", "10-25", "25-50", "50-plus"]);
+  // Complete: every band is the book's, and a zero is a finding.
+  expect(settled[0]).toMatchObject({ id: "breached", count: 1, debt: 4_200_000_000n });
+  for (const band of settled.slice(1)) expect(band).toMatchObject({ count: 0, debt: 0n });
+  // Still running, and stopped: the positive read so far prints as read; every unread band is unknown so far.
+  for (const unsettled of [of(false), of(false, "Failed to fetch")]) {
+    expect(unsettled.map((b) => b.id)).toEqual(settled.map((b) => b.id));
+    expect(unsettled.map((b) => b.label)).toEqual(settled.map((b) => b.label));
+    expect(unsettled[0]).toMatchObject({ id: "breached", count: 1, debt: 4_200_000_000n });
+    for (const band of unsettled.slice(1)) expect(band).toMatchObject({ count: null, debt: null });
+  }
+  // No page landed: nothing is known of any band.
+  const pending = bandsSoFar(summarizeCash({ rows: [], decimals: 6, refusedPositions: 0, refusedWhole: null, walkComplete: false, walkStopped: null }));
+  expect(pending).toHaveLength(7);
+  for (const band of pending) expect(band).toMatchObject({ count: null, debt: null });
+  // Accounts read with no debt between them: the count is a positive read, the dollars are still not a claimed zero.
+  const debtless = bandsSoFar({ settled: false, bands: [{ id: "50-plus", label: "≥50%", count: 3, debt: 0n }] });
+  expect(debtless).toEqual([{ id: "50-plus", label: "≥50%", count: 3, debt: null }]);
 });
 
 test("the walk qualifier: nothing over a settled or unloaded book, the running and the stopped register otherwise", () => {

@@ -216,7 +216,7 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
   // The stress body's own batch, never the lookup's: the two answer for themselves.
   const stressBatchId = stress?.batchId ?? null;
   // A repair lands a lookup and replays no stress: a stress on the page beside a repaired lookup was read before it.
-  const stressFromPreviousLookup = stress !== null && reading.lookupRepaired === true;
+  const stressFromPreviousLookup = stress !== null && reading.lookupRepaired;
   // A streak is asserted OF the lookup's batch only when the history's vantage IS that batch: a history read at an
   // older vantage ends before this batch, and its run says nothing about the batches between. Then the headline states
   // the current batch alone and the History card's vantage clause carries the rest.
@@ -383,6 +383,16 @@ export function stressEmptyText(view: InspectorView): string {
   return "No scenarios.";
 }
 
+/** The stress batch note as its pages print it: every page that names the stress batch prints from here, so the disclosure has one author. */
+export interface StressBatchNote {
+  /** The section's sentence. */
+  readonly disclosure: string;
+  /** A stress row's label: "batch " and the chip value. */
+  readonly rowLabel: string;
+  /** The stress batch as a chip prints it beside its own label — the batch, and that it is from the previous lookup when it is. */
+  readonly chipValue: string;
+}
+
 /**
  * The stress section's batch note: the position lookup and the stress lookup are separate requests, and each answers
  * for the batch its own envelope names. When the two differ the section says so, and every row is labelled with the
@@ -390,19 +400,21 @@ export function stressEmptyText(view: InspectorView): string {
  * above. A stress body naming no readable batch is disclosed the same way. When the lookup was refreshed by a resume
  * repair, which replays no stress, the note and every row's label say the stress is from the previous lookup. Null
  * when the two agree — one batch's stress is that batch's whichever lookup it was read for — or while either is
- * still unknown.
+ * still unknown. Every page that names the stress batch prints from this note, so the disclosure has one author.
  */
-export function stressBatchNote(view: InspectorView): { readonly disclosure: string; readonly rowLabel: string } | null {
+export function stressBatchNote(view: InspectorView): StressBatchNote | null {
   if (view.stress === null || view.batchId === null) return null;
   const position = groupInt(view.batchId);
   const kept = view.stressFromPreviousLookup;
   const keptLabel = kept ? " · stress from the previous lookup" : "";
   if (view.stressBatchId === null) {
+    const chipValue = `not readable${keptLabel}`;
     return {
       disclosure: kept
         ? `The stress response names no readable batch and was read for the previous lookup; the position above was refreshed since and is batch ${position}. Its rows are not compared against the position above.`
         : `The stress response names no readable batch; the position above is batch ${position}. Its rows are not compared against the position above.`,
-      rowLabel: `batch not readable${keptLabel}`,
+      rowLabel: `batch ${chipValue}`,
+      chipValue,
     };
   }
   if (view.stressBatchId === view.batchId) return null;
@@ -410,9 +422,11 @@ export function stressBatchNote(view: InspectorView): { readonly disclosure: str
   const head = kept
     ? `Stress from the previous lookup, for batch ${stressBatch}; the position above was refreshed since and is batch ${position}.`
     : `Stress for batch ${stressBatch}; the position above is batch ${position}.`;
+  const chipValue = `${stressBatch}${keptLabel}`;
   return {
     disclosure: `${head} Each row's before and after are read for batch ${stressBatch} and are not compared against the position above.`,
-    rowLabel: `batch ${stressBatch}${keptLabel}`,
+    rowLabel: `batch ${chipValue}`,
+    chipValue,
   };
 }
 

@@ -24,7 +24,7 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
       ? []
       : [
           { label: "Result for batch", value: groupInt(space.batchId) },
-          ...(crossBatch && space.stressBatchId !== null ? [{ label: "Stress for batch", value: groupInt(space.stressBatchId), tone: "warn" as const }] : []),
+          ...(space.stressBatchChip === null ? [] : [{ label: "Stress for batch", value: space.stressBatchChip, tone: "warn" as const }]),
           ...(space.selected === null ? [] : [{ label: "Scenario", value: space.selected.id }]),
         ];
   const t = space.tiles;

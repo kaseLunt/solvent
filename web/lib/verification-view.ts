@@ -21,6 +21,7 @@ import { CASH, LEGACY } from "./inspector-position";
 import { refused, terminated, type LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
 import { publishable, type EvidenceResponse } from "./proof-data";
+import { plainCause } from "./refusal-phrasebook";
 import { isWirePopulation, readWirePopulation } from "./wireGuard";
 
 type Schemas = components["schemas"];
@@ -56,17 +57,39 @@ export function bookFailed(cause: unknown): BookReading {
 }
 
 /**
- * The Cash census as the compute step prints it: `/v1/book`'s own count of the
- * engine's positions, through the population guard. The aggregate states the
- * number, so a page that prints only the census asks only `/v1/book` — it
- * never walks `/v1/positions` for a figure the book already carries. Null
- * while the book is unanswered or unread, and when the book lists no Cash
- * engine: no count, never a zero.
+ * The Cash census as the compute step reads it: the count `/v1/book` states, or
+ * the refusal it states instead. A withheld engine's card keeps integer counts
+ * because the contract requires the field — they are placeholders "whatever
+ * the position counts say", and the contract's own withheld example carries 0 —
+ * so a withheld engine's count is never read, and never printed as a census.
  */
-export function cashCensus(reading: BookReading): number | null {
+export type CashCensus =
+  | { readonly kind: "count"; readonly accounts: number }
+  /** The book answered and the engine is withheld whole, or is not on the book: named, with the wire's code when it carries one. */
+  | { readonly kind: "refused"; readonly reason: "withheld" | "missing"; readonly code: string | null; readonly cause: string };
+
+/**
+ * The one census reader both pages' compute step prints from. The aggregate
+ * states the number, so a page that prints only the census asks only
+ * `/v1/book` — it never walks `/v1/positions` for a figure the book already
+ * carries. The engine is withheld when the book's head names it in
+ * `refused_engines` or its own card says `refused`; an engine the book does
+ * not list is missing, not empty. Both are refusals — never a zero. Only a
+ * served engine's count passes the population guard and prints. Null while
+ * the book is unanswered or unread.
+ */
+export function cashCensus(reading: BookReading): CashCensus | null {
   if (reading.phase !== "ok" || reading.book === null) return null;
-  const engine = reading.book.engines.find((e) => e.engine === CASH);
-  return engine === undefined ? null : readWirePopulation(engine.positions, "engines[debt_manager].positions");
+  const book = reading.book;
+  const engine = book.engines.find((e) => e.engine === CASH);
+  const named = book.refused_engines.find((r) => r.engine === CASH) ?? (engine?.refused === true ? (engine.refusal ?? null) : undefined);
+  if (named !== undefined) {
+    return { kind: "refused", reason: "withheld", code: named?.code ?? null, cause: plainCause(named?.code ?? "", named?.detail) };
+  }
+  if (engine === undefined) {
+    return { kind: "refused", reason: "missing", code: null, cause: "the Cash engine is missing from this batch" };
+  }
+  return { kind: "count", accounts: readWirePopulation(engine.positions, "engines[debt_manager].positions") };
 }
 
 /**
@@ -218,14 +241,15 @@ const COMPUTE_UNREAD = "The batch could not be read.";
 const COMPUTE_ABSENT = "No batch is servable; nothing is computed.";
 const VERIFY_UNREAD = "The receipt could not be read.";
 const VERIFY_ABSENT = "No reconcile receipt is committed; nothing is verified against the chain.";
+/** Where the account count would print, a refused census says which refusal it is. */
+const CENSUS_REFUSED = { withheld: "Cash accounts withheld", missing: "Cash engine not in this batch" } as const;
 
-/** The Overview's four numbers, unchanged in law: the OP block, the batch, the gated tally, the endpoint count. */
-export function pipelineSteps(
-  meta: MetaResponse | null,
-  evidence: EvidenceResponse | null,
-  reading: BookReading,
-  cashAccounts: number | null,
-): readonly PipelineStep[] {
+/**
+ * The Overview's four numbers, unchanged in law: the OP block, the batch, the
+ * gated tally, the endpoint count. The compute step reads its census from the
+ * book reading itself, so no page can hand it another count.
+ */
+export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceResponse | null, reading: BookReading): readonly PipelineStep[] {
   const dm = meta?.watermark_vector.find((w) => w.engine === CASH) ?? null;
   const eth = meta?.watermark_vector.find((w) => w.engine === LEGACY) ?? null;
   const ethBlock = eth === null ? UNAVAILABLE : n(eth.last_block);
@@ -253,8 +277,9 @@ export function pipelineSteps(
         };
 
   const book = reading.phase === "ok" ? reading.book : null;
+  const census = cashCensus(reading);
   const compute: PipelineStep =
-    book === null
+    book === null || census === null
       ? {
           key: "compute",
           label: "Compute",
@@ -265,16 +290,31 @@ export function pipelineSteps(
           sentence: reading.phase === "no-batch" ? COMPUTE_ABSENT : COMPUTE_UNREAD,
           line: { before: "", figure: UNAVAILABLE, after: "" },
         }
-      : {
-          key: "compute",
-          label: "Compute",
-          ordinal: ORDINAL.compute,
-          value: n(book.batch.id),
-          sub: `batch · ${n(cashAccounts)} Cash accounts`,
-          tone: "neutral",
-          sentence: `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; every position's health from the wire's own integers.`,
-          line: { before: "batch ", figure: n(book.batch.id), after: ` · ${n(cashAccounts)} Cash accounts` },
-        };
+      : census.kind === "refused"
+        ? {
+            // The batch is computed and printed; the census it would count is refused by name — never "0", never neutral.
+            key: "compute",
+            label: "Compute",
+            ordinal: ORDINAL.compute,
+            value: n(book.batch.id),
+            sub: `batch · ${CENSUS_REFUSED[census.reason]}`,
+            tone: "refused",
+            sentence:
+              census.reason === "withheld"
+                ? `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; the Cash book is withheld this batch (${census.cause}).`
+                : `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; ${census.cause}.`,
+            line: { before: "batch ", figure: n(book.batch.id), after: ` · ${CENSUS_REFUSED[census.reason]}` },
+          }
+        : {
+            key: "compute",
+            label: "Compute",
+            ordinal: ORDINAL.compute,
+            value: n(book.batch.id),
+            sub: `batch · ${n(census.accounts)} Cash accounts`,
+            tone: "neutral",
+            sentence: `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; every position's health from the wire's own integers.`,
+            line: { before: "batch ", figure: n(book.batch.id), after: ` · ${n(census.accounts)} Cash accounts` },
+          };
 
   const recon = evidence?.reconcile ?? null;
   const verify: PipelineStep =
@@ -650,7 +690,6 @@ export interface VerificationInput {
   readonly state: EvidenceState;
   readonly meta: MetaResponse | null;
   readonly book: BookReading;
-  readonly cashAccounts: number | null;
 }
 
 export interface VerificationView {
@@ -669,9 +708,9 @@ export interface VerificationView {
 }
 
 export function deriveVerificationView(input: VerificationInput): VerificationView {
-  const { state, meta, book, cashAccounts } = input;
+  const { state, meta, book } = input;
   const evidence = state.phase === "ok" ? state.manifest : null;
-  const steps = pipelineSteps(meta, evidence, book, cashAccounts);
+  const steps = pipelineSteps(meta, evidence, book);
   const doctrine = [VERIFICATION_INTRO, VERIFICATION_SPLIT, PROOF_CAPTION, LIVE_CAPTION];
   if (state.phase === "loading") {
     return {

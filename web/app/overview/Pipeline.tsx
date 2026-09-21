@@ -9,7 +9,6 @@ export interface PipelineProps {
   evidence: Schemas["EvidenceResponse"] | null;
   /** The book reader's whole answer, so a 503 no-batch is told apart from a reader that has not answered. */
   reading: BookReading;
-  cashAccounts: number | null;
 }
 
 /** The front door's own words for each step; the ordinal, the number and its line are the shared law's (lib/verification-view). */
@@ -37,10 +36,10 @@ const STEP_COPY: Record<PipelineStep["key"], { name: string; description: string
 };
 
 /** How it works — four steps, each carrying a live number or an honest "unavailable". */
-export function Pipeline({ meta, evidence, reading, cashAccounts }: PipelineProps) {
+export function Pipeline({ meta, evidence, reading }: PipelineProps) {
   return (
     <div className={styles.pipe}>
-      {pipelineSteps(meta, evidence, reading, cashAccounts).map((step) => (
+      {pipelineSteps(meta, evidence, reading).map((step) => (
         <div key={step.key} className={styles.step} data-testid={`pipeline-${step.key}`} data-value={step.line.figure}>
           <div className={styles.stepNum}>{step.ordinal}</div>
           <div className={styles.stepN}>{STEP_COPY[step.key].name}</div>

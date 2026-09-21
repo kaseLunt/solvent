@@ -133,6 +133,31 @@ export function bandsFinding(summary: Pick<CashSummary, "bands" | "decimals" | "
   return { lead: `${lead}at least `, figure: humanUsd(sum, summary.decimals), rest: ` sits within 10% of the cap${qualifier}`, barsNote };
 }
 
+/** A room band as the distance chart prints it: null where the walk cannot yet say. */
+export interface BandSoFar {
+  readonly id: string;
+  readonly label: string;
+  readonly count: number | null;
+  readonly debt: bigint | null;
+}
+
+/**
+ * The bands as the distance chart's bars print them, under the card's own
+ * sentence: a zero is claimed only by a complete walk. Until then a band the
+ * walk has read nothing in is unknown so far — no figure and no count, never
+ * "$0 · 0" — and a band it has read in prints what it read, which the chart's
+ * note names a lower bound. Once the walk is complete every band is the
+ * book's, zeros included.
+ */
+export function bandsSoFar(summary: Pick<CashSummary, "bands" | "settled">): BandSoFar[] {
+  return summary.bands.map((b) => ({
+    id: b.id,
+    label: b.label,
+    count: summary.settled || b.count > 0 ? b.count : null,
+    debt: summary.settled || b.debt > 0n ? b.debt : null,
+  }));
+}
+
 /**
  * The attention table's line when it shows no row. "No account needs
  * attention" is a negative over the book: it is said only by a complete walk,

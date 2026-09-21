@@ -86,6 +86,32 @@ test("a withheld Cash engine refuses the strip and the entry cards carry no walk
   await expect(page.locator("body")).not.toContainText("liquidatable now");
 });
 
+test("a withheld Cash engine: the pipeline's compute step prints the batch and names the census withheld — never '0 Cash accounts'", async ({ page }) => {
+  // The contract's withheld card: refused, its refusal, null totals, and placeholder counts — 0 in the contract's own example.
+  const refusal = { engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "collateral-flag custody is unproven for this window", note: "" };
+  const withheld = {
+    ...BOOK,
+    refused_engines: [refusal],
+    engines: BOOK.engines.map((e) =>
+      e.engine === "debt_manager"
+        ? { ...e, refused: true, refusal, positions: 0, computed_positions: 0, refused_positions: 0, total_debt: null, total_collateral: null }
+        : e,
+    ),
+  };
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, withheld));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_MANIFEST));
+  await page.goto("/");
+  await expect(page.getByTestId("overview-live")).toHaveAttribute("data-variant", "refused");
+  const compute = page.getByTestId("pipeline-compute");
+  await expect(compute).toHaveAttribute("data-value", BOOK.batch.id.toLocaleString("en-US"));
+  await expect(compute).toContainText(`batch ${BOOK.batch.id.toLocaleString("en-US")} · Cash accounts withheld`);
+  await expect(compute).not.toContainText("0 Cash accounts");
+  await expect(page.locator("body")).not.toContainText("0 Cash accounts");
+});
+
 test("while the walk runs the strip is pending and the Book entry says so — never '$0 within 10% of cap'", async ({ page }) => {
   await page.route("**/v1/stream**", (route) => route.abort());
   await page.route("**/v1/book", (route) => json(route, BOOK));

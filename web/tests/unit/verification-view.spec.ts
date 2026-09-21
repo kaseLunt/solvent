@@ -40,7 +40,7 @@ const read = (book: typeof BOOK): BookReading => ({ phase: "ok", book, failure: 
 const UNREAD: BookReading = { phase: "loading", book: null, failure: null };
 const FAILED: BookReading = { phase: "error", book: null, failure: { message: "Failed to fetch", retryAfterSeconds: null } };
 const NO_BATCH: BookReading = { phase: "no-batch", book: null, failure: { message: "no complete risk batch is available", retryAfterSeconds: 5 } };
-const view = (state: EvidenceState, cashAccounts: number | null = 2) => deriveVerificationView({ state, meta: META, book: read(BOOK), cashAccounts });
+const view = (state: EvidenceState) => deriveVerificationView({ state, meta: META, book: read(BOOK) });
 const byKey = (steps: ReturnType<typeof pipelineSteps>, key: string) => {
   const step = steps.find((s) => s.key === key);
   if (step === undefined) throw new Error(`no ${key} step`);
@@ -56,16 +56,15 @@ if (DIGEST.length === 0) throw new Error("fixture invariant: the example carries
 
 test("the compute step reads the census, not a walk: the Cash account count is /v1/book's own, through the population guard, and the book's failure keeps the wire's one absence", () => {
   // The census is the aggregate's count — no positions page is behind it.
-  expect(cashCensus(bookAnswered(BOOK))).toBe(2);
-  expect(cashCensus(bookAnswered(DEMO_BOOK))).toBe(1412);
+  expect(cashCensus(bookAnswered(BOOK))).toEqual({ kind: "count", accounts: 2 });
+  expect(cashCensus(bookAnswered(DEMO_BOOK))).toEqual({ kind: "count", accounts: 1412 });
   expect(bookAnswered(BOOK)).toEqual({ phase: "ok", book: BOOK, failure: null });
-  const compute = byKey(pipelineSteps(META, EVIDENCE_MANIFEST, bookAnswered(BOOK), cashCensus(bookAnswered(BOOK))), "compute");
+  const compute = byKey(pipelineSteps(META, EVIDENCE_MANIFEST, bookAnswered(BOOK)), "compute");
   expect(compute.value).toBe("1");
   expect(compute.sub).toBe("batch · 2 Cash accounts");
-  // Unanswered, failed, or an engine the book does not list: no count — never a zero.
+  // Unanswered or failed: no census at all — never a zero.
   expect(BOOK_LOADING).toEqual({ phase: "loading", book: null, failure: null });
   for (const unread of [BOOK_LOADING, FAILED, NO_BATCH]) expect(cashCensus(unread)).toBeNull();
-  expect(cashCensus(bookAnswered({ ...BOOK, engines: BOOK.engines.filter((e) => e.engine !== "debt_manager") }))).toBeNull();
   // A count the guard refuses is refused by name before it is printed.
   const malformed = { ...BOOK, engines: BOOK.engines.map((e) => (e.engine === "debt_manager" ? { ...e, positions: -0 } : e)) };
   expect(() => cashCensus(bookAnswered(malformed))).toThrow(/engines\[debt_manager\]\.positions/);
@@ -82,11 +81,50 @@ test("the compute step reads the census, not a walk: the Cash account count is /
   expect(bookFailed(unavailable)).toEqual(NO_BATCH);
   expect(bookFailed(new Error("Failed to fetch"))).toEqual(FAILED);
   expect(bookFailed("boom")).toEqual({ phase: "error", book: null, failure: { message: "boom", retryAfterSeconds: null } });
-  expect(byKey(pipelineSteps(META, EVIDENCE_MANIFEST, bookFailed(unavailable), cashCensus(bookFailed(unavailable))), "compute").sub).toBe("no servable batch");
+  expect(byKey(pipelineSteps(META, EVIDENCE_MANIFEST, bookFailed(unavailable)), "compute").sub).toBe("no servable batch");
+});
+
+test("a withheld Cash engine's census is a refusal, never its card's placeholder count: the compute step prints the batch and names the census withheld, in the refused tone — never '0 Cash accounts', never neutral", () => {
+  const refusal = { engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "collateral-flag custody is unproven for this window", note: "" };
+  // The contract's own withheld card: refused true, the refusal, null totals, and counts that are placeholders (0 in the contract's example).
+  const card = (over: Partial<(typeof BOOK)["engines"][number]>) => ({
+    ...BOOK,
+    engines: BOOK.engines.map((e) => (e.engine === "debt_manager" ? { ...e, refused: true, refusal, total_debt: null, total_collateral: null, ...over } : e)),
+  });
+  const REFUSED = { kind: "refused", reason: "withheld", code: "FLAG_CUSTODY_UNPROVEN", cause: "collateral-flag custody unproven" } as const;
+  // Whatever the counts say — the contract's zero, or a count left standing.
+  expect(cashCensus(bookAnswered(card({ positions: 0, computed_positions: 0, refused_positions: 0 })))).toEqual(REFUSED);
+  expect(cashCensus(bookAnswered(card({})))).toEqual(REFUSED);
+  // Named at the head of the book alone, the card unflagged: still withheld, with the head's code.
+  expect(cashCensus(bookAnswered({ ...BOOK, refused_engines: [refusal] }))).toEqual(REFUSED);
+  // A withheld card is never read as a population: a placeholder the guard would refuse does not throw here.
+  expect(() => cashCensus(bookAnswered(card({ positions: -0 })))).not.toThrow();
+  // Flagged with no refusal beside it: withheld, and said so without a code.
+  expect(cashCensus(bookAnswered(card({ refusal: null })))).toEqual({ kind: "refused", reason: "withheld", code: null, cause: "the engine gave no reason" });
+  // An engine the book does not list is not an empty engine.
+  expect(cashCensus(bookAnswered({ ...BOOK, engines: BOOK.engines.filter((e) => e.engine !== "debt_manager") }))).toEqual({
+    kind: "refused",
+    reason: "missing",
+    code: null,
+    cause: "the Cash engine is missing from this batch",
+  });
+
+  const compute = byKey(pipelineSteps(META, EVIDENCE_MANIFEST, bookAnswered(card({ positions: 0, computed_positions: 0, refused_positions: 0 }))), "compute");
+  expect(compute).toMatchObject({ value: "1", sub: "batch · Cash accounts withheld", tone: "refused" });
+  expect(compute.sentence).toBe("Batch 1 computed at 2026-07-29T10:00:00Z; the Cash book is withheld this batch (collateral-flag custody unproven).");
+  expect(compute.line).toEqual({ before: "batch ", figure: "1", after: " · Cash accounts withheld" });
+  expect(JSON.stringify(compute)).not.toContain("0 Cash accounts");
+  const missing = byKey(pipelineSteps(META, EVIDENCE_MANIFEST, bookAnswered({ ...BOOK, engines: BOOK.engines.filter((e) => e.engine !== "debt_manager") })), "compute");
+  expect(missing).toMatchObject({ value: "1", sub: "batch · Cash engine not in this batch", tone: "refused" });
+  expect(missing.sentence).toBe("Batch 1 computed at 2026-07-29T10:00:00Z; the Cash engine is missing from this batch.");
+  // The engine served: the count, neutral, in the bytes both pages have always printed.
+  const served = byKey(pipelineSteps(META, EVIDENCE_MANIFEST, bookAnswered(BOOK)), "compute");
+  expect(served).toMatchObject({ value: "1", sub: "batch · 2 Cash accounts", tone: "neutral" });
+  expect(served.line).toEqual({ before: "batch ", figure: "1", after: " · 2 Cash accounts" });
 });
 
 test("the four steps carry the Overview's numbers: the OP block, the batch, the gated tally, the endpoint count", () => {
-  const steps = pipelineSteps(META, EVIDENCE_MANIFEST, read(BOOK), 2);
+  const steps = pipelineSteps(META, EVIDENCE_MANIFEST, read(BOOK));
   expect(steps.map((s) => s.key)).toEqual(["index", "compute", "verify", "serve"]);
   expect(steps.map((s) => s.label)).toEqual(["Index", "Compute", "Verify", "Serve"]);
   expect(steps.map((s) => s.ordinal)).toEqual(["01 · INDEX", "02 · COMPUTE", "03 · VERIFY", "04 · SERVE"]);
@@ -121,7 +159,7 @@ test("the four steps carry the Overview's numbers: the OP block, the batch, the 
 });
 
 test("the demo dataset's numbers group their thousands: block, batch and accounts", () => {
-  const steps = pipelineSteps(DEMO_META, EVIDENCE_MANIFEST, read(DEMO_BOOK), 1412);
+  const steps = pipelineSteps(DEMO_META, EVIDENCE_MANIFEST, read(DEMO_BOOK));
   expect(byKey(steps, "index").value).toBe("155,323,444");
   expect(byKey(steps, "index").sub).toBe("OP block · Ethereum block 25,714,690");
   expect(byKey(steps, "compute").value).toBe("18,251");
@@ -130,7 +168,7 @@ test("the demo dataset's numbers group their thousands: block, batch and account
 
 test("a reader that has not answered is unavailable: the dash, the word, the could-not-be-read sentence — never an absence", () => {
   for (const reading of [UNREAD, FAILED]) {
-    const steps = pipelineSteps(null, null, reading, null);
+    const steps = pipelineSteps(null, null, reading);
     expect(byKey(steps, "index")).toMatchObject({ value: "—", sub: "unavailable", tone: "refused" });
     expect(byKey(steps, "index").line).toEqual({ before: "OP block ", figure: "unavailable", after: " · Ethereum block unavailable" });
     expect(byKey(steps, "compute")).toMatchObject({ value: "—", sub: "unavailable", tone: "refused", sentence: "The batch could not be read." });
@@ -141,17 +179,14 @@ test("a reader that has not answered is unavailable: the dash, the word, the cou
     expect(JSON.stringify(steps)).not.toContain("No batch is servable");
     expect(JSON.stringify(steps)).not.toContain("No reconcile receipt is committed");
   }
-  // The book answered but the Cash walk has not: the batch prints, the accounts say so.
-  expect(byKey(pipelineSteps(META, EVIDENCE_MANIFEST, read(BOOK), null), "compute").sub).toBe("batch · unavailable Cash accounts");
-  expect(byKey(pipelineSteps(META, EVIDENCE_MANIFEST, read(BOOK), null), "compute").line.after).toBe(" · unavailable Cash accounts");
 });
 
 test("an absence the wire stated is worded as one: the 503 no-batch book, the manifest with no committed receipt", () => {
-  const noBatch = byKey(pipelineSteps(META, EVIDENCE_MANIFEST, NO_BATCH, null), "compute");
+  const noBatch = byKey(pipelineSteps(META, EVIDENCE_MANIFEST, NO_BATCH), "compute");
   expect(noBatch).toMatchObject({ value: "—", sub: "no servable batch", tone: "refused", sentence: "No batch is servable; nothing is computed." });
   // The Overview's word for any missing figure stays "unavailable" — the weaker, always-true claim.
   expect(noBatch.line).toEqual({ before: "", figure: "unavailable", after: "" });
-  const noReceipt = byKey(pipelineSteps(META, EVIDENCE_NO_RECEIPT, read(BOOK), 2), "verify");
+  const noReceipt = byKey(pipelineSteps(META, EVIDENCE_NO_RECEIPT, read(BOOK)), "verify");
   expect(noReceipt).toMatchObject({
     value: "—",
     sub: "no committed receipt",
@@ -160,12 +195,12 @@ test("an absence the wire stated is worded as one: the 503 no-batch book, the ma
   });
   expect(noReceipt.line).toEqual({ before: "", figure: "unavailable", after: " gated rows exact" });
   // A meta that answered without the OP watermark is an absence too, not an unread meta.
-  const noWatermark = byKey(pipelineSteps({ ...META, watermark_vector: META.watermark_vector.filter((w) => w.engine !== "debt_manager") }, null, UNREAD, null), "index");
+  const noWatermark = byKey(pipelineSteps({ ...META, watermark_vector: META.watermark_vector.filter((w) => w.engine !== "debt_manager") }, null, UNREAD), "index");
   expect(noWatermark).toMatchObject({ value: "—", sub: "no OP Mainnet watermark", tone: "refused" });
 });
 
 test("a receipt that did not pass turns the Verify step warn", () => {
-  expect(byKey(pipelineSteps(META, EVIDENCE_PROOF_FAILED, read(BOOK), 2), "verify")).toMatchObject({ value: "84/87", sub: "gated rows exact · drift 3", tone: "warn" });
+  expect(byKey(pipelineSteps(META, EVIDENCE_PROOF_FAILED, read(BOOK)), "verify")).toMatchObject({ value: "84/87", sub: "gated rows exact · drift 3", tone: "warn" });
 });
 
 test("the receipt state reads the manifest: exact, failed, none — and drift for a passing verdict whose tallies disagree", () => {
