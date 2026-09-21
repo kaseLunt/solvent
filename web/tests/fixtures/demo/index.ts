@@ -40,3 +40,15 @@ export const DEMO_RUN_BOOK_SET: Schemas["RunBookSetResponse"] = load("run-book-s
 export const DEMO_OBSERVATORY_DM: Schemas["ObservatorySeriesResponse"] = load("observatory-demo-dm.json");
 export const DEMO_OBSERVATORY_AAVE: Schemas["ObservatorySeriesResponse"] = load("observatory-demo-aave.json");
 export const DEMO_FEED_PAGE_1: Schemas["EventsResponse"] = load("events-demo-feed-page-1.json");
+
+// Verification's demo body: the contract's own manifest with its live subject welded to the demo batch, so a page
+// that shows the manifest beside the demo Book names ONE serving batch. The proof subject is untouched: a pinned
+// reconcile run does not move with the batch being served.
+// Loaded from the committed body itself (not imported from ../proof): this index is also read by plain Node scripts.
+const EVIDENCE_MANIFEST: Schemas["EvidenceResponse"] = load("../evidence-manifest.json");
+const manifestSubstrate = EVIDENCE_MANIFEST.substrate;
+if (manifestSubstrate === undefined || manifestSubstrate === null) throw new Error("the evidence manifest fixture must carry a substrate to weld");
+export const DEMO_EVIDENCE: Schemas["EvidenceResponse"] = {
+  ...EVIDENCE_MANIFEST,
+  substrate: { ...manifestSubstrate, batch_id: DEMO_BATCH_ID },
+};

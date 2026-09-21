@@ -3,7 +3,9 @@
 // with the approved mockups before a page lands.
 //
 // Usage (from web/, with a production server on :3111):
-//   node scripts/screenshot-pages.mjs <outDir> [overview|book|inspector|lab ...]
+//   node scripts/screenshot-pages.mjs <outDir> [overview|book|inspector|lab|history|activity|verification|api ...]
+// The honest states are pages too: historyDegraded, activityRefused, activityExhausted, verificationFailed,
+// verificationUnavailable — the same routes with one answer replaced.
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -18,11 +20,26 @@ mkdirSync(out, { recursive: true });
 const fx = (name) => import(pathToFileURL(path.resolve("tests/fixtures", name)).href);
 const demo = await fx("demo/index.ts");
 const proof = await fx("proof.ts");
-const PAGES = { overview: "/", book: "/book", inspector: `/inspector/${demo.DEMO_NEAR_ADDR}`, lab: "/lab?scenario=eth_minus_30", labBare: "/lab", labAddress: `/lab?address=${demo.DEMO_NEAR_ADDR}`, labCompare: "/lab?scenarios=eth_minus_30,ethfi_minus_50" };
+const feed = await fx("feed.ts");
+const observatory = await fx("observatory.ts");
+const PAGES = { overview: "/", book: "/book", inspector: `/inspector/${demo.DEMO_NEAR_ADDR}`, lab: "/lab?scenario=eth_minus_30", labBare: "/lab", labAddress: `/lab?address=${demo.DEMO_NEAR_ADDR}`, labCompare: "/lab?scenarios=eth_minus_30,ethfi_minus_50", history: "/observatory", activity: "/feed", verification: "/proof", api: "/developers", historyDegraded: "/observatory", activityRefused: "/feed", activityExhausted: "/feed", verificationFailed: "/proof", verificationUnavailable: "/proof" };
+// One answer replaced per honest state; registered after the defaults, so it wins.
+const UNAVAILABLE = { error: { code: "unavailable", message: "the evidence manifest is not available" } };
+const OVERRIDES = {
+  historyDegraded: (page) => page.route("**/v1/observatory/series*", (r) => json(r, observatory.OBSERVATORY_DEGRADED, 503)),
+  activityRefused: (page) => page.route("**/v1/events*", (r) => json(r, feed.FEED_ERROR_BAD_CURSOR, 400)),
+  activityExhausted: (page) => page.route("**/v1/events*", (r) => json(r, feed.FEED_EMPTY)),
+  // Welded to the demo batch as the demo evidence is, so the failed receipt sits beside ONE serving batch.
+  verificationFailed: (page) =>
+    page.route("**/v1/evidence*", (r) =>
+      json(r, { ...proof.EVIDENCE_PROOF_FAILED, substrate: { ...proof.EVIDENCE_PROOF_FAILED.substrate, batch_id: demo.DEMO_BATCH_ID } }),
+    ),
+  verificationUnavailable: (page) => page.route("**/v1/evidence*", (r) => json(r, UNAVAILABLE, 503)),
+};
 const wanted = pageArgs.length === 0 ? Object.keys(PAGES) : pageArgs;
 const CORS = { "access-control-allow-origin": "*" };
-const json = (route, body) =>
-  route.fulfill({ status: 200, headers: CORS, contentType: "application/json", body: JSON.stringify(body) });
+const json = (route, body, status = 200) =>
+  route.fulfill({ status, headers: CORS, contentType: "application/json", body: JSON.stringify(body) });
 
 const browser = await chromium.launch();
 for (const theme of ["dark", "light"]) {
@@ -41,7 +58,7 @@ for (const theme of ["dark", "light"]) {
     await page.route("**/v1/stream**", (r) => r.abort());
     await page.route("**/v1/meta*", (r) => json(r, demo.DEMO_META));
     await page.route("**/v1/book", (r) => json(r, demo.DEMO_BOOK));
-    await page.route("**/v1/evidence*", (r) => json(r, proof.EVIDENCE_MANIFEST));
+    await page.route("**/v1/evidence*", (r) => json(r, demo.DEMO_EVIDENCE));
     await page.route("**/v1/positions*", (r) =>
       json(
         r,
@@ -52,7 +69,13 @@ for (const theme of ["dark", "light"]) {
     );
     // The Inspector's routes: `*` never crosses `/`, so /history and /stress are not swallowed by the address route.
     await page.route("**/v1/params*", (r) => json(r, demo.DEMO_PARAMS_DM));
-    await page.route("**/v1/events*", (r) => json(r, demo.DEMO_EVENTS_NEAR));
+    // One endpoint, two readers: the Inspector asks for one account's actions, Activity for the cross-engine page.
+    await page.route("**/v1/events*", (r) =>
+      json(r, new URL(r.request().url()).searchParams.get("account") === null ? demo.DEMO_FEED_PAGE_1 : demo.DEMO_EVENTS_NEAR),
+    );
+    await page.route("**/v1/observatory/series*", (r) =>
+      json(r, new URL(r.request().url()).searchParams.get("engine") === "debt_manager" ? demo.DEMO_OBSERVATORY_DM : demo.DEMO_OBSERVATORY_AAVE),
+    );
     await page.route("**/v1/address/*/history*", (r) => json(r, demo.DEMO_HISTORY_NEAR));
     await page.route("**/v1/address/*/stress*", (r) => json(r, demo.DEMO_STRESS_NEAR));
     await page.route("**/v1/address/*", (r) => json(r, demo.DEMO_ADDRESS_NEAR));
@@ -65,6 +88,7 @@ for (const theme of ["dark", "light"]) {
     });
     await page.route("**/v1/scenarios/*/run-book", (r) => json(r, demo.DEMO_RUN_BOOK_ETH));
     await page.route("**/v1/scenarios", (r) => json(r, demo.DEMO_SCENARIOS));
+    await OVERRIDES[name]?.(page);
     await page.goto(`http://localhost:3111${url}`, { waitUntil: "networkidle" });
     await page.waitForTimeout(600);
     await page.screenshot({ path: path.join(out, `${name}-${theme}-fold.png`) });
