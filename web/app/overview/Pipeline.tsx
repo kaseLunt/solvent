@@ -1,5 +1,5 @@
 import type { components } from "@solvent/client";
-import { pipelineSteps, type BookReading, type PipelineStep } from "@/lib/verification-view";
+import { pipelineSteps, type BookReading, type PipelineInFlight, type PipelineStep } from "@/lib/verification-view";
 import styles from "./overview.module.css";
 
 type Schemas = components["schemas"];
@@ -9,6 +9,8 @@ export interface PipelineProps {
   evidence: Schemas["EvidenceResponse"] | null;
   /** The book reader's whole answer, so a 503 no-batch is told apart from a reader that has not answered. */
   reading: BookReading;
+  /** Which of the two reads have not answered yet: a read in flight is pending, never "unavailable". */
+  inFlight: PipelineInFlight;
 }
 
 /** The front door's own words for each step; the ordinal, the number and its line are the shared law's (lib/verification-view). */
@@ -42,18 +44,32 @@ const STEP_COPY: Record<PipelineStep["key"], { name: string; description: string
  * `neutral`) prints in ink — the front door's line is a record, and green is kept for a verdict on the page that
  * owns it.
  */
-export function Pipeline({ meta, evidence, reading }: PipelineProps) {
+export function Pipeline({ meta, evidence, reading, inFlight }: PipelineProps) {
   return (
     <div className={styles.pipe}>
-      {pipelineSteps(meta, evidence, reading).map((step) => (
-        <div key={step.key} className={styles.step} data-testid={`pipeline-${step.key}`} data-value={step.line.figure} data-tone={step.tone}>
+      {pipelineSteps(meta, evidence, reading, inFlight).map((step) => (
+        <div
+          key={step.key}
+          className={styles.step}
+          data-testid={`pipeline-${step.key}`}
+          data-value={step.pending ? step.sub : step.line.figure}
+          data-tone={step.tone}
+          aria-busy={step.pending ? "true" : undefined}
+        >
           <div className={styles.stepNum}>{step.ordinal}</div>
           <div className={styles.stepN}>{STEP_COPY[step.key].name}</div>
           <div className={styles.stepD}>{STEP_COPY[step.key].description}</div>
+          {/* A read in flight has neither answered nor failed: the step prints the lib's pending word, never its line's "unavailable". */}
           <div className={styles.stepV}>
-            {step.line.before}
-            <b>{step.line.figure}</b>
-            {step.line.after}
+            {step.pending ? (
+              <b>{step.sub}</b>
+            ) : (
+              <>
+                {step.line.before}
+                <b>{step.line.figure}</b>
+                {step.line.after}
+              </>
+            )}
           </div>
         </div>
       ))}

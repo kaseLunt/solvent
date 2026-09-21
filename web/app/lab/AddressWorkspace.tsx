@@ -2,11 +2,10 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { KitTable, KpiTile, SectionHead, StatusPill, VerdictHeader, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { horizonLabel, sideRoomWords } from "@/lib/address-stress";
+import { projectionWords, sideRoomWords } from "@/lib/address-stress";
 import type { AddressTile, AddressWorkspace as Space } from "@/lib/lab-address";
 import { groupInt } from "@/lib/prose";
 import styles from "./lab.module.css";
-import { accountMoney } from "./money";
 
 const COLUMNS = [
   { key: "scenario", header: "Scenario" },
@@ -17,7 +16,6 @@ const COLUMNS = [
 
 /** The one-address workspace: the Inspector's tiles for before and after the selected scenario, and every scenario's row — the subject is the selected row the address carries, else the first it does. */
 export function AddressWorkspace({ space, kicker }: { space: Space; kicker: ReactNode }) {
-  const money = accountMoney(space.decimals);
   const chips =
     space.batchId === null
       ? []
@@ -46,11 +44,11 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
               {r.label} <StatusPill tone="projection">PROJECTION</StatusPill>
             </span>
           ),
-        before: sideRoomWords(r.before, space.decimals),
+        before: sideRoomWords(r.before, space.decimals, space.scaleAbsence),
         after:
           r.projection === null
-            ? sideRoomWords(r.after, space.decimals)
-            : r.projection.map((h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null ? "—" : `+${money(h.extraInterest)}`} interest`).join(" · "),
+            ? sideRoomWords(r.after, space.decimals, space.scaleAbsence)
+            : projectionWords(r.projection, space.decimals, space.scaleAbsence),
         flips:
           verdict.tone !== null ? (
             <StatusPill tone={verdict.tone} title={verdict.title ?? undefined}>

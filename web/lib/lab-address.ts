@@ -1,7 +1,7 @@
 // The one-address workspace. It is the Inspector's reading — its stress rows,
 // its decimals, its Cash position as today — arranged under the selected
 // scenario. No second stress reader exists; the Inspector's laws hold here.
-import { cannotSayTitle, computableSide, horizonLabel, roomWords, rowVerdict, sideRoomWords, stressVerdictWords, type StressRow, type StressSide, type StressVerdictWords } from "./address-stress";
+import { cannotSayTitle, computableSide, horizonLabel, roomWords, rowVerdict, sideRoomWords, stressVerdictWords, type ScaleAbsence, type StressRow, type StressSide, type StressVerdictWords } from "./address-stress";
 import { truncateAddress } from "./format";
 import { headroomBand } from "./headroom";
 import { humanUsdFull } from "./human-price";
@@ -58,6 +58,8 @@ export interface AddressWorkspace {
   /** The scenarios section's qualifier: what the rows were applied to, and at which batch when that is not the position's. */
   readonly qualifier: string;
   readonly decimals: number | null;
+  /** Why there is no scale to print at, when there is none: the table says the true cause, never "unreadable scale" for a lookup that holds no Cash position. */
+  readonly scaleAbsence: ScaleAbsence | null;
   readonly cause: string | null;
 }
 
@@ -67,7 +69,7 @@ const PROJECTIONS_NOT_READINGS = "shocked figures are projections, not readings"
 const QUALIFIER = `applied to this account · ${PROJECTIONS_NOT_READINGS}`;
 
 function empty(state: AddressWorkspaceState, address: string, headline: LabHeadline, cause: string | null = null): AddressWorkspace {
-  return { state, address, rows: [], table: [], selected: null, headline, tiles: null, batchId: null, stressBatchId: null, stressBatchChip: null, qualifier: QUALIFIER, decimals: null, cause };
+  return { state, address, rows: [], table: [], selected: null, headline, tiles: null, batchId: null, stressBatchId: null, stressBatchChip: null, qualifier: QUALIFIER, decimals: null, scaleAbsence: "no-lookup", cause };
 }
 
 const STATUS_WORD: Record<CashStatus, AddressTile> = {
@@ -184,7 +186,9 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   const qualifier = sameBatch
     ? QUALIFIER
     : `applied to this account at ${stressBatchId === null ? "a batch the stress result does not name readably" : `batch ${groupInt(stressBatchId)}`} · ${positionBatchWords} · ${PROJECTIONS_NOT_READINGS}`;
-  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, table, selected, headline, tiles: null, batchId, stressBatchId, stressBatchChip, qualifier, decimals, cause: null });
+  // A scale the view handed over but the guard refused is the one case that IS an unreadable scale.
+  const scaleAbsence: ScaleAbsence | null = decimals !== null ? null : (view.scaleAbsence ?? "unreadable");
+  const bare = (headline: LabHeadline): AddressWorkspace => ({ state: "rows", address, rows, table, selected, headline, tiles: null, batchId, stressBatchId, stressBatchChip, qualifier, decimals, scaleAbsence, cause: null });
   if (selected === null) return bare(refused(`No scenario applies to ${short}.`, "The stress response carried no scenario for this account."));
   // Rows beside no Cash position are two responses disagreeing; a position at a scale the guard refused prints no figure.
   // Neither is the scenarios' doing, so neither borrows their sentence. The position is asked before its scale: no
@@ -233,7 +237,7 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
     roomAfter: after === null ? REFUSED_TILE : roomTile(after.room, decimals, roomToneAfter),
     statusAfter,
   };
-  return { state: "rows", address, rows, table, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, stressBatchId, stressBatchChip, qualifier, decimals, cause: null };
+  return { state: "rows", address, rows, table, selected, headline: rowHeadline(short, selected, decimals), tiles, batchId, stressBatchId, stressBatchChip, qualifier, decimals, scaleAbsence, cause: null };
 }
 
 /**

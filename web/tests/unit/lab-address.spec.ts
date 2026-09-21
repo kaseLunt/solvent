@@ -470,3 +470,20 @@ test("a stress result that names no readable batch is not compared: the chip say
   const other = { ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: DEMO_STRESS_NEAR.batch.id + 1 } };
   expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(other), selectedId: "eth_minus_30" }).qualifier).toBe("applied to this account at batch 18,252 · the position above is batch 18,251 · shocked figures are projections, not readings");
 });
+
+test("where there is no scale to print at, the workspace carries the TRUE cause and the cells say it — 'unreadable scale' only for a scale that was read and refused", () => {
+  // A scale the guard refuses: the one case that is an unreadable scale.
+  const badScale = addressWorkspace({ address: DEMO_NEAR_ADDR, view: { ...near(), decimals: 1.5 }, selectedId: null });
+  expect(badScale.decimals).toBeNull();
+  expect(badScale.scaleAbsence).toBe("unreadable");
+  // A view that states why it has no scale: the workspace carries that cause, and the cells say it — never the scale's word.
+  const noPosition = addressWorkspace({ address: DEMO_NEAR_ADDR, view: { ...near(), decimals: null, scaleAbsence: "no-position" }, selectedId: null });
+  expect(noPosition.state).toBe("rows");
+  expect(noPosition.decimals).toBeNull();
+  expect(noPosition.scaleAbsence).toBe("no-position");
+  const spot = noPosition.rows.find((r) => r.projection === null)!;
+  expect(sideRoomWords(spot.before, noPosition.decimals, noPosition.scaleAbsence)).toBe("no Cash position in the lookup");
+  expect(sideRoomWords(spot.before, badScale.decimals, badScale.scaleAbsence)).toBe("unreadable scale");
+  // A readable scale carries no absence.
+  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: null }).scaleAbsence).toBeNull();
+});

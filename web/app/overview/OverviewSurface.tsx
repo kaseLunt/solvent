@@ -38,6 +38,8 @@ export function OverviewSurface() {
   const router = useRouter();
   const [meta, setMeta] = useState<Schemas["MetaResponse"] | null>(null);
   const [evidence, setEvidence] = useState<Schemas["EvidenceResponse"] | null>(null);
+  // A null answer is two states — not yet answered, and failed: the pipeline words them differently, so each read says when it has settled.
+  const [settled, setSettled] = useState({ meta: false, evidence: false });
   const [addressDraft, setAddressDraft] = useState("");
   const [addressRefused, setAddressRefused] = useState(false);
 
@@ -45,8 +47,15 @@ export function OverviewSurface() {
     const controller = new AbortController();
     getSolventClient()
       .meta(controller.signal)
-      .then(setMeta, () => setMeta(null));
-    fetchEvidence(solventBaseUrl(), controller.signal).then(setEvidence, () => setEvidence(null));
+      .then(setMeta, () => setMeta(null))
+      .finally(() => {
+        if (!controller.signal.aborted) setSettled((s) => ({ ...s, meta: true }));
+      });
+    fetchEvidence(solventBaseUrl(), controller.signal)
+      .then(setEvidence, () => setEvidence(null))
+      .finally(() => {
+        if (!controller.signal.aborted) setSettled((s) => ({ ...s, evidence: true }));
+      });
     return () => {
       controller.abort();
     };
@@ -187,7 +196,7 @@ export function OverviewSurface() {
         <h2>How it works</h2>
         <Link href="/proof#architecture">Architecture &amp; verification →</Link>
       </div>
-      <Pipeline meta={meta} evidence={evidence} reading={reading} />
+      <Pipeline meta={meta} evidence={evidence} reading={reading} inFlight={{ meta: !settled.meta, evidence: !settled.evidence }} />
       <div className={styles.foot}>
         <span>{FOOTER_STACK}</span>
         <span>

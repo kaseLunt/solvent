@@ -207,3 +207,32 @@ test("first viewport at 1440×900 holds hero, strip and entries", async ({ page 
     .evaluate((el) => el.getBoundingClientRect().bottom);
   expect(bottom).toBeLessThanOrEqual(900);
 });
+
+test("a read in flight has not failed: while meta and evidence have not answered, their steps are pending in ink — never 'unavailable', never the refused register; a failed read then says unavailable", async ({ page }) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, BOOK));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  // Every stalled request is held, not only the last: the shell's meta reader and the surface's both ask `/v1/meta`.
+  const held: Route[] = [];
+  const stall = (route: Route) => {
+    held.push(route);
+  };
+  await page.route("**/v1/meta*", stall);
+  await page.route("**/v1/evidence*", stall);
+  await page.goto("/");
+  for (const key of ["index", "verify"]) {
+    const step = page.getByTestId(`pipeline-${key}`);
+    await expect(step).toHaveAttribute("aria-busy", "true");
+    await expect(step).toHaveAttribute("data-value", "pending");
+    await expect(step).not.toHaveAttribute("data-tone", "refused");
+    await expect(step).not.toContainText("unavailable");
+  }
+  expect(held.length).toBeGreaterThanOrEqual(2);
+  await Promise.all(held.map((route) => route.abort()));
+  for (const key of ["index", "verify"]) {
+    const step = page.getByTestId(`pipeline-${key}`);
+    await expect(step).not.toHaveAttribute("aria-busy", "true");
+    await expect(step).toHaveAttribute("data-tone", "refused");
+    await expect(step).toContainText("unavailable");
+  }
+});
