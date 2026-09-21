@@ -46,7 +46,10 @@ export interface StressRow {
   readonly after: StressSide | null;
   /** before not liquidatable → after liquidatable. Null when the result is not applicable, or either side is missing or unknowable. */
   readonly flips: boolean | null;
-  /** The projection's horizons; null when the wire carries none. */
+  /**
+   * The projection's horizons. Null exactly when the wire carries NO PROJECTION (a spot row); an empty list is a
+   * projection that carries no horizon — a different fact, which `rowVerdict` answers with its `no-horizon` arm.
+   */
   readonly projection: StressHorizon[] | null;
   /** The projection's own disclaimer (delta-only; the base accrual is absent), verbatim; null without a projection. */
   readonly projectionNote: string | null;
@@ -87,16 +90,19 @@ function row(scenario: Scenario, account: string): StressRow {
     !result.applicable || before === null || after === null || before.verdict === "unknowable" || after.verdict === "unknowable"
       ? null
       : before.verdict !== "liquidatable" && after.verdict === "liquidatable";
-  const horizons = result.projection?.horizons ?? [];
+  // "No projection" and "a projection with no horizon" are two wire facts and stay two: the first is a spot row, the
+  // second is a projection that states nothing — it reaches the judge as an empty list, whose arm is a cannot-say.
+  // Erasing it to null would hand the row to the spot path and its "No".
+  //
   // A horizon whose duration is not a wire population is not a horizon a reader may be told about: it carries no
   // verdict, whatever the wire said for it, so the row is a cannot-say that names it rather than a "No" or a "Within".
   const projection =
-    horizons.length === 0
+    result.projection === null || result.projection === undefined
       ? null
-      : horizons.map((h) => ({
+      : (result.projection.horizons ?? []).map((h) => ({
           seconds: h.horizon_seconds,
           extraInterest: wireInt(h.additional_interest_usd),
-          verdict: isWirePopulation(h.horizon_seconds) ? h.liquidation_verdict : "unknowable",
+          verdict: isWirePopulation(h.horizon_seconds) ? h.liquidation_verdict : ("unknowable" as const),
         }));
   const mr = result.market_realization;
   const marketRealization =
@@ -190,11 +196,17 @@ export function sideRoomWords(side: StressSide | null, decimals: number | null, 
   return decimals === null ? scaleAbsenceWords(absence) : roomWords(figures.room, decimals);
 }
 
+/** The projection cell of a projection that lists no horizon — the cell's own words beside the verdict's "Cannot say". */
+const NO_HORIZON_WORDS = "no horizon in the projection";
+
 /**
  * A projection's cell: each horizon's extra interest at the position's scale, a dash for a horizon that carries none.
- * With no scale to print at the cell is the one true cause, said once — never "+— interest" per horizon.
+ * With no scale to print at the cell is the one true cause, said once — never "+— interest" per horizon. A
+ * projection that carries no horizon says so, whatever the scale: the cell is never empty, and a missing scale is
+ * not why it has nothing to list.
  */
 export function projectionWords(horizons: readonly StressHorizon[], decimals: number | null, absence: ScaleAbsence | null = null): string {
+  if (horizons.length === 0) return NO_HORIZON_WORDS;
   if (decimals === null) return scaleAbsenceWords(absence);
   return horizons.map((h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null ? "—" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`).join(" · ");
 }

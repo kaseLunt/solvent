@@ -201,6 +201,42 @@ test("a money figure that fails its wire guard is a NAMED hole of its own kind �
   expect(metricUnreadable(DM_CAPTURED, "accounts")).toBe(false);
 });
 
+test("the guard is chosen by the METRIC, never by the value's type: money served as a JSON number is the unreadable hole in the chart's geometry — never plotted unscaled, never labelled as a count; a count served as a string is never drawn at the money scale", () => {
+  const at = (hour: string, change: Partial<ObservatorySeriesPoint> = {}) => ({ ...DM_CAPTURED, bucket_start: `2026-07-29T${hour}:00:00Z`, ...change });
+  const money = (value: number): string => value as unknown as string;
+  // An integer would plot at 1e6 beside neighbours at 309.59 and take the peak's label with no "$"; a fraction, a
+  // negative and a zero would reach the population read. None is an exact decimal string: each is the same hole.
+  for (const bad of [1000000, 309593004, 309.593004, -5, 0]) {
+    const body = { ...OBSERVATORY_SERIES_DM, points: [at("06"), at("07", { debt_usd: money(bad) }), at("08")] };
+    const axis = buildBucketAxis(body);
+    const debt = buildMetricSeries(axis, body, "debt_usd");
+    // The geometry the chart draws: nothing is placed for that hour, and the hole wears the unreadable mark.
+    expect(debt.values).toEqual([309.593004, null, 309.593004]);
+    expect(debt.gapKinds).toEqual([null, "unreadable", null]);
+    expect(debt.titles[1]).toBe(
+      "2026-07-29T07:00:00Z · debt (usd) is unreadable in this bucket: the wire's value is not an exact decimal (unreadable is not zero)",
+    );
+    const bucket = body.points[1];
+    if (bucket === undefined) throw new Error("fixture invariant: three points");
+    expect(metricUnreadable(bucket, "debt_usd")).toBe(true);
+    expect(displayMetric(bucket, "debt_usd", 6)).toBe(EM_DASH);
+    // The peak and the newest label stay money, from hours that can be read.
+    expect(seriesMaxPoint(axis, body, "debt_usd", debt)).toMatchObject({ index: 0, directLabel: "peak $309.593004" });
+    expect(seriesNewestPoint(axis, body, "debt_usd", debt)?.directLabel).toBe("$309.593004");
+    // The same hour's collateral is judged on its own.
+    expect(buildMetricSeries(axis, body, "collateral_usd").gapKinds).toEqual([null, null, null]);
+  }
+  const collateral = { ...OBSERVATORY_SERIES_DM, points: [at("06"), at("07", { collateral_usd: money(412790672) })] };
+  expect(buildMetricSeries(buildBucketAxis(collateral), collateral, "collateral_usd").gapKinds).toEqual([null, "unreadable"]);
+  // A count is judged as a count whatever its type: a string is outside the population contract and keeps the
+  // count's throwing read — it never enters the money path to be scaled and given a "$".
+  const stringCount = at("07", { accounts: "1412" as unknown as number });
+  expect(metricUnreadable(stringCount, "accounts")).toBe(false);
+  expect(() => displayMetric(stringCount, "accounts", 6)).toThrow(WireIntegerError);
+  const counted = { ...OBSERVATORY_SERIES_DM, points: [at("06"), stringCount] };
+  expect(() => buildMetricSeries(buildBucketAxis(counted), counted, "accounts")).toThrow(WireIntegerError);
+});
+
 test("exact displays: usd through the engine's own scale, counts verbatim, null an em dash", () => {
   expect(displayMetric(DM_CAPTURED, "debt_usd", 6)).toBe("$309.593004");
   expect(displayMetric(DM_CAPTURED, "collateral_usd", 6)).toBe("$412.790672");

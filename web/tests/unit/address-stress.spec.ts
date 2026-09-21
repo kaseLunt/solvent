@@ -72,7 +72,40 @@ test("a flip is before not-liquidatable → after liquidatable; an unknowable si
   expect(u.rows[0]?.after?.verdict).toBe("unknowable");
 });
 
-test("a withheld Cash book under found is withheld and names its engine; duplicate results are contradictory; inapplicable rows never flip; empty horizons are no projection; the market-realization axis is carried", () => {
+test("an empty projection cannot say, FROM THE WIRE: a projection with no horizons over two healthy sides is 'Cannot say' with the arm's own title — never the spot shock's 'No', and never an empty cell", () => {
+  const scenario = STRESS_DM.scenarios[0];
+  const result = scenario?.results[0];
+  if (scenario === undefined || result === undefined || result.before === null || result.after === null || result.projection === null) {
+    throw new Error("fixture shape");
+  }
+  const { before, after, projection: served } = result;
+  // Both sides readable and NOT liquidatable: the spot path would say "No" — the reassurance an empty projection has
+  // not earned. The body goes through the client's own refinement and this reader, as the page's does.
+  const healthy = { liquidatable: false, debt_usd: "1000000000", max_borrow_lt: "3200000000" };
+  const bodyWith = (projection: typeof served | null): components["schemas"]["StressResponse"] => ({
+    ...STRESS_DM,
+    scenarios: [{ ...scenario, results: [{ ...result, before: { ...before, ...healthy }, after: { ...after, ...healthy }, projection }] }],
+  });
+  const read = (projection: typeof served | null): StressRow => {
+    const r = stressReading(lookup(bodyWith(projection)), STRESS_DM.address);
+    if (r.kind !== "rows" || r.rows[0] === undefined) throw new Error(r.kind);
+    return r.rows[0];
+  };
+  const empty = read({ ...served, horizons: [] });
+  expect(empty.applicable).toBe(true);
+  expect(rowVerdict(empty)).toEqual({ kind: "cannot-say", cause: "no-horizon" });
+  expect(stressVerdictWords(rowVerdict(empty))).toEqual({ text: "Cannot say", tone: "refused", title: "the projection carries no horizon" });
+  expect(stressVerdictWords(rowVerdict(empty)).text).not.toBe("No");
+  // The projection's own cell says what is missing — with a scale, and with none (the scale is not why it is empty).
+  expect(projectionWords(empty.projection ?? [], 6)).toBe("no horizon in the projection");
+  expect(projectionWords(empty.projection ?? [], null, "no-position")).toBe("no horizon in the projection");
+  expect(projectionWords([], 6)).not.toBe("");
+  // The same sides with NO projection are a spot row, and keep the spot's word; with horizons they keep theirs.
+  expect(stressVerdictWords(rowVerdict(read(null))).text).toBe("No");
+  expect(stressVerdictWords(rowVerdict(read(served))).text).toMatch(/^(Within|Not within) /);
+});
+
+test("a withheld Cash book under found is withheld and names its engine; duplicate results are contradictory; inapplicable rows never flip; empty horizons are a projection with no horizon, never no projection; the market-realization axis is carried", () => {
   type Body = components["schemas"]["StressResponse"];
   const scenario = STRESS_DM.scenarios[0];
   const result = scenario?.results[0];
@@ -104,9 +137,16 @@ test("a withheld Cash book under found is withheld and names its engine; duplica
   expect(inapplicable[0]?.after).not.toBeNull();
   expect(inapplicable[0]?.flips).toBeNull();
 
+  // A projection the wire carries with an empty horizon list is still a projection — one that states no horizon. It
+  // is never read as "no projection": that would hand the row to the spot shock's words.
   const noHorizons = rowsOf({ ...STRESS_DM, scenarios: [{ ...scenario, results: [{ ...result, projection: { ...result.projection, horizons: [] } }] }] });
-  expect(noHorizons[0]?.projection).toBeNull();
+  expect(noHorizons[0]?.projection).toEqual([]);
+  expect(noHorizons[0]?.projection).not.toBeNull();
   expect(noHorizons[0]?.projectionNote).toBe(result.projection.note);
+  // No projection at all stays null — the two are told apart.
+  const noProjection = rowsOf({ ...STRESS_DM, scenarios: [{ ...scenario, results: [{ ...result, projection: null }] }] });
+  expect(noProjection[0]?.projection).toBeNull();
+  expect(noProjection[0]?.projectionNote).toBeNull();
 
   const realized = rowsOf({
     ...STRESS_DM,

@@ -14,6 +14,7 @@ import type { EvidenceManifest } from "./evidence";
 import { isAddress } from "./format";
 import { receiptIdentity } from "./freshness";
 import { fetchAddressHistory, fetchEvents, fetchParams, type ChainEvent, type ParamChange } from "./inspector-data";
+import { evidenceReadAt, type EvidencePhase, type EvidenceSettled } from "./inspector-evidence";
 import { CASH } from "./inspector-position";
 import { useAnchoredAgeSeconds, type LiveAgeReading } from "./live-age";
 import { describeLookupError } from "./lookup-error";
@@ -31,7 +32,14 @@ export interface AddressReading {
   readonly history: Phase<HistoryLookup>;
   readonly stress: Phase<StressLookup>;
   readonly params: Phase<readonly ParamChange[]>;
+  /** The manifest that answered; null while its read is in flight AND after it failed — `evidencePhase` tells the two apart. */
   readonly evidence: EvidenceManifest | null;
+  /**
+   * The evidence read's phase: in flight, failed, or answered. A read in flight has not failed, so the two nulls
+   * above are never worded alike. The hook always states it; a reading built without it is read by what it holds
+   * (`evidenceReadOf`).
+   */
+  readonly evidencePhase?: EvidencePhase;
   readonly age: LiveAgeReading;
   readonly reload: () => void;
   /**
@@ -77,7 +85,9 @@ export function useAddressLookup(addr: string): AddressReading {
   const valid = isAddress(addr);
   const [epoch, setEpoch] = useState(0);
   const [lookupResult, setLookupResult] = useState<Keyed<AddressLookup>>(null);
-  const [evidence, setEvidence] = useState<EvidenceManifest | null>(null);
+  // The evidence read that last SETTLED, with the epoch it was asked in: what the page is told is derived from it
+  // and the current epoch, so a read in flight is never stored — or worded — as a failure.
+  const [evidenceSettled, setEvidenceSettled] = useState<EvidenceSettled | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   /** The load currently in flight, if any. A resume repair rides it rather than aborting it. */
   const inFlightRef = useRef<Promise<boolean> | null>(null);
@@ -140,9 +150,12 @@ export function useAddressLookup(addr: string): AddressReading {
   const params = useKeyedFetch(addr, hasCash, epoch, fetchCashParams);
 
   // Book-level, not address-keyed: the committed reconcile receipt behind the Trust card's last item.
-  // Not fetched on the invalid-address page. A failed fetch that was NOT aborted clears the manifest:
-  // a reload() whose receipt fetch fails must not leave the previous receipt standing as current —
-  // the Trust item reads "receipt unavailable" instead.
+  // Not fetched on the invalid-address page. The read is a PHASE — in flight, failed, answered — and each settles
+  // under the epoch that asked it. A failed fetch that was NOT aborted replaces the manifest: a reload() whose
+  // receipt fetch fails must not leave the previous receipt standing as current — the Trust item reads "receipt
+  // unavailable" then, and only then. While a read is in flight the item is pending; a manifest already on the page
+  // stands until the re-read answers or fails. A resume repair re-asks the lookup alone, never this read, so it
+  // cannot move the item.
   useEffect(() => {
     if (!valid) return;
     const controller = new AbortController();
@@ -150,16 +163,18 @@ export function useAddressLookup(addr: string): AddressReading {
       .evidence(controller.signal)
       .then(
         (manifest) => {
-          if (!controller.signal.aborted) setEvidence(manifest);
+          if (!controller.signal.aborted) setEvidenceSettled({ epoch, read: { phase: "answered", manifest } });
         },
         () => {
-          if (!controller.signal.aborted) setEvidence(null);
+          if (!controller.signal.aborted) setEvidenceSettled({ epoch, read: { phase: "failed" } });
         },
       );
     return () => {
       controller.abort();
     };
   }, [epoch, valid]);
+  const evidenceRead = evidenceReadAt(evidenceSettled, epoch);
+  const evidence = evidenceRead.phase === "answered" ? evidenceRead.manifest : null;
 
   const repair = useCallback(() => loadLookup({ keepOnFailure: true }), [loadLookup]);
   const age = useAnchoredAgeSeconds(
@@ -172,7 +187,9 @@ export function useAddressLookup(addr: string): AddressReading {
     setEpoch((e) => e + 1);
   }, []);
 
-  return { address: addr, valid, lookup, history, stress, params, evidence, age, reload, lookupRepaired };
+  // An invalid address asks for nothing, so its reading states no evidence phase: nothing is in flight to be pending.
+  const evidencePhase = valid ? evidenceRead.phase : undefined;
+  return { address: addr, valid, lookup, history, stress, params, evidence, evidencePhase, age, reload, lookupRepaired };
 }
 
 /** Cursor-paged activity for one address. Mount the consumer with key={addr}: a fresh mount can never hold another address's rows. */

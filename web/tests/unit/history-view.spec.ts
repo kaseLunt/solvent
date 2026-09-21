@@ -12,14 +12,17 @@
 import { expect, test } from "@playwright/test";
 import {
   deriveHistoryView,
+  foreignSeries,
   HISTORY_ABSENT_NOTE,
   HISTORY_DEGRADED_CLAUSE,
   HISTORY_DEGRADED_NOTE,
   HISTORY_DOCTRINE,
   HISTORY_ENGINES,
+  HISTORY_FOREIGN_CLAUSE,
   HISTORY_INTRO,
   HISTORY_LOADING_DEK,
   HISTORY_MARKS,
+  HISTORY_METHOD,
   HISTORY_PROVENANCE,
   HISTORY_RATE_COLUMNS,
   HISTORY_UNAVAILABLE_CLAUSE,
@@ -140,6 +143,26 @@ test("chips: Engine · Stride · Range · Hours · Served, in that order; the st
   // A window with no hole is an ok census.
   const whole = { ...DEMO_OBSERVATORY_DM, points: DEMO_OBSERVATORY_DM.points.slice(-3) };
   expect(chip(deriveHistoryView(ok(whole)), "Hours")).toEqual({ label: "Hours", value: "3 recorded · 0 withheld · 0 absent", tone: "ok" });
+  // An hour that was recorded but states a money figure nobody can read is a hole too: the census counts it inside
+  // the recorded hours it belongs to, and never wears the ok register over it — whichever metric the chart is on,
+  // whichever money figure it is, a malformed string or a JSON number alike.
+  const holed = (change: Partial<ObservatorySeriesResponse["points"][number]>, at = 1): ObservatorySeriesResponse => ({
+    ...whole,
+    points: whole.points.map((p, i) => (i === at ? { ...p, ...change } : p)),
+  });
+  for (const body of [holed({ debt_usd: "12.5" }), holed({ collateral_usd: 153171572 as unknown as string }), holed({ debt_usd: "1e9" }, 0)]) {
+    for (const metric of ["debt_usd", "accounts"] as const) {
+      expect(chip(deriveHistoryView(ok(body, metric)), "Hours")).toEqual({
+        label: "Hours",
+        value: "3 recorded (1 with an unreadable figure) · 0 withheld · 0 absent",
+        tone: "warn",
+      });
+    }
+  }
+  const twice = { ...whole, points: whole.points.map((p, i) => (i === 0 ? p : { ...p, debt_usd: "x", collateral_usd: "y" })) };
+  expect(chip(deriveHistoryView(ok(twice)), "Hours")?.value).toBe("3 recorded (2 with an unreadable figure) · 0 withheld · 0 absent");
+  // A null figure is not an unreadable one, and the demo's own census does not move.
+  expect(chip(deriveHistoryView(ok(holed({ debt_usd: null }))), "Hours")?.tone).toBe("ok");
   // An applied stride is said as the service applies it, on the chip and in its title.
   const stepped = deriveHistoryView(ok({ ...DEMO_OBSERVATORY_DM, step_seconds: 7200 }));
   expect(chip(stepped, "Stride")?.value).toBe("at most one hour in every 2");
@@ -243,6 +266,93 @@ test("a debt figure that fails its wire guard, THROUGH the view: the page stands
   expect(older.headline.tone).toBe("neutral");
   expect(tile(older, "debt").tone).toBe("neutral");
   expect(older.finding).toContain("debt unreadable at one end, so no change is given");
+});
+
+test("money is judged as money whatever its type, THROUGH the view: a debt figure served as a JSON number — fractional, integer, negative or zero — is the named hole a malformed string is; never plotted, never labelled as a count, never a throw", () => {
+  // The contract's money is an exact decimal STRING. A JSON number has already been through a float: no guard can
+  // vouch for its digits, so it is unreadable whatever it holds.
+  const debtAt = (index: number, value: number): ObservatorySeriesResponse => ({
+    ...DEMO_OBSERVATORY_DM,
+    points: DEMO_OBSERVATORY_DM.points.map((p, i) => (i === index ? { ...p, debt_usd: value as unknown as string } : p)),
+  });
+  const newest = DEMO_OBSERVATORY_DM.points.length - 1;
+  for (const bad of [27828808.216758, 27828808216758, 1000000, -5, 0]) {
+    const v = deriveHistoryView(ok(debtAt(newest, bad)));
+    expect(v.state).toBe("ok");
+    expect(v.headline.emphasis).toBe("The latest hour's debt figure cannot be read,");
+    expect(v.headline.tone).toBe("refused");
+    expect(tile(v, "debt")).toEqual({ key: "debt", label: "Debt", value: "—", sub: "unreadable", tone: "refused" });
+    for (const key of ["collateral", "accounts", "liquidatable"]) expect(tile(v, key).tone).toBe("neutral");
+    expect(v.finding).toContain("debt unreadable at one end, so no change is given");
+    expect(v.marks.map((m) => m.mark)).toEqual(["absent", "withheld", "unreadable"]);
+    // The hour was recorded: the census counts it, and its record prints a dash with the true cause.
+    const entry = buildBucketAxis(debtAt(newest, bad)).entries.at(-1)!;
+    const row = pointRecord(entry, debtAt(newest, bad)).answer.find((r) => r.key === "debt")!;
+    expect(row.value).toBe(EM_DASH);
+    expect(row.note).toContain("unreadable");
+  }
+  // An OLDER hour: the headline and the tile answer from the newest hour; the chart keys the hole where it is.
+  const older = deriveHistoryView(ok(debtAt(40, 27828808216758)));
+  expect(older.headline.tone).toBe("neutral");
+  expect(tile(older, "debt").tone).toBe("neutral");
+  expect(older.marks.map((m) => m.mark)).toEqual(["absent", "withheld", "unreadable"]);
+  // The other money metric is judged by the same law, and the debt beside it still answers.
+  const collateral = deriveHistoryView(
+    ok({
+      ...DEMO_OBSERVATORY_DM,
+      points: DEMO_OBSERVATORY_DM.points.map((p, i) => (i === newest ? { ...p, collateral_usd: 153171572.777189 as unknown as string } : p)),
+    }),
+  );
+  expect(collateral.headline.tone).toBe("neutral");
+  expect(tile(collateral, "collateral")).toEqual({ key: "collateral", label: "Collateral", value: "—", sub: "unreadable", tone: "refused" });
+});
+
+test("a series answers for the engine that was ASKED: a body that names another engine is refused by name — the legacy market's figures never appear under Cash's name, nor Cash's under the legacy market's", () => {
+  // Cash was asked; the body that came back is the legacy market's, whole and well-formed.
+  const v = deriveHistoryView({ engine: "debt_manager", metric: "debt_usd", phase: "ok", response: DEMO_OBSERVATORY_AAVE, message: null });
+  expect(v.state).toBe("unavailable");
+  expect(v.kicker).toBe("History · Cash");
+  expect(v.headline).toEqual({
+    emphasis: "The history of Cash cannot be shown.",
+    rest: "",
+    tone: "refused",
+    dek:
+      "The service answered with the series of the legacy Aave v3 market (aave_v3_etherfi) where Cash (debt_manager) was asked for. " +
+      `${HISTORY_FOREIGN_CLAUSE} ${HISTORY_UNAVAILABLE_CLAUSE}`,
+  });
+  expect(v.chips).toEqual([
+    { label: "Engine", value: "Cash", title: "debt_manager" },
+    { label: "Record", value: "wrong engine", tone: "refused" },
+  ]);
+  // Nothing of the other engine's body is on the page: no tile, no finding, no chart name, no key, none of its notes.
+  expect(v.tiles).toEqual([]);
+  expect(v.finding).toBeNull();
+  expect(v.chartLabel).toBeNull();
+  expect(v.marks).toEqual([]);
+  expect(v.doctrine).toEqual(HISTORY_DOCTRINE);
+  expect(JSON.stringify(v)).not.toContain("$1.9M");
+  // The mirror: the legacy market asked, Cash answered.
+  const mirror = deriveHistoryView({ engine: "aave_v3_etherfi", metric: "debt_usd", phase: "ok", response: DEMO_OBSERVATORY_DM, message: null });
+  expect(mirror.state).toBe("unavailable");
+  expect(mirror.headline.emphasis).toBe("The history of the legacy Aave v3 market cannot be shown.");
+  expect(mirror.headline.dek).toContain("the series of Cash (debt_manager) where the legacy Aave v3 market (aave_v3_etherfi) was asked for.");
+  expect(JSON.stringify(mirror)).not.toContain("$27.8M");
+  // The decision the surface takes BEFORE it commits a body is this one, in these words.
+  expect(foreignSeries("debt_manager", DEMO_OBSERVATORY_DM)).toBeNull();
+  expect(foreignSeries("aave_v3_etherfi", DEMO_OBSERVATORY_AAVE)).toBeNull();
+  const sentence = foreignSeries("debt_manager", DEMO_OBSERVATORY_AAVE);
+  expect(sentence).toBe("The service answered with the series of the legacy Aave v3 market (aave_v3_etherfi) where Cash (debt_manager) was asked for.");
+  // The surface hands that sentence back as the reading's message; the view is the same refusal.
+  expect(deriveHistoryView({ engine: "debt_manager", metric: "debt_usd", phase: "foreign", response: null, message: sentence })).toEqual(v);
+  // An engine this page does not chart is named by the wire's own id; a body that names none says so — never a throw.
+  expect(foreignSeries("debt_manager", { ...DEMO_OBSERVATORY_DM, engine: "morpho_blue" })).toBe(
+    "The service answered with the series of an engine this page does not chart (morpho_blue) where Cash (debt_manager) was asked for.",
+  );
+  for (const engine of [null, undefined, 7, "", "  ", {}]) {
+    expect(foreignSeries("debt_manager", { ...DEMO_OBSERVATORY_DM, engine: engine as unknown as string })).toBe(
+      "The service answered with a series that names no engine where Cash (debt_manager) was asked for.",
+    );
+  }
 });
 
 test("an unreadable scale: the record cannot be read — state unavailable, the field named, no tiles, before any figure is formatted at it", () => {
@@ -352,10 +462,15 @@ test("doctrine: the intro, the chart's method notes and the source note verbatim
     "captured buckets · the line never interpolates across a gap",
     "absent bucket · no complete batch was observed in this bucket",
     "withheld bucket · the book was refused, so totals are null and never 0",
+    "unreadable figure · the bucket was recorded, but this figure is not the exact decimal the contract allows, so it is a hole and never 0",
     "zero floor drawn · the scale never crops it away",
     "click any bucket for its full record",
     "source · observatory_points rollup (points survive batch retention; batch + materialization identity retained by the rollup)",
   ]);
+  // The drawer teaches every mark the key can show: each mark's own word opens one of the method notes.
+  for (const mark of HISTORY_MARKS) {
+    expect(HISTORY_METHOD.filter((note) => note.startsWith(`${mark.mark} `))).toHaveLength(1);
+  }
   expect(v.doctrine).toEqual([...HISTORY_DOCTRINE, describeStride(DEMO_OBSERVATORY_DM.step_seconds), ...DEMO_OBSERVATORY_DM.notes]);
   expect(DEMO_OBSERVATORY_DM.notes.length).toBeGreaterThan(0);
   // The rollup writes a row by observing a batch, so the page claims the observation only — in every string that

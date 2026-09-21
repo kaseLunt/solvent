@@ -23,7 +23,9 @@
 // contract's own withheld-newest example (the qualified label, the dashed
 // tiles, the sparse-window line); a figure that fails its wire guard as a
 // named hole — headline, tile, mark, key and record — never the route
-// boundary; the bucket record's provenance and the three sweep states; the
+// boundary, whatever JavaScript type the money arrived in; a series that
+// answers for another engine than the one asked, refused by name; the bucket
+// record's provenance and the three sweep states; the
 // hazard placement; a state clause never in the caption ink; no key on a
 // hole-free window; the record named by its heading; a phone's width with no
 // sideways scroll; loading; the error arm; answer before evidence.
@@ -32,6 +34,7 @@ import { EM_DASH, formatBlock } from "../../lib/format";
 import {
   deriveHistoryView,
   HISTORY_DEGRADED_CLAUSE,
+  HISTORY_FOREIGN_CLAUSE,
   HISTORY_INTRO,
   HISTORY_LOADING_DEK,
   HISTORY_MARKS,
@@ -918,4 +921,87 @@ test("answer before evidence: header above the engine switcher above the tiles a
   expect(await x("history-engine-debt_manager")).toBeLessThan(await x("history-engine-aave_v3_etherfi"));
   expect(await y("history-kpi-debt")).toBeLessThan(await y("history-chart"));
   expect(await y("history-chart")).toBeLessThan(await y("history-point"));
+});
+
+test("money served as a JSON NUMBER is judged as money: an integer that would plot a million times too high, and a fraction that would reach the count's guard, are each the unreadable hole — never plotted, never the peak, never labelled as a count, never the route boundary; the census counts the hole and the drawer teaches its mark", async ({
+  page,
+}) => {
+  // The contract's money is an exact decimal string. These are the same digits, served as JSON numbers.
+  for (const bad of [27828808216758, 27828808.216758]) {
+    const malformed = newestMutated((p) => ({ ...p, debt_usd: bad as unknown as string }));
+    await mockShell(page);
+    await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, malformed));
+    await page.goto("/observatory");
+    await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "ok");
+    const view = viewOf(malformed);
+    await expect(page.getByTestId("history-verdict-headline")).toHaveText(
+      "The latest hour's debt figure cannot be read, in the hour starting Aug 8, 20:00 UTC. Unreadable is not zero.",
+    );
+    const debtTile = page.getByTestId("history-kpi-debt");
+    await expect(debtTile).toHaveAttribute("data-tone", "refused");
+    await expect(debtTile).toContainText("unreadable");
+
+    // The chart's geometry: the hour is a hole with the unreadable mark, and the y-max is a readable hour's — money, named.
+    const axis = buildBucketAxis(malformed);
+    const debt = buildMetricSeries(axis, malformed, "debt_usd");
+    expect(debt.values[debt.values.length - 1]).toBeNull();
+    expect(debt.gapKinds[debt.gapKinds.length - 1]).toBe("unreadable");
+    const chart = page.getByTestId("history-chart");
+    await expect(chart.locator('[data-testid="obs-gap"][data-kind="unreadable"]')).toHaveCount(1);
+    await expect(chart.getByTestId("obs-gap-unreadable")).toHaveCount(1);
+    await expect(chart.getByTestId("obs-ymax-label")).toHaveText("peak $27,942,906.330446");
+    await expect(chart.getByTestId("obs-newest-value")).toContainText("(last captured ");
+    await expect(chart.getByTestId("obs-newest-value")).toContainText("$");
+    // Never the number itself in any register: not grouped as a count, not as money, not raw.
+    for (const leaked of ["27,828,808,216,758", "27828808216758", "27828808.216758", "NaN"]) {
+      await expect(page.locator("body")).not.toContainText(leaked);
+    }
+
+    // The census counts the hole inside the recorded hours, and does not wear the ok register over it.
+    await expect(chip(page, "Hours")).toContainText("165 recorded (1 with an unreadable figure) · 1 withheld · 2 absent");
+    expect(view.chips.find((c) => c.label === "Hours")?.tone).toBe("warn");
+
+    // The drawer teaches the mark the key shows.
+    await page.getByTestId("history-drawer").click();
+    await expect(page.getByTestId("history-drawer-body")).toContainText(
+      "unreadable figure · the bucket was recorded, but this figure is not the exact decimal the contract allows, so it is a hole and never 0",
+    );
+    await page.keyboard.press("Escape");
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
+});
+
+test("a series answers for the engine that was ASKED: Cash is asked and the legacy market's body comes back — refused by name, nothing of it drawn under Cash's name; switching to the legacy market shows that body under its own", async ({
+  page,
+}) => {
+  await mockShell(page);
+  // The service answers EVERY ask with the legacy market's series, whole and well-formed.
+  await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, DEMO_OBSERVATORY_AAVE));
+  await page.goto("/observatory");
+  const surface = page.getByTestId("history-surface");
+  await expect(surface).toHaveAttribute("data-engine", "debt_manager");
+  await expect(surface).toHaveAttribute("data-state", "unavailable");
+  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText("The history of Cash cannot be shown.");
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(
+    `The service answered with the series of the legacy Aave v3 market (aave_v3_etherfi) where Cash (debt_manager) was asked for. ${HISTORY_FOREIGN_CLAUSE} ${HISTORY_UNAVAILABLE_CLAUSE}`,
+  );
+  await expect(chip(page, "Engine")).toContainText("Cash");
+  await expect(chip(page, "Record")).toContainText("wrong engine");
+  // None of the legacy market's figures stand under Cash's name: no tile, no chart, no record, no money at all.
+  await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(0);
+  await expect(page.getByTestId("history-chart")).toHaveCount(0);
+  await expect(page.getByTestId("history-point")).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText("$");
+
+  // The same body under the engine it IS for answers in full.
+  await page.getByTestId("history-engine-aave_v3_etherfi").click();
+  await expect(surface).toHaveAttribute("data-engine", "aave_v3_etherfi");
+  await expect(surface).toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText(headlineOf(DEMO_OBSERVATORY_AAVE).h1);
+  // And back: the legacy series that was just on screen is not left standing under Cash.
+  await page.getByTestId("history-engine-debt_manager").click();
+  await expect(surface).toHaveAttribute("data-state", "unavailable");
+  await expect(page.getByTestId("history-chart")).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText("$");
 });

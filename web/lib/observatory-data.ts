@@ -58,7 +58,7 @@ export interface ObservatorySeriesQuery {
   from?: string;
   /** Inclusive upper bound on bucket start (ISO date-time). Unbounded when absent. */
   to?: string;
-  /** Stride in seconds (native bucket 3600). Serves every Nth bucket VERBATIM. */
+  /** Stride in seconds (native bucket 3600). Serves at most one recorded hour per stride, each VERBATIM. */
   step?: number;
 }
 

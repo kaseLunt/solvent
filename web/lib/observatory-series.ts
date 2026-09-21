@@ -15,12 +15,17 @@
 //     refusal code; its null totals render as em dashes, NEVER 0;
 //   - a null metric on a served bucket is a GAP saying null-is-not-zero;
 //   - a money metric that FAILS ITS WIRE GUARD (not the contract's exact
-//     decimal) is a GAP of its own kind — UNREADABLE: not an absent hour, not
+//     decimal STRING — a malformed string, or a JSON number of any sign or
+//     size) is a GAP of its own kind — UNREADABLE: not an absent hour, not
 //     a withheld one, never zero and never a throw. It passes the guard
-//     before it meets a formatter, here and in every sentence;
-//   - `step_seconds` is the stride the server actually applied: every Nth
-//     captured bucket VERBATIM, never an average. Gap detection uses the
-//     applied stride, so downsampled series don't invent holes;
+//     before it meets a formatter, here and in every sentence. Which guard a
+//     value answers to is decided by its METRIC, never by its JavaScript
+//     type: money never enters the count path, nor a count the money path;
+//   - `step_seconds` is the stride the server actually applied: at most one
+//     recorded hour per stride, each VERBATIM, never an average (a recorded
+//     hour is served only when it starts at least one stride after the last
+//     one served, so a hole shifts the grid). Gap detection uses the applied
+//     stride, so downsampled series don't invent holes;
 //   - values are DISPLAY-PRECISION geometry only; exact decimal strings
 //     belong in adjacent mono text (displayMetric), grouped as money and
 //     counts always are;
@@ -168,8 +173,12 @@ export interface BucketMetricSeries {
   gapKinds: (GapKind | null)[];
 }
 
-/** The wire metric, raw. USD metrics are exact decimal strings. */
-function rawMetric(point: ObservatorySeriesPoint, metric: BucketMetric): string | number | null {
+/**
+ * The wire metric as it arrived — UNJUDGED. The contract says USD metrics are exact decimal strings and the other
+ * two are populations, but a body is cast on its way here, not validated: what the value is stays unknown until
+ * the metric's own guard has read it.
+ */
+function rawMetric(point: ObservatorySeriesPoint, metric: BucketMetric): unknown {
   switch (metric) {
     case "debt_usd":
       return point.debt_usd;
@@ -182,10 +191,23 @@ function rawMetric(point: ObservatorySeriesPoint, metric: BucketMetric): string 
   }
 }
 
+/**
+ * Which guard a metric answers to is decided by what the metric IS, never by the JavaScript type its value arrived
+ * in: the two USD totals are money (an exact decimal STRING at the series' scale), the other two are populations.
+ * A body is cast, not validated, on its way here — money that arrives as a JSON number has been through a float
+ * and must not slip into the count path to be plotted unscaled and printed without its "$".
+ */
+export function isMoneyMetric(metric: BucketMetric): metric is "debt_usd" | "collateral_usd" {
+  return metric === "debt_usd" || metric === "collateral_usd";
+}
+
 /** True when a served row states a money metric that fails the decimal guard: a figure no formatter may be handed. */
 export function metricUnreadable(point: ObservatorySeriesPoint, metric: BucketMetric): boolean {
+  if (!isMoneyMetric(metric)) return false;
   const raw = rawMetric(point, metric);
-  return typeof raw === "string" && !isWireDecimal(raw);
+  // Anything a money metric states that is not the contract's decimal string — a malformed string, or a number of
+  // any sign or size — is unreadable. Only null is "not stated".
+  return raw !== null && !isWireDecimal(raw);
 }
 
 /**
@@ -205,20 +227,23 @@ export function displayMetric(
   const raw = rawMetric(point, metric);
   if (raw === null) return EM_DASH;
   // The two count metrics are wire populations, guarded at THIS one chokepoint — tiles, chart labels and bucket
-  // records all read through it — and grouped, as every count the product prints is.
-  if (typeof raw === "number") return groupInt(readWirePopulation(raw, metric));
+  // records all read through it — and grouped, as every count the product prints is. The guard judges the value
+  // whatever its type, so a count that is not a population is refused here and never scaled as money.
+  if (!isMoneyMetric(metric)) return groupInt(readWirePopulation(raw as number, metric));
   if (!isWireDecimal(raw)) return EM_DASH;
   // Money is grouped, always: string surgery on the exact decimal at the engine's own scale, the digits untouched.
   return renderUsdAmount(raw, usdDecimals);
 }
 
 /**
- * Display-precision geometry for one metric value. Null = no finite geometry. A money string is placed only after
- * it passes the decimal guard — the caller has already named an unreadable one as its own gap.
+ * Display-precision geometry for one metric value. Null = no finite geometry. The path is the METRIC's: money is
+ * placed only as a decimal string that passed its guard (the caller has already named anything else a money metric
+ * states as its own gap), a count only as a population.
  */
-function geometryOf(raw: string | number | null, usdDecimals: number): number | null {
+function geometryOf(raw: unknown, metric: BucketMetric, usdDecimals: number): number | null {
   if (raw === null) return null;
-  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  // A count is placed as the population it is, through the count's own guarded read.
+  if (!isMoneyMetric(metric)) return readWirePopulation(raw as number, metric);
   if (!isWireDecimal(raw)) return null;
   const n = Number(formatUnits(raw, usdDecimals));
   return Number.isFinite(n) ? n : null;
@@ -267,7 +292,7 @@ export function buildMetricSeries(
       gapKinds.push("unreadable");
       continue;
     }
-    const value = geometryOf(raw, response.usd_decimals);
+    const value = geometryOf(raw, metric, response.usd_decimals);
     if (raw === null || value === null) {
       values.push(null);
       titles.push(

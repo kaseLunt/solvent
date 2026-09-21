@@ -13,6 +13,9 @@
 //   - points derive only from complete servable batches — an absent bucket is
 //     an honest gap, a withheld bucket is a named refusal, and NULL never
 //     renders as 0;
+//   - a series answers for the engine that was ASKED: a body naming another
+//     engine is refused by name before it is committed, so one engine's
+//     figures never stand under the other's name;
 //   - the degraded mode is FIRST-CLASS: a deployment whose database predates
 //     the observatory rollup serves the contract's `unavailable` envelope,
 //     and it renders as a NAMED state — never an empty chart;
@@ -25,7 +28,7 @@ import { useEffect, useState } from "react";
 import { ChartCard, VerdictHeader } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { solventBaseUrl } from "@/lib/api";
-import { deriveHistoryView, HISTORY_ENGINES, type HistoryReading } from "@/lib/history-view";
+import { deriveHistoryView, foreignSeries, HISTORY_ENGINES, type HistoryReading } from "@/lib/history-view";
 import { engineName } from "@/lib/inspector-headline";
 import {
   fetchObservatorySeries,
@@ -44,6 +47,7 @@ type SeriesState =
   | { phase: "loading" }
   | { phase: "ok"; response: ObservatorySeriesResponse; axis: BucketAxis }
   | { phase: "degraded"; message: string }
+  | { phase: "foreign"; message: string }
   | { phase: "error"; message: string };
 
 export function HistorySurface() {
@@ -73,6 +77,14 @@ function EngineHistory({
         // set state for a view that no longer asked — the failure arm below
         // refuses too.
         if (controller.signal.aborted) return;
+        // A series answers for the engine that was asked. A body that names another engine is refused in the
+        // lib's own sentence BEFORE it is committed: none of it is held, so none of it can be drawn under this
+        // engine's name.
+        const foreign = foreignSeries(engine, response);
+        if (foreign !== null) {
+          setSeries({ phase: "foreign", message: foreign });
+          return;
+        }
         const axis = buildBucketAxis(response);
         setSeries({ phase: "ok", response, axis });
         // Default selection: the newest bucket backed by a wire row, so the

@@ -16,6 +16,7 @@ import { humanAge } from "./freshness";
 import { freshnessTier, type FreshnessTier, type TierConstants } from "./freshnessTiers";
 import { buildHistorySeries, engineNeverPresent, knownBatchAxis, type HistorySeries } from "./history-series";
 import { humanUsdFull } from "./human-price";
+import { evidenceReadOf } from "./inspector-evidence";
 import {
   cannotComputeHeadline,
   cashHeadline,
@@ -236,8 +237,9 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
           position: cashWire,
           batchId,
           sweep,
-          reconcile: reading.evidence?.reconcile ?? null,
-          evidenceServedAt: reading.evidence?.served_at ?? null,
+          // The read's PHASE rides with the manifest: in flight is pending, failed is unavailable, and the item is
+          // judged from the whole manifest once it answers.
+          evidence: evidenceReadOf(reading.evidence, reading.evidencePhase),
         });
   const table = cashWire === null || cash === null ? null : collateralTable(cashWire, cash);
   // A boundary is printed only for a computed position WITH a verdict: a computed row whose verdict is unknowable has none to print.

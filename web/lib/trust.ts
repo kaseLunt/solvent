@@ -3,7 +3,7 @@
 // short detail. Nothing here is a verdict — it is what the reader needs to
 // decide how much to believe the verdict above it.
 //
-// Four laws:
+// Five laws:
 //   - every wire count that is printed or compared (price ages and budgets,
 //     sweep tallies, reconcile tallies) passes `readWirePopulation` first; a
 //     malformed value throws HERE, the same contract `lib/evidence.ts` keeps;
@@ -15,13 +15,23 @@
 //     the record of a PINNED run, finished at the instant it states, against
 //     the blocks it was pinned to — the live batch does not inherit it. So the
 //     item says what that run did, in the past tense, with the run's own date;
-//     it never says the Book, this batch or this account reconciles.
+//     it never says the Book, this batch or this account reconciles. Its
+//     ticked label speaks of the WHOLE run, so it is ticked only for a run
+//     that passed whole — the verdict Verification gives the same manifest
+//     (`receiptState`: exact), never the Cash weld alone. A run Verification
+//     calls drifted, failed or empty is never green here;
+//   - a read in flight has not failed: while the manifest is being read the
+//     receipt item is pending, and "unavailable" is said only of a read that
+//     failed. A manifest that answered with no receipt states an absence.
 import type { PriceInput, RefinedPosition, components } from "@solvent/client";
+import { proofSubjectStatus, type EvidenceManifest } from "./evidence";
 import { humanAge } from "./freshness";
 import { humanUtc } from "./human-utc";
+import type { EvidenceRead } from "./inspector-evidence";
 import { CASH, symbolFor } from "./inspector-position";
 import { groupInt, joinAnd } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
+import { receiptState } from "./verification-view";
 import { readWirePopulation } from "./wireGuard";
 
 type SweepStamp = components["schemas"]["SweepStamp"];
@@ -44,12 +54,13 @@ export interface TrustInput {
   readonly position: RefinedPosition;
   readonly batchId: number;
   readonly sweep: SweepStamp | null;
-  readonly reconcile: ReconcileSummary | null;
   /**
-   * The `served_at` of the evidence envelope that carried the receipt: the year the run's date is read against.
-   * Absent or null, the run's year always prints — a date is never left to a year this module could not name.
+   * The evidence read behind the receipt item: in flight, failed, or the manifest that answered. The WHOLE manifest,
+   * not its receipt alone — the run's verdict is Verification's, which also reads the wire's own proof status. The
+   * manifest's `served_at` names the year the run's date is read against; when it names none, the run's year prints —
+   * a date is never left to a year this module could not name.
    */
-  readonly evidenceServedAt?: string | null;
+  readonly evidence: EvidenceRead;
 }
 
 const plural = (count: number, noun: string): string => (count === 1 ? noun : `${noun}s`);
@@ -190,7 +201,7 @@ function provenanceItem(position: RefinedPosition): TrustItem {
   return { id: "provenance", label, detail: "provenance not recognised", state: "dim", title: otherWords.join("; ") };
 }
 
-/** The receipt item's two labels: what the run did when every counted row matched, and the run alone when it cannot say that. */
+/** The receipt item's two labels: what the run did when it passed WHOLE, and the run alone when it cannot say that. */
 const RECONCILE_MATCHED = "Pinned reconcile run matched the chain";
 const RECONCILE_RUN = "Pinned reconcile run";
 
@@ -205,10 +216,37 @@ function finishedWords(reconcile: ReconcileSummary, servedAt: string | null): st
   return humanUtc(at, servedAt ?? undefined);
 }
 
-function reconcileItem(reconcile: ReconcileSummary | null, servedAt: string | null): TrustItem {
-  // Only a receipt whose every counted row matched says so; every other arm is named as the run and claims nothing.
+/** The receipt item before a manifest answers: a read in flight is pending; only a read that failed is unavailable. */
+const RECEIPT_PENDING = "receipt pending";
+const RECEIPT_UNAVAILABLE = "receipt unavailable";
+/** A manifest that answered and carries no receipt: the wire's own absence, worded as one. */
+const RECEIPT_ABSENT = "no committed receipt";
+/** Verification's words for a run that gated no rows: it compared nothing, so it proves nothing. */
+const RECEIPT_EMPTY = "the run gated no rows · nothing was compared";
+
+/** The Cash weld's tally when the receipt carries one, else the gated totals — the figures the item's detail counts. */
+function countedRows(reconcile: ReconcileSummary): { readonly cash: string; readonly compared: number; readonly exact: number } {
+  const weld = reconcile.welds.find((w) => w.engine === CASH);
+  return weld === undefined
+    ? { cash: "", compared: readWirePopulation(reconcile.gated_rows, "reconcile.gated_rows"), exact: readWirePopulation(reconcile.gated_exact, "reconcile.gated_exact") }
+    : {
+        cash: "Cash ",
+        compared: readWirePopulation(weld.rows_compared, "reconcile.welds[debt_manager].rows_compared"),
+        exact: readWirePopulation(weld.rows_exact, "reconcile.welds[debt_manager].rows_exact"),
+      };
+}
+
+/**
+ * The receipt item of a manifest that answered. The ARM is Verification's (`receiptState`) — one judge for one
+ * manifest, so the two pages cannot disagree about a run: only `exact` (the verdict passed, exit 0, no gated drift,
+ * every gated row exact, at least one gated row, every weld exact, and the wire's own proof status agreeing) is
+ * ticked under the label that speaks of the whole run. Within an arm the detail names the fault this card can count.
+ */
+function answeredItem(manifest: EvidenceManifest): TrustItem {
   const label = RECONCILE_RUN;
-  if (reconcile === null) return { id: "reconcile", label, detail: "receipt unavailable", state: "dim" };
+  const reconcile = manifest.reconcile;
+  if (reconcile === null) return { id: "reconcile", label, detail: RECEIPT_ABSENT, state: "dim" };
+  const arm = receiptState(manifest);
   const drift = readWirePopulation(reconcile.gated_drift, "reconcile.gated_drift");
   const exitCode = readWirePopulation(reconcile.exit_code, "reconcile.exit_code");
   const passed = reconcile.result === "pass" && exitCode === 0;
@@ -216,12 +254,10 @@ function reconcileItem(reconcile: ReconcileSummary | null, servedAt: string | nu
     const detail = `${groupInt(drift)} drifted ${plural(drift, "row")}${passed ? "" : " · did not pass"}`;
     return { id: "reconcile", label, detail, state: "warn", title: `result: ${reconcile.result} · exit ${String(exitCode)}` };
   }
+  if (arm === "empty") return { id: "reconcile", label, detail: RECEIPT_EMPTY, state: "dim" };
 
-  // Book-level: the Cash weld when the receipt carries one, else the gated totals — and ok only when every counted row is exact.
-  const weld = reconcile.welds.find((w) => w.engine === CASH);
-  const cash = weld === undefined ? "" : "Cash ";
-  const compared = weld === undefined ? readWirePopulation(reconcile.gated_rows, "reconcile.gated_rows") : readWirePopulation(weld.rows_compared, "reconcile.welds[debt_manager].rows_compared");
-  const exact = weld === undefined ? readWirePopulation(reconcile.gated_exact, "reconcile.gated_exact") : readWirePopulation(weld.rows_exact, "reconcile.welds[debt_manager].rows_exact");
+  // Book-level: the Cash weld when the receipt carries one, else the gated totals.
+  const { cash, compared, exact } = countedRows(reconcile);
   const title = reconcile.artifact_path;
   if (compared === 0) return { id: "reconcile", label, detail: `no ${cash}rows in the receipt`, state: "dim" };
   if (exact > compared) return { id: "reconcile", label, detail: `${groupInt(exact)} exact of ${groupInt(compared)} ${cash}rows · contradictory receipt`, state: "warn", title };
@@ -229,17 +265,33 @@ function reconcileItem(reconcile: ReconcileSummary | null, servedAt: string | nu
     const drifted = compared - exact;
     return { id: "reconcile", label, detail: `${groupInt(drifted)} ${cash}${plural(drifted, "row")} drifted`, state: "warn", title };
   }
-  const finished = finishedWords(reconcile, servedAt);
-  const detail = `${groupInt(exact)}/${groupInt(compared)} ${cash}rows${finished === null ? "" : ` · ${finished}`}`;
-  return { id: "reconcile", label: RECONCILE_MATCHED, detail, state: "ok", title };
+  const tally = `${groupInt(exact)}/${groupInt(compared)} ${cash}rows`;
+  if (arm !== "exact") {
+    // The rows this card counts are whole and the run is not: a gated row short, another engine's weld short, or the
+    // wire's own proof status refusing a receipt that passes on its numbers. The tally stays true; the tick does not
+    // follow from it. The judge's own finding rides the title.
+    const proof = proofSubjectStatus(manifest);
+    const words = arm === "failed" ? "the service does not vouch for this receipt" : "the run did not match whole";
+    return { id: "reconcile", label, detail: `${tally} · ${words}`, state: "warn", title: proof.kind === "rejected" ? proof.detail : title };
+  }
+  const servedAt: unknown = manifest.served_at;
+  const finished = finishedWords(reconcile, typeof servedAt === "string" ? servedAt : null);
+  return { id: "reconcile", label: RECONCILE_MATCHED, detail: `${tally}${finished === null ? "" : ` · ${finished}`}`, state: "ok", title };
 }
 
-export function trustChecklist({ position, batchId, sweep, reconcile, evidenceServedAt }: TrustInput): TrustItem[] {
+function reconcileItem(evidence: EvidenceRead): TrustItem {
+  // Only a run that passed whole says so; every other arm is named as the run and claims nothing.
+  if (evidence.phase === "pending") return { id: "reconcile", label: RECONCILE_RUN, detail: RECEIPT_PENDING, state: "dim" };
+  if (evidence.phase === "failed") return { id: "reconcile", label: RECONCILE_RUN, detail: RECEIPT_UNAVAILABLE, state: "dim" };
+  return answeredItem(evidence.manifest);
+}
+
+export function trustChecklist({ position, batchId, sweep, evidence }: TrustInput): TrustItem[] {
   return [
     computedItem(position, batchId),
     pricesItem(position),
     sweepItem(position, sweep),
     provenanceItem(position),
-    reconcileItem(reconcile, evidenceServedAt ?? null),
+    reconcileItem(evidence),
   ];
 }

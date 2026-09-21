@@ -27,6 +27,7 @@ import {
   describeStride,
   displayMetric,
   gridReadingLine,
+  isMoneyMetric,
   METRIC_LABELS,
   metricUnreadable,
   observatoryTakeaway,
@@ -76,9 +77,10 @@ export interface HistoryView {
 export interface HistoryReading {
   readonly engine: ObservatoryEngine;
   readonly metric: BucketMetric;
-  readonly phase: "loading" | "ok" | "degraded" | "error";
+  /** `foreign`: the body that came back answers for another engine than the one asked, and was never committed. */
+  readonly phase: "loading" | "ok" | "degraded" | "error" | "foreign";
   readonly response: ObservatorySeriesResponse | null;
-  /** The degraded envelope's own message, or the error's; null otherwise. */
+  /** The degraded envelope's own message, the error's, or `foreignSeries(...)`'s sentence; null otherwise. */
   readonly message: string | null;
 }
 
@@ -98,11 +100,15 @@ export const HISTORY_DEGRADED_CLAUSE = "That is a fact about this deployment, no
 export const HISTORY_INTRO =
   "How each engine's book has moved, hour by hour, in a record that outlives batch retention. An hour in which no complete batch was observed renders as a hole, which is never smoothed over and never drawn as a zero; one engine per view, never combined onto one axis.";
 
-/** The chart's method notes — the legend's three marks, the two drawing notes, the source — verbatim. */
+/**
+ * The chart's method notes — the line, then one note for EVERY hole mark the key can show (each opens with the
+ * mark's own word), the two drawing notes, the source — verbatim.
+ */
 export const HISTORY_METHOD: readonly string[] = [
   "captured buckets · the line never interpolates across a gap",
   "absent bucket · no complete batch was observed in this bucket",
   "withheld bucket · the book was refused, so totals are null and never 0",
+  `${UNREADABLE} figure · the bucket was recorded, but this figure is not the exact decimal the contract allows, so it is a hole and never 0`,
   "zero floor drawn · the scale never crops it away",
   "click any bucket for its full record",
   "source · observatory_points rollup (points survive batch retention; batch + materialization identity retained by the rollup)",
@@ -119,6 +125,37 @@ export const HISTORY_UNAVAILABLE_CLAUSE = "The record is unavailable, and none o
 
 /** A series whose scale is outside the wire contract: no figure on it prints at any other scale than its own. */
 export const HISTORY_UNREADABLE_SCALE = "The series states an unreadable value scale (usd_decimals).";
+
+/** Why a series that answers for another engine is refused whole: the two engines' figures never stand in for each other. */
+export const HISTORY_FOREIGN_CLAUSE = "One engine's figures are never shown under another's name.";
+
+/** The chip of a series refused because it answers for another engine than the one asked. */
+const FOREIGN_RECORD_WORD = "wrong engine";
+
+/** The refusal's sentence when the reading carries none of its own. */
+const FOREIGN_UNNAMED = "The service answered for another engine than the one asked for.";
+
+/** An engine in the refusal's sentence: its name in prose, then the wire's own id, so the two are told apart by both. */
+const namedWithId = (engine: ObservatoryEngine): string => `${engineInProse(engine)} (${engine})`;
+
+/**
+ * A series answers for the engine that was ASKED. The body's own `engine` is compared with the request's before the
+ * body is committed or a figure of it is read: a body naming another engine — the other of the two, one this page
+ * does not chart, or none at all — is refused whole, in this sentence. Null exactly when the body is the asked
+ * engine's. The legacy market's figures never appear under Cash's name, nor Cash's under the legacy market's.
+ */
+export function foreignSeries(requested: ObservatoryEngine, response: ObservatorySeriesResponse): string | null {
+  const answered: unknown = response.engine;
+  if (answered === requested) return null;
+  const known = HISTORY_ENGINES.find((engine) => engine === answered);
+  const series =
+    known !== undefined
+      ? `the series of ${namedWithId(known)}`
+      : typeof answered === "string" && answered.trim() !== ""
+        ? `the series of an engine this page does not chart (${answered.trim()})`
+        : "a series that names no engine";
+  return `The service answered with ${series} where ${namedWithId(requested)} was asked for.`;
+}
 
 export interface HistoryTileSpec {
   readonly key: HistoryTileKey;
@@ -196,9 +233,32 @@ function tileOf(
 /** The census chip before the series answers, and its label in every state: the window is counted in hours. */
 const HOURS_CHIP = "Hours";
 
-/** The identity strip of an answered series: the tally is warn-toned whenever a hole exists. */
+/** The money metrics, by identity: the figures an hour can state and still leave unreadable. */
+const MONEY_METRICS = HISTORY_TILES.map((spec) => spec.metric).filter(isMoneyMetric);
+
+/**
+ * The recorded hours that state a money figure no guard can read — in either money metric, whichever one the chart
+ * is on: the census is the window's, not the selected series'. Such an hour WAS recorded, so it is counted inside
+ * the recorded hours, never as a fourth kind of hour beside them.
+ */
+function unreadableHours(axis: BucketAxis): number {
+  return axis.entries.filter((entry) => {
+    const point = entry.kind === "captured" ? entry.point : null;
+    return point !== null && MONEY_METRICS.some((metric) => metricUnreadable(point, metric));
+  }).length;
+}
+
+/**
+ * The identity strip of an answered series: the tally is warn-toned whenever a hole exists — a withheld hour, an
+ * absent one, or a recorded hour with an unreadable figure. It never wears the ok register over any of the three.
+ */
 function okChips(engine: ObservatoryEngine, response: ObservatorySeriesResponse, axis: BucketAxis): LabChip[] {
-  const holes = axis.withheldCount > 0 || axis.absentCount > 0;
+  const unreadable = unreadableHours(axis);
+  const holes = axis.withheldCount > 0 || axis.absentCount > 0 || unreadable > 0;
+  const recorded =
+    unreadable > 0
+      ? `${groupInt(axis.capturedCount)} recorded (${groupInt(unreadable)} with an ${UNREADABLE} figure)`
+      : `${groupInt(axis.capturedCount)} recorded`;
   return [
     engineChip(engine),
     // The reader's word on the chip; the method sentence is its title and a drawer paragraph.
@@ -206,7 +266,7 @@ function okChips(engine: ObservatoryEngine, response: ObservatorySeriesResponse,
     { label: "Range", value: describeRange(response.from, response.to) },
     {
       label: HOURS_CHIP,
-      value: `${groupInt(axis.capturedCount)} recorded · ${groupInt(axis.withheldCount)} withheld · ${groupInt(axis.absentCount)} absent`,
+      value: `${recorded} · ${groupInt(axis.withheldCount)} withheld · ${groupInt(axis.absentCount)} absent`,
       tone: holes ? "warn" : "ok",
     },
     // The envelope carries served_at and no age: the wire's own instant, verbatim, never a browser-clock age.
@@ -235,6 +295,25 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
       ),
       chips: [engineChip(reading.engine), { label: "Rollup", value: "unavailable", tone: "refused" }],
       doctrine: [...HISTORY_DOCTRINE, HISTORY_DEGRADED_NOTE],
+    };
+  }
+  // A body that answers for another engine than the one asked is refused whole, before its scale is classified or a
+  // figure of it is read: nothing of it reaches the headline, the tiles, the chart or the drawer's notes.
+  const foreign =
+    reading.phase === "foreign"
+      ? (reading.message ?? FOREIGN_UNNAMED)
+      : reading.phase === "ok" && reading.response !== null
+        ? foreignSeries(reading.engine, reading.response)
+        : null;
+  if (foreign !== null) {
+    return {
+      ...base,
+      state: "unavailable",
+      headline: refused(
+        `The history of ${engineInProse(reading.engine)} cannot be shown.`,
+        `${foreign} ${HISTORY_FOREIGN_CLAUSE} ${HISTORY_UNAVAILABLE_CLAUSE}`,
+      ),
+      chips: [engineChip(reading.engine), { label: "Record", value: FOREIGN_RECORD_WORD, tone: "refused" }],
     };
   }
   if (reading.phase === "error" || reading.response === null) {

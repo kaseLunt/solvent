@@ -495,3 +495,94 @@ test("activity: a refused 'Load more' is stated on its own line beside the rows 
   await expect(page.getByTestId("inspector-activity-more")).toBeVisible();
   await expect(page.getByTestId("inspector-activity-more")).toBeEnabled();
 });
+
+test("stress: a projection that carries NO horizon cannot say — never the spot shock's 'No', and its cell is never empty", async ({ page }) => {
+  const emptied: typeof DEMO_STRESS_NEAR = {
+    ...DEMO_STRESS_NEAR,
+    scenarios: DEMO_STRESS_NEAR.scenarios.map((s) =>
+      s.id !== "dm_rate_horizon_plus_200bps" ? s : { ...s, results: s.results.map((r) => (r.projection === null ? r : { ...r, projection: { ...r.projection, horizons: [] } })) },
+    ),
+  };
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR, stress: emptied });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  const table = page.getByTestId("inspector-stress-table");
+  await expect(table.locator("tbody tr")).toHaveCount(3);
+  const row = table.locator("tbody tr").nth(2);
+  // Still a projection — the wire carried one — and it states no horizon: the judge's own arm, with its own title.
+  await expect(row.locator("td").first()).toContainText("PROJECTION");
+  const verdict = row.locator("td").last();
+  await expect(verdict.locator("[data-tone='refused']")).toHaveText("Cannot say");
+  await expect(verdict.locator("[data-tone='refused']")).toHaveAttribute("title", "the projection carries no horizon");
+  await expect(verdict).not.toContainText("No");
+  await expect(verdict).not.toContainText("Not within");
+  // The projection's cell says what is missing; it is not blank and lists no interest.
+  await expect(row.locator("td").nth(2)).toHaveText("no horizon in the projection");
+  // The spot rows beside it keep their own words.
+  await expect(table.locator("tbody tr").nth(0).locator("td").last()).toHaveText("Yes");
+});
+
+test("trust: a receipt IN FLIGHT is pending, never unavailable — the lookup answered first; when the manifest lands the run is judged; a read that FAILED is the one that says unavailable", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/v1/evidence*", async (route) => {
+    await held;
+    await json(route, EVIDENCE_MANIFEST);
+  });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  // The position is on the page; /v1/evidence has not answered.
+  await expect(surface(page)).toHaveAttribute("data-state", "near");
+  const receipt = page.getByTestId("inspector-trust-reconcile");
+  await expect(receipt).toContainText("Pinned reconcile run");
+  await expect(receipt).toContainText("receipt pending");
+  await expect(receipt).not.toContainText("unavailable");
+  await expect(receipt).not.toContainText("matched");
+  await expect(receipt).toHaveAttribute("data-state", "dim");
+  // The four items beside it did not wait for the manifest.
+  await expect(page.getByTestId("inspector-trust-computed")).toHaveAttribute("data-state", "ok");
+  release();
+  await expect(receipt).toHaveAttribute("data-state", "ok");
+  await expect(receipt).toContainText("Pinned reconcile run matched the chain");
+  await expect(receipt).not.toContainText("pending");
+
+  // A read that failed: unavailable — and only then.
+  await page.unroute("**/v1/evidence*");
+  await page.route("**/v1/evidence*", (route) => json(route, BOOK_ERROR_UNAVAILABLE, 503));
+  await page.reload();
+  await expect(surface(page)).toHaveAttribute("data-state", "near");
+  await expect(receipt).toContainText("receipt unavailable");
+  await expect(receipt).toHaveAttribute("data-state", "dim");
+  await expect(receipt).not.toContainText("pending");
+});
+
+test("trust: the ticked label is about the WHOLE run — a Cash weld that is whole inside a run that is not is never green, and says what Verification says of it", async ({ page }) => {
+  const receiptOf = EVIDENCE_MANIFEST.reconcile;
+  if (receiptOf === null) throw new Error("fixture invariant: the manifest carries a receipt");
+  const bodies = [
+    // A gated row short, with zero drift and the Cash weld 29/29.
+    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 86, gated_rows: 87 } }, state: "warn", words: "29/29 Cash rows · the run did not match whole" },
+    // The legacy weld short.
+    {
+      manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, welds: receiptOf.welds.map((w) => (w.engine === "aave_v3_etherfi" ? { ...w, rows_exact: 13 } : w)) } },
+      state: "warn",
+      words: "29/29 Cash rows · the run did not match whole",
+    },
+    // The wire's own proof status refuses a receipt that passes on its numbers.
+    { manifest: { ...EVIDENCE_MANIFEST, proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } }, state: "warn", words: "29/29 Cash rows · the service does not vouch for this receipt" },
+    // No gated rows beside a whole Cash weld: nothing was compared.
+    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 0, gated_rows: 0 } }, state: "dim", words: "the run gated no rows · nothing was compared" },
+  ];
+  for (const body of bodies) {
+    await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+    await page.route("**/v1/evidence*", (route) => json(route, body.manifest));
+    await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+    const receipt = page.getByTestId("inspector-trust-reconcile");
+    await expect(receipt).toContainText(body.words);
+    await expect(receipt).toHaveAttribute("data-state", body.state);
+    await expect(receipt).toContainText("Pinned reconcile run");
+    await expect(receipt).not.toContainText("matched the chain");
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
+});

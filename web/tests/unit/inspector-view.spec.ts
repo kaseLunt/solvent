@@ -105,6 +105,29 @@ test("invalid, loading and unavailable render into the frame with an honest iden
   expect(failed.chips[0]?.value).toBe("unavailable");
 });
 
+test("the evidence read's PHASE reaches the Trust card THROUGH the view: a receipt in flight is pending — never unavailable — beside a lookup that already answered; a failed read is unavailable; a repaired lookup leaves the receipt standing", () => {
+  const ready = { lookup: { phase: "ready" as const, value: found([nearWire()]) } };
+  const receipt = (overrides: Partial<AddressReading>) =>
+    deriveInspectorView(reading({ ...ready, ...overrides }), TIER_FALLBACK).trust?.find((t) => t.id === "reconcile");
+  // The lookup finished first; /v1/evidence is still out. Both reads hold no manifest — only the phase tells them apart.
+  expect(receipt({ evidence: null, evidencePhase: "pending" })).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt pending", state: "dim" });
+  expect(receipt({ evidence: null, evidencePhase: "failed" })).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt unavailable", state: "dim" });
+  expect(receipt({ evidence: null, evidencePhase: "pending" })?.detail).not.toContain("unavailable");
+  // Answered: the whole manifest is judged, and the run that passed whole is ticked with its own date.
+  expect(receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered" })).toMatchObject({ label: "Pinned reconcile run matched the chain", state: "ok" });
+  expect(receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered" })?.detail).toContain("29/29 Cash rows · Jul");
+  // The whole manifest rides through — the wire's own proof status included: a Cash weld alone is not the run.
+  const refusedByWire = { ...EVIDENCE_MANIFEST, proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" as const } };
+  expect(receipt({ evidence: refusedByWire, evidencePhase: "answered" })).toMatchObject({ label: "Pinned reconcile run", state: "warn" });
+  // A resume repair re-asks the lookup alone: the receipt on the page neither blanks nor turns unavailable.
+  expect(receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered", lookupRepaired: true })).toEqual(
+    receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered" }),
+  );
+  // A reading that states no phase is read by what it holds.
+  expect(receipt({ evidence: EVIDENCE_MANIFEST })?.state).toBe("ok");
+  expect(receipt({ evidence: null })?.detail).toBe("receipt unavailable");
+});
+
 test("near cap: state, kicker, headline, chips, table, boundary, trust and the room streak all derive from one reading", () => {
   const view = deriveInspectorView(
     // The lookup (batch 3) is newer than the history's vantage (2) — the same story the last test tells.
