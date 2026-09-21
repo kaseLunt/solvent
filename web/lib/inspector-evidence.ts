@@ -45,7 +45,7 @@ export function evidenceReadAt(settled: EvidenceSettled | null, epoch: number): 
  * is read by what it holds: a manifest answered; none is a read that did not deliver — it never invents a read in
  * flight nobody declared. A phase that contradicts what is held (answered with no manifest) is a failed read.
  */
-export function evidenceReadOf(manifest: EvidenceManifest | null, phase: EvidencePhase | undefined): EvidenceRead {
+export function evidenceReadOf(manifest: EvidenceManifest | null, phase: EvidencePhase | null): EvidenceRead {
   if (phase === "pending") return EVIDENCE_PENDING;
   if (manifest === null || phase === "failed") return EVIDENCE_FAILED;
   return evidenceAnswered(manifest);

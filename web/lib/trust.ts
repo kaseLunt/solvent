@@ -39,7 +39,7 @@ type ReconcileSummary = components["schemas"]["ReconcileSummary"];
 type PriceVerdict = PriceInput["verdict"];
 type BrokenVerdict = Exclude<PriceVerdict, "fresh" | "stale">;
 
-export type TrustState = "ok" | "warn" | "refused" | "dim";
+export type TrustState = "ok" | "warn" | "refused" | "dim" | "pending";
 export type TrustId = "computed" | "prices" | "sweep" | "provenance" | "reconcile";
 
 export interface TrustItem {
@@ -281,7 +281,7 @@ function answeredItem(manifest: EvidenceManifest): TrustItem {
 
 function reconcileItem(evidence: EvidenceRead): TrustItem {
   // Only a run that passed whole says so; every other arm is named as the run and claims nothing.
-  if (evidence.phase === "pending") return { id: "reconcile", label: RECONCILE_RUN, detail: RECEIPT_PENDING, state: "dim" };
+  if (evidence.phase === "pending") return { id: "reconcile", label: RECONCILE_RUN, detail: RECEIPT_PENDING, state: "pending" };
   if (evidence.phase === "failed") return { id: "reconcile", label: RECONCILE_RUN, detail: RECEIPT_UNAVAILABLE, state: "dim" };
   return answeredItem(evidence.manifest);
 }

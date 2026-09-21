@@ -282,7 +282,7 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
       ...base,
       state: "loading",
       headline: refused(`Loading the history of ${engineInProse(reading.engine)}…`, HISTORY_LOADING_DEK),
-      chips: [engineChip(reading.engine), { label: HOURS_CHIP, value: "pending", tone: "refused" }],
+      chips: [engineChip(reading.engine), { label: HOURS_CHIP, value: "pending" }],
     };
   }
   if (reading.phase === "degraded") {

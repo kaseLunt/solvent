@@ -123,6 +123,12 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
       route.fulfill({ json: OBSERVATORY_SERIES_AAVE, headers: CORS }),
     );
     await page.goto("/observatory");
+    // This mock answers EVERY request with the legacy series. The page opens on Cash, and a series that answers for
+    // another engine is refused by name — the legacy market's figures never stand under Cash's name.
+    await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "unavailable");
+    await expect(page.getByTestId("history-verdict").locator('[data-chip="Served"]')).toHaveCount(0);
+    // Asked for the engine it answers for, the same body is read, and its own instant is printed verbatim.
+    await page.getByTestId("history-engine-aave_v3_etherfi").click();
     await expect(
       page.getByTestId("history-verdict").locator('[data-chip="Served"]'),
     ).toContainText(OBSERVATORY_SERIES_AAVE.served_at);

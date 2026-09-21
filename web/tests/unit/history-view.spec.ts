@@ -430,7 +430,7 @@ test("loading: the refused tone, tiles empty, the dek says what will be here and
   expect(v.tiles).toEqual([]);
   expect(v.chips).toEqual([
     { label: "Engine", value: "Cash", title: "debt_manager" },
-    { label: "Hours", value: "pending", tone: "refused" },
+    { label: "Hours", value: "pending" },
   ]);
   expect(v.marks).toEqual([]);
   expect(deriveHistoryView({ engine: "aave_v3_etherfi", metric: "debt_usd", phase: "loading", response: null, message: null }).headline.emphasis).toBe(

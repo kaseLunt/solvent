@@ -25,6 +25,7 @@ function reading(overrides: Partial<AddressReading>): AddressReading {
     stress: { phase: "loading" },
     params: { phase: "loading" },
     evidence: EVIDENCE_MANIFEST,
+    evidencePhase: "answered",
     age: { seconds: 42, unresolved: false, refreshFailed: false },
     reload: () => {},
     lookupRepaired: false,
@@ -110,7 +111,7 @@ test("the evidence read's PHASE reaches the Trust card THROUGH the view: a recei
   const receipt = (overrides: Partial<AddressReading>) =>
     deriveInspectorView(reading({ ...ready, ...overrides }), TIER_FALLBACK).trust?.find((t) => t.id === "reconcile");
   // The lookup finished first; /v1/evidence is still out. Both reads hold no manifest — only the phase tells them apart.
-  expect(receipt({ evidence: null, evidencePhase: "pending" })).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt pending", state: "dim" });
+  expect(receipt({ evidence: null, evidencePhase: "pending" })).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt pending", state: "pending" });
   expect(receipt({ evidence: null, evidencePhase: "failed" })).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt unavailable", state: "dim" });
   expect(receipt({ evidence: null, evidencePhase: "pending" })?.detail).not.toContain("unavailable");
   // Answered: the whole manifest is judged, and the run that passed whole is ticked with its own date.

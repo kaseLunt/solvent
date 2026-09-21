@@ -36,10 +36,10 @@ export interface AddressReading {
   readonly evidence: EvidenceManifest | null;
   /**
    * The evidence read's phase: in flight, failed, or answered. A read in flight has not failed, so the two nulls
-   * above are never worded alike. The hook always states it; a reading built without it is read by what it holds
-   * (`evidenceReadOf`).
+   * above are never worded alike. Null only when no read was asked (an address that is not valid); such a reading is
+   * read by what it holds (`evidenceReadOf`).
    */
-  readonly evidencePhase?: EvidencePhase;
+  readonly evidencePhase: EvidencePhase | null;
   readonly age: LiveAgeReading;
   readonly reload: () => void;
   /**
@@ -188,7 +188,7 @@ export function useAddressLookup(addr: string): AddressReading {
   }, []);
 
   // An invalid address asks for nothing, so its reading states no evidence phase: nothing is in flight to be pending.
-  const evidencePhase = valid ? evidenceRead.phase : undefined;
+  const evidencePhase = valid ? evidenceRead.phase : null;
   return { address: addr, valid, lookup, history, stress, params, evidence, evidencePhase, age, reload, lookupRepaired };
 }
 

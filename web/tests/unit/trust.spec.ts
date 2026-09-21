@@ -288,7 +288,7 @@ test("reconcile AGREES with Verification: over the four evidence fixtures, a dri
 
 test("a receipt in flight is PENDING, never unavailable: the item words the evidence read's phase — and a re-read never flashes a failure that has not happened", () => {
   const item = (read: EvidenceRead) => byId(trustChecklist({ position: near(), batchId: 1, sweep, evidence: read })).reconcile;
-  expect(item(EVIDENCE_PENDING)).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt pending", state: "dim" });
+  expect(item(EVIDENCE_PENDING)).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt pending", state: "pending" });
   expect(item(EVIDENCE_FAILED)).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt unavailable", state: "dim" });
   expect(item(EVIDENCE_PENDING).detail).not.toContain("unavailable");
   // The four items beside it do not wait for the manifest.
@@ -308,11 +308,11 @@ test("a receipt in flight is PENDING, never unavailable: the item words the evid
   // …and when that re-read fails, the old receipt does not stand as current.
   expect(evidenceReadAt({ epoch: 1, read: { phase: "failed" } }, 1)).toEqual({ phase: "failed" });
 
-  // A reading's two members, read together: the stated phase decides; a reading that states none is read by what it holds.
+  // A reading's two members, read together: the stated phase decides; a reading for which no read was asked (null) is read by what it holds.
   expect(evidenceReadOf(null, "pending")).toEqual({ phase: "pending" });
   expect(evidenceReadOf(null, "failed")).toEqual({ phase: "failed" });
   expect(evidenceReadOf(manifest, "answered")).toEqual({ phase: "answered", manifest });
-  expect(evidenceReadOf(manifest, undefined)).toEqual({ phase: "answered", manifest });
-  expect(evidenceReadOf(null, undefined)).toEqual({ phase: "failed" });
+  expect(evidenceReadOf(manifest, null)).toEqual({ phase: "answered", manifest });
+  expect(evidenceReadOf(null, null)).toEqual({ phase: "failed" });
   expect(evidenceReadOf(null, "answered")).toEqual({ phase: "failed" });
 });

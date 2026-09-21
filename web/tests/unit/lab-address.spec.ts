@@ -21,6 +21,7 @@ function reading(overrides: Partial<AddressReading>): AddressReading {
     stress: { phase: "loading" },
     params: { phase: "loading" },
     evidence: null,
+    evidencePhase: "pending",
     age: { seconds: null, unresolved: false, refreshFailed: false },
     reload: () => {},
     lookupRepaired: false,

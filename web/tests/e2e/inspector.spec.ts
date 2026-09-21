@@ -537,9 +537,12 @@ test("trust: a receipt IN FLIGHT is pending, never unavailable — the lookup an
   const receipt = page.getByTestId("inspector-trust-reconcile");
   await expect(receipt).toContainText("Pinned reconcile run");
   await expect(receipt).toContainText("receipt pending");
+  // The pending register, in words for assistive tech too: a read in flight is never "not available".
+  await expect(receipt).toHaveAttribute("data-state", "pending");
+  await expect(receipt).toContainText("pending:");
+  await expect(receipt).not.toContainText("not available");
   await expect(receipt).not.toContainText("unavailable");
   await expect(receipt).not.toContainText("matched");
-  await expect(receipt).toHaveAttribute("data-state", "dim");
   // The four items beside it did not wait for the manifest.
   await expect(page.getByTestId("inspector-trust-computed")).toHaveAttribute("data-state", "ok");
   release();
