@@ -1,9 +1,13 @@
 // The committed scenarios applied to one account (spec 2026-09-15 §5.3
 // "Stress this address"), read into table rows. Cash only; the before/after
-// states are the wire's own — room is cap − debt on each side.
+// states are the wire's own — room is cap − debt on each side. The row's one
+// verdict and its room words are decided here, for the Inspector's table and
+// the Scenarios page's one-address mode alike.
 import type { StressLookup } from "@solvent/client";
+import { humanUsdFull } from "./human-price";
 import { engineName } from "./inspector-headline";
 import { CASH } from "./inspector-position";
+import { UNREADABLE_SCALE } from "./lab-headline";
 import { plainCause } from "./refusal-phrasebook";
 import { isWireDecimal, isWirePopulation } from "./wireGuard";
 
@@ -130,38 +134,93 @@ export function stressReading(lookup: StressLookup, account: string): StressRead
 }
 
 /**
- * One row's "Becomes liquidatable?" judgement, decided once. The gate first: a result the engine did not apply, or a
- * side that is missing or unknowable, earns no verdict word. A projection is then judged by its horizons, never by its
- * `after` (that is the spot, unchanged by construction): an unknowable horizon is a cannot-say that names the horizon;
- * a liquidatable one names the first horizon it happens within; otherwise the account holds through the longest. A spot
- * shock speaks through its flip, and a position liquidatable on both sides is said so — never a "No".
+ * A side's figures are read only when its debt and cap are both present and
+ * non-negative — the Inspector's rule for a position. A negative wire decimal
+ * is a legal string and not a figure: nothing prints from it, the room included.
  */
-export type StressVerdict =
+export function readableSide(side: StressSide | null): { readonly debt: bigint; readonly cap: bigint; readonly room: bigint } | null {
+  if (side === null || side.debt === null || side.cap === null || side.debt < 0n || side.cap < 0n) return null;
+  return { debt: side.debt, cap: side.cap, room: side.cap - side.debt };
+}
+
+/**
+ * A side is computable when its verdict is known and its figures are a
+ * position — the one condition the verdict, the room words, the tiles and the
+ * headline share, so a side one of them refuses yields no figure and no verdict
+ * word anywhere, on the Inspector and on the Scenarios page alike.
+ */
+export function computableSide(side: StressSide | null): ReturnType<typeof readableSide> {
+  return side !== null && side.verdict !== "unknowable" ? readableSide(side) : null;
+}
+
+/** Negative room is worded "over cap by" a positive figure: a minus sign on a dollar figure never prints as room. */
+export function roomWords(room: bigint, decimals: number): string {
+  return room < 0n ? `over cap by ${humanUsdFull(-room, decimals)}` : humanUsdFull(room, decimals);
+}
+
+/**
+ * A side's room words, the one register every room cell and tile shares on both pages: "not computed" for a
+ * missing, unreadable or unknowable side — never a figure beside a refused register or an unknowable verdict; a
+ * negative room "over cap by" a positive figure — never a minus on a dollar figure; the refused scale word where the
+ * position's scale did not pass the guard — a figure prints at no other scale than its own.
+ */
+export function sideRoomWords(side: StressSide | null, decimals: number | null): string {
+  const figures = computableSide(side);
+  if (figures === null) return "not computed";
+  return decimals === null ? UNREADABLE_SCALE : roomWords(figures.room, decimals);
+}
+
+/**
+ * One row's verdict, decided once, for every surface that prints the row: the gate over both sides, then the
+ * projection's horizons, then the spot flip. The Inspector's table, the Scenarios page's headline, its table and its
+ * library word all speak from it, so no two can disagree about the same row. A projection is judged by its horizons,
+ * never by its `after` — that is the spot, unchanged by construction: an unknowable horizon is a refusal that names
+ * the horizon; a liquidatable one names the first horizon it happens within; otherwise the account holds through the
+ * longest horizon. A position liquidatable on both sides is said so — never a "No".
+ */
+export type RowVerdict =
   | { readonly kind: "not-applicable"; readonly reason: string }
-  /** `horizon` is the unknowable horizon when one refused the row; null when a side did. */
-  | { readonly kind: "cannot-say"; readonly horizon: StressHorizon | null }
-  /** `within`: the first horizon a projection flips within; null for a spot shock. `already`: liquidatable before the shock too. */
+  | { readonly kind: "cannot-say"; readonly cause: "not-a-position" | "withheld" | "no-horizon" }
+  | { readonly kind: "cannot-say"; readonly cause: "horizon-unknowable"; readonly horizon: StressHorizon }
   | { readonly kind: "liquidatable"; readonly within: StressHorizon | null; readonly already: boolean }
-  /** `through`: the longest horizon a projection holds through; null for a spot shock. */
   | { readonly kind: "inside"; readonly through: StressHorizon | null };
 
-export function stressVerdict(row: StressRow): StressVerdict {
-  if (!row.applicable) return { kind: "not-applicable", reason: row.reason ?? "not applicable" };
-  // `flips` is null exactly when a side is missing or unknowable: nothing past this line speaks for such a row.
-  if (row.flips === null) return { kind: "cannot-say", horizon: null };
+export function rowVerdict(row: StressRow): RowVerdict {
+  if (!row.applicable) return { kind: "not-applicable", reason: row.reason ?? "the engine gave no reason" };
+  // A side that is not computable — missing, unreadable or unknowable — yields no verdict word in any row kind. The
+  // gate asks both sides as they are, a missing side included, before either arm may speak.
+  const sides = [row.before, row.after];
+  if (sides.some((s) => computableSide(s) === null)) {
+    // Figures that are present but not a position are the truer cause; a missing or unknowable side is withheld.
+    return { kind: "cannot-say", cause: sides.some((s) => s !== null && readableSide(s) === null) ? "not-a-position" : "withheld" };
+  }
   if (row.projection !== null) {
+    const longest = row.projection.reduce<StressHorizon | null>((a, h) => (a === null || h.seconds > a.seconds ? h : a), null);
+    if (longest === null) return { kind: "cannot-say", cause: "no-horizon" };
     const unknowable = row.projection.find((h) => h.verdict === "unknowable");
-    if (unknowable !== undefined) return { kind: "cannot-say", horizon: unknowable };
+    if (unknowable !== undefined) return { kind: "cannot-say", cause: "horizon-unknowable", horizon: unknowable };
     const within = row.projection.find((h) => h.verdict === "liquidatable");
     if (within !== undefined) return { kind: "liquidatable", within, already: false };
-    const longest = row.projection.reduce<StressHorizon | null>((a, h) => (a === null || h.seconds > a.seconds ? h : a), null);
-    // Unreachable: a projection is null when it has no horizons. Kept so an empty list is never "inside".
-    if (longest === null) return { kind: "cannot-say", horizon: null };
     return { kind: "inside", through: longest };
   }
-  if (row.flips) return { kind: "liquidatable", within: null, already: false };
+  // Past the gate both sides are computable, so the reader's flip is a boolean: null is exactly a missing or unknowable side.
+  if (row.flips === true) return { kind: "liquidatable", within: null, already: false };
   if (row.after?.verdict === "liquidatable") return { kind: "liquidatable", within: null, already: true };
   return { kind: "inside", through: null };
+}
+
+/** Why a row earns no verdict word — the hover's words, the same on both pages. A horizon whose duration the guard refused is never named by a length of time. */
+export function cannotSayTitle(verdict: Extract<RowVerdict, { kind: "cannot-say" }>): string {
+  switch (verdict.cause) {
+    case "not-a-position":
+      return "the shocked figures are not a position";
+    case "withheld":
+      return "one side of the comparison is withheld or unknowable";
+    case "no-horizon":
+      return "the projection carries no horizon";
+    case "horizon-unknowable":
+      return isWirePopulation(verdict.horizon.seconds) ? `the ${horizonLabel(verdict.horizon.seconds)} horizon carries no verdict` : "a horizon with an unreadable duration carries no verdict";
+  }
 }
 
 /** The verdict's cell: its words, the pill tone it wears (null for plain text), and the demoted detail for the hover. */
@@ -171,21 +230,13 @@ export interface StressVerdictWords {
   readonly title: string | null;
 }
 
-export function stressVerdictWords(verdict: StressVerdict): StressVerdictWords {
+/** The Inspector's "Becomes liquidatable?" cell, spoken from `rowVerdict`: a projection answers only in its horizons' terms, never a bare "No". */
+export function stressVerdictWords(verdict: RowVerdict): StressVerdictWords {
   switch (verdict.kind) {
     case "not-applicable":
       return { text: verdict.reason, tone: null, title: null };
     case "cannot-say":
-      return {
-        text: "Cannot say",
-        tone: "refused",
-        title:
-          verdict.horizon === null
-            ? "one side of the comparison is withheld or unknowable"
-            : isWirePopulation(verdict.horizon.seconds)
-              ? `the ${horizonLabel(verdict.horizon.seconds)} horizon carries no verdict`
-              : "a horizon with an unreadable duration carries no verdict",
-      };
+      return { text: "Cannot say", tone: "refused", title: cannotSayTitle(verdict) };
     case "liquidatable":
       if (verdict.within !== null) return { text: `Within ${horizonLabel(verdict.within.seconds)}`, tone: "warn", title: null };
       return verdict.already

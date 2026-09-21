@@ -1,6 +1,6 @@
 import { KpiTile, type Tone } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { signedCount } from "@/lib/lab-headline";
+import { newlyTone, signedCount } from "@/lib/lab-headline";
 import type { EngineReading } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import { bookMoney, signedBookMoney } from "./money";
@@ -20,7 +20,10 @@ function refusedWord(reading: EngineReading | null): string {
   }
 }
 
-/** Newly liquidatable · Liquidatable debt Δ · Bad debt at liquidation Δ · Accounts moved — the same four in every state (plan R2). */
+/**
+ * Newly liquidatable · Liquidatable debt Δ · Bad debt at liquidation Δ · Accounts moved — the same four in every state (plan R2).
+ * The newly tile wears the headline's own tone (`newlyTone`): a net at or below zero beside crossings or band changes is never ok.
+ */
 export function LabTiles({
   reading,
   pending,
@@ -46,7 +49,7 @@ export function LabTiles({
         sub={sub(
           `accounts · was ${groupInt(r?.beforeEligible ?? 0)}, now ${groupInt(r?.afterEligible ?? 0)}`,
         )}
-        tone={tone(r !== null && r.newly > 0 ? "crit" : "ok")}
+        tone={r === null ? "refused" : newlyTone(r.newly, r.heat)}
         pending={pending}
       />
       <KpiTile

@@ -7,6 +7,7 @@ import { engineName } from "./inspector-headline";
 import { LEGACY } from "./inspector-position";
 import type { CompareRow, CompareView } from "./lab-compare";
 import type { HeatmapView } from "./lab-transitions";
+import type { Banner, HeldCondition, Retained } from "./lab-view";
 import { formatTenths } from "./percent";
 import { groupInt, joinAnd } from "./prose";
 
@@ -86,7 +87,21 @@ function nearSentence(h: HeatmapView): string {
 /** The wire's net below zero, as a count of accounts: "{n} fewer Cash accounts are liquidatable", in the singular when it is one. */
 const fewer = (n: number): string => `${groupInt(n)} fewer Cash account${n === 1 ? " is" : "s are"} liquidatable`;
 
+/**
+ * The tone of the newly-liquidatable figure, the headline's and its tile's alike, so the two can never disagree: crit
+ * when the net is above zero; at or below zero the net says nothing of the accounts that crossed the cap while others
+ * left it, so crossings in the lanes are warn; fewer liquidatable with none crossing is ok; a net of zero is ok only
+ * when no account changes band, and warn when any does.
+ */
+export function newlyTone(newly: number, heat: HeatmapView | null): "crit" | "warn" | "ok" {
+  if (newly > 0) return "crit";
+  if ((heat?.crossedCap ?? 0) > 0) return "warn";
+  if (newly < 0) return "ok";
+  return (heat?.bandChanged ?? 0) === 0 ? "ok" : "warn";
+}
+
 export function resultHeadline(f: ResultFigures): LabHeadline {
+  const tone = newlyTone(f.newly, f.heat);
   const movement =
     f.heat === null
       ? f.heatReason === null
@@ -95,20 +110,20 @@ export function resultHeadline(f: ResultFigures): LabHeadline {
       : `${movementSentence(f.heat)}${nearSentence(f.heat)}`;
   const dek = `${badDebtSentence(f)}${movement}`;
   if (f.newly > 0 && f.deltaEligibleDebt > 0n) {
-    return { emphasis: `${humanUsd(f.deltaEligibleDebt, f.decimals)} more Cash debt becomes liquidatable,`, rest: `across ${accounts(f.newly)}.`, tone: "crit", dek };
+    return { emphasis: `${humanUsd(f.deltaEligibleDebt, f.decimals)} more Cash debt becomes liquidatable,`, rest: `across ${accounts(f.newly)}.`, tone, dek };
   }
-  if (f.newly > 0) return { emphasis: `${accounts(f.newly)} become${f.newly === 1 ? "s" : ""} liquidatable under ${f.label}.`, rest: "", tone: "crit", dek };
+  if (f.newly > 0) return { emphasis: `${accounts(f.newly)} become${f.newly === 1 ? "s" : ""} liquidatable under ${f.label}.`, rest: "", tone, dek };
   // The wire's count is a NET: at or below zero it says nothing of the accounts that crossed the cap while others left
   // it. Where the merged lanes show crossings, the net and the gross are both stated, and neither is worded as a "no".
   const crossed = f.heat?.crossedCap ?? 0;
   if (crossed > 0) {
     const net = f.newly === 0 ? "no more Cash accounts are liquidatable" : fewer(-f.newly);
-    return { emphasis: `Net, ${net} under ${f.label},`, rest: `though ${accounts(crossed)} cross${crossed === 1 ? "es" : ""} the cap.`, tone: "warn", dek };
+    return { emphasis: `Net, ${net} under ${f.label},`, rest: `though ${accounts(crossed)} cross${crossed === 1 ? "es" : ""} the cap.`, tone, dek };
   }
-  if (f.newly < 0) return { emphasis: `${fewer(-f.newly)} under ${f.label}.`, rest: "", tone: "ok", dek };
+  if (f.newly < 0) return { emphasis: `${fewer(-f.newly)} under ${f.label}.`, rest: "", tone, dek };
   const moves = f.heat?.bandChanged ?? 0;
-  if (moves === 0) return { emphasis: `No Cash account changes band under ${f.label}.`, rest: "", tone: "ok", dek };
-  return { emphasis: `No Cash account becomes liquidatable under ${f.label},`, rest: `but ${groupInt(moves)} change${moves === 1 ? "s" : ""} band.`, tone: "warn", dek };
+  if (moves === 0) return { emphasis: `No Cash account changes band under ${f.label}.`, rest: "", tone, dek };
+  return { emphasis: `No Cash account becomes liquidatable under ${f.label},`, rest: `but ${groupInt(moves)} change${moves === 1 ? "s" : ""} band.`, tone, dek };
 }
 
 export function notRunHeadline(def: { label: string; description: string; path_assumption: string; shocks: number }): LabHeadline {
@@ -177,6 +192,56 @@ export function failureHeadline(kind: FailureKind, d: FailureDetail): LabHeadlin
       return refused(`The service answered ${String(d.status)}.`, sentence(d.message ?? "without the contract's error envelope"));
     case "refused-locally":
       return refused("Nothing was sent.", sentence(d.message ?? "the request was refused before dispatch"));
+  }
+}
+
+/** A failure's own words inside a sentence about what it left standing: its emphasis, its rest where it has one, its dek. */
+const failureWords = (failure: LabHeadline | null): string =>
+  failure === null ? "the service gave no reason." : [failure.emphasis, failure.rest, failure.dek].filter((part) => part !== "").join(" ");
+
+/**
+ * A re-run that failed over what it did not replace, in one shape for the page's two actions: the action, the
+ * failure's own words, then what stands below and for which batch. A computed result is never replaced by a failure.
+ */
+const rerunFailedLine = (action: "Run" | "Compare", failure: LabHeadline | null, stands: string): string => `${action} again failed — ${failureWords(failure)} ${stands}`;
+
+/** A failed Compare over the comparison it left standing: the failure named, and the batch the dots below are for. */
+export const compareRerunFailedLine = (failure: LabHeadline, batchId: number): string =>
+  rerunFailedLine("Compare", failure, `The comparison below stands for batch ${groupInt(batchId)}.`);
+
+export interface StaleBannerInput {
+  readonly kind: Exclude<Banner, null>;
+  readonly skew: readonly string[];
+  /** The batch of the result the banner sits on; null only where no result is shown. */
+  readonly batchId: number | null;
+  readonly failure: LabHeadline | null;
+  readonly heldCondition: HeldCondition;
+  readonly retained: Retained | null;
+}
+
+/**
+ * The banner's sentence. A result for a previous input, a superseded batch, or a re-run that failed keeps its
+ * figures, and the banner says which — and, when a failure left a held result standing, the held result's own
+ * condition beside it. A retained body the page does not show (its definition changed) is disclosed, never mistaken
+ * for the answer. A result is never silently replaced.
+ */
+export function staleBannerLine(b: StaleBannerInput): string {
+  const superseded = `${b.batchId === null ? "Its batch" : `Batch ${groupInt(b.batchId)}`} has been superseded: a newer complete batch exists.`;
+  const stale = `Results for a previous input: the listing's ${joinAnd(b.skew)} changed since this run.`;
+  switch (b.kind) {
+    case "superseded":
+      return `${superseded} This result stands for the batch it names.`;
+    case "stale-input":
+      return `${stale} This result stands for the definition it was computed under.`;
+    case "rerun-failed": {
+      const stands = `The result below stands for ${b.batchId === null ? "the batch it names" : `batch ${groupInt(b.batchId)}`}.`;
+      const condition = b.heldCondition === "superseded" ? ` ${superseded}` : b.heldCondition === "stale-input" ? ` ${stale}` : "";
+      return `${rerunFailedLine("Run", b.failure, stands)}${condition}`;
+    }
+    case "retained-refused":
+      return b.retained === null
+        ? "A result is retained but not shown: its definition changed since it was computed. The failure above is this request's own."
+        : `A result for batch ${groupInt(b.retained.batchId)} is retained but not shown: the definition's ${joinAnd(b.retained.skew)} changed since it was computed. The failure above is this request's own.`;
   }
 }
 

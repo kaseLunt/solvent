@@ -7,6 +7,7 @@ import type { ReceivedAt } from "./freshness";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import type { LoadPhase } from "./inspector-view";
+import { classifyRunBookEnvelope } from "./lab-classify";
 import { compareRows, setMembership, type CompareView } from "./lab-compare";
 import { readEngine, type EngineReading } from "./lab-engine";
 import {
@@ -138,28 +139,32 @@ function definitionChips(def: ScenarioDefinition, configVersion: string): LabChi
 }
 
 function enginesChip(run: LabRunBook, cash: EngineReading): LabChip {
-  const served = servedEngines(run).map((e) => engineName(e.engine));
-  const withheld = excludedEngines(run).map((e) => `${engineName(e.engine)} withheld`);
+  const served = run.engines.map((e) => engineName(e.engine));
+  const withheld = run.excluded_engines.map((e) => `${engineName(e.engine)} withheld`);
   const parts = [...(served.length > 0 ? [joinAnd(served)] : []), ...withheld];
   return { label: "Engines", value: parts.join(" · "), tone: withheld.length > 0 || cash.kind === "withheld" ? "warn" : undefined };
 }
 
-/** The envelope's two lists, read only when they are lists: a body missing one prints no engine from it, and `readEngine` names the field. */
-function servedEngines(run: LabRunBook): LabRunBook["engines"] {
-  const value: unknown = run.engines;
-  return Array.isArray(value) ? run.engines : [];
-}
-function excludedEngines(run: LabRunBook): LabRunBook["excluded_engines"] {
-  const value: unknown = run.excluded_engines;
-  return Array.isArray(value) ? run.excluded_engines : [];
-}
+/** A classifier's field names as the contradiction's reasons: each field, outside the wire contract. */
+const outsideContract = (fields: readonly string[]): string[] => fields.map((f) => `${f} is outside the wire contract`);
 
 function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunBook, receivedAt: ReceivedAt): BookWorkspace {
+  // The envelope first, before any member of it is read: a body whose envelope is outside the contract is the
+  // contradictory state naming every field, and nothing of it is carried — no run for the drawer or the age to
+  // read, no identity, the definition's own chips. Both engines' readings refuse by the same names.
+  const envelope = classifyRunBookEnvelope(run);
+  if (envelope.length > 0) {
+    return {
+      ...emptyBook("contradictory", contradictoryHeadline(def.label, outsideContract(envelope)), def, definitionChips(def, configVersion)),
+      cash: readEngine(run, CASH, def),
+      legacy: def.engines.includes(LEGACY) ? readEngine(run, LEGACY, def) : null,
+    };
+  }
   const skew = definitionSkew(def, configVersion, run);
   const superseded = run.batch.supersession.superseded;
   const kicker = `${def.label} · Cash book`;
   // The answered engines, distinct and in wire order; a withheld engine is a refusal, never an answer.
-  const identity: ResultIdentity = { scope: "book", batchId: run.batch.id, configVersion: run.scenario_config_version, engines: [...new Set(servedEngines(run).map((e) => e.engine))], servedAt: run.served_at };
+  const identity: ResultIdentity = { scope: "book", batchId: run.batch.id, configVersion: run.scenario_config_version, engines: [...new Set(run.engines.map((e) => e.engine))], servedAt: run.served_at };
   const cash = readEngine(run, CASH, def);
   const legacy = def.engines.includes(LEGACY) ? readEngine(run, LEGACY, def) : null;
   const chips: LabChip[] = [
@@ -184,7 +189,7 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
     case "contradictory":
       return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, cash.reasons) };
     case "unreadable":
-      return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, cash.fields.map((f) => `${f} is outside the wire contract`)) };
+      return { ...base, state: "contradictory", banner, headline: contradictoryHeadline(def.label, outsideContract(cash.fields)) };
     case "result": {
       const r = cash.result;
       const headline = resultHeadline({

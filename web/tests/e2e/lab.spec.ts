@@ -925,6 +925,8 @@ test("a net count at or below zero states the net and the gross: the headline na
   await expect(tile(page, "newly")).toContainText("−3");
   await expect(tile(page, "newly")).not.toContainText("-3");
   await expect(tile(page, "newly")).toContainText("was 49, now 167");
+  // The tile wears the headline's own tone: a net below zero beside 118 crossings is warn, never the ok tone.
+  await expect(tile(page, "newly")).toHaveAttribute("data-tone", "warn");
   await expect(row(page, "eth_minus_30")).toContainText("Net −3 accounts · 118 cross the cap");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "result");
   await expect(page.locator("main")).not.toContainText("No Cash account becomes liquidatable");
@@ -1072,4 +1074,111 @@ test("two asks in one tick are one POST: a second click before the first has com
   });
   await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
   expect(counts.sets()).toBe(1);
+});
+
+test("the envelope is classified before any read: a 2xx run-book without its batch is the contradictory state naming the field — nothing of the body printed, no zero, the route still standing", async ({ page }) => {
+  // `undefined` does not survive JSON: the body arrives with no `batch` member at all.
+  await mockLab(page, { runBook: { ...DEMO_RUN_BOOK_ETH, batch: undefined } });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
+  await expect(headline(page)).toHaveText("The result for ETH -30 percent contradicts itself.");
+  await expect(dek(page)).toHaveText("batch is outside the wire contract. Nothing from it is drawn.");
+  for (const key of ["newly", "debt", "baddebt", "moved"]) {
+    await expect(tile(page, key)).toContainText("—");
+    await expect(tile(page, key)).toContainText("contradictory");
+    await expect(tile(page, key)).toHaveAttribute("data-tone", "refused");
+  }
+  // Nothing of the body is printed: no batch chip, no age, no drawer onto a body that cannot be read, no grid, no movers.
+  await expect(chip(page, "Result for batch")).toHaveCount(0);
+  await expect(chip(page, "Computed")).toHaveCount(0);
+  await expect(chip(page, "Engines")).toHaveCount(0);
+  await expect(chip(page, "Scenario")).toContainText("eth_minus_30 · v1");
+  await expect(page.getByTestId("lab-drawer")).toHaveCount(0);
+  await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
+  await expect(page.getByTestId("lab-movers")).toHaveCount(0);
+  await expect(page.getByTestId("lab-banner")).toHaveCount(0);
+  // The legacy fold refuses by the same name; the library's word follows.
+  await expect(page.getByTestId("lab-legacy-kpi-newly")).toContainText("contradictory");
+  await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
+  await expectNoCashZero(page);
+  // The route stays live: the shell and the library are still on the page, and the run can be asked again.
+  await expect(page.getByRole("banner")).toBeVisible();
+  await expect(page.getByTestId("lab-run")).toBeEnabled();
+  // A list that is not one and a coverage that is not an object are named the same way, every fault, in wire order.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page, { runBook: { ...DEMO_RUN_BOOK_ETH, shocks: "none", coverage: null } });
+  await page.goto("/lab");
+  await page.getByTestId("lab-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
+  await expect(dek(page)).toHaveText("shocks is outside the wire contract; coverage is outside the wire contract. Nothing from it is drawn.");
+  await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
+});
+
+test("two consecutive answers that do not read keep the last result that read: a malformed body never moves into the hold, and the banner names the batch that stands", async ({ page }) => {
+  await mockLab(page);
+  await page.goto("/lab");
+  await runIt(page);
+  await expect(chip(page, "Result for batch")).toContainText("18,251");
+  // Both bodies that follow name another batch, so the batch the banner names can only be the first result's.
+  const later = { ...DEMO_RUN_BOOK_ETH.batch, id: 18252 };
+  const malformed = { ...withCash((e) => ({ ...e, eligible_debt_delta_usd: "1e6" })), batch: later };
+  const noCoverage = { ...DEMO_RUN_BOOK_ETH, batch: later, coverage: undefined };
+  let answers = 0;
+  await page.route("**/v1/scenarios/*/run-book", (route) => {
+    if (route.request().method() === "OPTIONS") return preflight(route);
+    answers += 1;
+    return json(route, answers === 1 ? malformed : noCoverage, 200, POST_CORS);
+  });
+  const banner = page.getByTestId("lab-banner");
+  await page.getByTestId("lab-run").click();
+  await expect(banner).toContainText("eligible_debt_delta_usd is outside the wire contract.");
+  await expect(banner).toContainText("The result below stands for batch 18,251.");
+  // The second answer that does not read: the hold is still the result that read, never the first malformed body.
+  await page.getByTestId("lab-banner-rerun").click();
+  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. coverage is outside the wire contract. Nothing from it is drawn.");
+  await expect(banner).toContainText("The result below stands for batch 18,251.");
+  await expect(banner).not.toContainText("18,252");
+  expect(answers).toBe(2);
+  await expect(banner).toHaveAttribute("data-kind", "rerun-failed");
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  await expect(chip(page, "Result for batch")).toContainText("18,251");
+  await expect(headline(page)).toContainText("$1.2M more Cash debt becomes liquidatable");
+  await expect(tile(page, "newly")).toContainText("118");
+  await expect(tile(page, "debt")).toContainText("+$1.2M");
+  await expect(page.getByTestId("lab-heatmap")).toBeVisible();
+  await expect(page.getByTestId("lab-movers")).toBeVisible();
+  await expect(row(page, "eth_minus_30")).toContainText("+$1.2M liquidatable · 118 accounts");
+  await expect(row(page, "eth_minus_30")).not.toContainText("Unreadable");
+});
+
+test("compare: a set whose envelope is outside the contract is a failed Compare naming the field — nothing of it drawn; over a comparison already on the page, that comparison stands", async ({ page }) => {
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  // `undefined` does not survive JSON: the first body arrives with no `evaluation` member, the second with no `batch`.
+  await mockLab(page, { setVerbatim: { ...shapeSet(DEMO_RUN_BOOK_SET, asked), evaluation: undefined } });
+  await page.goto(`/lab?scenarios=${asked.join(",")}`);
+  const state = page.getByTestId("lab-compare-state");
+  await expect(state).toHaveAttribute("data-kind", "failed");
+  await expect(state).toHaveText("The set does not answer the request. Faults: evaluation is outside the wire contract. Nothing from it is drawn.");
+  await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
+  await expect(page.getByTestId("lab-compare-caption")).toHaveCount(0);
+  await expect(page.getByTestId("lab-compare")).toBeEnabled();
+  // The route stays live, and a comparison that answers is drawn.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await mockLab(page);
+  await page.getByTestId("lab-compare").click();
+  await expect(state).toHaveAttribute("data-kind", "ok");
+  await expect(page.getByTestId("lab-dotplot").locator("circle")).toHaveCount(2);
+  // A later body without its batch fails by name, and the comparison it had stands for the batch it names.
+  await page.route("**/v1/scenarios/run-book-set", (route) =>
+    route.request().method() === "OPTIONS" ? preflight(route) : json(route, { ...shapeSet(DEMO_RUN_BOOK_SET, asked), batch: undefined }, 200, POST_CORS),
+  );
+  await page.getByTestId("lab-compare").click();
+  await expect(state).toHaveAttribute("data-kind", "failed");
+  await expect(state).toHaveAttribute("data-held", "true");
+  await expect(state).toHaveText(
+    "Compare again failed — The set does not answer the request. Faults: batch is outside the wire contract. Nothing from it is drawn. The comparison below stands for batch 18,251.",
+  );
+  await expect(page.getByTestId("lab-dotplot").locator("circle")).toHaveCount(2);
+  await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
 });

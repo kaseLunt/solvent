@@ -4,9 +4,10 @@
 import { expect, test } from "@playwright/test";
 import { lookup } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
+import { sideRoomWords } from "../../lib/address-stress";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { deriveInspectorView } from "../../lib/inspector-view";
-import { addressWorkspace, rowOutcome, rowVerdictWord, sideRoomWords } from "../../lib/lab-address";
+import { addressWorkspace, rowOutcome, rowVerdictWord } from "../../lib/lab-address";
 import { DEMO_ADDRESS_NEAR, DEMO_ADDRESS_REFUSED, DEMO_NEAR_ADDR, DEMO_REFUSED_ADDR, DEMO_STRESS_NEAR } from "../fixtures/demo";
 import { ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, NOT_FOUND_ADDR, UNKNOWABLE_ADDR } from "../fixtures/inspector";
 

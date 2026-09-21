@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
-import { horizonLabel, stressReading, stressVerdict, stressVerdictWords, UNREADABLE_HORIZON, type StressHorizon, type StressRow } from "../../lib/address-stress";
+import { horizonLabel, rowVerdict, sideRoomWords, stressReading, stressVerdictWords, UNREADABLE_HORIZON, type StressHorizon, type StressRow } from "../../lib/address-stress";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const load = <T,>(name: string): T => JSON.parse(readFileSync(path.join(here, "..", "fixtures", name), "utf8")) as T;
@@ -164,35 +164,37 @@ function projectionRow(horizons: readonly { seconds: number; verdict: StressHori
   };
 }
 
-test("stressVerdict: an unknowable horizon is a cannot-say that names it — never 'No'; a liquidatable one names the first horizon it happens within; otherwise inside through the longest", () => {
+test("rowVerdict, in the Inspector's words: an unknowable horizon is a cannot-say that names it — never 'No'; a liquidatable one names the first horizon it happens within; otherwise inside through the longest", () => {
   // The defect: before/after not liquidatable, the 30d horizon refined to unknowable, the 90d one not-liquidatable — rendered "No".
-  const unknowable = stressVerdict(projectionRow([{ seconds: 2_592_000, verdict: "unknowable" }, { seconds: 7_776_000, verdict: "not-liquidatable" }]));
-  expect(unknowable).toEqual({ kind: "cannot-say", horizon: { seconds: 2_592_000, extraInterest: 7926575n, verdict: "unknowable" } });
+  const unknowable = rowVerdict(projectionRow([{ seconds: 2_592_000, verdict: "unknowable" }, { seconds: 7_776_000, verdict: "not-liquidatable" }]));
+  expect(unknowable).toEqual({ kind: "cannot-say", cause: "horizon-unknowable", horizon: { seconds: 2_592_000, extraInterest: 7926575n, verdict: "unknowable" } });
   expect(stressVerdictWords(unknowable)).toEqual({ text: "Cannot say", tone: "refused", title: "the 30d horizon carries no verdict" });
   // The unknowable horizon refuses the row even when a later horizon would flip it: no verdict word is earned past an unknown.
-  const unknownThenFlip = stressVerdict(projectionRow([{ seconds: 2_592_000, verdict: "unknowable" }, { seconds: 7_776_000, verdict: "liquidatable" }]));
+  const unknownThenFlip = rowVerdict(projectionRow([{ seconds: 2_592_000, verdict: "unknowable" }, { seconds: 7_776_000, verdict: "liquidatable" }]));
   expect(unknownThenFlip.kind).toBe("cannot-say");
-  const within = stressVerdict(projectionRow([{ seconds: 2_592_000, verdict: "not-liquidatable" }, { seconds: 7_776_000, verdict: "liquidatable" }]));
+  const within = rowVerdict(projectionRow([{ seconds: 2_592_000, verdict: "not-liquidatable" }, { seconds: 7_776_000, verdict: "liquidatable" }]));
   expect(within).toMatchObject({ kind: "liquidatable", within: { seconds: 7_776_000 }, already: false });
   expect(stressVerdictWords(within)).toEqual({ text: "Within 90d", tone: "warn", title: null });
   // The first horizon it happens within, in wire order, not the longest.
-  const first = stressVerdict(projectionRow([{ seconds: 7_776_000, verdict: "liquidatable" }, { seconds: 2_592_000, verdict: "liquidatable" }]));
+  const first = rowVerdict(projectionRow([{ seconds: 7_776_000, verdict: "liquidatable" }, { seconds: 2_592_000, verdict: "liquidatable" }]));
   expect(first).toMatchObject({ kind: "liquidatable", within: { seconds: 7_776_000 } });
-  const inside = stressVerdict(projectionRow([{ seconds: 2_592_000, verdict: "not-liquidatable" }, { seconds: 7_776_000, verdict: "not-liquidatable" }]));
+  const inside = rowVerdict(projectionRow([{ seconds: 2_592_000, verdict: "not-liquidatable" }, { seconds: 7_776_000, verdict: "not-liquidatable" }]));
   expect(inside).toMatchObject({ kind: "inside", through: { seconds: 7_776_000 } });
   expect(stressVerdictWords(inside)).toEqual({ text: "Not within 90d", tone: null, title: "a projection speaks only through its longest horizon" });
   // A side missing or unknowable gates the row before its horizons are consulted.
-  const sideUnknown = { ...projectionRow([{ seconds: 2_592_000, verdict: "liquidatable" }]), flips: null };
-  expect(stressVerdict(sideUnknown)).toEqual({ kind: "cannot-say", horizon: null });
-  expect(stressVerdictWords(stressVerdict(sideUnknown))).toEqual({ text: "Cannot say", tone: "refused", title: "one side of the comparison is withheld or unknowable" });
+  const flipping = projectionRow([{ seconds: 2_592_000, verdict: "liquidatable" }]);
+  const sideUnknown = { ...flipping, after: { ...flipping.after!, verdict: "unknowable" as const }, flips: null };
+  expect(rowVerdict(sideUnknown)).toEqual({ kind: "cannot-say", cause: "withheld" });
+  expect(stressVerdictWords(rowVerdict(sideUnknown))).toEqual({ text: "Cannot say", tone: "refused", title: "one side of the comparison is withheld or unknowable" });
+  expect(rowVerdict({ ...flipping, before: null, flips: null })).toEqual({ kind: "cannot-say", cause: "withheld" });
   // Spot shocks: a flip is Yes; liquidatable on both sides is said, never "No"; a non-flip is No; not applicable prints its reason.
   const spot = { ...projectionRow([]), projection: null, projectionNote: null };
-  expect(stressVerdictWords(stressVerdict({ ...spot, flips: true }))).toEqual({ text: "Yes", tone: "crit", title: null });
+  expect(stressVerdictWords(rowVerdict({ ...spot, flips: true }))).toEqual({ text: "Yes", tone: "crit", title: null });
   const already = { ...spot, before: { ...spot.before!, verdict: "liquidatable" as const }, after: { ...spot.after!, verdict: "liquidatable" as const }, flips: false };
-  expect(stressVerdict(already)).toEqual({ kind: "liquidatable", within: null, already: true });
-  expect(stressVerdictWords(stressVerdict(already))).toEqual({ text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" });
-  expect(stressVerdictWords(stressVerdict(spot))).toEqual({ text: "No", tone: null, title: null });
-  expect(stressVerdictWords(stressVerdict({ ...spot, applicable: false, reason: "not evaluated for this account", flips: null }))).toEqual({
+  expect(rowVerdict(already)).toEqual({ kind: "liquidatable", within: null, already: true });
+  expect(stressVerdictWords(rowVerdict(already))).toEqual({ text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" });
+  expect(stressVerdictWords(rowVerdict(spot))).toEqual({ text: "No", tone: null, title: null });
+  expect(stressVerdictWords(rowVerdict({ ...spot, applicable: false, reason: "not evaluated for this account", flips: null }))).toEqual({
     text: "not evaluated for this account",
     tone: null,
     title: null,
@@ -227,15 +229,51 @@ test("a horizon whose duration fails the population guard is an unknowable horiz
     [60.5, "unknowable"],
     [7776000, "not-liquidatable"],
   ]);
-  const verdict = stressVerdict(row);
-  expect(verdict).toMatchObject({ kind: "cannot-say", horizon: { seconds: 60.5, verdict: "unknowable" } });
+  const verdict = rowVerdict(row);
+  expect(verdict).toMatchObject({ kind: "cannot-say", cause: "horizon-unknowable", horizon: { seconds: 60.5, verdict: "unknowable" } });
   expect(stressVerdictWords(verdict)).toEqual({ text: "Cannot say", tone: "refused", title: "a horizon with an unreadable duration carries no verdict" });
   // A negative duration is the same refusal; a whole one keeps the wire's verdict.
   const negative = { ...malformed, scenarios: [{ ...scenario, results: [{ ...malformed.scenarios[0]!.results[0]!, projection: { ...result.projection, horizons: [{ ...result.projection.horizons[0]!, horizon_seconds: -1, becomes_liquidatable: false }] } }] }] };
   const n = stressReading(lookup(negative), STRESS_DM.address);
   if (n.kind !== "rows") throw new Error(n.kind);
   expect(n.rows[0]?.projection?.[0]?.verdict).toBe("unknowable");
-  expect(stressVerdict(n.rows[0]!).kind).toBe("cannot-say");
+  expect(rowVerdict(n.rows[0]!).kind).toBe("cannot-say");
+});
+
+test("the negative-figure gate is the one judge's, so it holds on the Inspector too: a side whose figures are not a position earns no verdict word — never the wire's 'No' or 'Yes' — and no room", () => {
+  const spot = { ...projectionRow([]), projection: null, projectionNote: null };
+  // A negative debt is a legal wire decimal and not a figure: the reader's flip said false, and the row is still a cannot-say.
+  const negativeDebt = { ...spot, after: { ...spot.after!, debt: -1n, room: 5012500001n } };
+  expect(rowVerdict(negativeDebt)).toEqual({ kind: "cannot-say", cause: "not-a-position" });
+  expect(stressVerdictWords(rowVerdict(negativeDebt))).toEqual({ text: "Cannot say", tone: "refused", title: "the shocked figures are not a position" });
+  expect(sideRoomWords(negativeDebt.after, 6)).toBe("not computed");
+  // The same for a negative cap, on either side, and whatever the wire's flip claims.
+  const negativeCap = { ...spot, before: { ...spot.before!, cap: -5n, room: -4822000005n }, flips: true };
+  expect(stressVerdictWords(rowVerdict(negativeCap)).text).toBe("Cannot say");
+  expect(sideRoomWords(negativeCap.before, 6)).toBe("not computed");
+  // A projection is gated the same way before its horizons are read.
+  const projected = projectionRow([{ seconds: 2_592_000, verdict: "liquidatable" }]);
+  expect(rowVerdict({ ...projected, before: { ...projected.before!, debt: -1n } })).toEqual({ kind: "cannot-say", cause: "not-a-position" });
+  // An unreadable figure is the same refusal as a negative one.
+  expect(rowVerdict({ ...spot, after: { ...spot.after!, cap: null, room: null } })).toEqual({ kind: "cannot-say", cause: "not-a-position" });
+  // An inapplicable row that gives no reason says so, in the same words on both pages.
+  expect(stressVerdictWords(rowVerdict({ ...spot, applicable: false, reason: null, flips: null }))).toEqual({ text: "the engine gave no reason", tone: null, title: null });
+});
+
+test("sideRoomWords: the room cell's one register on both pages — a negative room is 'over cap by' a positive figure, never a minus on a dollar figure; no room prints beside an unknowable verdict", () => {
+  const side = { debt: 4822000000n, cap: 5012500000n, room: 190500000n, verdict: "not-liquidatable" as const };
+  expect(sideRoomWords(side, 6)).toBe("$190.50");
+  // The demo account under ETH -30 percent: cap 3,752.50 under a debt of 4,822.
+  const over = { debt: 4822000000n, cap: 3752500000n, room: -1069500000n, verdict: "liquidatable" as const };
+  expect(sideRoomWords(over, 6)).toBe("over cap by $1,069");
+  expect(sideRoomWords(over, 6)).not.toMatch(/[-−]/);
+  // An unknowable verdict refuses the room, whatever figures ride beside it; so does a missing side.
+  expect(sideRoomWords({ ...side, verdict: "unknowable" }, 6)).toBe("not computed");
+  expect(sideRoomWords({ ...over, verdict: "unknowable" }, 6)).toBe("not computed");
+  expect(sideRoomWords(null, 6)).toBe("not computed");
+  // A figure prints at no other scale than its own.
+  expect(sideRoomWords(side, null)).toBe("unreadable scale");
+  expect(sideRoomWords(null, null)).toBe("not computed");
 });
 
 test("the reading carries the stress response's own batch on every arm; an id the population guard refuses names no batch", () => {

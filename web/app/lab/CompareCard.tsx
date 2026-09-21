@@ -7,7 +7,7 @@ import {
   type DotPlotRow,
 } from "@/components/kit";
 import type { CompareView } from "@/lib/lab-compare";
-import { compareCaption, compareHeadline, compareRowWords } from "@/lib/lab-headline";
+import { compareCaption, compareHeadline, compareRerunFailedLine, compareRowWords } from "@/lib/lab-headline";
 import type { CompareState } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import { useMeasuredWidth } from "@/lib/useMeasuredWidth";
@@ -49,7 +49,7 @@ function finding(state: CompareState): string {
       // A failed Compare over a held comparison names the failure and what stands beneath it; with nothing held, the failure is the state.
       return state.held === null
         ? `${state.headline.emphasis} ${state.headline.dek}`
-        : `Compare again failed — ${state.headline.emphasis} ${state.headline.dek} The comparison below stands for batch ${groupInt(state.held.cash.batchId)}.`;
+        : compareRerunFailedLine(state.headline, state.held.cash.batchId);
     case "ok":
       return compareHeadline(state.cash);
   }

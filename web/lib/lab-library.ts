@@ -8,6 +8,7 @@
 import type { components } from "@solvent/client";
 import { engineName } from "./inspector-headline";
 import { CASH } from "./inspector-position";
+import { classifyRunBookEnvelope } from "./lab-classify";
 import { readEngine } from "./lab-engine";
 import { signedCount, signedUsd } from "./lab-headline";
 import { groupInt, joinAnd } from "./prose";
@@ -90,6 +91,8 @@ export function outcomeLine(record: RunRecord | undefined, definition: ScenarioD
 }
 
 function cashOutcome(response: LabRunBook, definition: ScenarioDefinition, configVersion: string): LibraryOutcome {
+  // The envelope first, before the skew reads its lists: a body whose envelope is outside the contract is unreadable, whatever else it says.
+  if (classifyRunBookEnvelope(response).length > 0) return failed("Unreadable");
   // A result computed under another version of the definition is not this definition's result.
   if (definitionSkew(definition, configVersion, response).includes("version")) return { key: "definition-changed", text: "Definition changed", tone: "refused" };
   const r = readEngine(response, CASH, definition);

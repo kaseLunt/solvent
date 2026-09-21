@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 import {
   compareCaption,
   compareHeadline,
+  compareRerunFailedLine,
   compareRowWords,
   contradictoryHeadline,
   definitionChangedHeadline,
@@ -11,6 +12,7 @@ import {
   failureHeadline,
   LISTING_LOADING,
   listingUnavailableHeadline,
+  newlyTone,
   notCoveredHeadline,
   notRunHeadline,
   resultHeadline,
@@ -18,6 +20,7 @@ import {
   setMembershipHeadline,
   signedCount,
   signedUsd,
+  staleBannerLine,
   withheldHeadline,
 } from "../../lib/lab-headline";
 import { compareRows } from "../../lib/lab-compare";
@@ -247,4 +250,66 @@ test("compareRowWords and compareCaption: the value column's words are the lib's
   expect(compareCaption({ ...two, freshness: "superseded" })).toBe("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251 — superseded).");
   expect(compareCaption({ ...two, freshness: "none_servable" })).toBe("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251 — no batch was servable when probed).");
   expect(compareCaption(compareRows(demoSetFor(TWO), "aave_v3_etherfi"))).toBe("Change in liquidatable legacy debt per scenario, as a share of the legacy book (batch 18,251).");
+});
+
+test("newlyTone: the newly-liquidatable tile wears the headline's own tone — a net at or below zero is warn beside crossings or band changes, ok only when the headline is", () => {
+  const cases: { newly: number; heat: ReturnType<typeof heatOf> | null; tone: "crit" | "warn" | "ok" }[] = [
+    { newly: 118, heat: DEMO.heat, tone: "crit" },
+    { newly: 2, heat: null, tone: "crit" },
+    // The wire's net at or below zero while the merged lanes show crossings: the headline warns, and so does the tile.
+    { newly: 0, heat: DEMO.heat, tone: "warn" },
+    { newly: -3, heat: DEMO.heat, tone: "warn" },
+    // No crossing: fewer liquidatable is ok; a net of zero is ok only when no account changes band.
+    { newly: -3, heat: heatOf({ 0: { 3: 3 }, 7: { 7: 2 } }), tone: "ok" },
+    { newly: 0, heat: heatOf({ 2: { 2: 3 }, 7: { 7: 9 } }), tone: "ok" },
+    { newly: 0, heat: heatOf({ 2: { 2: 1 }, 5: { 4: 5 }, 7: { 7: 2 } }), tone: "warn" },
+    { newly: 0, heat: null, tone: "ok" },
+  ];
+  for (const c of cases) {
+    expect(newlyTone(c.newly, c.heat)).toBe(c.tone);
+    // One law: the headline's tone is this function's, in every arm.
+    expect(resultHeadline({ ...DEMO, newly: c.newly, heat: c.heat, heatReason: c.heat === null ? "unreadable" : null }).tone).toBe(c.tone);
+  }
+});
+
+test("the rerun sentences are the lib's: a failed Compare and a failed Run over a standing result share one shape — the action, the failure's own words, what stands and for which batch", () => {
+  const limited = failureHeadline("rate-limited", { retryAfterSeconds: 3 });
+  expect(compareRerunFailedLine(limited, 18251)).toBe("Compare again failed — Rate limited (429). Retry after 3s. The comparison below stands for batch 18,251.");
+  expect(staleBannerLine({ kind: "rerun-failed", skew: [], batchId: 18251, failure: limited, heldCondition: null, retained: null })).toBe(
+    "Run again failed — Rate limited (429). Retry after 3s. The result below stands for batch 18,251.",
+  );
+  // A contradiction is a failure like any other: its sentence, then the batch that stands.
+  const contradiction = contradictoryHeadline("ETH -30 percent", ["batch is outside the wire contract"]);
+  expect(staleBannerLine({ kind: "rerun-failed", skew: [], batchId: 18251, failure: contradiction, heldCondition: null, retained: null })).toBe(
+    "Run again failed — The result for ETH -30 percent contradicts itself. batch is outside the wire contract. Nothing from it is drawn. The result below stands for batch 18,251.",
+  );
+  // A headline with a rest keeps it between its emphasis and its dek; no failure at all says so.
+  expect(compareRerunFailedLine({ emphasis: "The evaluator is busy,", rest: "as it said.", tone: "refused", dek: "1 of 1 slots in use." }, 7)).toBe(
+    "Compare again failed — The evaluator is busy, as it said. 1 of 1 slots in use. The comparison below stands for batch 7.",
+  );
+  expect(staleBannerLine({ kind: "rerun-failed", skew: [], batchId: 18251, failure: null, heldCondition: null, retained: null })).toBe(
+    "Run again failed — the service gave no reason. The result below stands for batch 18,251.",
+  );
+  // The held result's own condition is said beside the failure that left it standing.
+  expect(staleBannerLine({ kind: "rerun-failed", skew: [], batchId: 18251, failure: limited, heldCondition: "superseded", retained: null })).toBe(
+    "Run again failed — Rate limited (429). Retry after 3s. The result below stands for batch 18,251. Batch 18,251 has been superseded: a newer complete batch exists.",
+  );
+  expect(staleBannerLine({ kind: "rerun-failed", skew: ["path assumption", "shocks"], batchId: 18251, failure: limited, heldCondition: "stale-input", retained: null })).toBe(
+    "Run again failed — Rate limited (429). Retry after 3s. The result below stands for batch 18,251. Results for a previous input: the listing's path assumption and shocks changed since this run.",
+  );
+});
+
+test("the banner's other sentences: a superseded batch, a previous input, a retained body that is not shown", () => {
+  expect(staleBannerLine({ kind: "superseded", skew: [], batchId: 18251, failure: null, heldCondition: null, retained: null })).toBe(
+    "Batch 18,251 has been superseded: a newer complete batch exists. This result stands for the batch it names.",
+  );
+  expect(staleBannerLine({ kind: "stale-input", skew: ["config version"], batchId: 18251, failure: null, heldCondition: null, retained: null })).toBe(
+    "Results for a previous input: the listing's config version changed since this run. This result stands for the definition it was computed under.",
+  );
+  expect(staleBannerLine({ kind: "retained-refused", skew: [], batchId: null, failure: null, heldCondition: null, retained: { batchId: 18250, skew: ["version"] } })).toBe(
+    "A result for batch 18,250 is retained but not shown: the definition's version changed since it was computed. The failure above is this request's own.",
+  );
+  expect(staleBannerLine({ kind: "retained-refused", skew: [], batchId: null, failure: null, heldCondition: null, retained: null })).toBe(
+    "A result is retained but not shown: its definition changed since it was computed. The failure above is this request's own.",
+  );
 });

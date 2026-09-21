@@ -425,6 +425,48 @@ test("stress answering for another batch: the section discloses both batches, ea
   await expect(table.locator("tbody tr").nth(0).locator("td").last()).toHaveText("Yes");
 });
 
+test("stress: the room cells and the verdict are the one judge's words — a negative room is 'over cap by' a positive figure, never a minus on a dollar figure; a side that is unknowable or not a position prints no room and earns no verdict word", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  const table = page.getByTestId("inspector-stress-table");
+  await expect(table.locator("tbody tr")).toHaveCount(3);
+  const rowFor = (label: string) => table.locator("tbody tr").filter({ hasText: label });
+  const eth = rowFor("ETH -30 percent");
+  const ethfi = rowFor("ETHFI -50 percent");
+  // The demo body as served: both shocks leave the debt above the shocked cap.
+  await expect(eth.locator("td").nth(1)).toHaveText("$190.50");
+  await expect(eth.locator("td").nth(2)).toHaveText("over cap by $1,069");
+  await expect(eth.locator("td").nth(3)).toHaveText("Yes");
+  await expect(ethfi.locator("td").nth(2)).toHaveText("over cap by $215.75");
+  await expect(table).not.toContainText("−$");
+  await expect(table).not.toContainText("-$");
+  // ETH's shocked side loses its verdict (the wire's null boolean); ETHFI's carries a negative debt — a legal string, not a position.
+  const refusing = {
+    ...DEMO_STRESS_NEAR,
+    scenarios: DEMO_STRESS_NEAR.scenarios.map((s) => {
+      if (s.id === "eth_minus_30") return { ...s, results: s.results.map((r) => (!r.after ? r : { ...r, after: { ...r.after, liquidatable: null } })) };
+      if (s.id === "ethfi_minus_50") return { ...s, results: s.results.map((r) => (!r.after ? r : { ...r, after: { ...r.after, debt_usd: "-4822000000" } })) };
+      return s;
+    }),
+  };
+  await page.unroute("**/v1/address/*/stress*");
+  await page.route("**/v1/address/*/stress*", (route) => json(route, refusing));
+  await page.reload();
+  await expect(table.locator("tbody tr")).toHaveCount(3);
+  // No room beside an unknowable verdict, whatever figures ride with it; the side that stands keeps its room.
+  await expect(eth.locator("td").nth(1)).toHaveText("$190.50");
+  await expect(eth.locator("td").nth(2)).toHaveText("not computed");
+  await expect(eth.locator("td").nth(3).locator("[data-tone='refused']")).toHaveText("Cannot say");
+  await expect(eth.locator("td").nth(3).locator("[data-tone='refused']")).toHaveAttribute("title", "one side of the comparison is withheld or unknowable");
+  // A negative figure is not a position: no room from it, and never the wire's "Yes" or "No".
+  await expect(ethfi.locator("td").nth(2)).toHaveText("not computed");
+  await expect(ethfi.locator("td").nth(3).locator("[data-tone='refused']")).toHaveText("Cannot say");
+  await expect(ethfi.locator("td").nth(3).locator("[data-tone='refused']")).toHaveAttribute("title", "the shocked figures are not a position");
+  await expect(ethfi).not.toContainText("$4,822");
+  await expect(ethfi).not.toContainText("$9,428");
+  await expect(table).not.toContainText("−$");
+});
+
 test("activity: a refused 'Load more' is stated on its own line beside the rows it could not extend — the rows stand, the button remains", async ({ page }) => {
   await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
   await page.unroute("**/v1/events*");

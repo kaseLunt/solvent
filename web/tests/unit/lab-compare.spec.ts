@@ -160,23 +160,34 @@ test("setMembership: a duplicated id in requested_scenario_ids refuses before an
   expect(setMembership(["a_one"], set)).toEqual(["a_one appears 2 times in requested_scenario_ids; a set names each id once"]);
 });
 
-test("the envelope's lists are read only once they are lists: a body missing one is refused by the field's name, never dereferenced", () => {
+test("the envelope is classified before any set question is posed: a body outside it is refused by the names of its fields, never dereferenced; a result that breaks its own lists is one contradictory row", () => {
   const two = answering([result("a_one", "A", {}), result("b_two", "B", {})]);
   const noIds = { ...two, requested_scenario_ids: undefined } as unknown as RunBookSetResponse;
-  expect(setMembership(["a_one", "b_two"], noIds)).toEqual(["requested_scenario_ids is not a list"]);
+  expect(setMembership(["a_one", "b_two"], noIds)).toEqual(["requested_scenario_ids is outside the wire contract"]);
   const noResults = { ...two, results: null } as unknown as RunBookSetResponse;
-  expect(setMembership(["a_one", "b_two"], noResults)).toEqual(["results is not a list"]);
+  expect(setMembership(["a_one", "b_two"], noResults)).toEqual(["results is outside the wire contract"]);
   const noEvaluation = { ...two, evaluation: undefined } as unknown as RunBookSetResponse;
-  expect(setMembership(["a_one", "b_two"], noEvaluation)).toEqual(["evaluation.scenarios_evaluated is not a count"]);
-  expect(setMembership(["a_one"], {} as unknown as RunBookSetResponse)).toEqual(["requested_scenario_ids is not a list", "results is not a list", "evaluation.scenarios_evaluated is not a count"]);
-  // The reader behind the gate never dereferences a missing list either.
-  expect(compareRows(noResults, "debt_manager").rows).toEqual([]);
-  // A result's four engine lists: each missing one is named, and the row is contradictory before any engine is read.
+  expect(setMembership(["a_one", "b_two"], noEvaluation)).toEqual(["evaluation is outside the wire contract"]);
+  const noCount = { ...two, evaluation: { ...two.evaluation, scenarios_evaluated: "2" } } as unknown as RunBookSetResponse;
+  expect(setMembership(["a_one", "b_two"], noCount)).toEqual(["evaluation.scenarios_evaluated is outside the wire contract"]);
+  // The members `compareRows` reads beyond the membership's own — the batch the figures are shown for, the freshness, the newest servable id.
+  const noBatch = { ...two, batch: undefined } as unknown as RunBookSetResponse;
+  expect(setMembership(["a_one", "b_two"], noBatch)).toEqual(["batch is outside the wire contract"]);
+  expect(setMembership(["a_one"], {} as unknown as RunBookSetResponse)).toEqual(
+    ["batch", "evaluation", "requested_scenario_ids", "results", "excluded_engines", "coverage", "notes"].map((f) => `${f} is outside the wire contract`),
+  );
+  // A result that is not an object is the envelope's fault: no id is read from it.
+  const nullResult = { ...two, results: [two.results[0], null] } as unknown as RunBookSetResponse;
+  expect(setMembership(["a_one", "b_two"], nullResult)).toEqual(["results[1] is outside the wire contract"]);
+  // A result's four engine lists: each broken one is named, and the row is contradictory before any engine is read — the rows beside it stand.
   const noEngines = compareRows(setOf([{ ...result("x", "X", {}), engines: undefined } as unknown as SetRunScenarioResult]), "debt_manager").rows[0]!;
   expect(noEngines.kind).toBe("contradictory");
-  expect(noEngines.reason).toBe("engines is not a list");
+  expect(noEngines.reason).toBe("engines is outside the wire contract");
   expect(noEngines.shareTenths).toBeNull();
   const none = compareRows(setOf([{ ...result("y", "Y", {}), covered_engines: null, withheld_engines: "", unmeasurable_engines: {} } as unknown as SetRunScenarioResult]), "debt_manager").rows[0]!;
   expect(none.kind).toBe("contradictory");
-  expect(none.reason).toBe("covered_engines, withheld_engines, unmeasurable_engines are not a list");
+  expect(none.reason).toBe("covered_engines, withheld_engines, unmeasurable_engines are outside the wire contract");
+  const beside = compareRows(setOf([{ ...result("z", "Z", {}), unmeasurable_engines: [null] } as unknown as SetRunScenarioResult, result("a_one", "A", { engines: [summary({})] })]), "debt_manager").rows;
+  expect(beside.map((r) => [r.id, r.kind])).toEqual([["a_one", "point"], ["z", "contradictory"]]);
+  expect(beside[1]?.reason).toBe("unmeasurable_engines[0] is outside the wire contract");
 });

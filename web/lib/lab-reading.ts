@@ -8,10 +8,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Phase } from "./address-lookup";
 import { getSolventClient, solventBaseUrl } from "./api";
 import { setMembership } from "./lab-compare";
+import { readsAsAnswer } from "./lab-engine";
 import type { HeldResult, HeldSet, RunRecord, ScenariosResponse, SetRecord } from "./lab-library";
 import { monotonicNowMs } from "./freshness";
 import { describeLookupError } from "./lookup-error";
-import { runBookScenario, type RunBookOutcome } from "./runbook";
+import { runBookScenario, type LabRunBook, type RunBookOutcome } from "./runbook";
 import { runBookSet, type SetRunOutcome } from "./runbookSet";
 
 export interface LabReading {
@@ -26,25 +27,32 @@ export interface LabReading {
 export const canDispatch = (runs: ReadonlyMap<string, RunRecord>, id: string): boolean => runs.get(id)?.phase !== "running";
 export const canDispatchSet = (set: SetRecord | null): boolean => set === null || set.phase !== "running";
 
-/** A computed result is never replaced by the run that follows it: it is held until a newer result stands. */
-function heldOf(prev: RunRecord | undefined): HeldResult | null {
+/** Whether a 2xx run-book reads as an answer: the record's one question of a body, supplied by the caller (`readsAsAnswer` in lab-engine on the page). */
+export type ReadsAsAnswer = (response: LabRunBook) => boolean;
+
+/**
+ * A computed result is never replaced by the run that follows it: it is held until a newer answer stands. Only a
+ * body that READS moves into the hold. A 2xx body that does not read is a failed answer like any other failure, so
+ * the hold passes through it unchanged — however many follow one another, the last body that read stands behind them.
+ */
+function heldOf(prev: RunRecord | undefined, reads: ReadsAsAnswer): HeldResult | null {
   if (prev === undefined) return null;
-  if (prev.phase === "settled" && prev.outcome.kind === "ok") return { response: prev.outcome.response, at: prev.at, atMonotonicMs: prev.atMonotonicMs };
+  if (prev.phase === "settled" && prev.outcome.kind === "ok" && reads(prev.outcome.response)) return { response: prev.outcome.response, at: prev.at, atMonotonicMs: prev.atMonotonicMs };
   return prev.held;
 }
 
-export function withRunning(runs: ReadonlyMap<string, RunRecord>, id: string, now: number): Map<string, RunRecord> {
+export function withRunning(runs: ReadonlyMap<string, RunRecord>, id: string, now: number, reads: ReadsAsAnswer): Map<string, RunRecord> {
   const next = new Map(runs);
-  next.set(id, { phase: "running", startedAt: now, held: heldOf(runs.get(id)) });
+  next.set(id, { phase: "running", startedAt: now, held: heldOf(runs.get(id), reads) });
   return next;
 }
 
-export function withSettled(runs: ReadonlyMap<string, RunRecord>, id: string, outcome: RunBookOutcome, now: number, monotonicNow: number): Map<string, RunRecord> {
+export function withSettled(runs: ReadonlyMap<string, RunRecord>, id: string, outcome: RunBookOutcome, now: number, monotonicNow: number, reads: ReadsAsAnswer): Map<string, RunRecord> {
   const next = new Map(runs);
-  // The hold survives every settle, an ok one included: whether the new body READS as an answer is the view's
-  // question, and a 2xx body that does not read never releases the result it had. The hold is always the last
-  // ok result before this settle; a new result stands in front of it, a failure or a malformed body behind it.
-  next.set(id, { phase: "settled", outcome, at: now, atMonotonicMs: monotonicNow, held: heldOf(runs.get(id)) });
+  // The hold survives every settle, an ok one included: whether the new body releases it is the view's question,
+  // asked with the definition in hand. The hold is always the last body that read before this settle; a new answer
+  // stands in front of it, a failure or a body that does not read behind it.
+  next.set(id, { phase: "settled", outcome, at: now, atMonotonicMs: monotonicNow, held: heldOf(runs.get(id), reads) });
   return next;
 }
 
@@ -120,17 +128,17 @@ export function useLabReading(): LabReading {
     if (controllers.current.has(id) || !canDispatch(runsRef.current, id)) return;
     const controller = new AbortController();
     controllers.current.set(id, controller);
-    setRuns((prev) => withRunning(prev, id, Date.now()));
+    setRuns((prev) => withRunning(prev, id, Date.now(), readsAsAnswer));
     runBookScenario(solventBaseUrl(), id, { signal: controller.signal }).then(
       (outcome) => {
         if (controller.signal.aborted) return;
         controllers.current.delete(id);
-        setRuns((prev) => withSettled(prev, id, outcome, Date.now(), monotonicNowMs()));
+        setRuns((prev) => withSettled(prev, id, outcome, Date.now(), monotonicNowMs(), readsAsAnswer));
       },
       (cause: unknown) => {
         if (controller.signal.aborted) return;
         controllers.current.delete(id);
-        setRuns((prev) => withSettled(prev, id, { kind: "unreachable", message: describeLookupError(cause) }, Date.now(), monotonicNowMs()));
+        setRuns((prev) => withSettled(prev, id, { kind: "unreachable", message: describeLookupError(cause) }, Date.now(), monotonicNowMs(), readsAsAnswer));
       },
     );
   }, []);

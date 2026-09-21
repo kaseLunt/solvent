@@ -321,7 +321,7 @@ test("compare: a failed Compare never replaces the comparison it had — the hel
 test("readEngine never throws at render: a body missing an envelope list, or a null side or matrix, is unreadable by the field's name — the contradictory state, the route standing", () => {
   const run = runBookOf([demoCash()], DEFINITION_ETH);
   const missingLists = { ...run, engines: undefined, excluded_engines: null } as unknown as typeof run;
-  expect(readEngine(missingLists, "debt_manager", DEFINITION_ETH)).toEqual({ kind: "unreadable", fields: ["excluded_engines", "engines"] });
+  expect(readEngine(missingLists, "debt_manager", DEFINITION_ETH)).toEqual({ kind: "unreadable", fields: ["engines", "excluded_engines"] });
   const nullSide = runBookOf([{ ...demoCash(), before: null } as unknown as Engine], DEFINITION_ETH);
   expect(readEngine(nullSide, "debt_manager", DEFINITION_ETH)).toEqual({ kind: "unreadable", fields: ["before"] });
   const nullMatrix = runBookOf([{ ...demoCash(), hf_transitions: null } as unknown as Engine], DEFINITION_ETH);
@@ -329,10 +329,60 @@ test("readEngine never throws at render: a body missing an envelope list, or a n
   const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: nullSide }) }), ui());
   expect(v.book.state).toBe("contradictory");
   expect(v.book.headline.dek).toBe("before is outside the wire contract. Nothing from it is drawn.");
-  // A missing refusal list through the view: named, and the chips print what lists exist.
+  // A missing refusal list through the view: named, and no chip prints an engine from a body whose envelope is outside the contract.
   const noExcluded = { ...run, excluded_engines: undefined } as unknown as typeof run;
   const e = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: noExcluded }) }), ui());
   expect(e.book.state).toBe("contradictory");
   expect(e.book.headline.dek).toBe("excluded_engines is outside the wire contract. Nothing from it is drawn.");
-  expect(e.book.chips.find((c) => c.label === "Engines")?.value).toBe("Cash");
+  expect(e.book.chips.map((c) => c.label)).toEqual(["Scenario", "Config"]);
+});
+
+test("the envelope is classified before any read: a 2xx run-book without its batch, its coverage or a list is the contradictory state naming the field — nothing of the body printed, no throw at render", () => {
+  const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
+  const over = (overrides: Record<string, unknown>) => settled("eth_minus_30", { kind: "ok", response: { ...run, ...overrides } as unknown as typeof run });
+  const noBatch = deriveLabView(reading({ runs: over({ batch: undefined }) }), ui());
+  expect(noBatch.book.state).toBe("contradictory");
+  expect(noBatch.book.headline).toEqual(contradictoryHeadline("ETH -30 percent", ["batch is outside the wire contract"]));
+  expect(noBatch.book.headline.dek).toBe("batch is outside the wire contract. Nothing from it is drawn.");
+  // Nothing of the body is carried: no run for the drawer or the age to read, no identity, the definition's own chips.
+  expect(noBatch.book.run).toBeNull();
+  expect(noBatch.book.identity).toBeNull();
+  expect(noBatch.book.chips.map((c) => c.label)).toEqual(["Scenario", "Config"]);
+  // Both engines' readings refuse by the envelope's field, so the tiles say contradictory, never "not run".
+  expect(noBatch.book.cash).toEqual({ kind: "unreadable", fields: ["batch"] });
+  expect(noBatch.book.legacy).toEqual({ kind: "unreadable", fields: ["batch"] });
+  expect(noBatch.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
+  // Every fault is named, in wire read order.
+  const several = deriveLabView(reading({ runs: over({ batch: null, shocks: undefined, coverage: "all", notes: {} }) }), ui());
+  expect(several.book.state).toBe("contradictory");
+  expect(several.book.headline.dek).toBe("batch is outside the wire contract; shocks is outside the wire contract; coverage is outside the wire contract; notes is outside the wire contract. Nothing from it is drawn.");
+  expect(several.library.find((r) => r.id === "eth_minus_30")?.outcome.text).toBe("Unreadable");
+  // The envelope is judged before the definition is consulted: a body that cannot be read is never "not modelled".
+  expect(readEngine({ ...run, batch: undefined } as unknown as typeof run, "debt_manager", { ...DEFINITION_ETH, engines: ["aave_v3_etherfi"] })).toEqual({ kind: "unreadable", fields: ["batch"] });
+  // A held result stands in front of such a body, as in front of any answer that does not read.
+  const held = { response: run, at: 1, atMonotonicMs: 1 };
+  const runs = new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "ok", response: { ...run, batch: undefined } as unknown as typeof run }, at: 2, atMonotonicMs: 2, held }]]);
+  const v = deriveLabView(reading({ runs }), ui());
+  expect(v.book.state).toBe("result");
+  expect(v.book.banner).toBe("rerun-failed");
+  expect(v.book.rerunFailure).toEqual(contradictoryHeadline("ETH -30 percent", ["batch is outside the wire contract"]));
+});
+
+test("compare: a set whose envelope is outside the contract is a failed Compare naming the field — without its evaluation, its batch or its coverage nothing is read, and a held comparison stands", () => {
+  const asked = ["eth_minus_30", "ethfi_minus_50"];
+  const answering = demoSetFor(asked);
+  const over = (overrides: Record<string, unknown>, held: SetRecord["held"] = null): SetRecord => ({ phase: "settled", ids: asked, outcome: { kind: "ok", response: { ...answering, ...overrides } as unknown as typeof answering }, at: 3, held });
+  const noEvaluation = deriveLabView(reading({ set: over({ evaluation: undefined }) }), ui()).compare;
+  expect(noEvaluation.kind).toBe("failed");
+  if (noEvaluation.kind !== "failed") return;
+  expect(noEvaluation.headline.emphasis).toBe("The set does not answer the request.");
+  expect(noEvaluation.headline.dek).toBe("Faults: evaluation is outside the wire contract. Nothing from it is drawn.");
+  expect(noEvaluation.held).toBeNull();
+  const noBatch = deriveLabView(reading({ set: over({ batch: undefined, coverage: null }) }), ui()).compare;
+  expect(noBatch.kind).toBe("failed");
+  if (noBatch.kind === "failed") expect(noBatch.headline.dek).toBe("Faults: batch is outside the wire contract; coverage is outside the wire contract. Nothing from it is drawn.");
+  const held = { ids: asked, response: answering, at: 2 };
+  const standing = deriveLabView(reading({ set: over({ batch: undefined }, held) }), ui()).compare;
+  expect(standing.kind).toBe("failed");
+  if (standing.kind === "failed") expect(standing.held?.cash.batchId).toBe(18251);
 });

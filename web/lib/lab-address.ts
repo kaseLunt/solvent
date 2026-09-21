@@ -1,13 +1,13 @@
 // The one-address workspace. It is the Inspector's reading — its stress rows,
 // its decimals, its Cash position as today — arranged under the selected
 // scenario. No second stress reader exists; the Inspector's laws hold here.
-import { horizonLabel, type StressHorizon, type StressRow, type StressSide } from "./address-stress";
+import { cannotSayTitle, computableSide, horizonLabel, roomWords, rowVerdict, sideRoomWords, type StressRow, type StressSide } from "./address-stress";
 import { truncateAddress } from "./format";
 import { headroomBand } from "./headroom";
 import { humanUsdFull } from "./human-price";
 import type { CashStatus } from "./inspector-position";
 import type { InspectorView } from "./inspector-view";
-import { refused, sentence, UNREADABLE_SCALE, type LabHeadline } from "./lab-headline";
+import { refused, sentence, type LabHeadline } from "./lab-headline";
 import type { LibraryOutcome } from "./lab-library";
 import { groupInt } from "./prose";
 import { isWireScale } from "./wireGuard";
@@ -63,32 +63,13 @@ const STATUS_WORD: Record<CashStatus, AddressTile> = {
 const NEAR_BANDS: ReadonlySet<number> = new Set([0, 1, 2, 3]);
 
 /**
- * A side's figures are read only when its debt and cap are both present and
- * non-negative — the Inspector's rule for a position. A negative wire decimal
- * is a legal string and not a figure: nothing prints from it, the room included.
- */
-function readable(side: StressSide | null): { readonly debt: bigint; readonly cap: bigint; readonly room: bigint } | null {
-  if (side === null || side.debt === null || side.cap === null || side.debt < 0n || side.cap < 0n) return null;
-  return { debt: side.debt, cap: side.cap, room: side.cap - side.debt };
-}
-
-/**
- * A side is computable when its verdict is known and its figures are a
- * position — the one condition the tiles, the dek and the headline share, so
- * a side the tiles refuse yields no figure and no verdict word anywhere.
- */
-function computable(side: StressSide | null): ReturnType<typeof readable> {
-  return side !== null && side.verdict !== "unknowable" ? readable(side) : null;
-}
-
-/**
  * The after side's status word in the Inspector's register: the verdict
  * governs; a non-liquidatable side is "Near cap" inside the near bands and
  * "Healthy" outside them; an unknowable verdict, or figures that cannot be
  * read, is "Not computed" — never a verdict word on an unknown.
  */
 function afterStatus(side: StressSide | null): AddressTile {
-  const figures = computable(side);
+  const figures = computableSide(side);
   if (side === null || figures === null) return NOT_COMPUTED;
   if (side.verdict === "liquidatable") return { value: "Liquidatable", tone: "crit" };
   const band = headroomBand(figures.cap, figures.debt);
@@ -98,61 +79,6 @@ function afterStatus(side: StressSide | null): AddressTile {
 /** Negative room is worded "over cap by" a positive figure in the crit tone: a minus sign on a dollar figure never prints as room. */
 function roomTile(room: bigint, decimals: number, tone: TileTone): AddressTile {
   return { value: roomWords(room, decimals), tone: room < 0n ? "crit" : tone };
-}
-
-function roomWords(room: bigint, decimals: number): string {
-  return room < 0n ? `over cap by ${humanUsdFull(-room, decimals)}` : humanUsdFull(room, decimals);
-}
-
-/**
- * A side's room words, the one register the tiles, the dek and the table's room cells share: "not computed" for a
- * missing, unreadable or unknowable side — never a figure beside a refused register; a negative room "over cap by"
- * a positive figure — never a minus on a dollar figure; the refused scale word where the position's scale did not
- * pass the guard — a figure prints at no other scale than its own.
- */
-export function sideRoomWords(side: StressSide | null, decimals: number | null): string {
-  const figures = computable(side);
-  if (figures === null) return "not computed";
-  return decimals === null ? UNREADABLE_SCALE : roomWords(figures.room, decimals);
-}
-
-/**
- * One row's verdict, decided once: the gate over both sides, then the projection's horizons,
- * then the spot flip. The headline and the library word both speak from it, so the two can
- * never disagree about the same row. A projection is judged by its horizons, never by its
- * `after` — that is the spot, unchanged by construction: an unknowable horizon is a refusal
- * that names the horizon; a liquidatable one names the first horizon it happens within, in
- * the Inspector's warn tone; otherwise the account holds through the longest horizon.
- */
-export type RowVerdict =
-  | { readonly kind: "not-applicable"; readonly reason: string }
-  | { readonly kind: "cannot-say"; readonly cause: "not-a-position" | "withheld" | "no-horizon" }
-  | { readonly kind: "cannot-say"; readonly cause: "horizon-unknowable"; readonly horizon: StressHorizon }
-  | { readonly kind: "liquidatable"; readonly within: StressHorizon | null; readonly already: boolean }
-  | { readonly kind: "inside"; readonly through: StressHorizon | null };
-
-export function rowVerdict(row: StressRow): RowVerdict {
-  if (!row.applicable) return { kind: "not-applicable", reason: row.reason ?? "the engine gave no reason" };
-  // A side the tiles refuse — missing, unreadable or unknowable — yields no verdict word in any row kind. The gate
-  // asks both sides as they are, a missing side included, before either arm may speak.
-  const sides = [row.before, row.after];
-  if (sides.some((s) => computable(s) === null)) {
-    // Figures that are present but not a position are the truer cause; a missing or unknowable side is withheld.
-    return { kind: "cannot-say", cause: sides.some((s) => s !== null && readable(s) === null) ? "not-a-position" : "withheld" };
-  }
-  if (row.projection !== null) {
-    const longest = row.projection.reduce<StressHorizon | null>((a, h) => (a === null || h.seconds > a.seconds ? h : a), null);
-    if (longest === null) return { kind: "cannot-say", cause: "no-horizon" };
-    const unknowable = row.projection.find((h) => h.verdict === "unknowable");
-    if (unknowable !== undefined) return { kind: "cannot-say", cause: "horizon-unknowable", horizon: unknowable };
-    const within = row.projection.find((h) => h.verdict === "liquidatable");
-    if (within !== undefined) return { kind: "liquidatable", within, already: false };
-    return { kind: "inside", through: longest };
-  }
-  // Past the gate both sides are computable, so the reader's flip is a boolean: null is exactly a missing or unknowable side.
-  if (row.flips === true) return { kind: "liquidatable", within: null, already: false };
-  if (row.after?.verdict === "liquidatable") return { kind: "liquidatable", within: null, already: true };
-  return { kind: "inside", through: null };
 }
 
 /**
@@ -251,7 +177,7 @@ export function addressWorkspace(input: { address: string; view: InspectorView |
   const side = selected.after;
   // An uncomputable after side refuses its figures as the Inspector refuses an unknowable position's: a debt beside
   // "Not computed" would read as a computed one.
-  const after = computable(side);
+  const after = computableSide(side);
   // The after room carries its status's tone as the before pair does: crit beside Liquidatable, warn beside Near cap.
   const statusAfter = afterStatus(side);
   const roomToneAfter: TileTone = statusAfter.tone === "crit" ? "crit" : statusAfter.tone === "warn" ? "warn" : "neutral";
@@ -309,17 +235,7 @@ export function rowVerdictWord(row: StressRow): RowVerdictWord {
     case "not-applicable":
       return { text: verdict.reason, tone: null, title: null };
     case "cannot-say":
-      switch (verdict.cause) {
-        case "not-a-position":
-          return { text: "Cannot say", tone: "refused", title: "the shocked figures are not a position" };
-        case "withheld":
-          return { text: "Cannot say", tone: "refused", title: "one side of the comparison is withheld or unknowable" };
-        case "no-horizon":
-          return { text: "Cannot say", tone: "refused", title: "the projection carries no horizon" };
-        case "horizon-unknowable":
-          return { text: "Cannot say", tone: "refused", title: `the ${horizonLabel(verdict.horizon.seconds)} horizon carries no verdict` };
-      }
-      break;
+      return { text: "Cannot say", tone: "refused", title: cannotSayTitle(verdict) };
     case "liquidatable":
       if (verdict.within !== null) return { text: `Yes · within ${horizonLabel(verdict.within.seconds)}`, tone: "warn", title: null };
       return verdict.already ? { text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" } : { text: "Yes", tone: "crit", title: null };

@@ -1,31 +1,32 @@
 // The run records' law: one run per id in flight, a settled record replaces
 // the running one and nothing else, a second click while running is a no-op.
 import { expect, test } from "@playwright/test";
+import { readsAsAnswer } from "../../lib/lab-engine";
 import { canDispatch, canDispatchSet, withRunning, withSetRunning, withSetSettled, withSettled } from "../../lib/lab-reading";
 import type { RunRecord } from "../../lib/lab-library";
 import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
-import { cashEngine, DEMO_CASH_TABLE, runBookOf } from "./helpers/run-book-engine";
+import { cashEngine, DEMO_CASH_TABLE, runBookOf, transitionsOf } from "./helpers/run-book-engine";
 
 test("withRunning marks one id and leaves the others; canDispatch refuses an id in flight", () => {
   const empty = new Map<string, RunRecord>();
-  const one = withRunning(empty, "eth_minus_30", 100);
+  const one = withRunning(empty, "eth_minus_30", 100, readsAsAnswer);
   expect(one.get("eth_minus_30")).toEqual({ phase: "running", startedAt: 100, held: null });
   expect(empty.size).toBe(0);
   expect(canDispatch(one, "eth_minus_30")).toBe(false);
   expect(canDispatch(one, "ethfi_minus_50")).toBe(true);
-  const two = withRunning(one, "ethfi_minus_50", 101);
+  const two = withRunning(one, "ethfi_minus_50", 101, readsAsAnswer);
   expect(two.size).toBe(2);
   expect(two.get("eth_minus_30")).toEqual({ phase: "running", startedAt: 100, held: null });
 });
 
 test("withSettled replaces the running record with the outcome and keeps every other record", () => {
-  const running = withRunning(withRunning(new Map(), "a", 1), "b", 2);
-  const settled = withSettled(running, "a", { kind: "not-served" }, 5, 7);
+  const running = withRunning(withRunning(new Map(), "a", 1, readsAsAnswer), "b", 2, readsAsAnswer);
+  const settled = withSettled(running, "a", { kind: "not-served" }, 5, 7, readsAsAnswer);
   expect(settled.get("a")).toEqual({ phase: "settled", outcome: { kind: "not-served" }, at: 5, atMonotonicMs: 7, held: null });
   expect(settled.get("b")).toEqual({ phase: "running", startedAt: 2, held: null });
   expect(canDispatch(settled, "a")).toBe(true);
   // A settlement for an id that was never running is still recorded — the wire answered, the page shows it.
-  expect(withSettled(new Map(), "c", { kind: "not-served" }, 9, 9).get("c")?.phase).toBe("settled");
+  expect(withSettled(new Map(), "c", { kind: "not-served" }, 9, 9, readsAsAnswer).get("c")?.phase).toBe("settled");
 });
 
 test("canDispatchSet: only when no set is in flight", () => {
@@ -36,19 +37,19 @@ test("canDispatchSet: only when no set is in flight", () => {
 
 test("a computed result is held through a re-run and stands beside a failed one; the hold survives an ok settle, and the newest result moves into it on the next run", () => {
   const run = runBookOf([cashEngine(DEMO_CASH_TABLE)]);
-  const first = withSettled(withRunning(new Map(), "a", 1), "a", { kind: "ok", response: run }, 2, 2);
+  const first = withSettled(withRunning(new Map(), "a", 1, readsAsAnswer), "a", { kind: "ok", response: run }, 2, 2, readsAsAnswer);
   expect(first.get("a")?.held).toBeNull();
-  const again = withRunning(first, "a", 3);
+  const again = withRunning(first, "a", 3, readsAsAnswer);
   expect(again.get("a")).toEqual({ phase: "running", startedAt: 3, held: { response: run, at: 2, atMonotonicMs: 2 } });
-  const failed = withSettled(again, "a", { kind: "not-served" }, 4, 4);
+  const failed = withSettled(again, "a", { kind: "not-served" }, 4, 4, readsAsAnswer);
   expect(failed.get("a")).toEqual({ phase: "settled", outcome: { kind: "not-served" }, at: 4, atMonotonicMs: 4, held: { response: run, at: 2, atMonotonicMs: 2 } });
-  const third = withSettled(withRunning(failed, "a", 5), "a", { kind: "unreachable", message: "down" }, 6, 6);
+  const third = withSettled(withRunning(failed, "a", 5, readsAsAnswer), "a", { kind: "unreachable", message: "down" }, 6, 6, readsAsAnswer);
   expect(third.get("a")?.held).toEqual({ response: run, at: 2, atMonotonicMs: 2 });
-  // A new ok settle keeps the hold: whether its body reads as an answer is the view's question, never the record's.
-  const fresh = withSettled(withRunning(third, "a", 7), "a", { kind: "ok", response: run }, 8, 8);
+  // A new ok settle keeps the hold: whether its body releases the hold is the view's question, asked with the definition in hand.
+  const fresh = withSettled(withRunning(third, "a", 7, readsAsAnswer), "a", { kind: "ok", response: run }, 8, 8, readsAsAnswer);
   expect(fresh.get("a")?.held).toEqual({ response: run, at: 2, atMonotonicMs: 2 });
   // The next run holds the newest ok result, with its own settle clocks.
-  expect(withRunning(fresh, "a", 9).get("a")?.held).toEqual({ response: run, at: 8, atMonotonicMs: 8 });
+  expect(withRunning(fresh, "a", 9, readsAsAnswer).get("a")?.held).toEqual({ response: run, at: 8, atMonotonicMs: 8 });
 });
 
 /** The demo set answering an ask: its results for the asked ids, the echo the ask itself, the evaluated count agreeing. */
@@ -76,4 +77,43 @@ test("a set that answered its request is held through a failed Compare and relea
   const fresh = withSetSettled(withSetRunning(unanswering, asked, 7), asked, { kind: "ok", response: answering }, 8);
   expect(fresh.held).toBeNull();
   expect(withSetRunning(fresh, asked, 9).held).toEqual({ ids: asked, response: answering, at: 8 });
+});
+
+test("the hold survives consecutive answers that do not read: only a body that reads as an answer moves into the hold, so two malformed 200s keep the last result that read", () => {
+  const result = runBookOf([cashEngine(DEMO_CASH_TABLE)]);
+  const malformed = runBookOf([cashEngine(DEMO_CASH_TABLE, { eligible_debt_delta_usd: "1e6" })]);
+  const contradictory = runBookOf([cashEngine(DEMO_CASH_TABLE, { hf_transitions: { ...transitionsOf(DEMO_CASH_TABLE), total_rows: 5 } })]);
+  const noBatch = { ...result, batch: undefined } as unknown as typeof result;
+  const ask = (runs: ReadonlyMap<string, RunRecord>, response: typeof result, at: number) =>
+    withSettled(withRunning(runs, "a", at, readsAsAnswer), "a", { kind: "ok", response }, at + 1, at + 1, readsAsAnswer);
+  const first = ask(new Map(), result, 1);
+  const held = { response: result, at: 2, atMonotonicMs: 2 };
+  // One malformed 200: the result that read is held behind it.
+  const once = ask(first, malformed, 3);
+  expect(once.get("a")?.held).toEqual(held);
+  // The ask that follows holds the SAME result — the malformed body never moves into the hold — and so does its settle.
+  expect(withRunning(once, "a", 5, readsAsAnswer).get("a")?.held).toEqual(held);
+  const twice = ask(once, malformed, 5);
+  expect(twice.get("a")?.held).toEqual(held);
+  // A self-contradicting matrix and a body whose envelope is outside the contract are the same class.
+  const thrice = ask(ask(twice, contradictory, 7), noBatch, 9);
+  expect(thrice.get("a")?.held).toEqual(held);
+  expect(withRunning(thrice, "a", 11, readsAsAnswer).get("a")?.held).toEqual(held);
+  // A settle over a settled record judges that record the same way.
+  expect(withSettled(thrice, "a", { kind: "not-served" }, 12, 12, readsAsAnswer).get("a")?.held).toEqual(held);
+  // An honest answer that is not a result still reads: a withheld book moves into the hold, as the view releases the hold for it.
+  const withheld = runBookOf([], undefined, { excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "the custody flag is unproven", note: "" }] });
+  expect(withRunning(ask(thrice, withheld, 13), "a", 15, readsAsAnswer).get("a")?.held).toEqual({ response: withheld, at: 14, atMonotonicMs: 14 });
+});
+
+test("readsAsAnswer: the envelope inside the contract, and the Cash row — where the body carries one and no refusal names it — classified clean with a matrix that agrees with itself", () => {
+  const result = runBookOf([cashEngine(DEMO_CASH_TABLE)]);
+  expect(readsAsAnswer(result)).toBe(true);
+  expect(readsAsAnswer({ ...result, batch: undefined } as unknown as typeof result)).toBe(false);
+  expect(readsAsAnswer({ ...result, engines: undefined } as unknown as typeof result)).toBe(false);
+  expect(readsAsAnswer(runBookOf([cashEngine(DEMO_CASH_TABLE, { usd_decimals: 1.5 })]))).toBe(false);
+  expect(readsAsAnswer(runBookOf([cashEngine(DEMO_CASH_TABLE, { hf_transitions: { ...transitionsOf(DEMO_CASH_TABLE), total_rows: 5 } })]))).toBe(false);
+  // No Cash row is withheld or not modelled — an honest answer; a listed refusal is the answer whatever row rides beside it.
+  expect(readsAsAnswer(runBookOf([]))).toBe(true);
+  expect(readsAsAnswer(runBookOf([cashEngine(DEMO_CASH_TABLE, { usd_decimals: 1.5 })], undefined, { excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "", note: "" }] }))).toBe(true);
 });

@@ -1,5 +1,5 @@
 import { KitTable, SectionHead, StatusPill, type KitRow } from "@/components/kit";
-import { horizonLabel, stressVerdict, stressVerdictWords, type StressRow, type StressSide } from "@/lib/address-stress";
+import { horizonLabel, rowVerdict, sideRoomWords, stressVerdictWords, type StressRow, type StressSide } from "@/lib/address-stress";
 import { humanUsdFull } from "@/lib/human-price";
 import { stressBatchNote, stressEmptyText, type InspectorView } from "@/lib/inspector-view";
 import { isWireScale } from "@/lib/wireGuard";
@@ -23,12 +23,14 @@ function realization(r: StressRow): string | null {
 
 /**
  * The committed scenarios applied to this account — the wire's own before/after sides; a rate step is a delta-only
- * projection. The view reads the stress lookup and decides the verdict words, the batch note and the empty words;
- * this file only places the rows. Before and after are the STRESS body's own sides, read for the batch it names.
+ * projection. The lib decides the row's verdict (`rowVerdict`, the one judge the Scenarios page shares), its room
+ * words, the batch note and the empty words; this file only places the rows. A room prints only from a computable
+ * side — never beside an unknowable verdict — and a negative room is "over cap by", never a minus on a dollar figure.
+ * Before and after are the STRESS body's own sides, read for the batch it names.
  */
 export function StressTable({ view }: { view: InspectorView }) {
   const money = moneyFor(view.decimals);
-  const room = (side: StressSide | null): string => money(side?.room);
+  const room = (side: StressSide | null): string => sideRoomWords(side, view.decimals);
   const result = view.stress;
   const note = stressBatchNote(view);
   const rows: KitRow[] =
@@ -37,7 +39,7 @@ export function StressTable({ view }: { view: InspectorView }) {
       : result.rows.map((r) => {
           const projected = r.projection !== null;
           const extra = realization(r);
-          const verdict = stressVerdictWords(stressVerdict(r));
+          const verdict = stressVerdictWords(rowVerdict(r));
           return {
             key: r.id,
             dim: !r.applicable,
