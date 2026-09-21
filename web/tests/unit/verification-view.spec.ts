@@ -570,15 +570,85 @@ test("evidence unavailable: state unavailable, refused headline with the message
   );
 });
 
-test("loading: a refused headline, refused chips, nothing claimed", () => {
+test("loading: the headline in its own words, every chip pending and none refused, nothing claimed", () => {
   const v = view({ phase: "loading" });
   expect(v.state).toBe("loading");
-  expect(v.receipt).toBe("none");
+  expect(v.receipt).toBe("pending");
   expect(v.headline).toEqual({ emphasis: "Loading this deployment's verification record…", rest: "", tone: "refused", dek: VERIFICATION_LOADING_DEK });
   // The loading dek says what the page will hold and claims none of it.
   expect(VERIFICATION_LOADING_DEK).toBe("The result of its last check against the chain, and the identity of the batch it is serving.");
-  expect(v.chips.every((c) => c.tone === "refused")).toBe(true);
+  // A chip whose read is in flight says so: it is not refused, it is not unknown, and it prints no dash for a value nobody has withheld.
+  expect(v.chips).toEqual([
+    { label: "Proof pin", value: "pending" },
+    { label: "Live batch", value: "pending" },
+    { label: "Receipt", value: "pending" },
+    { label: "Batch key", value: "pending" },
+  ]);
   expect(v.probes).toEqual([]);
+});
+
+test("a receipt in flight is pending — never 'none', which is the wire's own absence, and never the register of a read that failed", () => {
+  const loading = view({ phase: "loading" });
+  const failed = view({ phase: "error", message: "Failed to fetch", retryAfterSeconds: null });
+  const absent = view(ok(EVIDENCE_NO_RECEIPT));
+  // Three states of one read, three registers: in flight, failed, and the absence the manifest itself stated.
+  expect(loading.receipt).toBe("pending");
+  expect(failed.receipt).toBe("none");
+  expect(absent.receipt).toBe("none");
+  expect(loading.receiptLine).toBe("Reading the reconcile receipt…");
+  expect(loading.chips.some((c) => c.tone === "refused")).toBe(false);
+  expect(failed.chips.every((c) => c.tone === "refused")).toBe(true);
+  expect(JSON.stringify(loading.chips)).not.toMatch(/unknown|none|unavailable|—/);
+  // A retry puts every reader back in flight: the same pending view, whatever failed before it.
+  expect(deriveVerificationView({ state: { phase: "loading" }, meta: null, metaInFlight: true, book: UNREAD }).receipt).toBe("pending");
+  // The receipt judge itself has no pending arm: it reads a manifest that answered, and its answers do not move.
+  expect([EVIDENCE_MANIFEST, EVIDENCE_PROOF_FAILED, EVIDENCE_NO_RECEIPT, EVIDENCE_NO_BATCH].map(receiptState)).toEqual(["exact", "failed", "none", "exact"]);
+});
+
+test("nothing is green under a receipt of no rows: a weld of 0/0 exact proves nothing, so no pill, row or fold row of the proof card — and no row of its drawer — wears the ok tone", () => {
+  const tonesOf = (manifest: EvidenceResponse): string[] => {
+    const { proof } = subjectCards(manifest);
+    const drawer = proofSubjectEvidence(manifest);
+    return [
+      proof.status.tone,
+      ...proof.rows.map((r) => r.tone),
+      ...(proof.fold?.sections ?? []).flatMap((s) => s.rows.map((r) => r.tone)),
+      ...drawer.sections.flatMap((s) => s.rows.map((r) => r.tone ?? "default")),
+    ];
+  };
+  // The run gated nothing and its welds say so themselves: "0/0 exact" on each engine.
+  const empty = structuredClone(EVIDENCE_MANIFEST);
+  if (empty.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  Object.assign(empty.reconcile, { gated_rows: 0, gated_exact: 0, gated_drift: 0 });
+  for (const weld of empty.reconcile.welds) Object.assign(weld, { rows_compared: 0, rows_exact: 0 });
+  expect(receiptState(empty)).toBe("empty");
+  const { proof } = subjectCards(empty);
+  expect(proof.rows.map((r) => [r.label, r.value, r.tone])).toEqual([
+    ["status", "NOTHING PROVEN · the run gated no rows, so nothing was compared", "warn"],
+    ["gated rows", "0/0 exact · drift 0", "dim"],
+    ["weld · debt_manager", "0/0 exact", "dim"],
+    ["weld · aave_v3_etherfi", "0/0 exact", "dim"],
+    // The registry's identity is a record, true whatever the receipt proved: it prints in ink and lends the card no pass's colour.
+    ["fingerprint weld", "identical to service fingerprint, by construction", "default"],
+  ]);
+  expect(tonesOf(empty)).not.toContain("ok");
+  // The same holds when the welds still carry the rows a gate of zero never judged.
+  const gatedNone = structuredClone(EVIDENCE_MANIFEST);
+  if (gatedNone.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  Object.assign(gatedNone.reconcile, { gated_rows: 0, gated_exact: 0, gated_drift: 0 });
+  expect(receiptState(gatedNone)).toBe("empty");
+  expect(tonesOf(gatedNone)).not.toContain("ok");
+  // A hazard is never dimmed with them: a registry that does not match is still loud.
+  const mismatched = structuredClone(empty);
+  mismatched.feeds_registry.registry_fingerprint = "0".repeat(64);
+  expect(subjectCards(mismatched).proof.rows.at(-1)).toMatchObject({ label: "fingerprint weld", tone: "crit" });
+  // The pin can fail: a receipt that compared rows and passed wears the colour on every one of these rows.
+  expect(tonesOf(EVIDENCE_MANIFEST).filter((tone) => tone === "ok").length).toBeGreaterThanOrEqual(9);
+  // One gated row that matched is a finding again, and its welds are green again.
+  const single = structuredClone(EVIDENCE_MANIFEST);
+  if (single.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  Object.assign(single.reconcile, { gated_rows: 1, gated_exact: 1, gated_drift: 0 });
+  expect(subjectCards(single).proof.rows.filter((r) => r.label.startsWith("weld · ")).map((r) => r.tone)).toEqual(["ok", "ok"]);
 });
 
 test("the proof card: the pin pill, the answer rows, the hazards hoisted, fifteen provenance rows in three sections", () => {

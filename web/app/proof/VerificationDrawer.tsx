@@ -48,7 +48,7 @@ export function VerificationDrawer({ open, onClose, doctrine, descriptor }: Veri
                 {section.rows.map((row, index) => (
                   <div key={`${section.title}·${row.label}·${String(index)}`} className={styles.row}>
                     <span className={styles.k}>{row.label}</span>
-                    <span className={[styles.v, TONE_CLASS[row.tone ?? "default"]].filter(Boolean).join(" ")}>
+                    <span className={[styles.v, TONE_CLASS[row.tone ?? "default"]].filter(Boolean).join(" ")} data-tone={row.tone ?? "default"}>
                       {row.value}
                     </span>
                   </div>

@@ -114,6 +114,9 @@ test("the split renders as two subjects; PROOF · EXACT lives ONLY on the proof 
   // The pin is the receipt's own comparison sha, shortened.
   await expect(proof.getByTestId("verification-proof-status")).toHaveText("PROOF · EXACT @ 5f0b3e2a");
   await expect(proof).toContainText("ACCEPTED · every gated row welded exact");
+  // The pass's colour is on the pill and on each answer row of a run that compared rows and passed: the status, the gated tally, both welds, the registry's identity.
+  await expect(proof.locator("[data-tone='ok']")).toHaveCount(6);
+  await expect(proof.getByTestId("verification-weld-debt_manager").locator("[data-tone='ok']")).toHaveText("29/29 exact");
   // The live subject wears its own identity — never the proof's.
   await expect(live.getByTestId("verification-live-status")).toHaveText("SERVING · WATERMARKED");
   await expect(live).not.toContainText("PROOF");
@@ -214,6 +217,35 @@ test("a receipt that gated no rows proves nothing: data-receipt empty, the refus
   await expect(page.getByTestId("verification-proof-status")).toHaveText("RECEIPT COMPARED NO ROWS");
   await expect(page.getByTestId("verification-subject-proof")).toContainText("NOTHING PROVEN · the run gated no rows, so nothing was compared");
   for (const claim of ["All 0", "matched the chain", "PROOF · EXACT @", "ACCEPTED"]) await expect(page.locator("body")).not.toContainText(claim);
+});
+
+test("nothing is green under a receipt of no rows: a weld of 0/0 exact is dim on the proof card and in its drawer, and no element of either wears the ok tone", async ({
+  page,
+}) => {
+  const empty = structuredClone(EVIDENCE_MANIFEST);
+  if (empty.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  Object.assign(empty.reconcile, { gated_rows: 0, gated_exact: 0, gated_drift: 0 });
+  for (const weld of empty.reconcile.welds) Object.assign(weld, { rows_compared: 0, rows_exact: 0 });
+  await mockAll(page, empty);
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-receipt", "empty");
+  const proof = page.getByTestId("verification-subject-proof");
+  await expect(proof.getByTestId("verification-proof-status")).toHaveText("RECEIPT COMPARED NO ROWS");
+  for (const engine of ["debt_manager", "aave_v3_etherfi"]) {
+    const weld = proof.getByTestId(`verification-weld-${engine}`);
+    await expect(weld).toBeVisible();
+    await expect(weld.locator("[data-tone]")).toHaveText("0/0 exact");
+    await expect(weld.locator("[data-tone]")).toHaveAttribute("data-tone", "dim");
+  }
+  // The fold's rows are in the DOM whether or not it is open, so the count covers the whole card.
+  await expect(proof.locator("[data-tone='ok']")).toHaveCount(0);
+  // The drawer prints the same chain under the same law.
+  await page.getByRole("button", { name: "explain proof subject" }).click();
+  const evidence = page.getByTestId("verification-drawer-evidence");
+  await expect(evidence).toContainText("NOTHING PROVEN · the run gated no rows, so nothing was compared");
+  await expect(evidence).toContainText("0/0 exact");
+  await expect(evidence.locator("[data-tone='ok']")).toHaveCount(0);
+  await expect(evidence.locator("[data-tone='dim']").filter({ hasText: /^0\/0 exact$/ })).toHaveCount(2);
 });
 
 test("a missing receipt is a first-class state: data-receipt none, warn, the served reason, the refused proof-pin chip", async ({ page }) => {
@@ -359,6 +391,42 @@ test("evidence unavailable: state unavailable, the refused header with the retry
   await expect(page.getByTestId("verification-receipt")).toHaveText("Reconcile receipt: 87 gated rows exact, 0 drift");
 });
 
+test("retry keeps focus: pressed from the keyboard, the control leaves with the failure it answered and focus lands on the page's heading — never on <body> — and the heading is no Tab stop", async ({
+  page,
+}) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, BOOK));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  let reachable = false;
+  await page.route("**/v1/evidence*", (route) => (reachable ? json(route, EVIDENCE_MANIFEST) : route.abort()));
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-state", "unavailable");
+  const focused = () => page.evaluate(() => document.activeElement?.tagName ?? "nothing");
+  // The first read moves no focus, and the heading is not a focus target until a retry needs one.
+  expect(await focused()).toBe("BODY");
+  expect(await headline(page).evaluate((el) => el.hasAttribute("tabindex"))).toBe(false);
+
+  const retry = page.getByTestId("verification-retry");
+  await retry.focus();
+  await expect(retry).toBeFocused();
+  reachable = true;
+  await page.keyboard.press("Enter");
+  await expect(surface(page)).toHaveAttribute("data-state", "ok");
+  await expect(retry).toHaveCount(0);
+  // The control is gone; the focus it held is on the heading, which now states the finding the retry fetched.
+  await expect(headline(page)).toBeFocused();
+  expect(await focused()).toBe("H1");
+  await expect(headline(page)).toHaveText("All 87 checked rows matched the chain exactly, in this deployment's pinned reconcile run.");
+  // Focusable by script alone: Tab leaves it for the page's first control, and Shift+Tab never comes back to it.
+  await expect(headline(page)).toHaveAttribute("tabindex", "-1");
+  await page.keyboard.press("Tab");
+  await expect(page.getByTestId("verification-drawer")).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(headline(page)).not.toBeFocused();
+  expect(await focused()).not.toBe("H1");
+});
+
 test("a read in flight has not failed: while /v1/evidence, /v1/book and /v1/meta are unanswered every step is pending in its own words — 'could not be read' and 'unavailable' wait for a failure", async ({
   page,
 }) => {
@@ -390,13 +458,30 @@ test("a read in flight has not failed: while /v1/evidence, /v1/book and /v1/meta
   }
   await expect(page.getByTestId("verification-step-compute")).toHaveText("Reading the batch…");
   await expect(page.getByTestId("verification-step-verify")).toHaveText("Reading the receipt…");
-  await expect(page.getByTestId("verification-receipt")).toHaveText("Reading the reconcile receipt…");
+  // The receipt is pending, as its tile is: the strip is neutral and busy, drawn with the solid rule — the dashed, dimmed strip is a refusal's — and the page's receipt is not "none", the manifest's own absence.
+  const strip = page.getByTestId("verification-receipt");
+  await expect(strip).toHaveText("Reading the reconcile receipt…");
+  await expect(strip).toHaveAttribute("data-tone", "neutral");
+  await expect(strip).toHaveAttribute("aria-busy", "true");
+  expect(await strip.evaluate((el) => getComputedStyle(el).borderTopStyle)).toBe("solid");
+  await expect(surface(page)).toHaveAttribute("data-receipt", "pending");
+  // Every identity chip waits with it: the word, and no refused chip — nothing has been withheld.
+  for (const label of ["Proof pin", "Live batch", "Receipt", "Batch key"]) {
+    await expect(chip(page, label)).toContainText("pending");
+    await expect(chip(page, label)).not.toHaveClass(/chipRefused/);
+  }
+  for (const words of ["unknown", "none"]) await expect(page.getByTestId("verification-verdict-identity")).not.toContainText(words);
+  // Neither subject is drawn before the manifest answers.
+  await expect(page.getByTestId("verification-subject-proof")).toHaveCount(0);
+  await expect(page.getByTestId("verification-subject-live")).toHaveCount(0);
   // Nothing has failed, so nothing says it has.
   for (const words of ["could not be read", "could not be fetched", "unavailable"]) await expect(surface(page)).not.toContainText(words);
   await expect(page.getByTestId("verification-retry")).toHaveCount(0);
   release();
   await expect(surface(page)).toHaveAttribute("data-state", "ok");
   await expect(surface(page).locator("[aria-busy='true']")).toHaveCount(0);
+  await expect(surface(page)).toHaveAttribute("data-receipt", "exact");
+  await expect(strip).toHaveAttribute("data-tone", "ok");
   await expect(page.getByTestId("verification-step-verify")).toHaveText("87 gated rows reconciled exact against the chain; 0 drift named.");
 });
 

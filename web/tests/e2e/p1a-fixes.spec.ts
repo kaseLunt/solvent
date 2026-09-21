@@ -454,15 +454,16 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await expect(toggle).toHaveText("Show 2 small & dust positions ($75.75)");
     await expect(table.locator("tbody tr")).toHaveCount(4);
-    // A row is named for the materiality tier it falls under: both folded rows are over $1, so both are "small".
     await expect(page.getByTestId("sg-table-row-small-2")).toHaveCount(0);
-    await expect(page.getByTestId("sg-table-row-dust")).toHaveCount(0);
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     await expect(table.locator("tbody tr")).toHaveCount(6);
     await expect(page.getByTestId("sg-table-row-small-1")).toContainText("$61.20");
-    await expect(page.getByTestId("sg-table-row-small-2")).toContainText("$14.55");
+    // A row is named for the materiality tier it falls under: both folded rows are over $1, so both are "small". With
+    // the fold open, the $14.55 row IS in the table under that name, and no row of the same table is named "dust".
+    await expect(table.getByTestId("sg-table-row-small-2")).toContainText("$14.55");
+    await expect(table.getByTestId("sg-table-row-dust")).toHaveCount(0);
     // The refused row never folds, in either position.
     await expect(refused).toBeVisible();
   });

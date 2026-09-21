@@ -339,6 +339,29 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
     expect(() => receiptComparedNothing({ ...NO_ROWS_GATED.reconcile, gated_rows: -0 } as NonNullable<EvidenceManifest["reconcile"]>)).toThrow(/gated_rows/);
   });
 
+  test("the drawer of a receipt that gated no rows wears no pass's colour: a weld of 0/0 exact is dim, the registry's identity is ink — and a weld that compared rows and matched is green again", () => {
+    const tones = (manifest: EvidenceManifest): (string | undefined)[] => proofSubjectEvidence(manifest).sections.flatMap((section) => section.rows.map((row) => row.tone));
+    const zeroWelds = receiptWith((r) => {
+      r.gated_rows = 0;
+      r.gated_exact = 0;
+      r.gated_drift = 0;
+      r.welds = r.welds.map((weld) => ({ ...weld, rows_compared: 0, rows_exact: 0 }));
+    });
+    expect(proofSubjectStatus(zeroWelds).kind).toBe("accepted");
+    const receipt = proofSubjectEvidence(zeroWelds).sections.find((section) => section.title === "RECEIPT · COMMITTED ARTIFACT");
+    expect(receipt?.rows.filter((row) => row.label.startsWith("weld · ")).map((row) => [row.label, row.value, row.tone])).toEqual([
+      ["weld · debt_manager", "0/0 exact", "dim"],
+      ["weld · aave_v3_etherfi", "0/0 exact", "dim"],
+    ]);
+    expect(tones(zeroWelds)).not.toContain("ok");
+    expect(tones(NO_ROWS_GATED)).not.toContain("ok");
+    // The colour belongs to a run that compared rows and passed — there every one of these rows wears it.
+    expect(tones(EVIDENCE_MANIFEST).filter((tone) => tone === "ok")).toHaveLength(5);
+    // A registry that does not match is a hazard, and no receipt dims it.
+    const mismatched: EvidenceManifest = { ...structuredClone(zeroWelds), feeds_registry: { ...zeroWelds.feeds_registry, registry_fingerprint: "0".repeat(64) } };
+    expect(proofSubjectEvidence(mismatched).sections.at(-1)?.rows.at(-1)).toMatchObject({ label: "fingerprint weld", tone: "crit" });
+  });
+
   test("a missing receipt says NOTHING IS PROVEN in the head — an absence named as an absence", () => {
     expect(proofTakeaway(EVIDENCE_NO_RECEIPT)).toBe("Nothing is proven for this deployment: no reconcile receipt is committed.");
   });

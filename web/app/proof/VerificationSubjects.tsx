@@ -29,7 +29,7 @@ function Row({ row }: { row: CardRow }) {
   return (
     <div className={styles.row} data-testid={row.id === undefined ? undefined : `verification-${row.id}`}>
       <span className={styles.k}>{row.label}</span>
-      <span className={[styles.v, TONE_CLASS[row.tone]].filter(Boolean).join(" ")}>
+      <span className={[styles.v, TONE_CLASS[row.tone]].filter(Boolean).join(" ")} data-tone={row.tone}>
         {row.copy === undefined ? (
           row.value
         ) : (

@@ -205,6 +205,15 @@ export function receiptState(manifest: EvidenceResponse): ReceiptState {
   return passed ? "drift" : "failed";
 }
 
+/**
+ * What the page draws for the receipt: the judge's answer once the manifest
+ * has answered, and `pending` while its read is in flight. A read in flight
+ * has no receipt state — `none` is the manifest's own absence, and a page
+ * that wore it before the manifest answered would state an absence nobody
+ * served.
+ */
+export type ReceiptRegister = ReceiptState | "pending";
+
 type ManifestReconcile = NonNullable<EvidenceResponse["reconcile"]>;
 
 /** Whether every tally the receipt judge reads is a wire population; a receipt that is not is judged by nobody and printed as it came. */
@@ -504,7 +513,7 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
   const feeds = manifest.feeds_registry;
   const welded = feeds.registry_fingerprint === service.registry_fingerprint;
   const reconcile = status.kind === "unavailable" ? null : status.reconcile;
-  // A pass over no gated rows compared nothing: the card refuses the finding in the same words the drawer does, and no row of it wears a verdict's colour.
+  // A pass over no gated rows compared nothing: the card refuses the finding in the same words the drawer does, and no row of it wears a pass's colour — not the gated tally, not a weld of "0/0 exact", not the registry's identity, which is a record and prints in ink. A hazard stays loud.
   const vacuous = status.kind === "accepted" && receiptComparedNothing(status.reconcile);
   // Every artifact-derived string destined for the fold is checked here; a refused one is a hazard and hoists out.
   const artifact = reconcile === null ? null : publishable(reconcile.artifact_path);
@@ -530,7 +539,7 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
       rows.push({
         label: `weld · ${weld.engine}`,
         value: `${String(weld.rows_exact)}/${String(weld.rows_compared)} exact`,
-        tone: weld.rows_exact === weld.rows_compared ? "ok" : "crit",
+        tone: vacuous ? "dim" : weld.rows_exact === weld.rows_compared ? "ok" : "crit",
         id: `weld-${weld.engine}`,
       });
     }
@@ -540,7 +549,7 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
     value: welded
       ? "identical to service fingerprint, by construction"
       : "MISMATCH against service fingerprint, which the contract says are identical by construction",
-    tone: welded ? "ok" : "crit",
+    tone: welded ? (vacuous ? "default" : "ok") : "crit",
   });
   if (artifact !== null && !artifact.ok) rows.push({ label: "artifact", value: artifact.refusal, tone: "warn", id: "proof-artifact-refused" });
   if (receiptNote !== null && !receiptNote.ok) rows.push({ label: "receipt note", value: receiptNote.refusal, tone: "warn", id: "proof-note-refused" });
@@ -742,7 +751,12 @@ function chips(manifest: EvidenceResponse, receipt: ReceiptState): LabChip[] {
   return [pinned, liveBatch, receiptChip, key];
 }
 
-/** Every chip refused: nothing is known before the manifest answers, and nothing is invented when it cannot. */
+/** Every chip pending while the manifest is read: nothing is known yet, and nothing has been refused — the dash and the dashed chip wait for a read that failed. */
+function pendingChips(): LabChip[] {
+  return ["Proof pin", "Live batch", "Receipt", "Batch key"].map((label) => ({ label, value: PENDING }));
+}
+
+/** Every chip refused: the manifest could not be read, and nothing is invented in its place. */
 function unknownChips(): LabChip[] {
   return [
     { label: "Proof pin", value: EM_DASH, tone: "refused" },
@@ -806,7 +820,7 @@ export interface VerificationInput {
 
 export interface VerificationView {
   readonly state: "loading" | "unavailable" | "ok";
-  readonly receipt: ReceiptState;
+  readonly receipt: ReceiptRegister;
   readonly kicker: "Verification · this deployment";
   readonly headline: LabHeadline;
   /** Proof pin · Live batch · Receipt · Batch key. */
@@ -864,10 +878,10 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
   if (state.phase === "loading") {
     return {
       state: "loading",
-      receipt: "none",
+      receipt: "pending",
       kicker: VERIFICATION_KICKER,
       headline: refused("Loading this deployment's verification record…", VERIFICATION_LOADING_DEK),
-      chips: unknownChips(),
+      chips: pendingChips(),
       steps,
       receiptLine: "Reading the reconcile receipt…",
       probes: [],

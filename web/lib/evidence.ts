@@ -858,7 +858,13 @@ function buildIdentitySection(manifest: EvidenceManifest): EvidenceSection {
   };
 }
 
-function feedsRegistrySection(manifest: EvidenceManifest): EvidenceSection {
+/**
+ * The feeds registry's rows. The registry matching the service's fingerprint
+ * is a record, true whatever the receipt proved: beside a receipt that
+ * compared nothing it prints in ink, so that no row of that chain wears a
+ * pass's colour. A mismatch is a hazard, and is loud under every receipt.
+ */
+function feedsRegistrySection(manifest: EvidenceManifest, vacuous: boolean): EvidenceSection {
   const feeds = manifest.feeds_registry;
   const welded = feeds.registry_fingerprint === manifest.service.registry_fingerprint;
   return {
@@ -868,7 +874,7 @@ function feedsRegistrySection(manifest: EvidenceManifest): EvidenceSection {
       { label: "registry fingerprint", value: feeds.registry_fingerprint },
       { label: "file sha256", value: feeds.file_sha256 },
       welded
-        ? { label: "fingerprint weld", value: "identical to service.registry_fingerprint, by construction", tone: "ok" }
+        ? { label: "fingerprint weld", value: "identical to service.registry_fingerprint, by construction", tone: vacuous ? "default" : "ok" }
         : {
             label: "fingerprint weld",
             value: "MISMATCH against service.registry_fingerprint, which the contract says are identical by construction",
@@ -931,9 +937,11 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
             value: `${String(readWirePopulation(weld.rows_exact, "rows_exact"))}/${String(
               readWirePopulation(weld.rows_compared, "rows_compared"),
             )} exact`,
-            tone:
-              readWirePopulation(weld.rows_exact, "rows_exact") ===
-              readWirePopulation(weld.rows_compared, "rows_compared")
+            // A weld under a run that gated no rows proves what the run proved — nothing: "0/0 exact" is a count, never a match.
+            tone: vacuous
+              ? "dim"
+              : readWirePopulation(weld.rows_exact, "rows_exact") ===
+                  readWirePopulation(weld.rows_compared, "rows_compared")
                 ? "ok"
                 : "crit",
           }),
@@ -945,7 +953,7 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
     });
   }
 
-  sections.push(buildIdentitySection(manifest), feedsRegistrySection(manifest));
+  sections.push(buildIdentitySection(manifest), feedsRegistrySection(manifest, vacuous));
 
   return {
     title: "EXPLAIN · PROOF SUBJECT",

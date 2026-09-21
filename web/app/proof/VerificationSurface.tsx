@@ -1,7 +1,7 @@
 "use client";
 
 import type { components } from "@solvent/client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KitTable, SectionHead, VerdictHeader, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
@@ -108,6 +108,19 @@ export function VerificationSurface() {
     };
   }, [attempt]);
 
+  // The retry control leaves the page with the failure it answered, so the focus it held moves to the page's
+  // heading — which outlives every state and now says what is being read — and never falls to the document.
+  // The heading is focusable by script alone: it is no stop in the Tab order. Only a retry moves focus; the
+  // first read leaves it where the visitor put it.
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (attempt === 0) return;
+    const heading = surfaceRef.current?.querySelector("h1");
+    if (heading === null || heading === undefined) return;
+    heading.tabIndex = -1;
+    heading.focus();
+  }, [attempt]);
+
   // A deep link lands on what it names. The browser's own hash scroll ran on the
   // loading tree, which may be shorter than the viewport; once the manifest has
   // answered and the page has its height, the named element is scrolled to.
@@ -132,6 +145,7 @@ export function VerificationSurface() {
 
   return (
     <div
+      ref={surfaceRef}
       className={styles.page}
       data-testid="verification-surface"
       data-state={view.state}
