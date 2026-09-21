@@ -1,10 +1,12 @@
 // The Verification page-test contract (spec 2026-09-15 §5.5, §7; plan R1–R5,
 // R8). Mocked from the committed fixtures: the contract's own /v1/evidence
 // example and its three documented deltas (tests/fixtures/proof.ts), and the
-// Overview's meta, book and positions mocks for the architecture steps. Every
-// headline, chip, step and receipt string here is produced by
-// lib/verification-view.ts (unit-pinned in tests/unit/verification-view.spec.ts);
-// the subjects' words are lib/evidence.ts's.
+// Overview's meta and book mocks for the architecture steps (the positions
+// mock stands so that a walk, if the page ever started one, would be counted
+// rather than fail — the page asks /v1/book alone). Every headline, chip,
+// step and receipt string here is produced by lib/verification-view.ts
+// (unit-pinned in tests/unit/verification-view.spec.ts); the subjects' words
+// are lib/evidence.ts's.
 //
 // Placement laws for the two cards follow the three-layer rule: a hazard is
 // visible AND not a descendant of the fold AND the counted summary recounts;
@@ -174,6 +176,29 @@ test("a missing batch renders loudly, refuses the live chips and fabricates NO m
   // The example's real key must appear NOWHERE — absence is absence.
   await expect(page.getByText(REAL_KEY)).toHaveCount(0);
   await expect(page.getByTestId("verification-proof-status")).toHaveText("PROOF · EXACT @ 5f0b3e2a");
+});
+
+test("the compute step reads the census only: /proof asks /v1/book once and never walks /v1/positions — the step still names its batch and its account count", async ({
+  page,
+}) => {
+  await mockAll(page);
+  const asked = { book: 0, positions: 0 };
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/v1/book") asked.book += 1;
+    if (path.startsWith("/v1/positions")) asked.positions += 1;
+  });
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("verification-kpi-compute")).toContainText("1");
+  await expect(page.getByTestId("verification-kpi-compute")).toContainText("batch · 2 Cash accounts");
+  await expect(page.getByTestId("verification-step-compute")).toContainText(
+    "Batch 1 computed at 2026-07-29T10:00:00Z; every position's health from the wire's own integers.",
+  );
+  // The book has landed and printed; a walk would have asked for its first page by now.
+  await page.waitForTimeout(300);
+  expect(asked.book).toBe(1);
+  expect(asked.positions).toBe(0);
 });
 
 test("evidence unavailable: state unavailable, the refused header with the retry law, no subject invented, the other steps still answer", async ({

@@ -7,7 +7,7 @@
 // receipt) are worded as absences. The four architecture steps are the
 // Overview's pipeline law, derived here once and rendered by both pages
 // (app/overview/Pipeline.tsx and app/proof/VerificationArchitecture.tsx).
-import type { components } from "@solvent/client";
+import { UnavailableError, type components } from "@solvent/client";
 import {
   deriveProofSubjectStatus,
   liveSubjectStatus,
@@ -36,6 +36,37 @@ export interface BookReading {
   readonly phase: "loading" | "ok" | "no-batch" | "error";
   readonly book: BookResponse | null;
   readonly failure: { readonly message: string; readonly retryAfterSeconds: number | null } | null;
+}
+
+/** The `/v1/book` ask before it answers: pending — never refused, never an absence. */
+export const BOOK_LOADING: BookReading = { phase: "loading", book: null, failure: null };
+
+/** The book's answer as the steps read it. */
+export const bookAnswered = (book: BookResponse): BookReading => ({ phase: "ok", book, failure: null });
+
+/**
+ * The book's failure as the steps read it. The wire's own 503 is "no-batch" —
+ * the one absence it states; anything else is a book that could not be read,
+ * never an absence.
+ */
+export function bookFailed(cause: unknown): BookReading {
+  return cause instanceof UnavailableError
+    ? { phase: "no-batch", book: null, failure: { message: cause.body.error.message, retryAfterSeconds: cause.retryAfterSeconds } }
+    : { phase: "error", book: null, failure: { message: cause instanceof Error ? cause.message : String(cause), retryAfterSeconds: null } };
+}
+
+/**
+ * The Cash census as the compute step prints it: `/v1/book`'s own count of the
+ * engine's positions, through the population guard. The aggregate states the
+ * number, so a page that prints only the census asks only `/v1/book` — it
+ * never walks `/v1/positions` for a figure the book already carries. Null
+ * while the book is unanswered or unread, and when the book lists no Cash
+ * engine: no count, never a zero.
+ */
+export function cashCensus(reading: BookReading): number | null {
+  if (reading.phase !== "ok" || reading.book === null) return null;
+  const engine = reading.book.engines.find((e) => e.engine === CASH);
+  return engine === undefined ? null : readWirePopulation(engine.positions, "engines[debt_manager].positions");
 }
 
 /**

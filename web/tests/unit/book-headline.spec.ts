@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { bookHeadline, bookHeadlineRefused, nearCapSentence, walkSentence } from "../../lib/book-headline";
+import { bookHeadline, bookHeadlineRefused, censusFaultWords, nearCapSentence, walkSentence } from "../../lib/book-headline";
 
 const usd6 = (n: number): bigint => BigInt(Math.round(n * 1_000_000));
 /** A complete walk: the only state in which a negative may be claimed over the book. */
@@ -122,6 +122,25 @@ test("a stopped walk names its cause and claims no verdict over the rest", () =>
   );
   const blank = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 0, computed: 0, complete: false, stopped: "  " });
   expect(blank.dek).toBe("The walk stopped before the last page (the service gave no reason). No page has landed yet. No verdict is claimed over the rest.");
+});
+
+test("the census fault: a short walk delivered N of the M rows; a walk past its census delivered N rows FOR a census of M — never 'N of the M' with N the larger", () => {
+  expect(censusFaultWords(2, 3)).toBe("the walk delivered 2 of the 3 rows the wire advertised");
+  expect(censusFaultWords(0, 3)).toBe("the walk delivered 0 of the 3 rows the wire advertised");
+  expect(censusFaultWords(3, 2)).toBe("the walk delivered 3 rows for a census of 2");
+  expect(censusFaultWords(1, 0)).toBe("the walk delivered 1 row for a census of 0");
+  expect(censusFaultWords(3, 2)).not.toMatch(/\d+ of the \d+/);
+  const h = bookHeadline({
+    decimals: 6,
+    material: nothing,
+    belowLine: nothing,
+    nearCap: nothing,
+    notComputed: 0,
+    computed: 3,
+    complete: false,
+    stopped: censusFaultWords(3, 2),
+  });
+  expect(h.dek).toContain("(the walk delivered 3 rows for a census of 2)");
 });
 
 test("a material finding stands mid-walk as a lower bound; a zero near-cap count mid-walk is silence, not a negative", () => {

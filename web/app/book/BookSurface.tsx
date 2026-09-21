@@ -4,6 +4,7 @@ import { useState } from "react";
 import { BandBars, ChartCard, KpiTile, SectionHead, VerdictHeader, type Band } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { useCashBook } from "@/lib/cash-book";
+import { bandsFinding, walkQualifier } from "@/lib/cash-summary";
 import { deriveCashView, deriveLegacyView, malformedSub, moneyText } from "@/lib/cash-view";
 import { humanUsd } from "@/lib/human-usd";
 import { MATERIAL_LINE_USD } from "@/lib/materiality";
@@ -37,7 +38,7 @@ export function BookSurface() {
     value: b.debt,
     tone: bandTone(b.id),
   }));
-  const nearTenPct = (summary?.bands ?? []).filter((b) => NEAR_BANDS.has(b.id)).reduce((s, b) => s + b.debt, 0n);
+  const distance = summary === null ? null : bandsFinding(summary);
   const refusalKey = cash.engine?.refusals[0]?.key;
   const badDebt = view.badDebt;
   const walkFailure =
@@ -45,11 +46,7 @@ export function BookSurface() {
       ? null
       : { message: cash.walkFailure.message, retryable: cash.walkFailure.register === "transport" };
   const notComputedLine = refusedTiles ? "Not computed." : "Loading…";
-  const walkNote = walking
-    ? " · walking the book, figures are a lower bound"
-    : walkStopped !== null
-      ? " · the walk stopped, figures are a lower bound"
-      : "";
+  const walkNote = walkQualifier(summary);
   const withheldCause = view.withheld === null ? null : plainCause(view.withheld.code, view.withheld.detail);
   // A walk-derived zero is a finding only once the walk is complete: until
   // then the tile shows a dash, and a positive figure is a lower bound.
@@ -207,13 +204,13 @@ export function BookSurface() {
         <ChartCard
           title="Distance to liquidation, by debt"
           finding={
-            summary === null ? (
+            distance === null ? (
               notComputedLine
             ) : (
               <>
-                Cash debt grouped by room under the borrow cap · bars are dollars, counts printed ·{" "}
-                <b>{humanUsd(nearTenPct, decimals)}</b> sits within 10% of the cap
-                {walkNote}
+                {distance.lead}
+                <b>{distance.figure}</b>
+                {distance.rest}
               </>
             )
           }
@@ -223,7 +220,14 @@ export function BookSurface() {
           {summary === null ? (
             <p className={styles.note}>{notComputedLine}</p>
           ) : (
-            <BandBars bands={bands} decimals={decimals} weightedBy="value" testId="book-bands" />
+            <>
+              <BandBars bands={bands} decimals={decimals} weightedBy="value" testId="book-bands" />
+              {distance !== null && distance.barsNote !== null && (
+                <p className={styles.note} data-testid="book-bands-note">
+                  {distance.barsNote}
+                </p>
+              )}
+            </>
           )}
         </ChartCard>
         <ChartCard title="Needs attention" finding={summary === null ? notComputedLine : `Material first, then by room${walkNote}`}>

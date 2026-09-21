@@ -33,9 +33,15 @@ export interface AddressReading {
   readonly evidence: EvidenceManifest | null;
   readonly age: LiveAgeReading;
   readonly reload: () => void;
+  /**
+   * The lookup on the page was landed by a resume repair. A repair refreshes the position alone and replays no
+   * stress, so a stress beside a repaired lookup was read for the lookup before it. Absent reads as false.
+   */
+  readonly lookupRepaired?: boolean;
 }
 
-type Keyed<T> = { readonly for: string; readonly state: Phase<T> } | null;
+/** `repaired`: a background repair landed this result — it rode no load epoch, so nothing keyed by the epoch was replayed with it. */
+type Keyed<T> = { readonly for: string; readonly state: Phase<T>; readonly repaired?: boolean } | null;
 const LOADING = { phase: "loading" } as const;
 
 function forAddress<T>(keyed: Keyed<T>, addr: string): Phase<T> {
@@ -91,7 +97,7 @@ export function useAddressLookup(addr: string): AddressReading {
           (value) => {
             // An abort is a supersession, not an answer: the request that replaced this one reports for itself.
             if (controller.signal.aborted) return false;
-            setLookupResult({ for: addr, state: { phase: "ready", value } });
+            setLookupResult({ for: addr, state: { phase: "ready", value }, repaired: keepOnFailure });
             return true;
           },
           (cause: unknown) => {
@@ -122,6 +128,7 @@ export function useAddressLookup(addr: string): AddressReading {
   }, [loadLookup, epoch]);
 
   const lookup = forAddress(lookupResult, addr);
+  const lookupRepaired = lookupResult !== null && lookupResult.for === addr && lookupResult.repaired === true;
   const ready = lookup.phase === "ready" ? lookup.value : null;
   const hasCash = ready !== null && ready.outcome === "found" && ready.response.positions.some((p) => p.engine === CASH);
 
@@ -164,7 +171,7 @@ export function useAddressLookup(addr: string): AddressReading {
     setEpoch((e) => e + 1);
   }, []);
 
-  return { address: addr, valid, lookup, history, stress, params, evidence, age, reload };
+  return { address: addr, valid, lookup, history, stress, params, evidence, age, reload, lookupRepaired };
 }
 
 /** Cursor-paged activity for one address. Mount the consumer with key={addr}: a fresh mount can never hold another address's rows. */

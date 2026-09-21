@@ -373,6 +373,42 @@ test("the drawer, open across a refresh that withholds the book, speaks the with
   await expect(body).not.toContainText("nothing to calculate");
 });
 
+test("resume: a repair that moves the position replays no stress — the section says the stress is from the previous lookup, beside the stress batch on every row", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  let stressRequests = 0;
+  page.on("request", (request) => {
+    if (/\/v1\/address\/[^/]+\/stress/.test(request.url())) stressRequests += 1;
+  });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "near");
+  const table = page.getByTestId("inspector-stress-table");
+  await expect(table.locator("tbody tr")).toHaveCount(3);
+  // One batch, one lookup: nothing to disclose.
+  await expect(page.getByTestId("inspector-stress-batch")).toHaveCount(0);
+  const stressBefore = stressRequests;
+  // The repair lands the same account one batch on.
+  let addressRequests = 0;
+  await page.unroute("**/v1/address/*");
+  await page.route("**/v1/address/*", (route) => {
+    addressRequests += 1;
+    return json(route, { ...DEMO_ADDRESS_NEAR, batch: { ...DEMO_ADDRESS_NEAR.batch, id: DEMO_ADDRESS_NEAR.batch.id + 1 } });
+  });
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  await expect.poll(() => addressRequests).toBe(1);
+  await expect(page.getByTestId("inspector-verdict-identity")).toContainText("Batch 18,252");
+  const note = page.getByTestId("inspector-stress-batch");
+  await expect(note).toHaveAttribute("role", "note");
+  await expect(note).toContainText("Stress from the previous lookup, for batch 18,251; the position above was refreshed since and is batch 18,252.");
+  await expect(note).toContainText("not compared against the position above");
+  for (const k of [0, 1, 2]) {
+    await expect(table.locator("tbody tr").nth(k).locator("td").first()).toContainText("batch 18,251 · stress from the previous lookup");
+  }
+  // The premise, pinned: the repair refreshed the position alone.
+  expect(stressRequests).toBe(stressBefore);
+});
+
 test("stress answering for another batch: the section discloses both batches, each row wears the stress batch, the rows still read for their own batch", async ({ page }) => {
   await mockInspector(page, { address: DEMO_ADDRESS_NEAR, stress: { ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: DEMO_STRESS_NEAR.batch.id + 1 } } });
   await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);

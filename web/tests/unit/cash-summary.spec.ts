@@ -4,7 +4,7 @@
 import { expect, test } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
 import { readCashRow } from "../../lib/cash-rows";
-import { attentionEmptyText, summarizeCash, unavailableHeadline } from "../../lib/cash-summary";
+import { attentionEmptyText, bandsFinding, summarizeCash, unavailableHeadline, walkQualifier } from "../../lib/cash-summary";
 import { POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 
 const rows = POSITIONS_DM_PAGE_1.positions.map((p) => readCashRow(refinePositionSummary(p)));
@@ -77,6 +77,67 @@ test("the attention table's empty line never clears the book over an unfinished 
   expect(attentionEmptyText({ settled: true, stopped: null, belowLine: { sum: 61_500_000n, count: 3 }, decimals: 6 })).toBe(
     "Nothing material needs attention; 3 liquidatable positions under $100 ($61.50) are behind the small & dust toggle.",
   );
+});
+
+test("the distance chart's finding: settled it states the figure; over an incomplete walk — still running or stopped — the figure AND the bars each wear the lower-bound qualifier, and a walk-derived zero is a dash", () => {
+  const first = POSITIONS_DM_PAGE_1.positions[0];
+  if (first === undefined) throw new Error("fixture invariant: the committed page serves a row");
+  // Room 184 under a cap of 4,804: the 2–5% band, not liquidatable.
+  const near = readCashRow(
+    refinePositionSummary({
+      ...first,
+      account: "0xnear",
+      status: "computed",
+      refusal: null,
+      liquidatable: false,
+      health_factor: { wad: null, num: "4804000000", den: "4620000000", infinite: false, note: "" },
+      total_debt: "4620000000",
+    }),
+  );
+  expect(near.band).toBe(2);
+  const LEAD = "Cash debt grouped by room under the borrow cap · bars are dollars, counts printed · ";
+  const of = (input: { rows: typeof rows; walkComplete: boolean; walkStopped: string | null }) =>
+    bandsFinding(summarizeCash({ decimals: 6, refusedPositions: 0, refusedWhole: null, ...input }));
+
+  // Settled: the figure stands alone, a settled zero is a finding, and nothing is qualified.
+  expect(of({ rows: [near], walkComplete: true, walkStopped: null })).toEqual({
+    lead: LEAD,
+    figure: "$4,620",
+    rest: " sits within 10% of the cap",
+    barsNote: null,
+  });
+  expect(of({ rows, walkComplete: true, walkStopped: null })).toMatchObject({ lead: LEAD, figure: "$0", rest: " sits within 10% of the cap", barsNote: null });
+
+  // Still running, a positive read: the figure is a floor in its own words, and the bars say so themselves.
+  expect(of({ rows: [near], walkComplete: false, walkStopped: null })).toEqual({
+    lead: `${LEAD}at least `,
+    figure: "$4,620",
+    rest: " sits within 10% of the cap · walking the book, figures are a lower bound",
+    barsNote: "Walking the book: every bar and every count is a lower bound over the accounts read so far.",
+  });
+  // Stopped, a positive read: the same two qualifiers, in the stopped register.
+  expect(of({ rows: [near], walkComplete: false, walkStopped: "Failed to fetch" })).toEqual({
+    lead: `${LEAD}at least `,
+    figure: "$4,620",
+    rest: " sits within 10% of the cap · the walk stopped, figures are a lower bound",
+    barsNote: "The walk stopped: every bar and every count is a lower bound over the accounts it read.",
+  });
+  // A walk-derived zero is never "$0" before the walk ends — in either register.
+  for (const walkStopped of [null, "Failed to fetch"]) {
+    const zero = of({ rows, walkComplete: false, walkStopped });
+    expect(zero.figure).toBe("—");
+    expect(zero.rest).toContain("within 10% of the cap: a zero is claimed only by a complete walk");
+    expect(zero.rest).toContain("figures are a lower bound");
+    expect(zero.barsNote).not.toBeNull();
+    expect(`${zero.lead}${zero.figure}${zero.rest}`).not.toContain("$0");
+  }
+});
+
+test("the walk qualifier: nothing over a settled or unloaded book, the running and the stopped register otherwise", () => {
+  expect(walkQualifier(null)).toBe("");
+  expect(walkQualifier({ settled: true, stopped: null })).toBe("");
+  expect(walkQualifier({ settled: false, stopped: null })).toBe(" · walking the book, figures are a lower bound");
+  expect(walkQualifier({ settled: false, stopped: "Failed to fetch" })).toBe(" · the walk stopped, figures are a lower bound");
 });
 
 test("load failure headline", () => {

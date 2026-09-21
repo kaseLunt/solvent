@@ -5,17 +5,19 @@ import { useEffect, useState } from "react";
 import { KitTable, SectionHead, VerdictHeader, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
-import { useCashBook } from "@/lib/cash-book";
-import { deriveCashView } from "@/lib/cash-view";
 import type { EvidenceDescriptor } from "@/lib/evidence";
-import { useMetaConstants } from "@/lib/meta";
 import { fetchEvidence, ProofFetchError } from "@/lib/proof-data";
 import {
+  BOOK_LOADING,
+  bookAnswered,
+  bookFailed,
+  cashCensus,
   deriveVerificationView,
   PROBE_COLUMNS,
   PROBES_EMPTY,
   probesSummary,
   VERIFICATION_COPY,
+  type BookReading,
   type EvidenceState,
 } from "@/lib/verification-view";
 import styles from "./verification.module.css";
@@ -42,15 +44,16 @@ const CLOSED: DrawerState = { open: false, descriptor: null };
 /**
  * Verification: the verdict header, the architecture strip the Overview shares,
  * the two subjects, the committed probe records, the raw wire body. The manifest
- * is fetched through lib/proof-data; the steps' live numbers come from the meta
- * and book readers the Overview uses, so both pages print one derivation. Every
- * word is the view model's; this component prints.
+ * is fetched through lib/proof-data; the steps' live numbers come from /v1/meta
+ * and /v1/book through the derivation the Overview prints, so both pages read
+ * one law. The compute step prints the book's census, so this page asks
+ * /v1/book alone and never walks /v1/positions. Every word is the view
+ * model's; this component prints.
  */
 export function VerificationSurface() {
   const [state, setState] = useState<EvidenceState>({ phase: "loading" });
   const [meta, setMeta] = useState<MetaAsk>({ settled: false, value: null });
-  const reading = useCashBook();
-  const metaConstants = useMetaConstants();
+  const [reading, setReading] = useState<BookReading>(BOOK_LOADING);
   const [drawer, setDrawer] = useState<DrawerState>(CLOSED);
   const [showRaw, setShowRaw] = useState(false);
 
@@ -72,6 +75,16 @@ export function VerificationSurface() {
           retryAfterSeconds: null,
         });
       });
+    getSolventClient()
+      .book(controller.signal)
+      .then(
+        (book) => {
+          if (!controller.signal.aborted) setReading(bookAnswered(book));
+        },
+        (cause: unknown) => {
+          if (!controller.signal.aborted) setReading(bookFailed(cause));
+        },
+      );
     getSolventClient()
       .meta(controller.signal)
       .then(
@@ -97,8 +110,7 @@ export function VerificationSurface() {
     document.getElementById(id)?.scrollIntoView({ block: "start" });
   }, [state.phase]);
 
-  const cash = deriveCashView(reading, metaConstants.constants);
-  const view = deriveVerificationView({ state, meta: meta.value, book: reading, cashAccounts: cash.positions });
+  const view = deriveVerificationView({ state, meta: meta.value, book: reading, cashAccounts: cashCensus(reading) });
   const manifest = state.phase === "ok" ? state.manifest : null;
   const probeRows: KitRow[] = view.probes.map((row, index) => ({
     key: row.key,

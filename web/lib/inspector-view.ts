@@ -94,6 +94,12 @@ export interface InspectorView {
    * batch. When it differs from `batchId` the stress section says so and its figures are read for their own batch.
    */
   readonly stressBatchId: number | null;
+  /**
+   * The stress on the page was read for the lookup BEFORE the one on the page: a resume repair refreshes the position
+   * alone and replays no stress. False when no stress has answered — nothing was kept, so nothing is from a previous
+   * lookup. The batch note says it beside the stress batch whenever the two batches are not provably one.
+   */
+  readonly stressFromPreviousLookup: boolean;
   readonly stressLoad: LoadPhase;
   readonly refusedTiles: boolean;
   readonly floor: string | null;
@@ -113,7 +119,7 @@ function empty(state: InspectorState, kicker: string, headline: InspectorHeadlin
   return {
     state, kicker, headline, chips, batchId: null, decimals: null, cash: null, cashWire: null, legacy: null, table: null, boundary: null,
     trust: null, room: null, streak: null, legacySeries: null, historyBatchId: null, historyOutcome: null, ...loads, stress: null,
-    stressBatchId: null, refusedTiles: true, floor: null, tier: null, ageSeconds: null,
+    stressBatchId: null, stressFromPreviousLookup: false, refusedTiles: true, floor: null, tier: null, ageSeconds: null,
   };
 }
 
@@ -209,6 +215,8 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
   const stress = reading.stress.phase === "ready" ? stressReading(reading.stress.value, reading.address) : null;
   // The stress body's own batch, never the lookup's: the two answer for themselves.
   const stressBatchId = stress?.batchId ?? null;
+  // A repair lands a lookup and replays no stress: a stress on the page beside a repaired lookup was read before it.
+  const stressFromPreviousLookup = stress !== null && reading.lookupRepaired === true;
   // A streak is asserted OF the lookup's batch only when the history's vantage IS that batch: a history read at an
   // older vantage ends before this batch, and its run says nothing about the batches between. Then the headline states
   // the current batch alone and the History card's vantage clause carries the rest.
@@ -288,6 +296,7 @@ export function deriveInspectorView(reading: AddressReading, constants: TierCons
     ...loads,
     stress,
     stressBatchId,
+    stressFromPreviousLookup,
     refusedTiles: cash === null || !isComputedCash(cash),
     floor,
     tier,
@@ -378,22 +387,32 @@ export function stressEmptyText(view: InspectorView): string {
  * The stress section's batch note: the position lookup and the stress lookup are separate requests, and each answers
  * for the batch its own envelope names. When the two differ the section says so, and every row is labelled with the
  * stress body's batch — its before and after are read for that batch and are never compared against the position
- * above. A stress body naming no readable batch is disclosed the same way. Null when the two agree, or while either
- * is still unknown.
+ * above. A stress body naming no readable batch is disclosed the same way. When the lookup was refreshed by a resume
+ * repair, which replays no stress, the note and every row's label say the stress is from the previous lookup. Null
+ * when the two agree — one batch's stress is that batch's whichever lookup it was read for — or while either is
+ * still unknown.
  */
 export function stressBatchNote(view: InspectorView): { readonly disclosure: string; readonly rowLabel: string } | null {
   if (view.stress === null || view.batchId === null) return null;
+  const position = groupInt(view.batchId);
+  const kept = view.stressFromPreviousLookup;
+  const keptLabel = kept ? " · stress from the previous lookup" : "";
   if (view.stressBatchId === null) {
     return {
-      disclosure: `The stress response names no readable batch; the position above is batch ${groupInt(view.batchId)}. Its rows are not compared against the position above.`,
-      rowLabel: "batch not readable",
+      disclosure: kept
+        ? `The stress response names no readable batch and was read for the previous lookup; the position above was refreshed since and is batch ${position}. Its rows are not compared against the position above.`
+        : `The stress response names no readable batch; the position above is batch ${position}. Its rows are not compared against the position above.`,
+      rowLabel: `batch not readable${keptLabel}`,
     };
   }
   if (view.stressBatchId === view.batchId) return null;
   const stressBatch = groupInt(view.stressBatchId);
+  const head = kept
+    ? `Stress from the previous lookup, for batch ${stressBatch}; the position above was refreshed since and is batch ${position}.`
+    : `Stress for batch ${stressBatch}; the position above is batch ${position}.`;
   return {
-    disclosure: `Stress for batch ${stressBatch}; the position above is batch ${groupInt(view.batchId)}. Each row's before and after are read for batch ${stressBatch} and are not compared against the position above.`,
-    rowLabel: `batch ${stressBatch}`,
+    disclosure: `${head} Each row's before and after are read for batch ${stressBatch} and are not compared against the position above.`,
+    rowLabel: `batch ${stressBatch}${keptLabel}`,
   };
 }
 

@@ -70,6 +70,18 @@ export function walkSentence(input: Pick<BookHeadlineInput, "complete" | "stoppe
     : `The walk stopped before the last page (${causeWords(input.stopped)}); every figure is a lower bound over the ${read} it read.`;
 }
 
+/**
+ * The census fault's words: the walk's delivered rows disagree with the census
+ * the wire advertised. A short walk delivered "N of the M rows"; a walk past
+ * its census delivered N rows FOR a census of M — "N of the M" is a part of a
+ * whole, and is never said of an N larger than M.
+ */
+export function censusFaultWords(delivered: number, census: number): string {
+  return delivered > census
+    ? `the walk delivered ${plural(delivered, "row")} for a census of ${String(census)}`
+    : `the walk delivered ${String(delivered)} of the ${String(census)} rows the wire advertised`;
+}
+
 function joinSentences(parts: readonly (string | null)[]): string {
   return parts.filter((p): p is string => p !== null && p.length > 0).join(" ");
 }

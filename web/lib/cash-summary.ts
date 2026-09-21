@@ -81,6 +81,58 @@ export function summarizeCash(input: CashSummaryInput): CashSummary {
   };
 }
 
+type WalkState = Pick<CashSummary, "settled" | "stopped">;
+
+/**
+ * The qualifier a walk-derived finding wears until the walk is complete: the
+ * running register, the stopped register, or nothing over a settled book (and
+ * nothing where no summary exists to qualify).
+ */
+export function walkQualifier(walk: WalkState | null): string {
+  if (walk === null) return "";
+  if (walk.stopped !== null) return " · the walk stopped, figures are a lower bound";
+  return walk.settled ? "" : " · walking the book, figures are a lower bound";
+}
+
+/** The room bands that sit within 10% of the borrow cap. */
+const NEAR_BAND_IDS: ReadonlySet<string> = new Set(["0-2", "2-5", "5-10"]);
+
+/** The distance chart's finding as the parts the card renders: words, the emphasized figure, words. */
+export interface BandsFinding {
+  readonly lead: string;
+  readonly figure: string;
+  readonly rest: string;
+  /** The bars' own qualifier while the walk is incomplete; null once every bar is the book's. */
+  readonly barsNote: string | null;
+}
+
+/**
+ * The distance chart's finding. Over a complete walk the figure within 10% of
+ * the cap stands as read. Over an incomplete one — still running or stopped —
+ * the chart carries two lower bounds and each wears its own qualifier: the
+ * figure is a floor in its own words ("at least"), and the bars say that their
+ * dollars and counts are. A walk-derived zero is a finding only once the walk
+ * is complete: before that it is a dash, never "$0".
+ */
+export function bandsFinding(summary: Pick<CashSummary, "bands" | "decimals" | "settled" | "stopped">): BandsFinding {
+  const lead = "Cash debt grouped by room under the borrow cap · bars are dollars, counts printed · ";
+  const near = summary.bands.filter((b) => NEAR_BAND_IDS.has(b.id));
+  const sum = near.reduce((s, b) => s + b.debt, 0n);
+  const count = near.reduce((c, b) => c + b.count, 0);
+  if (summary.settled) {
+    return { lead, figure: humanUsd(sum, summary.decimals), rest: " sits within 10% of the cap", barsNote: null };
+  }
+  const qualifier = walkQualifier(summary);
+  const barsNote =
+    summary.stopped !== null
+      ? "The walk stopped: every bar and every count is a lower bound over the accounts it read."
+      : "Walking the book: every bar and every count is a lower bound over the accounts read so far.";
+  if (count === 0) {
+    return { lead, figure: "—", rest: ` within 10% of the cap: a zero is claimed only by a complete walk${qualifier}`, barsNote };
+  }
+  return { lead: `${lead}at least `, figure: humanUsd(sum, summary.decimals), rest: ` sits within 10% of the cap${qualifier}`, barsNote };
+}
+
 /**
  * The attention table's line when it shows no row. "No account needs
  * attention" is a negative over the book: it is said only by a complete walk,

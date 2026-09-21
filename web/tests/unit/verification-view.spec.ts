@@ -6,9 +6,14 @@
 // fixtures); a reader that has not answered prints "unavailable", never a zero
 // and never an absence the wire did not state.
 import { expect, test } from "@playwright/test";
+import { UnavailableError } from "@solvent/client";
 import { proofTakeaway } from "../../lib/evidence";
 import type { EvidenceResponse } from "../../lib/proof-data";
 import {
+  BOOK_LOADING,
+  bookAnswered,
+  bookFailed,
+  cashCensus,
   deriveVerificationView,
   markerLine,
   pipelineSteps,
@@ -48,6 +53,37 @@ const REAL_KEY = EVIDENCE_MANIFEST.substrate?.materialization_key ?? "";
 if (REAL_KEY.length === 0) throw new Error("fixture invariant: the example carries a key");
 const DIGEST = EVIDENCE_MANIFEST.substrate?.substrate_digest ?? "";
 if (DIGEST.length === 0) throw new Error("fixture invariant: the example carries a digest");
+
+test("the compute step reads the census, not a walk: the Cash account count is /v1/book's own, through the population guard, and the book's failure keeps the wire's one absence", () => {
+  // The census is the aggregate's count — no positions page is behind it.
+  expect(cashCensus(bookAnswered(BOOK))).toBe(2);
+  expect(cashCensus(bookAnswered(DEMO_BOOK))).toBe(1412);
+  expect(bookAnswered(BOOK)).toEqual({ phase: "ok", book: BOOK, failure: null });
+  const compute = byKey(pipelineSteps(META, EVIDENCE_MANIFEST, bookAnswered(BOOK), cashCensus(bookAnswered(BOOK))), "compute");
+  expect(compute.value).toBe("1");
+  expect(compute.sub).toBe("batch · 2 Cash accounts");
+  // Unanswered, failed, or an engine the book does not list: no count — never a zero.
+  expect(BOOK_LOADING).toEqual({ phase: "loading", book: null, failure: null });
+  for (const unread of [BOOK_LOADING, FAILED, NO_BATCH]) expect(cashCensus(unread)).toBeNull();
+  expect(cashCensus(bookAnswered({ ...BOOK, engines: BOOK.engines.filter((e) => e.engine !== "debt_manager") }))).toBeNull();
+  // A count the guard refuses is refused by name before it is printed.
+  const malformed = { ...BOOK, engines: BOOK.engines.map((e) => (e.engine === "debt_manager" ? { ...e, positions: -0 } : e)) };
+  expect(() => cashCensus(bookAnswered(malformed))).toThrow(/engines\[debt_manager\]\.positions/);
+  // The wire's own 503 is the one absence; anything else is an unread book.
+  const message = "no complete risk batch is available";
+  const unavailable = new UnavailableError({
+    url: "http://127.0.0.1:8080/v1/book",
+    status: 503,
+    code: "unavailable",
+    message,
+    retryAfterSeconds: 5,
+    body: { error: { code: "unavailable", message, retry_after_seconds: 5 } },
+  });
+  expect(bookFailed(unavailable)).toEqual(NO_BATCH);
+  expect(bookFailed(new Error("Failed to fetch"))).toEqual(FAILED);
+  expect(bookFailed("boom")).toEqual({ phase: "error", book: null, failure: { message: "boom", retryAfterSeconds: null } });
+  expect(byKey(pipelineSteps(META, EVIDENCE_MANIFEST, bookFailed(unavailable), cashCensus(bookFailed(unavailable))), "compute").sub).toBe("no servable batch");
+});
 
 test("the four steps carry the Overview's numbers: the OP block, the batch, the gated tally, the endpoint count", () => {
   const steps = pipelineSteps(META, EVIDENCE_MANIFEST, read(BOOK), 2);

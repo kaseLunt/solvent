@@ -253,6 +253,14 @@ test("while the walk is still running the verdict is pending — never 'Nothing 
   await expect(page.getByTestId("book-kpi-liquidatable")).toHaveAttribute("aria-busy", "true");
   await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("aria-busy", "true");
   await expect(page.getByTestId("book-attention")).toContainText("Walking the book…");
+  // The distance chart: a walk-derived zero is a dash, never "$0 sits within 10%", and the bars wear their own qualifier.
+  await expect(page.getByTestId("book-bands-card")).toContainText(
+    "— within 10% of the cap: a zero is claimed only by a complete walk · walking the book, figures are a lower bound",
+  );
+  await expect(page.getByTestId("book-bands-card")).not.toContainText("$0 sits within 10%");
+  await expect(page.getByTestId("book-bands-note")).toHaveText(
+    "Walking the book: every bar and every count is a lower bound over the accounts read so far.",
+  );
   await expect(page.locator("body")).not.toContainText("Nothing material");
   await expect(page.locator("body")).not.toContainText("No account is within 10%");
   await expect(page.locator("body")).not.toContainText("No account needs attention");
@@ -294,6 +302,63 @@ test("a terminal page short of the advertised census stops the walk by name — 
   await expect(page.getByTestId("book-kpi-near")).toContainText("—");
   await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("data-tone", "refused");
   await expect(page.getByTestId("book-kpi-median")).toContainText("walk stopped");
+  await expect(page.getByTestId("book-bands-card")).toContainText(
+    "— within 10% of the cap: a zero is claimed only by a complete walk · the walk stopped, figures are a lower bound",
+  );
+  await expect(page.getByTestId("book-bands-card")).not.toContainText("$0 sits within 10%");
+  await expect(page.getByTestId("book-bands-note")).toHaveText(
+    "The walk stopped: every bar and every count is a lower bound over the accounts it read.",
+  );
+});
+
+test("the distance chart over an incomplete walk: the figure is a floor in its own words and the bars wear their own qualifier; once the walk completes, neither is qualified", async ({
+  page,
+}) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/meta*", (route) => json(route, DEMO_META));
+  await page.route("**/v1/book", (route) => json(route, DEMO_BOOK));
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/v1/positions*", async (route) => {
+    const cursor = new URL(route.request().url()).searchParams.get("cursor");
+    if (cursor === null) return json(route, DEMO_POSITIONS_DM_PAGE_1);
+    await held;
+    return json(route, DEMO_POSITIONS_DM_PAGE_2);
+  });
+  await page.goto("/book");
+  const card = page.getByTestId("book-bands-card");
+  // Page one carries the least room first, so the near-cap accounts are read while page two is still out.
+  await expect(card).toContainText(/at least \$[\d.,]+[KMB]? sits within 10% of the cap · walking the book, figures are a lower bound/);
+  await expect(page.getByTestId("book-bands-note")).toHaveText(
+    "Walking the book: every bar and every count is a lower bound over the accounts read so far.",
+  );
+  release();
+  await expect(page.getByTestId("book-bands-note")).toHaveCount(0);
+  await expect(card).toContainText(/· \$[\d.,]+[KMB]? sits within 10% of the cap/);
+  await expect(card).not.toContainText("at least");
+  await expect(card).not.toContainText("lower bound");
+});
+
+test("a waterfall served with no points is a named refusal on the preview card — never 'not on the grid', never 'no stress grid'", async ({ page }) => {
+  if (BOOK.waterfall === null) throw new Error("fixture invariant: the committed book serves a waterfall");
+  await mockCommitted(page, { ...BOOK, waterfall: { ...BOOK.waterfall, points: [] } });
+  await page.goto("/book");
+  const card = page.getByTestId("book-stress-preview");
+  await expect(card).toContainText("Preview withheld: no points published.");
+  await expect(card).not.toContainText("is not on this batch");
+  await expect(card).not.toContainText("carries no stress grid");
+  await expect(card.locator("a")).toHaveAttribute("href", "/lab");
+});
+
+test("a walk past its census is worded against the census — 'delivered N rows for a census of M', never 'N of the M rows'", async ({ page }) => {
+  await mockWith(page, cashEngineOf(BOOK, { positions: 1 }), { ...POSITIONS_DM_PAGE_1, total_positions: 1 });
+  await page.goto("/book");
+  await expect(page.getByTestId("book-walk-failure")).toContainText("the walk delivered 2 rows for a census of 1");
+  await expect(page.getByTestId("book-walk-failure")).not.toContainText("2 of the 1");
+  await expect(page.getByTestId("book-verdict-dek")).toContainText("the walk delivered 2 rows for a census of 1");
+  await expect(page.locator("body")).not.toContainText("No account needs attention");
 });
 
 test("a positions page from another engine never enters the Cash walk", async ({ page }) => {
@@ -313,6 +378,24 @@ test("a positions page from another engine never enters the Cash walk", async ({
     .locator("[data-count]")
     .evaluateAll((els) => els.reduce((n, el) => n + Number(el.getAttribute("data-count")), 0));
   expect(counts).toBe(0);
+});
+
+test("another engine's refused page is a wrong-engine fault — never Cash's refusal", async ({ page }) => {
+  const foreignRefusal = {
+    ...POSITIONS_DM_PAGE_1,
+    engine: "aave_v3_etherfi",
+    refused: true,
+    refusal: { engine: "aave_v3_etherfi", code: "SWEEP_FAILED", detail: "collateral sweep failed", note: "" },
+    total_positions: null,
+    positions: [],
+    next_cursor: null,
+  };
+  await mockWith(page, BOOK, foreignRefusal);
+  await page.goto("/book");
+  await expect(page.getByTestId("book-walk-failure")).toContainText('the page answers for engine "aave_v3_etherfi", not debt_manager');
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be fully read this batch.");
+  await expect(page.getByTestId("book-verdict-headline")).not.toHaveText("The Cash book could not be computed this batch.");
+  await expect(page.locator("body")).not.toContainText("Collateral sweep failed.");
 });
 
 test("a liquidatable position under the $100 line is hidden by the display rule, and the table says so — never 'No account needs attention'", async ({ page }) => {

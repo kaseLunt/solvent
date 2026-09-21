@@ -198,6 +198,21 @@ test("readCashPage: a foreign engine never enters the Cash walk — the page's o
   expect(out.fault).toContain("never enters the Cash walk");
 });
 
+test("readCashPage: the page's engine is judged before its refusal — another engine's refusal is a wrong-engine fault, never Cash's refusal", () => {
+  const foreignRefusal = page({
+    engine: "aave_v3_etherfi",
+    refused: true,
+    refusal: { engine: "aave_v3_etherfi", code: "SWEEP_FAILED", detail: "collateral sweep failed", note: "" },
+    total_positions: null,
+    positions: [],
+    next_cursor: null,
+  });
+  expect(readCashPage(foreignRefusal, EXPECT)).toEqual({
+    kind: "malformed",
+    fault: 'the page answers for engine "aave_v3_etherfi", not debt_manager',
+  });
+});
+
 test("readCashPage: the census — a null total on a page that is not refused, and a total the book contradicts, are malformed", () => {
   const nul = readCashPage(page({ total_positions: null }), EXPECT);
   expect(nul.kind).toBe("malformed");

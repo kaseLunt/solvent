@@ -113,12 +113,17 @@ function describe(value: unknown): string {
 /**
  * Read one positions page for the Cash walk, or refuse it by name. The page
  * is judged BEFORE any row is derived: a foreign engine's rows never enter the
- * Cash walk (the two engines never share an axis); a refused page is a refusal,
- * not an empty book; a row at another scale never enters a sum at the book's;
- * a row the contract would not have produced is a malformed page, not a throw.
+ * Cash walk (the two engines never share an axis), and the page's engine is
+ * judged before its refusal — another engine's refusal is a wrong-engine fault,
+ * never Cash's refusal; a refused page is a refusal, not an empty book; a row
+ * at another scale never enters a sum at the book's; a row the contract would
+ * not have produced is a malformed page, not a throw.
  * The batch identity is the caller's law — it decides a reload, not a reading.
  */
 export function readCashPage(page: RefinedPositionsResponse, expect: CashPageExpectation): CashPageReading {
+  if (page.engine !== expect.engine) {
+    return { kind: "malformed", fault: `the page answers for engine ${describe(page.engine)}, not ${expect.engine}` };
+  }
   const refused = field(page, "refused");
   if (typeof refused !== "boolean") {
     return { kind: "malformed", fault: `refused is not a boolean (got ${describe(refused)})` };
@@ -126,9 +131,6 @@ export function readCashPage(page: RefinedPositionsResponse, expect: CashPageExp
   if (refused) {
     const refusal = page.refusal ?? null;
     return { kind: "refused", code: refusal?.code ?? null, detail: refusal?.detail ?? null };
-  }
-  if (page.engine !== expect.engine) {
-    return { kind: "malformed", fault: `the page answers for engine ${describe(page.engine)}, not ${expect.engine}` };
   }
   const total = field(page, "total_positions");
   if (!isWirePopulation(total)) {

@@ -27,6 +27,7 @@
 import { BatchSupersededError, UnavailableError, type components } from "@solvent/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSolventClient } from "./api";
+import { censusFaultWords } from "./book-headline";
 import { readCashPage, type CashPageReading, type CashRow } from "./cash-rows";
 import { receiptIdentity } from "./freshness";
 import { useAnchoredAgeSeconds, type LiveAgeReading } from "./live-age";
@@ -258,7 +259,7 @@ export function useCashBook(): CashBookReading {
               cursor,
               reading.rows,
               false,
-              invalid(`the walk delivered ${String(delivered)} of the ${String(reading.total)} rows the wire advertised`),
+              invalid(censusFaultWords(delivered, reading.total)),
             );
             return;
           }

@@ -102,6 +102,17 @@ const LOADING: Headline = {
 
 const n = (value: number): string => value.toLocaleString("en-US");
 
+/**
+ * A waterfall served with no points is a grid nobody published: a refusal by
+ * name. It is never read as "the engine is absent from the grid" — an engine
+ * is absent from points that exist — and never as "no stress grid", which is
+ * the wire serving no waterfall at all.
+ */
+function emptyGrid(points: unknown): StressPreview | null {
+  if (!Array.isArray(points)) return { kind: "refused", reason: "waterfall.points is not a list" };
+  return points.length === 0 ? { kind: "refused", reason: "no points published" } : null;
+}
+
 export function deriveCashView(reading: CashBookReading, constants: TierConstants): CashView {
   const cash = reading.cash;
   const loaded = reading.phase === "ok";
@@ -180,7 +191,7 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
       ? { kind: "refused", reason: withheldCause }
       : reading.book === null || reading.book.waterfall === null
         ? null
-        : stressPreview(reading.book.waterfall, "debt_manager", reading.book.coverage);
+        : (emptyGrid(reading.book.waterfall.points) ?? stressPreview(reading.book.waterfall, "debt_manager", reading.book.coverage));
 
   const debt = refusedTiles || engine === null ? ABSENT : readWireMoney(engine.total_debt, decimals, "engines[debt_manager].total_debt");
   const collateral =

@@ -128,6 +128,27 @@ test("the preview line: the ETH −30% line, or the withheld preview named — n
   expect(deriveCashView(reading({ book: { ...BOOK, waterfall: null } }), TIER_FALLBACK).previewLine).toBe("Committed scenarios");
 });
 
+test("a waterfall served with no points is a refusal — 'no points published' — never an engine absent from the grid and never 'no stress grid'", () => {
+  if (BOOK.waterfall === null) throw new Error("fixture invariant");
+  const empty = deriveCashView(reading({ book: { ...BOOK, waterfall: { ...BOOK.waterfall, points: [] } } }), TIER_FALLBACK);
+  expect(empty.preview).toEqual({ kind: "refused", reason: "no points published" });
+  expect(empty.previewLine).toBe("Preview withheld: no points published");
+  const notAList = deriveCashView(
+    reading({ book: { ...BOOK, waterfall: { ...BOOK.waterfall, points: null as unknown as NonNullable<typeof BOOK.waterfall>["points"] } } }),
+    TIER_FALLBACK,
+  );
+  expect(notAList.preview).toEqual({ kind: "refused", reason: "waterfall.points is not a list" });
+  // A withheld engine keeps its own cause: the grid's emptiness never overwrites the engine's refusal.
+  const withheld = deriveCashView(
+    reading({
+      book: { ...BOOK, waterfall: { ...BOOK.waterfall, points: [] } },
+      cash: { refusedWhole: { code: "SWEEP_FAILED", detail: "" } },
+    }),
+    TIER_FALLBACK,
+  );
+  expect(withheld.preview).toEqual({ kind: "refused", reason: "collateral sweep failed" });
+});
+
 test("money passes the decimal guard: '' and '0x10' are named as malformed fields, never $0 or $16", () => {
   const v = deriveCashView(reading({ cash: { engine: { ...cashEngine, total_debt: "", total_collateral: "0x10" } } }), TIER_FALLBACK);
   expect(v.debt).toEqual({ kind: "malformed", field: "engines[debt_manager].total_debt" });
