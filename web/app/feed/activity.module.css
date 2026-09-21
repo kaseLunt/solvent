@@ -6,10 +6,11 @@
 .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 28px 0 24px; }
 .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 
-/* ---- live posture strip: the CURRENT connection only, never history ---- */
-.live { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-2); }
-.liveLabel { letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
-.liveChip { display: inline-flex; align-items: center; gap: 6px; letter-spacing: 0.06em; text-transform: uppercase; }
+/* ---- the live strip: the CURRENT connection only, never a record. One plain line: prose in the page's sans,
+ * mono for ids and numbers alone; the label and the state chip keep the small-caps form of the group labels below. ---- */
+.live { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: var(--type-body); color: var(--ink-2); }
+.liveLabel { font-size: var(--type-small); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.liveChip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--type-small); letter-spacing: 0.06em; text-transform: uppercase; }
 .liveChip i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block; }
 /* A proven connection is ACCENT — connection is posture, not health, and no socket is green. */
 .liveAccent { color: var(--accent-text); }
@@ -28,23 +29,23 @@
 .liveUnknown i { background: transparent; border: 1px dashed currentColor; }
 .liveWarn { color: var(--warn-text); }
 .liveDown { color: var(--crit-text); }
-.live b { color: var(--ink); font-weight: var(--w-semibold); }
-.liveLaw { flex-basis: 100%; color: var(--ink-3); }
+.live b { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink); font-weight: var(--w-semibold); }
 
-/* ---- controls: the kit's ghost buttons at chip size; a pressed one takes the accent ---- */
+/* ---- controls: the kit's ghost buttons at chip size. The pressed look is the kit's one toggle grammar; the resting
+ * ink is set only on an unpressed button, so it never outranks that rule. ---- */
 .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .groupLabel { font-size: var(--type-small); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); margin-right: 4px; }
-.controls .chipBtn { padding: 4px 10px; font-size: var(--type-small); color: var(--ink-2); }
+.controls .chipBtn { padding: 4px 10px; font-size: var(--type-small); }
+.controls .chipBtn:not([aria-pressed="true"]) { color: var(--ink-2); }
 .controls .chipBtn:hover { border-color: var(--accent); color: var(--accent-text); }
-.controls .chipBtn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .sinceInput { font-family: var(--mono); font-size: var(--type-mono-sm); width: 130px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
 .sinceInput::placeholder { color: var(--ink-3); }
 .applied { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-3); }
-/* A stated impossibility (cross-engine since_block) or the ledger's pinned type — dim, not an error. */
+/* A stated impossibility (since-block with no single engine, in short form) or the ledger's pinned type — dim, not an error. */
 .impossible { font-size: var(--type-small); color: var(--ink-3); max-width: 520px; }
 
-/* ---- the order note beneath the list's head ---- */
+/* ---- the untimed tail's notice above the table, only when a tail is loaded ---- */
 .order { margin: 0; font-size: var(--type-small); color: var(--ink-3); }
 
 /* ---- honest state strips: a notice and a failed fetch warn; a refusal is dashed ---- */
@@ -55,8 +56,8 @@
 .stripRefused { border: 1px dashed var(--crit); background: var(--refused-bg); }
 .stripRefused b { color: var(--crit-text); }
 
-/* ---- the table's cells: the unit tag beside the amount, the type word, the liquidation extract, the tx link ---- */
-.unit { margin-left: 6px; font-size: var(--type-floor); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3); }
+/* ---- the table's cells: the unit in its own quiet column beside the amount, the type word, the liquidation extract, the tx link ---- */
+.unit { font-size: var(--type-floor); color: var(--ink-3); }
 .type { font-size: var(--type-small); color: var(--ink-2); }
 /* The extract stacks beneath the pill and wraps inside the nowrap cell, so an em dash is read, not hovered for. */
 .detail { display: block; max-width: 44ch; margin-top: 4px; white-space: normal; line-height: 1.5; font-size: var(--type-floor); color: var(--ink-2); }

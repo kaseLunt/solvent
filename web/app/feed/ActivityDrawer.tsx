@@ -7,8 +7,9 @@ import styles from "./activity.module.css";
 
 /**
  * The header's drawer button and the drawer it opens. The doctrine is the view model's, paragraph by paragraph,
- * verbatim: the intro, the list's name, the method line, the forensics note, the tail note. The dek keeps the one
- * clause the law requires visible; everything else about method lives here.
+ * verbatim: the intro, the list's name, the method line, the forensics note, the tail note, the order's full
+ * sentence, the since-block law and the live strip's law. The header states facts about the loaded rows; everything
+ * about method lives here.
  */
 export function ActivityDrawer({ doctrine }: { doctrine: readonly string[] }) {
   const [open, setOpen] = useState(false);

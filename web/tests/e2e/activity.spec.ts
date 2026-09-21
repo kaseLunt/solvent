@@ -7,27 +7,42 @@
 // fixtures. Every sentence asserted here is lib/activity-view.ts's or
 // lib/feed-view.ts's; every count is the fixture's own.
 //
-// What this pins: the verdict header IS feedTakeaway's sentence, with the
-// scope in the kicker, the dek's one clause and the five chips; the two
-// tiles; every loaded row in wire order with the untimed tail dim and its
-// block number where the time would be; the ledger view pinning the type;
-// since_block impossible cross-engine, real engine-scoped, dropped with a
-// notice when the engine changes, and no cursor ever crossing a mode; a 400
-// refusal in the envelope's own words with an honest restart; load more
-// appending and the tiles counting; degraded envelopes and the empty filter
-// as real answers; amount units named or raw, never a dollar; the live strip
-// as its own instrument; ordering drift as a standing alert; the doctrine in
-// the drawer; answer before evidence.
+// What this pins: the verdict header IS feedTakeaway's two parts in ink (the
+// neutral tone — a record is never the health green), with the scope in the
+// kicker, the dek's computed facts and the five chips (Newest carrying the
+// exact instant the headline speaks); before the first page answers nothing
+// is counted; the two tiles; every loaded row in wire order with the untimed
+// tail dim and its block number where the time would be; the amount alone in
+// its right-aligned column with its unit in the column beside it; the ledger
+// view pinning the type; since-block impossible with no single engine (short
+// form, the sentence in its title), real with one, removed with a notice when
+// the engine changes, and no cursor ever crossing a mode; a 400 refusal named
+// under the dashed tone with the service's own words and an honest restart;
+// load more appending and the tiles counting; degraded envelopes and the
+// empty filter as real answers; amount units named or raw, never a dollar;
+// the live strip as its own instrument, one plain line naming no roadmap;
+// a broken ordering as a standing alert; the doctrine in the drawer; answer
+// before evidence.
 import { expect, test, type Page, type Route } from "@playwright/test";
 import {
-  ACTIVITY_DEK,
+  ACTIVITY_AMOUNT_HEADER,
+  ACTIVITY_EXHAUSTED_DEK,
   ACTIVITY_FORENSICS,
   ACTIVITY_INTRO,
   ACTIVITY_LIST_TITLE,
+  ACTIVITY_LIVE_LABEL,
+  ACTIVITY_LIVE_LAW,
+  ACTIVITY_LIVE_NOTE,
+  ACTIVITY_LOADING_DEK,
   ACTIVITY_METHOD,
+  ACTIVITY_SINCE_FULL,
+  ACTIVITY_SINCE_NOTE,
+  ACTIVITY_SINCE_SHORT,
   ACTIVITY_TAIL_NOTE,
+  ACTIVITY_TAIL_NOTICE,
+  ACTIVITY_TAIL_NOTICE_UNORDERED,
 } from "../../lib/activity-view";
-import { feedTakeaway } from "../../lib/feed-view";
+import { feedTakeaway, type FeedTakeawayScope } from "../../lib/feed-view";
 import { DEMO_FEED_PAGE_1 } from "../fixtures/demo";
 import {
   FEED_CROSS_PAGE_1,
@@ -79,11 +94,23 @@ const LEDGER_PAGE: typeof DEMO_FEED_PAGE_1 = {
   next_cursor: null,
 };
 
+/** The header's one sentence as the page prints it: feedTakeaway's emphasis, a space, its rest. */
+const takeawayText = (...args: Parameters<typeof feedTakeaway>): string => {
+  const { emphasis, rest } = feedTakeaway(...args);
+  return rest === "" ? emphasis : `${emphasis} ${rest}`;
+};
+
+/** The walk as the surface hands it to the sentence: every type, the all-actions view, the page's own served_at. */
+const asServed = (servedAt: string, over: FeedTakeawayScope = {}): FeedTakeawayScope => ({ types: [], ledger: false, servedAt, ...over });
+
+/** humanUtc joins its tokens with U+00A0; `toHaveText` folds white space, a string equality does not. */
+const nb = (text: string): string => text.replaceAll(" ", "\u00a0");
+
 const rows = (page: Page) => page.locator('[data-testid^="activity-row-"]');
 const chip = (page: Page, label: string) => page.getByTestId("activity-verdict").locator(`[data-chip="${label}"]`);
 const headline = (page: Page) => page.getByTestId("activity-verdict-headline");
 
-test("cold load: the demo page — 50 rows in wire order, the headline IS feedTakeaway's sentence and the H1, the scope in the kicker, the dek's clause, five chips, two tiles, state ok", async ({ page }) => {
+test("cold load: the demo page — 50 rows in wire order, the headline IS feedTakeaway's sentence and the H1 in ink, the scope in the kicker, the dek's computed facts, five chips with the exact newest instant, two tiles, the amount column aligned with its unit beside it, state ok", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
@@ -93,24 +120,30 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   await expect(surface).toHaveAttribute("data-state", "ok");
   await expect(surface).toHaveAttribute("data-mode", "cross-engine");
 
-  const sentence = feedTakeaway(DEMO_FEED_PAGE_1.events, "cross-engine", true);
-  expect(sentence).toBe("50 chain action(s) loaded, 3 liquidation(s) · newest custodied 2026-08-08T20:21:05Z · more exist behind the cursor.");
+  const sentence = takeawayText(DEMO_FEED_PAGE_1.events, "cross-engine", true, asServed(DEMO_FEED_PAGE_1.served_at));
+  expect(sentence).toBe(`3 liquidations among the 50 chain actions loaded, the newest at ${nb("Aug 8, 20:21 UTC")}; more exist beyond these.`);
   await expect(headline(page)).toHaveText(sentence);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(sentence);
-  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "ok");
-  await expect(page.getByTestId("activity-verdict")).toContainText("Activity · cross-engine");
-  await expect(page.getByTestId("activity-verdict-dek")).toHaveText(ACTIVITY_DEK);
+  // The finding's core is the emphasis; a record is ink — the neutral tone, never the health green.
+  await expect(headline(page).locator("b")).toHaveText("3 liquidations among the 50 chain actions loaded,");
+  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "neutral");
+  await expect(page.getByTestId("activity-verdict")).toContainText("Activity · all engines");
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText(
+    "1 of them records bad debt being realised (deficit_created). 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
+  );
 
-  await expect(chip(page, "Scope")).toContainText("cross-engine");
+  await expect(chip(page, "Scope")).toContainText("all engines");
   await expect(chip(page, "View")).toContainText("all actions");
-  await expect(chip(page, "Order")).toContainText("cross-engine");
-  await expect(chip(page, "Rows")).toContainText("50");
+  await expect(chip(page, "Order")).toContainText("by block time");
+  // The exact layer of the spoken instant: the wire's own string, verbatim. The row count is the tile's, said once.
+  await expect(chip(page, "Newest")).toContainText("2026-08-08T20:21:05Z");
+  await expect(chip(page, "Rows")).toHaveCount(0);
   await expect(chip(page, "Filter echo")).toContainText("engine — · types all · since_block — · limit 50");
 
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("50");
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("more available");
   await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("3");
-  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("cross-engine");
+  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("among the loaded rows");
 
   // The row's id is its own chain coordinates; the head row carries its custodied time and opens the Inspector.
   const first = DEMO_FEED_PAGE_1.events[0];
@@ -122,6 +155,16 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   await expect(head.getByTestId("activity-account")).toHaveAttribute("href", `/inspector/${first.account}`);
   await expect(head.getByTestId("activity-tx")).toHaveAttribute("href", `https://optimistic.etherscan.io/tx/${first.tx_hash}`);
   await expect(rows(page).first()).toHaveAttribute("data-testid", `activity-row-10·${first.tx_hash}·38·0`);
+
+  // The amount stands alone in its right-aligned cell — the wire's integer verbatim (no scale is licensed with the
+  // stream muted), aligned and never reformatted — and its unit sits in the quiet column beside it, not upper-cased.
+  const headCells = page.getByTestId("activity-table").locator("thead th");
+  await expect(headCells).toHaveText(["When", "Engine", "Type", "Account", ACTIVITY_AMOUNT_HEADER, "Unit", "Tx"]);
+  await expect(head.locator("td").nth(4)).toHaveText(first.amount ?? "");
+  await expect(head.locator("td").nth(4)).toHaveCSS("text-align", "right");
+  await expect(head.locator("td").nth(4).getByTestId("activity-unit")).toHaveCount(0);
+  await expect(head.locator("td").nth(5).getByTestId("activity-unit")).toHaveText("normalized debt · raw units · USDC");
+  await expect(head.getByTestId("activity-unit")).toHaveCSS("text-transform", "none");
 
   // No unit on this page licenses a dollar figure.
   expect((await page.getByTestId("activity-table").innerText()).includes("$")).toBe(false);
@@ -140,7 +183,9 @@ test("the untimed tail: the two rows without header time are last and dim, their
   await expect(rows(page).nth(47)).not.toHaveClass(/dim/);
   await expect(page.locator('[data-testid^="activity-row-"][class*="dim"]')).toHaveCount(2);
   await expect(page.getByTestId("activity-drift")).toHaveCount(0);
-  await expect(page.getByTestId("activity-order")).toContainText("custodied header time");
+  // The list's head says the order in short form with the envelope's page size; the tail's notice stands above the table.
+  await expect(page.getByTestId("activity-order")).toContainText("newest first, by block time · loads 50 at a time");
+  await expect(page.getByTestId("activity-tail")).toHaveText(ACTIVITY_TAIL_NOTICE);
 });
 
 test("the ledger view pins the type to liquidation: the request says so, three rows each a crit pill with its extract behind it, the chips and the note say so, the walk restarts cursor-less", async ({ page }) => {
@@ -163,7 +208,7 @@ test("the ledger view pins the type to liquidation: the request says so, three r
 
   await expect(chip(page, "View")).toContainText("liquidations ledger");
   await expect(chip(page, "Filter echo")).toContainText("types liquidation");
-  await expect(chip(page, "Rows")).toContainText("3");
+  await expect(page.getByTestId("activity-kpi-rows")).toContainText("3");
   await expect(page.getByTestId("activity-types")).toHaveCount(0);
   await expect(page.getByTestId("activity-types-note")).toContainText("pinned to liquidation");
   await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("3");
@@ -187,7 +232,21 @@ test("the ledger view pins the type to liquidation: the request says so, three r
   await expect(extracts.nth(1)).toContainText("bonus realized — / configured —");
   await expect(extracts.nth(2)).toContainText("bonus realized — / configured —");
   await expect(extracts.nth(1)).not.toContainText("configured 0");
-  await expect(headline(page)).toHaveText(feedTakeaway(LEDGER_PAGE.events, "cross-engine", false));
+  const ledgerSentence = takeawayText(LEDGER_PAGE.events, "cross-engine", false, asServed(LEDGER_PAGE.served_at, { ledger: true }));
+  expect(ledgerSentence).toBe(`3 liquidations loaded, the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`);
+  await expect(headline(page)).toHaveText(ledgerSentence);
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText("2 are on Cash and 1 on the legacy Aave v3 market.");
+  // One pressed-toggle grammar, the kit's: the pressed button wears the accent, the resting one the dim ink.
+  const look = (id: string) =>
+    page.getByTestId(id).evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { color: style.color, border: style.borderTopColor, background: style.backgroundColor };
+    });
+  const pressed = await look("activity-view-ledger");
+  const resting = await look("activity-view-all");
+  expect(pressed.color).not.toBe(resting.color);
+  expect(pressed.border).not.toBe(resting.border);
+  expect(pressed.background).not.toBe(resting.background);
 
   // Back to every action: the walk restarts from the demo page, the vocabulary returns.
   await page.getByTestId("activity-view-all").click();
@@ -213,7 +272,7 @@ test("all-actions view: an UNESTABLISHED extract is visible on cold load — the
   await expect(rows(page).first().getByTestId("activity-liquidation")).toBeVisible();
 });
 
-test("since_block: a stated impossibility cross-engine, a real numeric control engine-scoped (Enter applies), dropped with a notice when the engine changes; a cursor never crosses modes and the bound never crosses chains", async ({ page }) => {
+test("since-block: a stated impossibility with no single engine — short form, the sentence in its title — a real numeric control with one (Enter applies), removed with a notice when the engine changes; a cursor never crosses modes and the bound never crosses chains", async ({ page }) => {
   await muteStream(page);
   const requests: URLSearchParams[] = [];
   await mockEvents(
@@ -229,9 +288,11 @@ test("since_block: a stated impossibility cross-engine, a real numeric control e
   await page.goto("/feed");
   await expect(rows(page)).toHaveCount(50);
 
-  // Cross-engine: since_block is a property of chains, stated, not a disabled control and not an error.
+  // No single engine: since-block is a property of chains, stated in short form (what would be here and how to get
+  // it) with the full sentence in its title — not a disabled control and not an error.
   const since = page.getByTestId("activity-since");
-  await expect(since).toContainText("incomparable across chains");
+  await expect(since).toHaveText(ACTIVITY_SINCE_SHORT);
+  await expect(since).toHaveAttribute("title", ACTIVITY_SINCE_FULL);
   await expect(since).toHaveAttribute("data-possible", "false");
   await expect(page.getByTestId("activity-since-input")).toHaveCount(0);
 
@@ -241,10 +302,15 @@ test("since_block: a stated impossibility cross-engine, a real numeric control e
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-mode", "engine-scoped");
   await expect(page.getByTestId("activity-verdict")).toContainText("Activity · Aave v3 market (legacy)");
   await expect(chip(page, "Scope")).toContainText("Aave v3 market (legacy)");
-  await expect(chip(page, "Order")).toContainText("engine-scoped");
-  await expect(page.getByTestId("activity-order")).toContainText("block height");
+  await expect(chip(page, "Order")).toContainText("by block number");
+  await expect(chip(page, "Newest")).toContainText("block 25,635,601");
+  await expect(page.getByTestId("activity-order")).toContainText("newest first, by block number on the legacy Aave v3 market's chain · loads 50 at a time");
+  await expect(page.getByTestId("activity-tail")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(2);
-  await expect(headline(page)).toHaveText("2 chain action(s) loaded, 1 liquidation(s) · newest at block 25,635,601.");
+  await expect(headline(page)).toHaveText(
+    "1 liquidation among the 2 chain actions loaded, the newest at block 25,635,601; that is every action matching this filter.",
+  );
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText("Listed newest first, by block number on the legacy Aave v3 market's chain.");
   await expect(rows(page).nth(1).locator("td").first()).toHaveText("block 25,635,580");
   await expect(rows(page).nth(1)).not.toHaveClass(/dim/);
   await expect(since).toHaveAttribute("data-possible", "true");
@@ -257,10 +323,12 @@ test("since_block: a stated impossibility cross-engine, a real numeric control e
   await expect(page.getByTestId("activity-since-applied")).toHaveText("≥ 25635600");
   await expect(chip(page, "Filter echo")).toContainText("since_block 25635600");
 
-  // Back to cross-engine: the bound is DROPPED with a visible notice, never silently re-meant.
+  // Back to every engine: the bound is REMOVED with a visible notice, never silently re-meant.
   await page.getByTestId("activity-engine-all").click();
-  await expect(page.getByTestId("activity-notice")).toContainText("since_block 25635600 dropped");
-  await expect(since).toContainText("incomparable across chains");
+  await expect(page.getByTestId("activity-notice")).toContainText(
+    "The since-block filter (25,635,600) was removed: a block number only means something on one chain, and no single engine is selected.",
+  );
+  await expect(since).toHaveText(ACTIVITY_SINCE_SHORT);
   await expect(rows(page)).toHaveCount(50);
 
   // The law of the walk: no request EVER carried a cursor across a mode switch, and no cross-engine request smuggled the bound.
@@ -268,7 +336,7 @@ test("since_block: a stated impossibility cross-engine, a real numeric control e
   for (const params of requests.filter((candidate) => candidate.get("engine") === null)) expect(params.get("since_block")).toBeNull();
 });
 
-test("a refused cursor (400) renders the envelope's own words under the dashed tone; served rows survive; restart from page one clears it", async ({ page }) => {
+test("a refused cursor (400): the headline names the refusal under the dashed tone and counts the loaded rows as loaded, the dek gives the envelope's own words; served rows survive; restart from page one clears it", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, (params, route) =>
     params.get("cursor") === null ? fulfillJson(route, DEMO_FEED_PAGE_1) : fulfillJson(route, FEED_ERROR_BAD_CURSOR, 400),
@@ -283,8 +351,9 @@ test("a refused cursor (400) renders the envelope's own words under the dashed t
   await expect(refusal).toContainText("not interchangeable");
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "refused");
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
-  await expect(headline(page)).toContainText("Page refused · bad_request:");
-  await expect(headline(page)).toContainText("not interchangeable");
+  await expect(headline(page)).toHaveText("The next page was refused, after 50 chain actions loaded.");
+  await expect(page.getByTestId("activity-verdict-dek")).toContainText("not interchangeable");
+  await expect(page.getByTestId("activity-verdict-dek")).toContainText("Restart the list below.");
   // Page-one rows are still shown and still counted — a refusal doesn't erase served truth.
   await expect(rows(page)).toHaveCount(50);
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("50");
@@ -295,7 +364,7 @@ test("a refused cursor (400) renders the envelope's own words under the dashed t
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
 });
 
-test("load more appends the cursor page: the rows tile and chip count, the tail grows, the end is stated, the headline drops its cursor clause", async ({ page }) => {
+test("load more appends the cursor page: the rows tile counts, the tail grows, the end is stated, the headline says these are every action matching the filter", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
@@ -305,12 +374,17 @@ test("load more appends the cursor page: the rows tile and chip count, the tail 
   await expect(rows(page)).toHaveCount(52);
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("52");
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("end of the filtered feed");
-  await expect(chip(page, "Rows")).toContainText("52");
   await expect(page.getByTestId("activity-load-more")).toHaveCount(0);
   await expect(page.getByTestId("activity-end")).toHaveText("end of the filtered feed");
   await expect(page.locator('[data-testid^="activity-row-"][class*="dim"]')).toHaveCount(4);
   await expect(page.getByTestId("activity-drift")).toHaveCount(0);
-  await expect(headline(page)).toHaveText(feedTakeaway([...DEMO_FEED_PAGE_1.events, ...FEED_CROSS_PAGE_2.events], "cross-engine", false));
+  // The reference year is the newest envelope's own served_at — the continuation page's.
+  const all = takeawayText([...DEMO_FEED_PAGE_1.events, ...FEED_CROSS_PAGE_2.events], "cross-engine", false, asServed(FEED_CROSS_PAGE_2.served_at));
+  expect(all).toBe(`3 liquidations among the 52 chain actions loaded, the newest at ${nb("Aug 8, 20:21 UTC")}; that is every action matching this filter.`);
+  await expect(headline(page)).toHaveText(all);
+  // The stitched tail (two fixture pages) does not show the service's own tail order, so that order is left unsaid.
+  await expect(page.getByTestId("activity-verdict-dek")).toContainText("4 have no block time yet and are listed last.");
+  await expect(page.getByTestId("activity-tail")).toHaveText(ACTIVITY_TAIL_NOTICE_UNORDERED);
 });
 
 test("degraded envelopes: 429 and 500 state their reasons as the page's own refusal — the strip, the state, the dashed header, dashed tiles that never read zero; retry recovers", async ({ page }) => {
@@ -327,8 +401,8 @@ test("degraded envelopes: 429 and 500 state their reasons as the page's own refu
   await expect(error).toContainText("rate limit exceeded");
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "error");
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
-  await expect(headline(page)).toContainText("Page fetch failed:");
-  await expect(headline(page)).toContainText("rate limit exceeded");
+  await expect(headline(page)).toHaveText("Recorded chain actions could not be fetched.");
+  await expect(page.getByTestId("activity-verdict-dek")).toContainText("rate limit exceeded");
   await expect(page.getByTestId("activity-kpi-rows")).toHaveAttribute("data-tone", "refused");
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("—");
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("page fetch failed");
@@ -354,11 +428,12 @@ test("an empty filtered feed is a real answer: the exhausted state, the table's 
 
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "exhausted");
   const table = page.getByTestId("activity-table");
-  await expect(table).toContainText("no custodied chain actions match this filter");
+  await expect(table).toContainText("no recorded chain action matches this filter");
   await expect(table).toContainText("a real answer");
   await expect(rows(page)).toHaveCount(0);
-  await expect(headline(page)).toHaveText("0 chain actions loaded in this window — the list below states the reason.");
-  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "ok");
+  await expect(headline(page)).toHaveText("No recorded chain action matches this filter.");
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText(ACTIVITY_EXHAUSTED_DEK);
+  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "neutral");
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("0");
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("end of the filtered feed");
   await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("0");
@@ -378,8 +453,14 @@ test("amount units render honestly: named, raw where unlicensed and tagged, the 
   // With the stream muted no engine has a licensed scale: every non-null amount is raw and says so.
   await expect(units.filter({ hasText: "raw units" })).toHaveCount(3);
 
-  // The record-only row (unit `none`, null amount) is its own statement, not a zero.
-  await expect(page.getByTestId("activity-amount").filter({ hasText: "record-only" })).toHaveCount(1);
+  // The record-only row (unit `none`, null amount) is its own statement, not a zero — and not a value: it is set in
+  // the table's dim sub register, never the mono of a figure, with no unit beside it.
+  const recordOnly = page.getByTestId("activity-amount").filter({ hasText: "record-only" });
+  await expect(recordOnly).toHaveCount(1);
+  await expect(recordOnly).toHaveClass(/sub/);
+  await expect(recordOnly).not.toHaveClass(/addr/);
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "123456789" })).toHaveClass(/addr/);
+  await expect(units).toHaveCount(3);
 
   // The opaque amount is the RAW integer — its decimals were NOT applied.
   await expect(page.getByTestId("activity-amount").filter({ hasText: "123456789" })).toHaveCount(1);
@@ -417,17 +498,21 @@ test("ordering drift: a timed row inside the untimed tail — the alert stands o
   const alert = page.getByTestId("activity-drift");
   await expect(alert).toBeVisible();
   await expect(alert).toHaveAttribute("role", "alert");
-  await expect(alert).toContainText("ORDERING DRIFT");
+  await expect(alert).toContainText("Ordering fault · the service sent a timed row inside the untimed tail");
   await expect(alert).toContainText("treat this walk as suspect");
   await expect(headline(page)).toHaveText(
-    "3 chain action(s) loaded, 2 liquidation(s) · the wire violated its own ordering law (see the alert below), so no newest is claimed.",
+    "2 liquidations among the 3 chain actions loaded, no newest is claimed: the service broke its own ordering (see the alert below); that is every action matching this filter.",
   );
-  await expect(headline(page)).not.toContainText("newest custodied");
+  await expect(headline(page)).not.toContainText("the newest at");
+  // No newest anywhere: no chip; and the list's head claims no order the service did not keep.
+  await expect(chip(page, "Newest")).toHaveCount(0);
+  await expect(page.getByTestId("activity-order")).toContainText("in the order the service sent");
+  await expect(page.getByTestId("activity-tail")).toHaveCount(0);
   await expect(rows(page).nth(1)).toHaveClass(/dim/);
   await expect(rows(page).nth(2)).not.toHaveClass(/dim/);
 });
 
-test("live posture: no base frame → nothing pretended and the law printed; a delivered snapshot renders the batch's real watermark vector and stays labelled current-connection", async ({ page }) => {
+test("the live strip: no base frame → said, never pretended, on ONE plain line with the law in its label and no roadmap word; a delivered snapshot names the batch, its counts and each engine's block in reader words, mono for the figures alone", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
@@ -435,10 +520,18 @@ test("live posture: no base frame → nothing pretended and the law printed; a d
   const strip = page.getByTestId("activity-live");
   await expect(strip).toBeVisible();
   await expect(strip).toHaveAttribute("role", "status");
-  await expect(page.getByTestId("activity-live-none")).toContainText("nothing is pretended");
+  await expect(page.getByTestId("activity-live-none")).toHaveText("No batch has arrived on this connection yet, so nothing live is shown.");
   await expect(page.getByTestId("activity-live-batch")).toHaveCount(0);
-  await expect(strip).toContainText("current connection only");
-  await expect(strip).toContainText("Live posture is never history");
+  await expect(strip).toContainText(ACTIVITY_LIVE_LABEL);
+  await expect(strip.getByText(ACTIVITY_LIVE_LABEL)).toHaveAttribute("title", ACTIVITY_LIVE_LAW);
+  // No public string names the roadmap, on the strip or anywhere on the page.
+  await expect(page.locator("main")).not.toContainText("P4");
+  await expect(page.locator("main")).not.toContainText(/outbox/i);
+  // One plain line at the desk's width: the strip is a single row tall, and its prose is the page's sans — the dek's family, not mono.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  expect((await strip.boundingBox())?.height ?? Number.NaN).toBeLessThan(56);
+  const family = (testId: string) => page.getByTestId(testId).evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(await family("activity-live-none")).toBe(await family("activity-verdict-dek"));
 
   await page.unroute("**/v1/stream**");
   await page.route("**/v1/stream**", (route) =>
@@ -451,13 +544,45 @@ test("live posture: no base frame → nothing pretended and the law printed; a d
   await page.goto("/feed");
   const batch = page.getByTestId("activity-live-batch");
   await expect(batch).toBeVisible();
-  await expect(batch).toContainText("batch #1");
-  await expect(batch).toContainText("aave_v3_etherfi @25,635,618");
-  await expect(batch).toContainText("debt_manager @154,796,552");
-  await expect(page.getByTestId("activity-live")).toContainText("current connection only");
+  await expect(batch).toHaveText("Batch 1 · 4 positions, 2 not computed · Aave v3 market (legacy) at block 25,635,618 · Cash at block 154,796,552");
+  await expect(batch).not.toContainText("#");
+  await expect(page.getByTestId("activity-live")).toContainText(ACTIVITY_LIVE_LABEL);
+  // Mono is for ids and numbers alone: the figures are set apart from the prose around them.
+  await expect(batch.locator("b")).toHaveText(["1", "4", "2", "25,635,618", "154,796,552"]);
+  const figureFamily = await batch.locator("b").first().evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(figureFamily).not.toBe(await batch.evaluate((el) => getComputedStyle(el).fontFamily));
 });
 
-test("the doctrine lives in the drawer, verbatim: the intro, the list's name, the method line, the forensics note, the tail note; the intro's opening is not page copy; Escape closes it and the button regains focus", async ({ page }) => {
+test("before the first page answers NOTHING is counted: the headline names the load under the dashed tone and prints no digit, the dek says what will be here, the tiles are dashes — never a zero", async ({ page }) => {
+  await muteStream(page);
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await mockEvents(page, async (params, route) => {
+    await held;
+    await demoWalk(params, route);
+  });
+  await page.goto("/feed");
+
+  await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "loading");
+  await expect(headline(page)).toHaveText("Loading recorded chain actions…");
+  await expect(headline(page)).not.toContainText(/\d/);
+  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText(ACTIVITY_LOADING_DEK);
+  await expect(chip(page, "Newest")).toHaveCount(0);
+  await expect(page.getByTestId("activity-kpi-rows")).toContainText("—");
+  await expect(page.getByTestId("activity-kpi-rows")).not.toContainText("0");
+  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("—");
+  await expect(page.getByTestId("activity-kpi-liquidations")).not.toContainText("0");
+
+  release();
+  await expect(rows(page)).toHaveCount(50);
+  await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
+  await expect(headline(page)).toContainText("3 liquidations among the 50 chain actions loaded,");
+});
+
+test("the doctrine lives in the drawer, verbatim: the intro, the list's name, the method line, the forensics note, the tail note, the order's full sentence, the since-block law and the live strip's law; the intro's opening is not page copy; Escape closes it and the button regains focus", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
@@ -470,7 +595,19 @@ test("the doctrine lives in the drawer, verbatim: the intro, the list's name, th
 
   await page.getByTestId("activity-drawer").click();
   const body = page.getByTestId("activity-drawer-body");
-  await expect(body.locator("p")).toHaveText([ACTIVITY_INTRO, ACTIVITY_LIST_TITLE, ACTIVITY_METHOD, ACTIVITY_FORENSICS, ACTIVITY_TAIL_NOTE]);
+  await expect(body.locator("p")).toHaveText([
+    ACTIVITY_INTRO,
+    ACTIVITY_LIST_TITLE,
+    ACTIVITY_METHOD,
+    ACTIVITY_FORENSICS,
+    ACTIVITY_TAIL_NOTE,
+    "Ordered by custodied header time (block_time DESC) with a deterministic chain-aware tiebreak. Block heights are never compared across chains, and rows without header time follow in the disclosed untimed tail.",
+    ACTIVITY_SINCE_NOTE,
+    ACTIVITY_LIVE_NOTE,
+  ]);
+  await expect(body).toContainText("Past stream states are not stored, so they cannot be replayed here");
+  await expect(body).not.toContainText("P4");
+  await expect(body).not.toContainText(/outbox/i);
   await expect(body).toContainText(
     "Chain actions as recorded: borrows, repays, supplies, withdrawals, liquidations. The live strip shows the stream's posture now; the list below pages through durable history. The two never blend.",
   );
@@ -490,8 +627,11 @@ test("answer before evidence: header above tiles above the live strip above the 
   const y = async (id: string) => (await page.getByTestId(id).boundingBox())?.y ?? Number.NaN;
   expect(await y("activity-verdict")).toBeLessThan(await y("activity-kpi-rows"));
   expect(await y("activity-kpi-rows")).toBeLessThan(await y("activity-live"));
-  expect(await y("activity-live")).toBeLessThan(await y("activity-engine-all"));
-  expect(await y("activity-engine-all")).toBeLessThan(await y("activity-order"));
-  expect(await y("activity-order")).toBeLessThan(await y("activity-table"));
+  expect(await y("activity-live")).toBeLessThan(await y("activity-order"));
+  expect(await y("activity-order")).toBeLessThan(await y("activity-engine-all"));
+  // Two control rows, then the tail's one-line notice, then the table.
+  expect(await y("activity-engine-all")).toBeLessThan(await y("activity-since"));
+  expect(await y("activity-since")).toBeLessThan(await y("activity-tail"));
+  expect(await y("activity-tail")).toBeLessThan(await y("activity-table"));
   expect(await y("activity-table")).toBeLessThan(await y("activity-foot"));
 });

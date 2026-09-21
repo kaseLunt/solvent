@@ -1,11 +1,10 @@
 "use client";
 
 import kit from "@/components/kit/kit.module.css";
-import { LEDGER_TYPES_NOTE } from "@/lib/activity-view";
+import { ACTIVITY_SINCE_FULL, ACTIVITY_SINCE_SHORT, ALL_ENGINES, LEDGER_TYPES_NOTE } from "@/lib/activity-view";
 import {
   EVENT_DISPLAY_TYPES,
   FEED_ENGINES,
-  SINCE_BLOCK_IMPOSSIBILITY,
   type EventDisplayType,
   type FeedEngine,
   type FeedOrderMode,
@@ -30,11 +29,12 @@ export interface ActivityControlsProps {
 const BTN = `${kit.btn} ${kit.btnGhost} ${styles.chipBtn}`;
 
 /**
- * The walk's scope as pressed ghost buttons: engine (cross-engine or one of the two, named as the page names them),
- * view (every action or the liquidations ledger, which pins the type), the type vocabulary (the wire's own words,
- * never invented), and the since-block bound — a real control only engine-scoped; cross-engine it is a stated
- * impossibility, a property of chains, not a disabled control and not an error. The surface owns what each press
- * does to the walk; this component only names the choices.
+ * The walk's scope as pressed ghost buttons, in two rows: engine (all engines or one of the two, named as the page
+ * names them) and view (every action or the liquidations ledger, which pins the type); then the type vocabulary (the
+ * wire's own words, never invented) and the since-block bound — a real control only with one engine chosen; with
+ * none it is a stated impossibility in short form (what would be here and how to get it), its full sentence in the
+ * title and the drawer: a property of chains, not a disabled control and not an error. The pressed look is the kit's
+ * one toggle grammar. The surface owns what each press does to the walk; this component only names the choices.
  */
 export function ActivityControls({
   engine,
@@ -64,7 +64,7 @@ export function ActivityControls({
               onEngine(null);
             }}
           >
-            cross-engine
+            {ALL_ENGINES}
           </button>
           {FEED_ENGINES.map((candidate) => (
             <button
@@ -134,7 +134,12 @@ export function ActivityControls({
           </span>
         )}
 
-        <span className={scoped ? styles.group : styles.impossible} data-testid="activity-since" data-possible={scoped}>
+        <span
+          className={scoped ? styles.group : styles.impossible}
+          data-testid="activity-since"
+          data-possible={scoped}
+          title={scoped ? undefined : ACTIVITY_SINCE_FULL}
+        >
           {scoped ? (
             <>
               <span className={styles.groupLabel}>since block</span>
@@ -142,7 +147,7 @@ export function ActivityControls({
                 className={styles.sinceInput}
                 inputMode="numeric"
                 aria-label="since block"
-                placeholder={`height on ${engine ?? ""}`}
+                placeholder="block number"
                 value={sinceDraft}
                 data-testid="activity-since-input"
                 onChange={(changeEvent) => {
@@ -162,7 +167,7 @@ export function ActivityControls({
               )}
             </>
           ) : (
-            <>since_block · {SINCE_BLOCK_IMPOSSIBILITY}</>
+            ACTIVITY_SINCE_SHORT
           )}
         </span>
       </div>

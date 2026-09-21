@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { KitTable, StatusPill, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import type { ActivityLiquidation, ActivityRow } from "@/lib/activity-view";
+import { ACTIVITY_AMOUNT_HEADER, type ActivityLiquidation, type ActivityRow } from "@/lib/activity-view";
 import { truncateAddress } from "@/lib/format";
 import styles from "./activity.module.css";
 
@@ -29,15 +29,18 @@ const COLUMNS: KitColumn[] = [
   { key: "engine", header: "Engine" },
   { key: "type", header: "Type" },
   { key: "account", header: "Account" },
-  { key: "amount", header: "Amount", align: "right" },
+  { key: "amount", header: ACTIVITY_AMOUNT_HEADER, align: "right" },
+  { key: "unit", header: "Unit" },
   { key: "tx", header: "Tx" },
 ];
 
 /**
  * The paged record as the kit's table: every loaded row in WIRE ORDER (the service orders, the page discloses),
  * the untimed tail dim with its block number where the time would be, a liquidation's pill crit with its typed
- * extract visible beneath it, the account opening the Inspector, the amount with its unit named beside it, the tx
- * on its chain's explorer. Every cell is the view model's word; nothing is decided here.
+ * extract visible beneath it, the account opening the Inspector, the amount alone in its right-aligned column so
+ * the digits share an edge — the wire's integer verbatim, aligned and never reformatted — with its unit named in the
+ * quiet column beside it, the tx on its chain's explorer. A record-only row's word is a statement, not a value, and
+ * is set as one. Every cell is the view model's word; nothing is decided here.
  */
 export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[]; emptyText: string }) {
   const kitRows: KitRow[] = rows.map((row) => ({
@@ -59,17 +62,16 @@ export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[
         </Link>
       ),
       amount: (
-        <>
-          <span className={kit.addr} data-testid="activity-amount">
-            {row.amount}
-          </span>
-          {row.unit !== "" && (
-            <span className={styles.unit} data-testid="activity-unit" title={row.unitTitle ?? undefined}>
-              {row.unit}
-            </span>
-          )}
-        </>
+        <span className={row.recordOnly ? kit.sub : kit.addr} data-testid="activity-amount">
+          {row.amount}
+        </span>
       ),
+      unit:
+        row.unit === "" ? null : (
+          <span className={styles.unit} data-testid="activity-unit" title={row.unitTitle ?? undefined}>
+            {row.unit}
+          </span>
+        ),
       tx:
         row.tx === null ? (
           <span className={styles.tx} title={row.txTitle} data-testid="activity-tx">

@@ -28,6 +28,8 @@ import {
   type FeedChainEvent,
   type FeedOrderMode,
 } from "./feed-data";
+import { humanUtc } from "./human-utc";
+import { groupInt, joinAnd } from "./prose";
 
 export type FeedAmount =
   | { kind: "record-only" }
@@ -204,44 +206,120 @@ export function renderBps(value: string | null): string {
   return value === null ? EM_DASH : `${value} bps`;
 }
 
+/** A grouped count with its noun, plural unless the count is one: "1 liquidation", "1,200 chain actions". */
+export function plural(n: number, noun: string): string {
+  return `${groupInt(n)} ${noun}${n === 1 ? "" : "s"}`;
+}
+
 /**
- * The Feed's head takeaway (W-3L, inventory 397): the loaded WINDOW's own
- * numbers — row count, liquidation count, and the newest row's coordinate —
- * in one computed sentence. The newest claim is MODE-HONEST (the r74 law):
- * engine-scoped pages are height-ordered, so the newest is a block;
- * cross-engine pages are time-ordered, so the newest is a custodied header
- * time — and a window with no custodied time, or one whose ordering the
- * wire itself violated, makes NO newest claim rather than licensing a
- * false reading. `hasMore` blocks the totality reading: a window is a
- * floor of the filtered feed, never its total, while a cursor remains.
+ * What the loaded rows license as "the newest", decided once: the headline's claim and the header's `Newest` chip
+ * both read this, so neither can state a newest the other withholds. The claim is MODE-HONEST: an engine-scoped
+ * walk is height-ordered, so its newest is a block; a cross-engine walk is time-ordered, so its newest is a block
+ * time — and a window with no block time, or one whose ordering the service itself broke, claims NO newest rather
+ * than licensing a false reading. Null when nothing is loaded.
+ */
+export type FeedNewest =
+  | { readonly kind: "time"; readonly iso: string }
+  | { readonly kind: "block"; readonly block: number }
+  | { readonly kind: "untimed" }
+  | { readonly kind: "order-violated" };
+
+export function feedNewest(rows: readonly FeedChainEvent[], mode: FeedOrderMode): FeedNewest | null {
+  const head = rows[0];
+  if (head === undefined) return null;
+  if (mode === "engine-scoped") return { kind: "block", block: head.block_number };
+  const { timed, orderViolated } = splitUntimedTail(rows);
+  if (orderViolated) return { kind: "order-violated" };
+  const iso = timed[0]?.block_time ?? null;
+  return iso === null ? { kind: "untimed" } : { kind: "time", iso };
+}
+
+/** What the walk asked for, as far as the sentence needs it. Every field is optional: an absent one claims nothing. */
+export interface FeedTakeawayScope {
+  /** The type filter; empty or absent = every type. */
+  readonly types?: readonly EventDisplayType[];
+  /** The liquidations ledger: the walk pins the type, so the count is of liquidations. */
+  readonly ledger?: boolean;
+  /** The envelope's own `served_at`, the reference year for the newest instant. Absent, the year prints. */
+  readonly servedAt?: string | null;
+}
+
+/** The headline as its two parts: the finding's core, then its scope. Joined with one space they are the H1. */
+export interface FeedTakeaway {
+  readonly emphasis: string;
+  readonly rest: string;
+}
+
+/** Before the first page answers, nothing is counted. */
+export const FEED_LOADING = "Loading recorded chain actions…";
+
+/** No rows and no cursor: the service's real answer for the filter. */
+export const FEED_EXHAUSTED = "No recorded chain action matches this filter.";
+
+/**
+ * The Activity headline over the loaded WINDOW's own numbers — the liquidation count among the loaded rows, then
+ * the newest row's coordinate — as the finding's core and its scope. "loaded" never leaves the emphasis: a window
+ * is a floor of the filtered record, never its total, while a cursor remains, and `hasMore` says which. Nothing
+ * loaded is never a count: it is a load in flight or the service's real empty answer. The newest claim is
+ * `feedNewest`'s. The instant is spoken through `humanUtc` from the wire's own UTC fields with the envelope's
+ * `served_at` as the reference year — never the browser's clock or zone; the exact instant rides the `Newest` chip.
  */
 export function feedTakeaway(
   rows: readonly FeedChainEvent[],
   mode: FeedOrderMode,
   hasMore: boolean,
-): string {
-  const newest = rows[0];
-  if (newest === undefined) {
-    return "0 chain actions loaded in this window — the list below states the reason.";
+  scope: FeedTakeawayScope = {},
+): FeedTakeaway {
+  const newest = feedNewest(rows, mode);
+  if (newest === null) {
+    // Nothing loaded is never counted: a cursor still open is a load in flight, a spent one the service's real answer.
+    return { emphasis: hasMore ? FEED_LOADING : FEED_EXHAUSTED, rest: "" };
   }
+  const n = rows.length;
   const liquidations = rows.filter((event) => event.type === "liquidation").length;
-  const counts = `${String(rows.length)} chain action(s) loaded, ${String(liquidations)} liquidation(s)`;
-  const more = hasMore ? " · more exist behind the cursor" : "";
-  if (mode === "engine-scoped") {
-    return `${counts} · newest at block ${formatBlock(newest.block_number)}${more}.`;
+  const types = scope.types ?? [];
+  const ledger = scope.ledger === true && liquidations === n;
+  const reference = scope.servedAt ?? undefined;
+
+  if (n === 1) {
+    const only = rows[0];
+    const where =
+      newest.kind === "time"
+        ? `at ${humanUtc(newest.iso, reference)}`
+        : newest.kind === "block"
+          ? `at block ${formatBlock(newest.block)}`
+          : "with no block time yet";
+    const more = hasMore ? "more exist beyond this one." : "that is the only action matching this filter.";
+    return ledger
+      ? { emphasis: "1 liquidation loaded,", rest: `${where}; ${more}` }
+      : { emphasis: "1 chain action loaded,", rest: `a ${only?.type ?? "chain action"}, ${where}; ${more}` };
   }
-  const { timed, orderViolated } = splitUntimedTail(rows);
-  if (orderViolated) {
-    return (
-      `${counts} · the wire violated its own ordering law (see the alert below), ` +
-      `so no newest is claimed${more}.`
-    );
+
+  const loaded = plural(n, "chain action");
+  let emphasis: string;
+  let filtered = "";
+  if (ledger) {
+    emphasis = `${plural(n, "liquidation")} loaded,`;
+  } else if (liquidations > 0) {
+    emphasis = `${plural(liquidations, "liquidation")} among the ${loaded} loaded,`;
+  } else if (types.length === 0 || types.includes("liquidation")) {
+    // A true zero, scoped by "loaded": the filter admits liquidations and none is among these rows.
+    emphasis = `No liquidation among the ${loaded} loaded,`;
+  } else {
+    emphasis = `${loaded} loaded,`;
+    filtered = `filtered to ${joinAnd(types)}; `;
   }
-  const newestTimed = timed[0];
-  if (newestTimed === undefined) {
-    return `${counts} · none carry custodied header time, so no newest is claimed${more}.`;
-  }
-  return `${counts} · newest custodied ${newestTimed.block_time ?? EM_DASH}${more}.`;
+
+  const claim =
+    newest.kind === "time"
+      ? `the newest at ${humanUtc(newest.iso, reference)}`
+      : newest.kind === "block"
+        ? `the newest at block ${formatBlock(newest.block)}`
+        : newest.kind === "untimed"
+          ? "none has a block time yet, so no newest is claimed"
+          : "no newest is claimed: the service broke its own ordering (see the alert below)";
+  const more = hasMore ? "more exist beyond these." : "that is every action matching this filter.";
+  return { emphasis, rest: `${filtered}${claim}; ${more}` };
 }
 
 /**

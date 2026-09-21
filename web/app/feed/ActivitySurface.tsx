@@ -1,9 +1,9 @@
 "use client";
 
-// The Activity surface: durable chain actions + live posture, on the kit.
+// The Activity surface: recorded chain actions + the live stream's state, on the kit.
 //
-//   - history = GET /v1/events on cursor pages (lib/feed-data, the C1 seam
-//     under the AMENDMENT-1 laws); live posture = the global SSE provider
+//   - the record = GET /v1/events on cursor pages (lib/feed-data, the C1 seam
+//     under the AMENDMENT-1 laws); the live state = the global SSE provider
 //     (FeedLiveStrip) — the two are separate instruments and are never
 //     conflated (spec §5 law 6);
 //   - the ordering regime is DISCLOSED per mode, and switching mode (or any
@@ -53,10 +53,11 @@ const PAGE_LIMIT = 50;
 
 type FeedView = "all" | "ledger";
 
-/** The envelope facts of the most recent page (the wire's own echo). */
+/** The envelope facts of the most recent page (the wire's own echo), its `served_at` included: the reference year for an instant spoken in prose. */
 interface FeedEnvelope {
   filter: EventFilter;
   limit: number;
+  served_at: string;
 }
 
 interface Refusal {
@@ -120,7 +121,7 @@ export function ActivitySurface() {
           signal,
         );
         if (isCurrent()) {
-          setEnvelope({ filter: page.filter, limit: page.limit });
+          setEnvelope({ filter: page.filter, limit: page.limit, served_at: page.served_at });
           setRefusal(null);
         }
         return { rows: page.events, nextCursor: page.next_cursor };
@@ -250,7 +251,7 @@ export function ActivitySurface() {
         />
         <KpiTile
           testId="activity-kpi-liquidations"
-          label="Liquidations in the loaded window"
+          label="Liquidations"
           value={activity.tiles.liquidations.value}
           sub={activity.tiles.liquidations.sub}
           tone={activity.tiles.liquidations.tone}
@@ -260,8 +261,9 @@ export function ActivitySurface() {
 
       <FeedLiveStrip />
 
-      {/* The durable list's own head: the strip above and the record below stay two instruments with two names. */}
-      <SectionHead title={ACTIVITY_LIST_TITLE} />
+      {/* The recorded list's own head: the strip above and the record below stay two instruments with two names. The
+          qualifier is the order in short form; its full sentence is the drawer's. */}
+      <SectionHead title={ACTIVITY_LIST_TITLE} qualifier={activity.listQualifier} testId="activity-order" />
 
       <ActivityControls
         engine={engine}
@@ -277,9 +279,11 @@ export function ActivitySurface() {
         onApplySince={applySinceBlock}
       />
 
-      <p className={styles.order} data-testid="activity-order">
-        {activity.orderNote}
-      </p>
+      {activity.tailNote !== null && (
+        <p className={styles.order} data-testid="activity-tail">
+          {activity.tailNote}
+        </p>
+      )}
 
       {notice !== null && (
         <div className={`${styles.strip} ${styles.stripWarn}`} role="status" data-testid="activity-notice">
