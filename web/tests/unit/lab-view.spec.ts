@@ -419,8 +419,8 @@ test("a 2xx body that is not a JSON object is a named answer on both paths, neve
     const response = body as unknown as typeof run;
     const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response }) }), ui());
     expect(v.book.state).toBe("contradictory");
-    expect(v.book.headline).toEqual(contradictoryHeadline("ETH -30 percent", ["the response body is not a JSON object"]));
-    expect(v.book.headline.dek).toBe("the response body is not a JSON object. Nothing from it is drawn.");
+    expect(v.book.headline).toEqual(contradictoryHeadline("ETH -30 percent", ["The response body is not a JSON object"]));
+    expect(v.book.headline.dek).toBe("The response body is not a JSON object. Nothing from it is drawn.");
     expect(v.book.run).toBeNull();
     expect(v.book.cash).toEqual({ kind: "unreadable", fields: ["the response body is not a JSON object"] });
     expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome.text).toBe("Unreadable");
@@ -428,13 +428,13 @@ test("a 2xx body that is not a JSON object is a named answer on both paths, neve
     const h = deriveLabView(reading({ runs: over }), ui());
     expect(h.book.state).toBe("result");
     expect(h.book.banner).toBe("rerun-failed");
-    expect(h.book.rerunFailure?.dek).toBe("the response body is not a JSON object. Nothing from it is drawn.");
+    expect(h.book.rerunFailure?.dek).toBe("The response body is not a JSON object. Nothing from it is drawn.");
     // The set path: a failed Compare with the same name; a held comparison stands beside it.
     const setBody = body as unknown as typeof DEMO_RUN_BOOK_SET;
     const bare: SetRecord = { phase: "settled", ids: asked, outcome: { kind: "ok", response: setBody }, at: 3, held: null };
     const c = deriveLabView(reading({ set: bare }), ui()).compare;
     expect(c.kind).toBe("failed");
-    if (c.kind === "failed") expect(c.headline.dek).toBe("Faults: the response body is not a JSON object. Nothing from it is drawn.");
+    if (c.kind === "failed") expect(c.headline.dek).toBe("Faults: The response body is not a JSON object. Nothing from it is drawn.");
     const standing = deriveLabView(reading({ set: { ...bare, held: { ids: asked, response: demoSetFor(asked), at: 2 } } }), ui()).compare;
     expect(standing.kind).toBe("failed");
     if (standing.kind === "failed") expect(standing.held?.cash.batchId).toBe(18251);
@@ -468,4 +468,73 @@ test("the hold's rule and the view's release rule, where they part: the record a
   expect(readsAsAnswer(malformed)).toBe(false);
   expect(deriveLabView(reading({ runs: over(run) }), ui()).book.banner).toBeNull();
   expect(readsAsAnswer(run)).toBe(true);
+});
+
+test("a mover without an account, or a note that is not text, is named and never drawn: the body does not read as an answer, no mover row reaches the table, the library says so, and a held result stands", () => {
+  const mover = (account: unknown) => ({
+    account,
+    engine: "debt_manager",
+    hf_before_wad: null,
+    hf_after_wad: null,
+    hf_drop_wad: null,
+    hf_before_num: "5012500000",
+    hf_before_den: "4822000000",
+    hf_after_num: "3752500000",
+    hf_after_den: "4822000000",
+    became_eligible: true,
+    debt_usd: "4822000000",
+  });
+  const good = mover("0x7a3f19e2c8b4d0a6f1e3b5c7d9a2f4e6b8c0c21e");
+  const cashWith = (overrides: Record<string, unknown>) => runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), { ...demoCash(), ...overrides } as unknown as Engine], ETH_DEF);
+  // The served shape reads: its mover is drawn.
+  const served = cashWith({ movers: [good] });
+  expect(readsAsAnswer(served)).toBe(true);
+  const ok = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: served }) }), ui());
+  expect(ok.book.state).toBe("result");
+  expect(ok.book.cash?.kind === "result" && ok.book.cash.result.movers.rows.map((m) => m.account)).toEqual([good.account]);
+  const held = { response: served, at: 1, atMonotonicMs: 1 };
+  const cases: [Record<string, unknown>, string][] = [
+    [{ movers: [good, mover(null)] }, "movers[1].account"],
+    [{ movers: [mover(undefined)] }, "movers[0].account"],
+    [{ movers: [mover(7)] }, "movers[0].account"],
+    [{ note: { text: "helper" } }, "note"],
+    [{ note: null }, "note"],
+    [{ hf_transitions: { ...demoCash().hf_transitions, note: ["helper"] } }, "hf_transitions.note"],
+    [{ hf_transitions: { ...demoCash().hf_transitions, note: undefined } }, "hf_transitions.note"],
+  ];
+  for (const [overrides, name] of cases) {
+    const body = cashWith(overrides);
+    expect(readsAsAnswer(body)).toBe(false);
+    expect(readEngine(body, "debt_manager", DEFINITION_ETH)).toEqual({ kind: "unreadable", fields: [name] });
+    const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: body }) }), ui());
+    expect(v.book.state).toBe("contradictory");
+    expect(v.book.headline.dek).toBe(`${name} is outside the wire contract. Nothing from it is drawn.`);
+    // No reading carries a movers table: the surface draws the table from a result alone.
+    expect(v.book.cash?.kind).toBe("unreadable");
+    expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
+    // Over a held result the hold stands, its own mover drawn, the failure named beside it.
+    const over = new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: { kind: "ok", response: body }, at: 2, atMonotonicMs: 2, held }]]);
+    const h = deriveLabView(reading({ runs: over }), ui());
+    expect(h.book.state).toBe("result");
+    expect(h.book.banner).toBe("rerun-failed");
+    expect(h.book.run).toBe(served);
+    expect(h.book.rerunFailure?.dek).toBe(`${name} is outside the wire contract. Nothing from it is drawn.`);
+  }
+});
+
+test("a run refused locally has its own state and the set path's sentence — nothing was sent, never 'could not be reached'; the library says so, and a held result stands", () => {
+  const message = '"ETH-30" is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent';
+  const refusedLocally = { kind: "refused-locally", message } as const;
+  const v = deriveLabView(reading({ runs: settled("eth_minus_30", refusedLocally) }), ui());
+  expect(v.book.state).toBe("refused-locally");
+  expect(v.book.headline).toEqual(failureHeadline("refused-locally", { message }));
+  expect(v.book.headline.emphasis).toBe("Nothing was sent.");
+  expect(v.book.banner).toBeNull();
+  expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Not sent", tone: "refused" });
+  const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
+  const over = new Map<string, RunRecord>([["eth_minus_30", { phase: "settled", outcome: refusedLocally, at: 2, atMonotonicMs: 2, held: { response: run, at: 1, atMonotonicMs: 1 } }]]);
+  const h = deriveLabView(reading({ runs: over }), ui());
+  expect(h.book.state).toBe("result");
+  expect(h.book.banner).toBe("rerun-failed");
+  expect(h.book.rerunFailure?.emphasis).toBe("Nothing was sent.");
 });

@@ -106,8 +106,9 @@ test("a body that is not a JSON object is named in one sentence of its own, by b
     expect(classifyRunBookEnvelope(body as unknown as LabRunBook)).toEqual([BODY_NOT_OBJECT]);
     expect(classifySetEnvelope(body as unknown as RunBookSetResponse)).toEqual([BODY_NOT_OBJECT]);
   }
-  // The reasons a reader sees: a field is outside the wire contract; the body's sentence stands as it is.
-  expect(contractFaults(["batch", BODY_NOT_OBJECT, "engines[1]"])).toEqual(["batch is outside the wire contract", "the response body is not a JSON object", "engines[1] is outside the wire contract"]);
+  // The reasons a reader sees: a field keeps the wire's own case and is outside the wire contract; the body's sentence
+  // is capitalised as the sentence it is — it opens the dek and follows a full stop in the banner.
+  expect(contractFaults(["batch", BODY_NOT_OBJECT, "engines[1]"])).toEqual(["batch is outside the wire contract", "The response body is not a JSON object", "engines[1] is outside the wire contract"]);
 });
 
 test("a refusal is read only when it names its engine and carries a string code: the member that fails is named, on both envelopes; an empty code is the contract's own and stays", () => {

@@ -200,6 +200,9 @@ function transitionChecks(transitions: unknown): FieldCheck[] {
     "hf_transitions.lane_changed_rows",
     isNullableWirePopulation(transitions.lane_changed_rows),
   ]);
+  // The wire's own words about its lanes, printed verbatim in the drawer: the
+  // schema's required string. Text that is not text never reaches the page.
+  checks.push(["hf_transitions.note", typeof transitions.note === "string"]);
   return checks;
 }
 
@@ -233,6 +236,10 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
         checks.push([`movers[${String(index)}]`, false]);
         return;
       }
+      // The account the row links to and prints, truncated: the schema's
+      // required `Address`, a string. Unjudged, a missing or null account is
+      // read for its length at render.
+      checks.push([`movers[${String(index)}].account`, typeof mover.account === "string"]);
       // The four mover fields the detail subtree feeds into BigInt or the
       // money renderers. All four are the schema's NullableDecimal — the
       // Aave and Debt Manager arms differ in WHICH are null, and a null on
@@ -293,6 +300,10 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
       }
     }
   }
+
+  // The engine's own note, printed verbatim in the drawer: the schema's
+  // required string, the last member in wire order.
+  checks.push(["note", typeof e.note === "string"]);
 
   return { malformedFields: malformedFields(checks) };
 }
@@ -369,9 +380,13 @@ export function classifySetRunEngine(engine: SetRunEngineSummary): { malformedFi
  */
 export const BODY_NOT_OBJECT = "the response body is not a JSON object";
 
-/** A classifier's names as the reasons a reader sees: each field outside the wire contract; a body that is no object, in its own sentence. */
+/**
+ * A classifier's names as the reasons a reader sees: each field outside the wire contract — a field's name is the
+ * wire's own and keeps its case; a body that is no object, in its own sentence, capitalised as the sentence it is,
+ * because a reason opens the dek and follows a full stop in the banner.
+ */
 export function contractFaults(names: readonly string[]): string[] {
-  return names.map((name) => (name === BODY_NOT_OBJECT ? name : `${name} is outside the wire contract`));
+  return names.map((name) => (name === BODY_NOT_OBJECT ? `${name.charAt(0).toUpperCase()}${name.slice(1)}` : `${name} is outside the wire contract`));
 }
 
 const isString = (value: unknown): boolean => typeof value === "string";

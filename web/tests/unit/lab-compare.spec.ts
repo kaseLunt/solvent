@@ -177,7 +177,7 @@ test("the envelope is classified before any set question is posed: a body outsid
     ["batch", "evaluation", "requested_scenario_ids", "results", "excluded_engines", "coverage", "notes"].map((f) => `${f} is outside the wire contract`),
   );
   // A body that is no JSON object has no field to name: its own sentence, and nothing of it is read.
-  for (const body of [null, 7, "ok", []]) expect(setMembership(["a_one"], body as unknown as RunBookSetResponse)).toEqual(["the response body is not a JSON object"]);
+  for (const body of [null, 7, "ok", []]) expect(setMembership(["a_one"], body as unknown as RunBookSetResponse)).toEqual(["The response body is not a JSON object"]);
   // A result that is not an object is the envelope's fault: no id is read from it.
   const nullResult = { ...two, results: [two.results[0], null] } as unknown as RunBookSetResponse;
   expect(setMembership(["a_one", "b_two"], nullResult)).toEqual(["results[1] is outside the wire contract"]);

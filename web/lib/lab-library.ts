@@ -67,6 +67,7 @@ const FAILURE_WORD: Record<Exclude<RunBookOutcome["kind"], "ok" | "failed">, str
   "no-batch": "No batch",
   "rate-limited": "Rate limited",
   unreachable: "Unreachable",
+  "refused-locally": "Not sent",
 };
 
 const failed = (text: string): LibraryOutcome => ({ key: "failed", text, tone: "refused" });

@@ -61,6 +61,7 @@ export type BookState =
   | "rate-limited"
   | "busy"
   | "unreachable"
+  | "refused-locally"
   | "failed";
 
 export interface BookWorkspace {
@@ -249,6 +250,8 @@ function failureOf(o: Exclude<RunBookOutcome, { kind: "ok" }>): { state: BookSta
       return { state: "unreachable", headline: failureHeadline("unreachable", { message: o.message }) };
     case "failed":
       return { state: "failed", headline: failureHeadline("failed", { status: o.status, message: o.message }) };
+    case "refused-locally":
+      return { state: "refused-locally", headline: failureHeadline("refused-locally", { message: o.message }) };
   }
 }
 

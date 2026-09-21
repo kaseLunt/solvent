@@ -531,3 +531,50 @@ test("p1b-2: fields are named in wire read order across the whole subtree", () =
     }),
   ).toEqual(["usd_decimals", "after.bad_debt_usd", "hf_transitions.wad_scale", "movers[0].debt_usd"]);
 });
+
+/** A value standing where a required string belongs: absent, null, a number, an object, a list. */
+const NOT_TEXT: readonly unknown[] = [undefined, null, 7, { text: "0x" }, ["0x"]];
+const set = (target: object, member: string, value: unknown): void => {
+  if (value === undefined) delete (target as Record<string, unknown>)[member];
+  else (target as Record<string, unknown>)[member] = value;
+};
+
+test("a mover names the account its row links to: an account that is not a string is named per index, before the row's decimals — the address is never truncated off a null", () => {
+  for (const value of NOT_TEXT) {
+    expect(
+      corrupted((engine) => {
+        const mover = engine.movers[0];
+        if (!mover) throw new Error("fixture shape: mover missing");
+        // A served mover stands before it: the fault is named at its own index.
+        engine.movers = [structuredClone(mover), mover];
+        set(mover, "account", value);
+      }),
+    ).toEqual(["movers[1].account"]);
+  }
+  // Wire read order inside the mover: the account, then its decimals.
+  expect(
+    corrupted((engine) => {
+      const mover = engine.movers[0];
+      if (!mover) throw new Error("fixture shape: mover missing");
+      set(mover, "account", null);
+      mover.debt_usd = "x";
+    }),
+  ).toEqual(["movers[0].account", "movers[0].debt_usd"]);
+});
+
+test("the two notes the drawer prints verbatim are text: the engine's `note` and `hf_transitions.note` are named when they are not strings; an empty note is the wire's own and stays", () => {
+  for (const value of NOT_TEXT) {
+    expect(corrupted((engine) => set(engine, "note", value))).toEqual(["note"]);
+    expect(corrupted((engine) => set(engine.hf_transitions, "note", value))).toEqual(["hf_transitions.note"]);
+  }
+  expect(corrupted((engine) => set(engine, "note", ""))).toEqual([]);
+  expect(corrupted((engine) => set(engine.hf_transitions, "note", ""))).toEqual([]);
+  // Wire read order: the matrix's note closes the matrix, the engine's note closes the engine.
+  expect(
+    corrupted((engine) => {
+      set(engine.hf_transitions, "note", null);
+      engine.movers_total = -1;
+      set(engine, "note", 3);
+    }),
+  ).toEqual(["hf_transitions.note", "movers_total", "note"]);
+});

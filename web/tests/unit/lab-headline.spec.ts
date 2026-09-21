@@ -24,6 +24,7 @@ import {
   staleBannerLine,
   withheldHeadline,
 } from "../../lib/lab-headline";
+import { BODY_NOT_OBJECT, contractFaults } from "../../lib/lab-classify";
 import { compareRows } from "../../lib/lab-compare";
 import { laneReading } from "../../lib/lab-transitions";
 import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
@@ -286,6 +287,11 @@ test("the rerun sentences are the lib's: a failed Compare and a failed Run over 
   const contradiction = contradictoryHeadline("ETH -30 percent", ["batch is outside the wire contract"]);
   expect(staleBannerLine({ kind: "rerun-failed", skew: [], batchId: 18251, failure: contradiction, heldCondition: null, retained: null })).toBe(
     "Run again failed — The result for ETH -30 percent contradicts itself. batch is outside the wire contract. Nothing from it is drawn. The result below stands for batch 18,251.",
+  );
+  // A body that is no JSON object: its reason is a sentence of its own, so it reads as one after the headline's full stop.
+  const notAnObject = contradictoryHeadline("ETH -30 percent", contractFaults([BODY_NOT_OBJECT]));
+  expect(staleBannerLine({ kind: "rerun-failed", skew: [], batchId: 18251, failure: notAnObject, heldCondition: null, retained: null })).toBe(
+    "Run again failed — The result for ETH -30 percent contradicts itself. The response body is not a JSON object. Nothing from it is drawn. The result below stands for batch 18,251.",
   );
   // A headline with a rest keeps it between its emphasis and its dek; no failure at all says so.
   expect(compareRerunFailedLine({ emphasis: "The evaluator is busy,", rest: "as it said.", tone: "refused", dek: "1 of 1 slots in use." }, 7)).toBe(

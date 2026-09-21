@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 import { classifyRunBookEngine, classifyRunBookEnvelope } from "../../lib/lab-classify";
 import { readsAsAnswer } from "../../lib/lab-engine";
 import { runBookScenario, type LabRunBookEngine, type RunBookOutcome } from "../../lib/runbook";
+import { runBookSet } from "../../lib/runbookSet";
 import { RUN_BOOK_ETH } from "../fixtures/lab-book";
 
 const answering = (body: unknown, status = 200): typeof fetch => () => Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
@@ -90,4 +91,21 @@ test("only a transport failure is unreachable; a 2xx that is not JSON is the fai
   const notJson = await runBookScenario("http://x", "eth_minus_30", { fetchImpl: () => Promise.resolve(new Response("<html>", { status: 200 })) });
   expect(notJson).toEqual({ kind: "failed", status: 200, message: "2xx response body is not JSON" });
   expect((await runBookScenario("http://x", "eth_minus_30", { fetchImpl: answering({}, 404) })).kind).toBe("not-served");
+});
+
+test("an id outside the committed-scenario pattern is refused locally — the same answer the set path gives for the same condition: nothing is sent, the promise resolves, and the outcome is never unreachable", async () => {
+  let sent = 0;
+  const counting: typeof fetch = () => {
+    sent += 1;
+    return Promise.resolve(new Response("{}", { status: 200 }));
+  };
+  for (const id of ["ETH-30", "", "eth minus 30", "../run-book", "a".repeat(65)]) {
+    const outcome = await runBookScenario("http://x", id, { fetchImpl: counting });
+    expect(outcome).toEqual({ kind: "refused-locally", message: `${JSON.stringify(id)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent` });
+  }
+  expect(sent).toBe(0);
+  // The set path's words for the same condition, to the letter.
+  const viaSet = await runBookSet("http://x", ["ETH-30"], { fetchImpl: counting });
+  expect(viaSet).toEqual(await runBookScenario("http://x", "ETH-30", { fetchImpl: counting }));
+  expect(sent).toBe(0);
 });

@@ -1255,7 +1255,7 @@ test("a service that answered 200 is never unreachable: a run-book without its e
   await expect(surface(page)).toHaveAttribute("data-state", "result");
   await expect(tile(page, "newly")).toContainText("118");
   await page.getByTestId("lab-banner-rerun").click();
-  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. the response body is not a JSON object. Nothing from it is drawn.");
+  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. The response body is not a JSON object. Nothing from it is drawn.");
   await expect(banner).toContainText("The result below stands for batch 18,251.");
   expect(answers).toBe(2);
   await expect(surface(page)).toHaveAttribute("data-state", "result");
@@ -1271,7 +1271,7 @@ test("compare: a set 2xx whose body is JSON null is a failed Compare that says s
   await page.goto("/lab?scenarios=eth_minus_30,ethfi_minus_50");
   const state = page.getByTestId("lab-compare-state");
   await expect(state).toHaveAttribute("data-kind", "failed");
-  await expect(state).toHaveText("The set does not answer the request. Faults: the response body is not a JSON object. Nothing from it is drawn.");
+  await expect(state).toHaveText("The set does not answer the request. Faults: The response body is not a JSON object. Nothing from it is drawn.");
   await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
   await expect(page.getByRole("banner")).toBeVisible();
   await expect(page.getByTestId("lab-compare")).toBeEnabled();

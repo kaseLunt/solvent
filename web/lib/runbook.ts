@@ -70,7 +70,9 @@ export type RunBookOutcome =
   | { kind: "no-batch"; message: string; retryAfterSeconds: number | null }
   | { kind: "rate-limited"; retryAfterSeconds: number | null }
   | { kind: "unreachable"; message: string }
-  | { kind: "failed"; status: number; message: string };
+  | { kind: "failed"; status: number; message: string }
+  /** Nothing was sent: the id is outside the contract's pattern, refused before a request is spent. */
+  | { kind: "refused-locally"; message: string };
 
 /** A JSON object: never null, a primitive, or a list standing where one belongs. */
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
@@ -94,7 +96,7 @@ function sealProjection(projection: unknown): unknown {
  * never "unreachable" — that word is a transport failure's alone. A null projection is the wire's own "no
  * projection" and stays null; a horizon left unsealed carries no verdict, and the engine classifier names it.
  */
-export function sealRunBook(body: unknown): LabRunBook {
+function sealRunBook(body: unknown): LabRunBook {
   if (!isObject(body) || !Array.isArray(body.engines)) return body as unknown as LabRunBook;
   const engines = body.engines.map((engine: unknown) => (isObject(engine) && "projection" in engine ? { ...engine, projection: sealProjection(engine.projection) } : engine));
   return { ...body, engines } as unknown as LabRunBook;
@@ -141,11 +143,10 @@ export async function runBookScenario(
   scenarioId: string,
   options?: { signal?: AbortSignal; fetchImpl?: typeof fetch },
 ): Promise<RunBookOutcome> {
+  // Refused locally, in the set path's own words for the same condition. The refusal RESOLVES: a rejection here is
+  // read as a transport failure, and a request that was never sent is not a service that could not be reached.
   if (!SCENARIO_ID_PATTERN.test(scenarioId)) {
-    throw new Error(
-      `scenario id ${JSON.stringify(scenarioId)} is not a committed-scenario id ` +
-        `(expected ^[a-z0-9_]{1,64}$): refusing to send it`,
-    );
+    return { kind: "refused-locally", message: `${JSON.stringify(scenarioId)} is not a committed-scenario id (expected ^[a-z0-9_]{1,64}$), so nothing was sent` };
   }
   const url = `${baseUrl.replace(/\/+$/, "")}/v1/scenarios/${scenarioId}/run-book`;
   const doFetch = options?.fetchImpl ?? fetch;
