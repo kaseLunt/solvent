@@ -1,4 +1,4 @@
-/* The state family (canon §8, p1a-5): six DESIGNED states — loading
+/* The state family (canon §8): six DESIGNED states — loading
  * skeleton, definitive empty, invalid input, refused, unavailable,
  * superseded. Anti-state laws the family exists to make impossible:
  * a refused metric never renders as an em dash in a KPI grid; an unknown

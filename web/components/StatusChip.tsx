@@ -53,9 +53,9 @@ export function ChipVal({ children }: { children: ReactNode }) {
 }
 
 export interface RefusedChipProps {
-  /** The PLAIN CAUSE — leads (an owner-approved phrasebook sentence, e.g. "sweep failed twice"). */
+  /** The PLAIN CAUSE — leads (the phrasebook's sentence for the code, e.g. "collateral sweep failed"). */
   cause: string;
-  /** The wire code — mono, rides secondary, NEVER leads (e.g. "sweep_failed_no_success"). */
+  /** The wire code — mono, rides secondary, NEVER leads (e.g. "SWEEP_FAILED"). */
   code?: string;
   /** The state word: REFUSED (default) or WITHHELD. */
   word?: string;
@@ -81,19 +81,6 @@ export function RefusedChip({ cause, code, word = "REFUSED", testId }: RefusedCh
           )}
         </Fragment>
       ))}
-    </span>
-  );
-}
-
-/**
- * Engine identity is mono WIRE NAMES only — `aave_v3` / `debt_manager` —
- * never a sans "AAVE"/"DM" abbreviation (§1 identity law). Rendered
- * verbatim on the chip ground.
- */
-export function EngineTag({ engine, testId }: { engine: string; testId?: string }) {
-  return (
-    <span className={styles.engineTag} data-testid={testId}>
-      {engine}
     </span>
   );
 }

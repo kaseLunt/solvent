@@ -1,19 +1,24 @@
-// One view model for the Verification page (spec §5.5; plan R1–R5). The
-// surface reads it and prints it; the pins read it and check it; nothing below
-// it decides a sentence twice, and no component composes one. Every figure is
-// the evidence manifest's, the meta's or the book's own. A reader that has not
-// answered prints "unavailable" — never a zero, and never an absence the wire
-// did not state; only the wire's own arms (no servable batch, no committed
-// receipt) are worded as absences. The four architecture steps are the
+// One view model for the Verification page (spec §5.5). The surface reads it
+// and prints it; the pins read it and check it; nothing below it decides a
+// sentence twice, and no component composes one. Every figure is the evidence
+// manifest's, the meta's or the book's own. A read in flight is pending, in
+// its own words — it has not failed; a read that failed prints "unavailable"
+// — never a zero, and never an absence the wire did not state; only the
+// wire's own arms (no servable batch, no committed receipt) are worded as
+// absences. The four architecture steps are the
 // Overview's pipeline law, derived here once and rendered by both pages
 // (app/overview/Pipeline.tsx and app/proof/VerificationArchitecture.tsx).
 import { UnavailableError, type components } from "@solvent/client";
+import { CASH_ENGINE_MISSING, wholeRefusal } from "./cash-refusal";
 import {
   deriveProofSubjectStatus,
   liveSubjectStatus,
   proofPin,
   proofSubjectStatus,
   proofTakeawayArms,
+  RECEIPT_EMPTY_PILL,
+  RECEIPT_EMPTY_STATUS,
+  receiptComparedNothing,
   type EvidenceDescriptor,
 } from "./evidence";
 import { EM_DASH } from "./format";
@@ -74,22 +79,24 @@ export type CashCensus =
  * The one census reader both pages' compute step prints from. The aggregate
  * states the number, so a page that prints only the census asks only
  * `/v1/book` — it never walks `/v1/positions` for a figure the book already
- * carries. The engine is withheld when the book's head names it in
- * `refused_engines` or its own card says `refused`; an engine the book does
- * not list is missing, not empty. Both are refusals — never a zero. Only a
- * served engine's count passes the population guard and prints. Null while
- * the book is unanswered or unread.
+ * carries. Whether the engine is withheld whole is the one predicate every
+ * reader of the book shares (lib/cash-refusal): named at the book's head, or
+ * flagged on its own card. An engine the book does not list is missing, not
+ * empty, in the one sentence that says so. Both are refusals — never a zero.
+ * Only a served engine's count passes the population guard and prints. Null
+ * while the book is unanswered or unread.
  */
 export function cashCensus(reading: BookReading): CashCensus | null {
   if (reading.phase !== "ok" || reading.book === null) return null;
   const book = reading.book;
-  const engine = book.engines.find((e) => e.engine === CASH);
-  const named = book.refused_engines.find((r) => r.engine === CASH) ?? (engine?.refused === true ? (engine.refusal ?? null) : undefined);
-  if (named !== undefined) {
-    return { kind: "refused", reason: "withheld", code: named?.code ?? null, cause: plainCause(named?.code ?? "", named?.detail) };
+  const withheld = wholeRefusal(book, CASH);
+  if (withheld !== null) {
+    // A refusal that states no code has none: the census says so with null, and the phrasebook words the absence.
+    return { kind: "refused", reason: "withheld", code: withheld.code === "" ? null : withheld.code, cause: plainCause(withheld.code, withheld.detail) };
   }
+  const engine = book.engines.find((e) => e.engine === CASH);
   if (engine === undefined) {
-    return { kind: "refused", reason: "missing", code: null, cause: "the Cash engine is missing from this batch" };
+    return { kind: "refused", reason: "missing", code: null, cause: CASH_ENGINE_MISSING };
   }
   return { kind: "count", accounts: readWirePopulation(engine.positions, "engines[debt_manager].positions") };
 }
@@ -122,7 +129,7 @@ export const PUBLIC_ENDPOINTS = [
 export const VERIFICATION_KICKER = "Verification · this deployment";
 /** The loading arm's dek: what the page will hold, claimed of nothing yet. */
 export const VERIFICATION_LOADING_DEK = "The result of its last check against the chain, and the identity of the batch it is serving.";
-/** The adjudicated intro (the R1 clarity ruling), verbatim — drawer doctrine now. */
+/** The page's intro, verbatim — the drawer's first doctrine paragraph. */
 export const VERIFICATION_INTRO =
   "What this deployment is, exactly: the pinned proof of its last reconcile and the identity of the batch it serves now. Nothing here is measured on request: every field is carried by the build or persisted by a batch.";
 /** The non-inheritance law that binds the two subjects, verbatim. */
@@ -148,6 +155,7 @@ export const VERIFICATION_COPY = {
   probesLink: "the contract and its samples → API",
   rawShow: "Raw JSON",
   rawHide: "Hide raw JSON",
+  retry: "Retry",
 } as const;
 
 /** The marker line beneath a subject's comparator: OPERATIONAL or PROVEN, then the descriptor's own note. */
@@ -156,6 +164,8 @@ export function markerLine(descriptor: Pick<EvidenceDescriptor, "marker" | "mark
 }
 
 const UNAVAILABLE = "unavailable";
+/** The pending register's word: a read in flight, which has neither answered nor failed. */
+const PENDING = "pending";
 const n = (value: number | null | undefined): string =>
   typeof value === "number" ? value.toLocaleString("en-US") : UNAVAILABLE;
 
@@ -174,17 +184,20 @@ function retryWords(seconds: number | null): string {
 // ---------------------------------------------------------------------------
 
 /**
- * exact — the committed receipt passed unqualified; drift — its verdict passed
- * but its own tallies disagree (drift counted, a row short, a weld short);
- * failed — the verdict itself failed, or the wire contradicts its receipt;
- * none — no committed receipt.
+ * exact — the committed receipt passed unqualified, over at least one gated
+ * row; empty — it passed over no gated rows at all: nothing was compared, so
+ * nothing is proven, and the page refuses the finding rather than word a
+ * vacuous pass as a match; drift — its verdict passed but its own tallies
+ * disagree (drift counted, a row short, a weld short); failed — the verdict
+ * itself failed, or the wire contradicts its receipt; none — no committed
+ * receipt.
  */
-export type ReceiptState = "exact" | "drift" | "failed" | "none";
+export type ReceiptState = "exact" | "empty" | "drift" | "failed" | "none";
 
 export function receiptState(manifest: EvidenceResponse): ReceiptState {
   const status = proofSubjectStatus(manifest);
   if (status.kind === "unavailable") return "none";
-  if (status.kind === "accepted") return "exact";
+  if (status.kind === "accepted") return receiptComparedNothing(status.reconcile) ? "empty" : "exact";
   // A wire that contradicts a receipt which passes on its own numbers has not passed: the disagreement is a failure, not drift.
   if (deriveProofSubjectStatus(manifest).kind !== "rejected") return "failed";
   const receipt = status.reconcile;
@@ -223,9 +236,11 @@ export interface PipelineStep {
   readonly ordinal: string;
   /** The tile's value: the step's number, or the dash when there is none to print. */
   readonly value: string;
-  /** Beside a number, "unit · context"; beside the dash, the refused word — "unavailable" for a reader that has not answered, the absence the wire stated otherwise. */
+  /** Beside a number, "unit · context"; beside the dash, the refused word — "unavailable" for a read that failed, the absence the wire stated otherwise; "pending" while the read is in flight. */
   readonly sub: string;
   readonly tone: "neutral" | "ok" | "warn" | "refused";
+  /** The step's read is in flight: the tile prints the pending mark in place of `value`, and nothing about the step is refused yet. */
+  readonly pending: boolean;
   readonly sentence: string;
   readonly line: PipelineLine;
 }
@@ -248,22 +263,68 @@ export function stepTileLabel(step: Pick<PipelineStep, "ordinal" | "label">): st
 }
 
 const INDEX_SENTENCE = "Chain heights indexed per engine, ahead of every batch.";
+// Three states of one read, never folded: in flight (it has not failed), failed (it could not be read), and the absence the wire itself stated.
+const COMPUTE_PENDING = "Reading the batch…";
 const COMPUTE_UNREAD = "The batch could not be read.";
 const COMPUTE_ABSENT = "No batch is servable; nothing is computed.";
+const VERIFY_PENDING = "Reading the receipt…";
 const VERIFY_UNREAD = "The receipt could not be read.";
 const VERIFY_ABSENT = "No reconcile receipt is committed; nothing is verified against the chain.";
+const VERIFY_EMPTY = "The pinned reconcile run gated no rows: nothing was compared, so nothing is verified against the chain.";
 /** Where the account count would print, a refused census says which refusal it is. */
 const CENSUS_REFUSED = { withheld: "Cash accounts withheld", missing: "Cash engine not in this batch" } as const;
 
 /**
+ * Which of the two null-able asks are still in flight. A null meta or manifest
+ * is either a read that has not answered or one that failed, and only the
+ * caller that made the ask knows which; the book's own `phase` already says
+ * so. A caller that says nothing is read as settled: its null is
+ * "unavailable", the weaker claim, never a pending one it did not make.
+ */
+export interface PipelineInFlight {
+  readonly meta: boolean;
+  readonly evidence: boolean;
+}
+
+const ALL_SETTLED: PipelineInFlight = { meta: false, evidence: false };
+
+const rowsWord = (count: number): string => (count === 1 ? "row" : "rows");
+
+/**
+ * The Verify step's sentence under a receipt that did not pass clean. The
+ * manifest carries the receipt's tallies and never its rows, so a drifted row
+ * is counted here and named only where it is recorded: the committed drift
+ * report, by its path when that path is publishable. A drift of zero is never
+ * printed as the fault — the proof card's status row names the conjunct that
+ * failed.
+ */
+function shortReceiptSentence(receipt: ManifestReconcile): string {
+  const tally = `${n(receipt.gated_exact)} of ${n(receipt.gated_rows)} gated rows reconciled exact against the chain`;
+  if (receipt.gated_drift === 0) return `${tally}, and the receipt still did not pass clean; the proof subject names the conjunct that failed.`;
+  const artifact = publishable(receipt.artifact_path);
+  const where = artifact.ok ? `the committed drift report, ${artifact.text}` : "the committed drift report";
+  return `${tally}; ${n(receipt.gated_drift)} ${rowsWord(receipt.gated_drift)} drifted. This manifest carries the tallies, not the rows: they are recorded in ${where}.`;
+}
+
+/**
  * The Overview's four numbers, unchanged in law: the OP block, the batch, the
  * gated tally, the endpoint count. The compute step reads its census from the
- * book reading itself, so no page can hand it another count.
+ * book reading itself, so no page can hand it another count. A step whose
+ * read is in flight is pending — the pending word, the reading sentence, no
+ * refused tone — and "could not be read" is said only once a read has failed.
+ * `line`, the Overview's own print, keeps "unavailable" for every figure it
+ * does not have.
  */
-export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceResponse | null, reading: BookReading): readonly PipelineStep[] {
+export function pipelineSteps(
+  meta: MetaResponse | null,
+  evidence: EvidenceResponse | null,
+  reading: BookReading,
+  inFlight: PipelineInFlight = ALL_SETTLED,
+): readonly PipelineStep[] {
   const dm = meta?.watermark_vector.find((w) => w.engine === CASH) ?? null;
   const eth = meta?.watermark_vector.find((w) => w.engine === LEGACY) ?? null;
   const ethBlock = eth === null ? UNAVAILABLE : n(eth.last_block);
+  const metaPending = meta === null && inFlight.meta;
   const index: PipelineStep =
     dm === null
       ? {
@@ -271,8 +332,9 @@ export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceRespo
           label: "Index",
           ordinal: ORDINAL.index,
           value: EM_DASH,
-          sub: meta === null ? UNAVAILABLE : "no OP Mainnet watermark",
-          tone: "refused",
+          sub: metaPending ? PENDING : meta === null ? UNAVAILABLE : "no OP Mainnet watermark",
+          tone: metaPending ? "neutral" : "refused",
+          pending: metaPending,
           sentence: INDEX_SENTENCE,
           line: { before: "OP block ", figure: UNAVAILABLE, after: ` · Ethereum block ${ethBlock}` },
         }
@@ -283,12 +345,14 @@ export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceRespo
           value: n(dm.last_block),
           sub: `OP block · Ethereum block ${ethBlock}`,
           tone: "neutral",
+          pending: false,
           sentence: INDEX_SENTENCE,
           line: { before: "OP block ", figure: n(dm.last_block), after: ` · Ethereum block ${ethBlock}` },
         };
 
   const book = reading.phase === "ok" ? reading.book : null;
   const census = cashCensus(reading);
+  const bookPending = reading.phase === "loading";
   const compute: PipelineStep =
     book === null || census === null
       ? {
@@ -296,9 +360,10 @@ export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceRespo
           label: "Compute",
           ordinal: ORDINAL.compute,
           value: EM_DASH,
-          sub: reading.phase === "no-batch" ? "no servable batch" : UNAVAILABLE,
-          tone: "refused",
-          sentence: reading.phase === "no-batch" ? COMPUTE_ABSENT : COMPUTE_UNREAD,
+          sub: bookPending ? PENDING : reading.phase === "no-batch" ? "no servable batch" : UNAVAILABLE,
+          tone: bookPending ? "neutral" : "refused",
+          pending: bookPending,
+          sentence: bookPending ? COMPUTE_PENDING : reading.phase === "no-batch" ? COMPUTE_ABSENT : COMPUTE_UNREAD,
           line: { before: "", figure: UNAVAILABLE, after: "" },
         }
       : census.kind === "refused"
@@ -310,6 +375,7 @@ export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceRespo
             value: n(book.batch.id),
             sub: `batch · ${CENSUS_REFUSED[census.reason]}`,
             tone: "refused",
+            pending: false,
             sentence:
               census.reason === "withheld"
                 ? `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; the Cash book is withheld this batch (${census.cause}).`
@@ -323,11 +389,15 @@ export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceRespo
             value: n(book.batch.id),
             sub: `batch · ${n(census.accounts)} Cash accounts`,
             tone: "neutral",
+            pending: false,
             sentence: `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; every position's health from the wire's own integers.`,
             line: { before: "batch ", figure: n(book.batch.id), after: ` · ${n(census.accounts)} Cash accounts` },
           };
 
   const recon = evidence?.reconcile ?? null;
+  const evidencePending = evidence === null && inFlight.evidence;
+  // A receipt whose tallies are not wire populations is judged by nobody: it prints as it came, under warn.
+  const receipt = evidence === null || recon === null || !receiptReadable(recon) ? null : receiptState(evidence);
   const verify: PipelineStep =
     evidence === null || recon === null
       ? {
@@ -335,26 +405,41 @@ export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceRespo
           label: "Verify",
           ordinal: ORDINAL.verify,
           value: EM_DASH,
-          sub: evidence === null ? UNAVAILABLE : "no committed receipt",
-          tone: "refused",
-          sentence: evidence === null ? VERIFY_UNREAD : VERIFY_ABSENT,
+          sub: evidencePending ? PENDING : evidence === null ? UNAVAILABLE : "no committed receipt",
+          tone: evidencePending ? "neutral" : "refused",
+          pending: evidencePending,
+          sentence: evidencePending ? VERIFY_PENDING : evidence === null ? VERIFY_UNREAD : VERIFY_ABSENT,
           line: { before: "", figure: UNAVAILABLE, after: " gated rows exact" },
         }
-      : {
-          key: "verify",
-          label: "Verify",
-          ordinal: ORDINAL.verify,
-          value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
-          // The tile glosses "gated" once — the rows that must match for a pass — so the headline's "checked rows" and this tally read as one number. The Overview's `line` keeps its own words.
-          sub: `gated (must-match) rows exact · drift ${n(recon.gated_drift)}`,
-          tone: receiptReadable(recon) && receiptState(evidence) === "exact" ? "ok" : "warn",
-          sentence: `${n(recon.gated_exact)} gated rows reconciled exact against the chain; ${n(recon.gated_drift)} drift named.`,
-          line: {
-            before: "",
-            figure: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
-            after: ` gated rows exact · drift ${n(recon.gated_drift)}`,
-          },
-        };
+      : receipt === "empty"
+        ? {
+            // A run that gated no rows compared nothing. Its "0/0" is the wire's own count, printed under the refused register with its cause — never as a tally of exact rows.
+            key: "verify",
+            label: "Verify",
+            ordinal: ORDINAL.verify,
+            value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
+            sub: "gated (must-match) rows · none compared",
+            tone: "refused",
+            pending: false,
+            sentence: VERIFY_EMPTY,
+            line: { before: "", figure: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`, after: " gated rows · none compared" },
+          }
+        : {
+            key: "verify",
+            label: "Verify",
+            ordinal: ORDINAL.verify,
+            value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
+            // The tile glosses "gated" once — the rows that must match for a pass — so the headline's "checked rows" and this tally read as one number. The Overview's `line` keeps its own words.
+            sub: `gated (must-match) rows exact · drift ${n(recon.gated_drift)}`,
+            tone: receipt === "exact" ? "ok" : "warn",
+            pending: false,
+            sentence: receipt === "exact" ? `${n(recon.gated_exact)} gated rows reconciled exact against the chain; ${n(recon.gated_drift)} drift named.` : shortReceiptSentence(recon),
+            line: {
+              before: "",
+              figure: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
+              after: ` gated rows exact · drift ${n(recon.gated_drift)}`,
+            },
+          };
 
   const endpoints = String(PUBLIC_ENDPOINTS.length);
   const serve: PipelineStep = {
@@ -364,6 +449,7 @@ export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceRespo
     value: endpoints,
     sub: "endpoints · typed TypeScript client",
     tone: "neutral",
+    pending: false,
     sentence: `${endpoints} read-only endpoints, every money value a decimal string.`,
     line: { before: "", figure: endpoints, after: " endpoints · typed TypeScript client" },
   };
@@ -418,6 +504,8 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
   const feeds = manifest.feeds_registry;
   const welded = feeds.registry_fingerprint === service.registry_fingerprint;
   const reconcile = status.kind === "unavailable" ? null : status.reconcile;
+  // A pass over no gated rows compared nothing: the card refuses the finding in the same words the drawer does, and no row of it wears a verdict's colour.
+  const vacuous = status.kind === "accepted" && receiptComparedNothing(status.reconcile);
   // Every artifact-derived string destined for the fold is checked here; a refused one is a hazard and hoists out.
   const artifact = reconcile === null ? null : publishable(reconcile.artifact_path);
   const receiptNote = reconcile === null ? null : publishable(reconcile.note);
@@ -425,7 +513,9 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
 
   const rows: CardRow[] = [
     status.kind === "accepted"
-      ? { label: "status", value: "ACCEPTED · every gated row welded exact", tone: "ok" }
+      ? vacuous
+        ? { label: "status", value: RECEIPT_EMPTY_STATUS, tone: "warn" }
+        : { label: "status", value: "ACCEPTED · every gated row welded exact", tone: "ok" }
       : status.kind === "rejected"
         ? { label: "status", value: `REJECTED · ${status.detail}`, tone: "crit" }
         : { label: "status", value: `UNAVAILABLE · ${pub(status.reason)}`, tone: "crit" },
@@ -434,7 +524,7 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
     rows.push({
       label: "gated rows",
       value: `${String(reconcile.gated_exact)}/${String(reconcile.gated_rows)} exact · drift ${String(reconcile.gated_drift)}`,
-      tone: reconcile.gated_drift === 0 ? "ok" : "crit",
+      tone: vacuous ? "dim" : reconcile.gated_drift === 0 ? "ok" : "crit",
     });
     for (const weld of reconcile.welds) {
       rows.push({
@@ -493,7 +583,9 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
     title: "Proof subject",
     status:
       status.kind === "accepted"
-        ? { text: `PROOF · EXACT @ ${proofPin(status.reconcile)}`, tone: "ok" }
+        ? vacuous
+          ? { text: RECEIPT_EMPTY_PILL, tone: "refused" }
+          : { text: `PROOF · EXACT @ ${proofPin(status.reconcile)}`, tone: "ok" }
         : status.kind === "rejected"
           ? { text: "RECEIPT REJECTED", tone: "crit" }
           : { text: "NO COMMITTED RECEIPT", tone: "refused" },
@@ -606,10 +698,13 @@ function probeRows(manifest: EvidenceResponse): readonly ProbeRow[] {
 
 const RECEIPT_CHIP_TONE: Record<ReceiptState, NonNullable<LabChip["tone"]>> = {
   exact: "ok",
+  empty: "refused",
   drift: "warn",
   failed: "crit",
   none: "refused",
 };
+
+const RECEIPT_EMPTY_TITLE = "the run gated no rows, so nothing was compared and nothing is proven";
 
 /** A 64-hex key at chip width: its first eight and last six characters; the whole key is the chip's title. */
 function shortKey(key: string): string {
@@ -638,7 +733,7 @@ function chips(manifest: EvidenceResponse, receipt: ReceiptState): LabChip[] {
     label: "Receipt",
     value: receipt === "none" ? "none" : `${receipt}${tally}`,
     tone: RECEIPT_CHIP_TONE[receipt],
-    title: proof.kind === "rejected" ? proof.detail : proof.kind === "unavailable" ? pub(proof.reason) : undefined,
+    title: proof.kind === "rejected" ? proof.detail : proof.kind === "unavailable" ? pub(proof.reason) : receipt === "empty" ? RECEIPT_EMPTY_TITLE : undefined,
   };
   const key: LabChip =
     live.kind === "serving"
@@ -667,11 +762,13 @@ function receiptLine(manifest: EvidenceResponse, receipt: ReceiptState): string 
   switch (receipt) {
     case "exact":
       return `Reconcile receipt: ${exact} gated rows exact, ${drift} drift`;
-    case "drift": {
-      // A weld short with no gated drift names its fault; otherwise the drift is the fault.
-      const fault = r.gated_drift === 0 && proof.kind === "rejected" ? proof.detail : "drift named";
-      return `Reconcile receipt: ${exact} of ${rows} gated rows exact, ${drift} drift — ${fault}, the proof badge refused`;
-    }
+    case "empty":
+      return "Reconcile receipt: the run gated no rows — nothing was compared, the proof badge refused";
+    case "drift":
+      // A weld short with no gated drift names its fault; otherwise the drift is the fault — counted, never "named": the manifest carries no row to name.
+      return r.gated_drift === 0 && proof.kind === "rejected"
+        ? `Reconcile receipt: ${exact} of ${rows} gated rows exact, ${drift} drift — ${proof.detail}, the proof badge refused`
+        : `Reconcile receipt: ${exact} of ${rows} gated rows exact, ${drift} ${rowsWord(r.gated_drift)} drifted — the proof badge refused`;
     case "failed":
       return `Reconcile receipt failed: ${proof.kind === "rejected" ? proof.detail : "the receipt did not pass"} — ${exact} of ${rows} gated rows exact, ${drift} drift`;
     case "none":
@@ -679,7 +776,7 @@ function receiptLine(manifest: EvidenceResponse, receipt: ReceiptState): string 
   }
 }
 
-/** The identity line — batch, key, commit, receipt — in the words the stampline printed; an absent value is the dash and its reason. */
+/** The identity line — batch, key, commit, receipt — one line of the drawer's doctrine; an absent value is the dash and its reason. */
 function identityLine(manifest: EvidenceResponse): string {
   const live = liveSubjectStatus(manifest);
   const r = manifest.reconcile;
@@ -702,6 +799,8 @@ export type EvidenceState =
 export interface VerificationInput {
   readonly state: EvidenceState;
   readonly meta: MetaResponse | null;
+  /** The `/v1/meta` ask has not settled: a null `meta` is then a read in flight, not one that failed. */
+  readonly metaInFlight: boolean;
   readonly book: BookReading;
 }
 
@@ -713,8 +812,8 @@ export interface VerificationView {
   /** Proof pin · Live batch · Receipt · Batch key. */
   readonly chips: LabChip[];
   readonly steps: readonly PipelineStep[];
-  /** "Reconcile receipt: N gated rows exact, M drift", or the failing / absent words. */
-  readonly receiptLine: string;
+  /** "Reconcile receipt: N gated rows exact, M drift", or the failing / absent / pending words. Null when the record could not be fetched: the header says so once, and no strip says it again. */
+  readonly receiptLine: string | null;
   readonly probes: readonly ProbeRow[];
   /** The intro, the split, both subjects' captions and the identity line, verbatim — the drawer's doctrine. */
   readonly doctrine: readonly string[];
@@ -729,14 +828,21 @@ export interface VerificationView {
  * A receipt that did not pass claims no exactness; an absent one states the
  * served reason; a contradicted one prints the contradiction. The second
  * speaks for the live subject: the batch served now, which the manifest holds
- * operational whatever the receipt says, or the reason none is served.
+ * operational whatever the receipt says, or the reason none is served. Of the
+ * live batch the manifest licenses one claim — no comparator applies to it —
+ * so the dek says no check covers it, in every arm, and never that it was
+ * "not re-checked": that would say it had been checked once.
  */
 export function verificationDek(manifest: EvidenceResponse): string {
   const proof = proofSubjectStatus(manifest);
   const live = liveSubjectStatus(manifest);
+  // A pass over no gated rows proves nothing: it claims no exactness and lends the live batch nothing to not inherit.
+  const proven = proof.kind === "accepted" && !receiptComparedNothing(proof.reconcile);
   const first =
     proof.kind === "accepted"
-      ? `That run is a fixed, reproducible check, finished ${humanUtc(proof.reconcile.finished_at, manifest.served_at)}; its result covers that run and nothing else.`
+      ? proven
+        ? `That run is a fixed, reproducible check, finished ${humanUtc(proof.reconcile.finished_at, manifest.served_at)}; its result covers that run and nothing else.`
+        : "That run gated no rows, so no exactness is claimed for this deployment until a run compares rows and passes."
       : proof.kind === "unavailable"
         ? sentence(pub(proof.reason))
         : deriveProofSubjectStatus(manifest).kind === "rejected"
@@ -744,16 +850,16 @@ export function verificationDek(manifest: EvidenceResponse): string {
           : terminated(pub(proof.detail));
   if (live.kind === "no-batch") {
     const absent = sentence(pub(live.reason));
-    return proof.kind === "accepted" ? `${first} ${absent} The proof still stands for its own run; it says nothing about live data.` : `${first} ${absent}`;
+    return proven ? `${first} ${absent} The proof still stands for its own run; it says nothing about live data.` : `${first} ${absent}`;
   }
-  const batch = `Batch ${groupInt(readWirePopulation(live.substrate.batch_id, "batch_id"))}, served now, is live data`;
-  return proof.kind === "accepted" ? `${first} ${batch} that was not re-checked and does not inherit it.` : `${first} ${batch}; no check covers it.`;
+  const batch = `Batch ${groupInt(readWirePopulation(live.substrate.batch_id, "batch_id"))}, served now, is live data; no check covers it`;
+  return proven ? `${first} ${batch}, and it does not inherit that result.` : `${first} ${batch}.`;
 }
 
 export function deriveVerificationView(input: VerificationInput): VerificationView {
-  const { state, meta, book } = input;
+  const { state, meta, metaInFlight, book } = input;
   const evidence = state.phase === "ok" ? state.manifest : null;
-  const steps = pipelineSteps(meta, evidence, book);
+  const steps = pipelineSteps(meta, evidence, book, { meta: metaInFlight, evidence: state.phase === "loading" });
   const doctrine = [VERIFICATION_INTRO, VERIFICATION_SPLIT, PROOF_CAPTION, LIVE_CAPTION];
   if (state.phase === "loading") {
     return {
@@ -763,7 +869,7 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
       headline: refused("Loading this deployment's verification record…", VERIFICATION_LOADING_DEK),
       chips: unknownChips(),
       steps,
-      receiptLine: "Reconcile receipt: loading /v1/evidence…",
+      receiptLine: "Reading the reconcile receipt…",
       probes: [],
       doctrine,
     };
@@ -771,7 +877,7 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
   if (state.phase === "error") {
     const retry = retryWords(state.retryAfterSeconds);
     const emphasis = "The verification record could not be fetched.";
-    // The cause is the fetch's own words, then when to retry, then the law: nothing stands in for an unread manifest.
+    // The cause is the fetch's own words, then when to retry, then the law: nothing stands in for an unread manifest. The failure is said here and nowhere else on the page — the receipt strip stands down rather than repeat it.
     const dek = [sentence(state.message), retry, NO_SUBSTITUTE].filter((part) => part !== "").join(" ");
     return {
       state: "unavailable",
@@ -780,7 +886,7 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
       headline: refused(emphasis, dek),
       chips: unknownChips(),
       steps,
-      receiptLine: `No reconcile receipt: the evidence manifest could not be fetched. ${retry}`,
+      receiptLine: null,
       probes: [],
       doctrine: [...doctrine, `${emphasis} ${dek}`],
     };
@@ -792,8 +898,8 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
     state: "ok",
     receipt,
     kicker: VERIFICATION_KICKER,
-    // The proof's finding is the only verdict on the page, so it alone wears a tone, and only the receipt's: ok for an unqualified pass, warn for anything less. The scope is ink, and the live batch — named in the dek — never wears the proof's colour, present or absent.
-    headline: { emphasis: arms.proof, rest: arms.scope, tone: receipt === "exact" ? "ok" : "warn", dek: verificationDek(manifest) },
+    // The proof's finding is the only verdict on the page, so it alone wears a tone, and only the receipt's: ok for an unqualified pass, warn for a receipt that fell short or is absent, the refused register for one that compared nothing — a finding withheld, not a finding. The scope is ink, and the live batch — named in the dek — never wears the proof's colour, present or absent.
+    headline: { emphasis: arms.proof, rest: arms.scope, tone: receipt === "exact" ? "ok" : receipt === "empty" ? "refused" : "warn", dek: verificationDek(manifest) },
     chips: chips(manifest, receipt),
     steps,
     receiptLine: receiptLine(manifest, receipt),

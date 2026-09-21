@@ -17,8 +17,9 @@ Governing documents:
 | --- | --- |
 | `app/tokens.css` | Design tokens, extracted verbatim from the mockup: palette, mono/sans stacks, type scale, spacing, radii. Light + dark via `prefers-color-scheme`, with a `data-theme` override that wins in both directions. |
 | `app/globals.css` | Baseline + tiny utilities (`.mono`, `.dim`, `.okt`, `.crit-t`, `.eyebrow`). |
-| `app/layout.tsx` | Root shell: pre-paint theme init, `PostureProvider`, `AppHeader`, `DegradationBanner`. |
-| `app/{book,inspector,lab,observatory,feed,developers}` | The six routes (W0: honest placeholders naming their feeds and landing wave). |
+| `app/layout.tsx` | Root shell: pre-paint theme init, `PostureProvider`, `MetaConstantsProvider`, the kit's `AppShell` (nav + live pill), `DegradationBanner`. |
+| `app/page.tsx` + `app/overview` | `/` — Overview, the front door. |
+| `app/{book,inspector,lab,observatory,feed,proof,developers}` | The seven pages behind it, by nav label: Book, Inspector, Scenarios (`/lab`), History (`/observatory`), Activity (`/feed`), Verification (`/proof`), API (`/developers`). Each page's sentences come from one view model in `lib/` (`cash-view`, `inspector-view`, `lab-view`, `history-view`, `activity-view`, `verification-view`, `api-view`); its components print and compose nothing. |
 | `app/styleguide` | Dev-only component showcase (SPECIMEN-labeled). Visible under `next dev`; compiled into a production build only when `NEXT_PUBLIC_SHOW_STYLEGUIDE=1` at build time (CI sets it). |
 | `components/` | The kit (`components/kit`: `VerdictHeader`, `IdentityChips`, `KpiTile`, `StatusPill`, `KitTable`, `Drawer`) and the shared components beside it (see the styleguide for them live). |
 | `lib/api.ts` | `SolventClient` provider; base URL from `NEXT_PUBLIC_SOLVENT_API_URL` (default `http://localhost:8080`). |
@@ -72,7 +73,7 @@ npm ci`) and build. Project settings: **Root Directory = `web`** with
 "Include source files outside of the Root Directory" enabled (the `file:`
 dependency lives one level up).
 
-## Honest-UI ground rules for surface waves (W1–W6)
+## Honest-UI ground rules
 
 1. Render lookups only via `lookup()` outcomes + `renderLookupOutcome` —
    `found: null` is NEVER "no position".
@@ -89,3 +90,11 @@ dependency lives one level up).
    truth only.
 7. Projections wear `StatusPill tone="projection"`; null `block_time` renders
    the block number (`renderBlockTime`), never an invented time.
+8. A record is ink; only a verdict wears tone. `VerdictHeader tone="neutral"`
+   is a statement of record (History, Activity, the API) and wears `--ink`;
+   `ok` green is a HEALTH verdict — nothing is liquidatable, the receipt is
+   exact — and never means "the data answered"; `refused` is every
+   non-answer. A record's holes ride a warn chip, never the H1.
+9. Three states of one read are never folded: in flight is pending, in its own
+   words; "could not be read" is said only after a read has failed; an absence
+   is worded as one only when the wire itself stated it.

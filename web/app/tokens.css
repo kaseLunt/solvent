@@ -120,7 +120,7 @@
   --fs-table: var(--t-meta); /* table cells, kv rows, feed items */
   --fs-mono: var(--t-mono-floor); /* .mono cells, term body */
   --fs-mono-sm: var(--t-mono-floor); /* addr chip, scenario chips, fed-by, formula */
-  --fs-caption: var(--t-floor); /* stat sub, stampline, eyebrow, feed time */
+  --fs-caption: var(--t-floor); /* captions: banner body, route-refusal evidence, drawer and chart captions, eyebrow */
   --fs-label: var(--t-floor); /* thead th, stat k, card h4, chips/tags */
   --fs-badge: var(--t-floor); /* PROJECTION badge */
   --fs-stat: var(--t-stat); /* stat value */
@@ -138,7 +138,7 @@
   --sp-1: 4px; /* chip vertical pad */
   --sp-2: 8px; /* gaps between chips, scopebar */
   --sp-3: 12px; /* statrow gap, cell x-pad step */
-  --sp-4: 14px; /* card pads, split gap, stampline gaps */
+  --sp-4: 14px; /* card pads, split gap */
   --sp-5: 18px; /* .pad — window content padding */
   --sp-6: 24px;
   --sp-7: 36px;
@@ -147,7 +147,7 @@
   /* ---- radius (mockup) ---- */
   --r-xs: 3px; /* engine chip, sev swatch, tags */
   --r-sm: 4px; /* addr chip, scenario chips */
-  --r-md: 6px; /* cards, stats, tablewrap, stampline */
+  --r-md: 6px; /* cards, state cards, the route refusal */
   --r-lg: 8px; /* window frame, terminal */
 
   /* ---- layout (canon §02 width contract) ---- */
@@ -249,7 +249,7 @@
 /* ---- §02 stepped width contract -----------------------------------------
  * The steps live on the TOKENS — not as hard .shell/.breakout overrides in
  * globals.css — so `.shell { max-width: var(--shell-max) }` keeps working and
- * every consumer of the token (.shell, .breakout, the ribbon's .bannerInner)
+ * every consumer of the token (.shell, .breakout, the degradation banner's .bannerInner)
  * steps together. Custom-property redefinition inside a media query is plain
  * CSS; no theme block touches these two tokens, so the light-first + media +
  * data-theme override law above is untouched. Breakout is max-width stepping

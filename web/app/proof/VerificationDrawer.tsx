@@ -23,11 +23,12 @@ export interface VerificationDrawerProps {
 }
 
 /**
- * Methodology & evidence (plan R3): the doctrine the page used to print inline,
- * and — when a subject's explain opened the drawer — that subject's typed
- * evidence chain first: its rows, its comparator verbatim, operational vs
- * proven. Nothing here knows about manifests; the descriptor is lib/evidence's
- * and every heading is the view model's.
+ * Methodology & evidence: the page's doctrine, paragraph by paragraph, and —
+ * when a subject's explain opened the drawer — that subject's typed evidence
+ * chain first: its rows, its comparator verbatim, operational vs proven.
+ * Nothing here knows about manifests; the descriptor is lib/evidence's and
+ * every heading is the view model's. A paragraph is keyed by its place: two
+ * paragraphs may say the same words, and a key is never their text.
  */
 export function VerificationDrawer({ open, onClose, doctrine, descriptor }: VerificationDrawerProps) {
   return (
@@ -61,8 +62,8 @@ export function VerificationDrawer({ open, onClose, doctrine, descriptor }: Veri
           </section>
         )}
         <h3>{VERIFICATION_COPY.doctrineHeading}</h3>
-        {doctrine.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
+        {doctrine.map((paragraph, index) => (
+          <p key={String(index)}>{paragraph}</p>
         ))}
       </div>
     </Drawer>

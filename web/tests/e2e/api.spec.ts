@@ -1,5 +1,5 @@
 // web/tests/e2e/api.spec.ts
-// The API page-test contract (spec 2026-09-15 §7; plan 2026-09-16 R8). The page
+// The API page-test contract (spec 2026-09-15 §7). The page
 // is a static render of the committed contract, so no route is mocked: the
 // stream is aborted so the shell's pill states its own truth, and nothing else
 // is touched. Every count here is the generated extract's
@@ -51,7 +51,7 @@ test("the verdict header: the contract's version in the kicker, the endpoint cou
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(`${view.headline.emphasis} ${view.headline.rest}`);
   await expect(page.getByTestId("api-verdict-dek")).toHaveText(view.headline.dek);
   await expect(page.getByTestId("api-verdict-dek")).toHaveText(
-    "No key or sign-in; requests are rate-limited per client. Every sample below is the contract's own example (api/openapi.yaml, v1.8.0) or a committed client fixture validated against it, cited beside each. A CI test re-reads both and fails if this page's extract has drifted.",
+    "No key or sign-in; requests are rate-limited per client. Every sample below is the contract's own example (api/openapi.yaml, v1.8.0) or a committed client fixture, cited beside each. A CI test re-reads both and fails if this page's extract has drifted from either; the fixtures are checked against the contract by the client package's own tests.",
   );
   await expect(page.getByTestId("api-verdict-identity").locator("[data-chip]")).toHaveCount(3);
   await expect(chip(page, "Contract")).toContainText(`${CONTRACT_META.title} · v${CONTRACT_META.version}`);

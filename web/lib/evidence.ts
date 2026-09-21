@@ -4,8 +4,8 @@
 //
 // The descriptor is deliberately DUMB and serializable: sections of labeled
 // rows plus the engine's comparator statement and the operational-vs-proven
-// marker. The Inspector builds descriptors from a position + its batch; W6's
-// Proof Center can build them from /v1/evidence and feed the SAME drawer.
+// marker. The Inspector builds descriptors from a position + its batch;
+// Verification builds them from /v1/evidence and feeds the SAME drawer.
 //
 // Everything here quotes fields the API actually serves. The one field the
 // canon shows that this surface does NOT serve — the materialization key —
@@ -83,8 +83,8 @@ function reorgPostureRow(stamp: Stamp | undefined): EvidenceRow {
   if (stamp === undefined) {
     return { label: "reorg posture", value: "no watermark for this engine on the batch", tone: "crit" };
   }
-  // p1b-14: both epoch stamps pass the population guard BEFORE the
-  // subtraction whose result renders as the reorg disclosure.
+  // Both epoch stamps pass the population guard BEFORE the subtraction
+  // whose result renders as the reorg disclosure.
   const maxEpoch = readWirePopulation(stamp.max_epoch_at_compute, "max_epoch_at_compute");
   const acked = readWirePopulation(stamp.acked_epoch, "acked_epoch");
   const unacked = maxEpoch - acked;
@@ -225,7 +225,7 @@ export function totalEvidence(
   which: "collateral" | "debt",
   subject: string,
 ): EvidenceDescriptor {
-  // ENGINE-CORRECT SOURCE (Wave R1 item 12): `total_*_base` are Aave's
+  // ENGINE-CORRECT SOURCE: `total_*_base` are Aave's
   // base-currency totals and are null on the Debt Manager, whose own totals
   // ride `collateral_value_usd` / `borrowings`. The drawer names the field it
   // actually read, so the card and its evidence can never disagree.
@@ -251,7 +251,7 @@ export function totalEvidence(
         value: raw ?? `${EM_DASH} (null, not established, and never rendered as 0)`,
         tone: raw === null ? "dim" : "default",
       },
-      // p1b-14: a scale printed as its own caption passes the scale guard.
+      // A scale printed as its own caption passes the scale guard.
       { label: "value decimals", value: String(readWireScale(position.value_decimals, "value_decimals")) },
       {
         label: "unit",
@@ -307,12 +307,12 @@ export function liquidationPriceEvidence(
   // `prices` into the same absent-boundary arm the row uses — no rows to
   // list, boundary not established, the wire's `reason` still exposed.
   const servedPrices = lp !== null && Array.isArray(lp.prices) ? lp.prices : [];
-  // p1b-4 (Codex r3 finding 2) — CLASSIFY EVERY ENTRY BEFORE ANY READ, each
-  // independently: `prices: [null]` (the p0-9 nil-pointer class one level
-  // down) threw a TypeError at the boundary check below, malformed decimal
-  // fields threw parseDecimal inside renderNullableDecimal, and an ABSENT
-  // price_decimals hit the no-scale branch — the RAW scaled integer rendered
-  // as a plausible drawer value (silent wrong display, the worst class).
+  // CLASSIFY EVERY ENTRY BEFORE ANY READ, each independently. Unclassified,
+  // `prices: [null]` throws a TypeError at the boundary check below, a
+  // malformed decimal field throws parseDecimal inside renderNullableDecimal,
+  // and an ABSENT price_decimals reaches the no-scale branch — the RAW scaled
+  // integer rendered as a plausible drawer value (a silent wrong display, the
+  // worst class).
   // PER-ENTRY INDEPENDENCE: a bad entry renders its OWN malformed row (by
   // index, nothing read off it) and never hides a good sibling; the BOUNDARY
   // claim reads prices[0], so a malformed first entry gets its own
@@ -368,8 +368,8 @@ export function liquidationPriceEvidence(
                     value:
                       `unreadable — the served entry is malformed (${first.fields.join(", ")}), ` +
                       "so its numbers are not read and no exact-price health claim is made" +
-                      // p1b-8: the wire's own `reason` rides this row too — the
-                      // card arm and the not-established row both expose it.
+                      // The wire's own `reason` rides this row too — the card arm
+                      // and the not-established row both expose it.
                       (lp.reason !== undefined && lp.reason !== "" ? ` · ${lp.reason}` : ""),
                     tone: "warn" as const,
                   },
@@ -394,9 +394,9 @@ export function liquidationPriceEvidence(
           ...(lp.already_breached
             ? [{ label: "already breached", value: "true · the boundary is behind the current price", tone: "crit" as const }]
             : []),
-          // Wave R1 item 2: the WIRE FIELD name (this is the evidence
-          // register — the field is what the reader came to check), with the
-          // axis-scoped statement the badge now carries, verbatim.
+          // The WIRE FIELD name (this is the evidence register — the field
+          // is what the reader came to check), with the axis-scoped statement
+          // the badge carries, verbatim.
           ...(lp.never_liquidatable
             ? [
                 {
@@ -486,10 +486,10 @@ export function legEvidence(
             : `block ${formatBlock(leg.collateral_index_block)}`,
         tone: "dim",
       },
-      // Wave R1 item 12: the denomination is the ENGINE's (Aave bps · 1e4,
-      // Debt Manager 100e18). The raw wire value stays beside the percentage
-      // — this is the evidence register, where the exact integer is the
-      // point; what changed is that it is no longer mislabeled "bps".
+      // The denomination is the ENGINE's (Aave bps · 1e4, Debt Manager
+      // 100e18), so the label never says "bps" of a value that is not. The
+      // raw wire value stays beside the percentage — this is the evidence
+      // register, where the exact integer is the point.
       {
         label: `liq threshold (${paramScaleNote(position.engine)})`,
         value:
@@ -497,7 +497,7 @@ export function legEvidence(
             ? EM_DASH
             : `${paramPercent(leg.liq_threshold, position.engine)} · raw ${leg.liq_threshold}`,
       },
-      // Wave R3 (round-10 HIGH): the bonus is a par-based MULTIPLIER on Aave
+      // The bonus is a par-based MULTIPLIER on Aave
       // (10500 = 1.05x = a 5% premium) and the PREMIUM ITSELF on the Debt
       // Manager. The register states the premium, the raw integer, and which
       // of the two encodings that integer is — the reader never has to guess
@@ -511,11 +511,10 @@ export function legEvidence(
 }
 
 // ---------------------------------------------------------------------------
-// /v1/evidence-derived builders (W6; C2 gave the split WIRE FIELDS) — the
-// Proof Center's chains.
+// /v1/evidence-derived builders — Verification's chains.
 //
-// THE SPLIT IS THE PRODUCT (plan AMENDMENT 1): a manifest carries TWO
-// subjects and they are never one identity —
+// THE SPLIT IS THE PRODUCT: a manifest carries TWO subjects and they are
+// never one identity —
 //
 //   proof_subject  the pinned, exactly-reproducible acceptance evidence: the
 //                  committed reconcile receipt (result, exit code, gated
@@ -526,7 +525,7 @@ export function legEvidence(
 //                  never reconcile-welded.
 //
 // Since contract 1.2.0 the wire CARRIES the status (`proof_subject.status`,
-// `live_subject.status`). This module reads the wire field AND keeps W6's
+// `live_subject.status`). This module reads the wire field AND keeps its own
 // derivation as a CROSS-CHECK: the status semantics are the receipt's own
 // strict conjunction, so the two must agree — and when they do not, the
 // contradiction renders LOUDLY (never the badge; honest-UI law). The proof
@@ -563,12 +562,12 @@ export function deriveProofSubjectStatus(manifest: EvidenceManifest): ProofSubje
   if (reconcile === null) {
     return { kind: "unavailable", reason: manifest.reconcile_unavailable_reason ?? NO_REASON };
   }
-  // p1b-14: every receipt integer passes the population guard BEFORE the
-  // acceptance welds — `-0 !== 0` is false, so a -0 exit code or drift token
-  // would have sailed THROUGH the checks below and accepted a receipt whose
-  // numbers cannot be read. A malformed receipt is not a rejected proof (that
-  // would claim the reconcile failed); the throw lands in the p1b-0 route
-  // boundary, which refuses to read it at all.
+  // Every receipt integer passes the population guard BEFORE the acceptance
+  // welds — `-0 !== 0` is false, so an unguarded -0 exit code or drift token
+  // sails THROUGH the checks below and accepts a receipt whose numbers cannot
+  // be read. A malformed receipt is not a rejected proof (that would claim
+  // the reconcile failed); the throw lands in the route boundary, which
+  // refuses to read it at all.
   const exitCode = readWirePopulation(reconcile.exit_code, "exit_code");
   const gatedDrift = readWirePopulation(reconcile.gated_drift, "gated_drift");
   const gatedExact = readWirePopulation(reconcile.gated_exact, "gated_exact");
@@ -611,7 +610,7 @@ export function deriveProofSubjectStatus(manifest: EvidenceManifest): ProofSubje
 
 /**
  * The proof subject's status — the WIRE's `proof_subject.status`, accepted
- * only when W6's derived conjunction agrees with it.
+ * only when the conjunction derived here agrees with it.
  *
  * On agreement the derived result (with its rich payload) is returned. On
  * CONTRADICTION the answer is never the badge: the strictest honest arm wins,
@@ -686,6 +685,16 @@ export function liveSubjectStatus(manifest: EvidenceManifest): LiveSubjectStatus
   };
 }
 
+/**
+ * A receipt whose run gated no rows at all. It passes its own conjunction
+ * vacuously — no drift, none short, because nothing was compared — so it is
+ * neither a failed run nor a proof. Every surface refuses the finding and
+ * says why; "all 0 rows matched" is never worded.
+ */
+export function receiptComparedNothing(reconcile: ManifestReconcile): boolean {
+  return readWirePopulation(reconcile.gated_rows, "gated_rows") === 0;
+}
+
 /** The proof pin: the receipt's own comparison sha, shortened for display. */
 export function proofPin(reconcile: ManifestReconcile): string {
   return reconcile.comparison_sha256.slice(0, 8);
@@ -705,6 +714,8 @@ export interface ProofTakeawayArms {
 }
 
 const DID_NOT_MATCH = "The last reconcile run did not match the chain exactly,";
+/** The finding withheld: no receipt is committed, or the committed one compared nothing. */
+const NOTHING_PROVEN = "Nothing is proven for this deployment:";
 
 const rowsWord = (count: number): string => (count === 1 ? "row" : "rows");
 
@@ -770,13 +781,13 @@ function rejectedArms(manifest: EvidenceManifest, reconcile: ManifestReconcile):
  * Both arms, from the same status derivations the two cards render (one
  * source), so the head and the cards cannot disagree — including under wire
  * contradictions, which those derivations already demote. A failed or absent
- * receipt is never worded as a match, and an absent batch is named in every
- * proof arm.
+ * receipt is never worded as a match, nor is one that compared no rows, and
+ * an absent batch is named in every proof arm.
  */
 export function proofTakeawayArms(manifest: EvidenceManifest): ProofTakeawayArms {
   const proof = proofSubjectStatus(manifest);
   const absence = liveAbsence(manifest);
-  if (proof.kind === "accepted") {
+  if (proof.kind === "accepted" && !receiptComparedNothing(proof.reconcile)) {
     const rows = readWirePopulation(proof.reconcile.gated_rows, "gated_rows");
     return {
       proof: rows === 1 ? "The 1 checked row matched the chain exactly," : `All ${groupInt(rows)} checked rows matched the chain exactly,`,
@@ -786,7 +797,9 @@ export function proofTakeawayArms(manifest: EvidenceManifest): ProofTakeawayArms
   const failing: ProofTakeawayArms =
     proof.kind === "rejected"
       ? rejectedArms(manifest, proof.reconcile)
-      : { proof: "Nothing is proven for this deployment:", scope: "no reconcile receipt is committed." };
+      : proof.kind === "accepted"
+        ? { proof: NOTHING_PROVEN, scope: "the pinned reconcile run compared no rows." }
+        : { proof: NOTHING_PROVEN, scope: "no reconcile receipt is committed." };
   return absence === null ? failing : { proof: failing.proof, scope: `${failing.scope} ${LIVE_ABSENCE[absence].also}` };
 }
 
@@ -865,13 +878,22 @@ function feedsRegistrySection(manifest: EvidenceManifest): EvidenceSection {
   };
 }
 
-/** The proof subject's full chain, drawer-ready. Marker "proven" ONLY on an unqualified pass. */
+/** The status row's words for a receipt that passed over no gated rows: the pass is vacuous, so the row refuses the finding and says why. */
+export const RECEIPT_EMPTY_STATUS = "NOTHING PROVEN · the run gated no rows, so nothing was compared";
+/** The pill's words for the same receipt. */
+export const RECEIPT_EMPTY_PILL = "RECEIPT COMPARED NO ROWS";
+
+/** The proof subject's full chain, drawer-ready. Marker "proven" ONLY on an unqualified pass over at least one gated row. */
 export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescriptor {
   const status = proofSubjectStatus(manifest);
+  const vacuous = status.kind === "accepted" && receiptComparedNothing(status.reconcile);
+  const proven = status.kind === "accepted" && !vacuous;
 
   const statusRow: EvidenceRow =
     status.kind === "accepted"
-      ? { label: "status", value: "ACCEPTED · every gated row welded exact", tone: "ok" }
+      ? vacuous
+        ? { label: "status", value: RECEIPT_EMPTY_STATUS, tone: "warn" }
+        : { label: "status", value: "ACCEPTED · every gated row welded exact", tone: "ok" }
       : status.kind === "rejected"
         ? { label: "status", value: `REJECTED · ${status.detail}`, tone: "crit" }
         : { label: "status", value: `UNAVAILABLE · ${status.reason}`, tone: "crit" };
@@ -884,7 +906,7 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
       title: "RECEIPT · COMMITTED ARTIFACT",
       rows: [
         { label: "schema", value: reconcile.schema, tone: "dim" },
-        // p1b-14: receipt tallies pass the population guard at the read.
+        // Receipt tallies pass the population guard at the read.
         {
           label: "result · exit",
           value: `${reconcile.result} · ${String(readWirePopulation(reconcile.exit_code, "exit_code"))}`,
@@ -895,7 +917,8 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
           value: `${String(readWirePopulation(reconcile.gated_exact, "gated_exact"))}/${String(
             readWirePopulation(reconcile.gated_rows, "gated_rows"),
           )} exact · drift ${String(readWirePopulation(reconcile.gated_drift, "gated_drift"))}`,
-          tone: readWirePopulation(reconcile.gated_drift, "gated_drift") === 0 ? "ok" : "crit",
+          // A tally of no rows is not a clean tally: it wears no verdict's colour.
+          tone: vacuous ? "dim" : readWirePopulation(reconcile.gated_drift, "gated_drift") === 0 ? "ok" : "crit",
         },
         {
           label: "advisory rows",
@@ -928,14 +951,16 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
     title: "EXPLAIN · PROOF SUBJECT",
     subject:
       status.kind === "accepted"
-        ? `PROOF · EXACT @ ${proofPin(status.reconcile)}`
+        ? vacuous
+          ? RECEIPT_EMPTY_PILL
+          : `PROOF · EXACT @ ${proofPin(status.reconcile)}`
         : status.kind === "rejected"
           ? `RECEIPT REJECTED · ${status.detail}`
           : "NO COMMITTED RECEIPT",
     comparator: PROOF_COMPARATOR,
-    marker: status.kind === "accepted" ? "proven" : "operational",
+    marker: proven ? "proven" : "operational",
     markerNote:
-      status.kind === "accepted"
+      proven
         ? PROVEN_NOTE
         : "NOT PROVEN: no unqualified committed receipt backs this deployment; nothing here may " +
           "wear the PROOF · EXACT badge, and the deployment identity above stays operational.",

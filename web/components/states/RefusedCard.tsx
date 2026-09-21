@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
+import { plainCause } from "@/lib/refusal-phrasebook";
 import { RefusedChip } from "../StatusChip";
 import styles from "./states.module.css";
+
+/** The default tag's refusal: a real wire code, led by the plain cause the phrasebook gives it — never a code the product cannot read. */
+const DEFAULT_CODE = "SWEEP_FAILED";
 
 export interface RefusedCardProps {
   head?: ReactNode;
@@ -20,7 +24,7 @@ export interface RefusedCardProps {
  */
 export function RefusedCard({
   head = "Verdict unavailable — the engine won't guess.",
-  body = "The Debt Manager sweep failed twice at this batch, so the engine refuses to value this position rather than serve a stale number. Values remain unknown — not zero.",
+  body = "The Debt Manager's collateral sweep failed at this batch, so the engine refuses to value this position rather than serve a stale number. Values remain unknown — not zero.",
   tag,
   foot = "Counted in every denominator it is excluded from · activity and history remain below · no dash-filled KPI skeleton.",
   testId,
@@ -30,7 +34,7 @@ export function RefusedCard({
       <p className={styles.head}>{head}</p>
       <p className={styles.body}>{body}</p>
       <div className={styles.chips}>
-        {tag ?? <RefusedChip cause="sweep failed twice" code="sweep_failed_no_success" />}
+        {tag ?? <RefusedChip cause={plainCause(DEFAULT_CODE)} code={DEFAULT_CODE} />}
       </div>
       {foot !== undefined && <p className={styles.foot}>{foot}</p>}
     </section>

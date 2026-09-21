@@ -1,169 +1,37 @@
-// The component kit's composition law (p1a-5) — PURE, per the p1a-4b lift
-// pattern: enforcement lives here, where unit specs can pin it, and the thin
-// components in web/components render these models verbatim. Canon:
-// build-contract §4 (verdict banner grammar, RATIFIED), §5–§6 (the chip
-// family's nine dimensions), §7 (exact-layer affordance), §8 (states).
+// The component kit's composition law — PURE: enforcement lives here, where
+// unit specs can pin it, and the thin components in web/components render
+// these models verbatim. Canon: build-contract §4 (the page answer never
+// stands without its identity), §5–§6 (the chip family's nine dimensions),
+// §7 (exact-layer affordance), §8 (states).
+import type { IdentityChip } from "../components/kit/IdentityChips";
 
-/* ---------------- verdict banner (§4) ---------------- */
-
-export type VerdictVariant = "current" | "refused" | "superseded" | "empty" | "partial";
-
-export type VerdictToneClass = "vAccent" | "vWarn" | "vQuiet";
+/* ---------------- the page answer's identity (§4) ---------------- */
 
 /**
- * Left-border tone per variant, per §4's CSS. Current wears the accent
- * spine; refused / superseded / partial wear the warn spine — "a banner
- * whose data is superseded, refused, or partial switches variant — it
- * never silently keeps the happy sentence"; empty is quiet, because
- * absence is a computed answer, not an alarm. (§4's CSS also defines a
- * crit spine, `.vCrit`; no phase-1 variant maps to it — it is the
- * grammar's escalation slot, not a live arm.)
+ * The chip the header's strip prints when it was handed no identity: dashed,
+ * in the refused register, NAMING the omission. A missing identity is not a
+ * dev-throw and not a blank strip — the header says, on the page, that it
+ * cannot say whose answer this is.
  */
-export const VERDICT_TONE_CLASS: Record<VerdictVariant, VerdictToneClass> = {
-  current: "vAccent",
-  refused: "vWarn",
-  superseded: "vWarn",
-  empty: "vQuiet",
-  partial: "vWarn",
-};
+export const IDENTITY_MISSING_CHIP: IdentityChip = { label: "Identity", value: "missing", tone: "refused" };
 
-/**
- * The RATIFIED law (§4): "The banner never renders without its identity
- * strip." A missing strip is not a dev-throw — the banner renders a
- * structural refusal NAMING the omission, in the warn register.
- */
-export const VERDICT_IDENTITY_REFUSAL = {
-  answer: "Verdict withheld — this banner has no identity strip.",
-  qualification:
-    "The banner was composed without its identity strip (batch · age · coverage · current/projected · evidence), so it cannot say whose answer it is, how fresh, or who answered. The banner never renders without its identity strip.",
-} as const;
-
-/* ---------------------------------------------------------------------------
- * THE TYPED IDENTITY MODEL (p1a-9 — the Codex finding: the ReactNode
- * identity was bypassable by render-empty ELEMENTS: `identityMissing`
- * inspected the unrendered node tree, so an empty fragment — an element,
- * therefore "content" — sailed past the law and mounted a banner with a
- * blank strip. The p1a-6 DOM pin caught the styleguide's strips, but the law
- * itself stayed evadable at every future call site.)
- *
- * So the ReactNode identity RETIRES. The banner now takes a TYPED model of
- * the §4 strip — batch · age · coverage · current/projected · evidence, the
- * ratified contents, one optional clause per field — and renders the strip
- * ITSELF from the chip family. There is no node to smuggle: absence is a
- * missing/blank model, presence is at least one clause with text, and the
- * distinction is decidable data, not a rendering prophecy.
- * ------------------------------------------------------------------------- */
-
-/**
- * One §4 strip clause: sans narration (`text`), an optional EMBEDDED VALUE in
- * the mono register (§5 law — ages, counts, ids, wire codes are mono, never
- * uppercase), an optional sans suffix after the value ("… ENGINES", "… · DM
- * WITHHELD"), and the §6 chip tone it wears (quiet when unstated).
- */
-export interface VerdictIdentityClause {
-  readonly text?: string;
-  readonly value?: string;
-  readonly suffix?: string;
-  readonly tone?: ChipTone;
-}
-
-/** The §4 identity strip, field for field. Every clause optional — but a
- * model with NO present clause is a missing strip (the refusal law). */
-export interface VerdictIdentityModel {
-  readonly batch?: VerdictIdentityClause;
-  readonly age?: VerdictIdentityClause;
-  readonly coverage?: VerdictIdentityClause;
-  readonly currentOrProjected?: VerdictIdentityClause;
-  readonly evidence?: VerdictIdentityClause;
-}
-
-/** The §4 render order — the canon names the fields in exactly this order. */
-export const VERDICT_IDENTITY_ORDER = [
-  "batch",
-  "age",
-  "coverage",
-  "currentOrProjected",
-  "evidence",
-] as const;
-
-export type VerdictIdentitySlot = (typeof VERDICT_IDENTITY_ORDER)[number];
-
-/** A clause is present when ANY of its text parts survives trimming. */
-function clausePresent(clause: VerdictIdentityClause | undefined): clause is VerdictIdentityClause {
-  if (clause === undefined) return false;
-  return [clause.text, clause.value, clause.suffix].some(
-    (part) => part !== undefined && part.trim() !== "",
-  );
+/** A chip is present when its label or its value survives trimming; a chip of blanks names nothing. */
+function chipPresent(chip: IdentityChip): boolean {
+  return chip.label.trim() !== "" || chip.value.trim() !== "";
 }
 
 /**
- * Is the identity strip MISSING? No model, or a model whose every clause is
- * absent or blank. This is the whole test — there is no render-empty shape
- * left to inspect, which is the point of the typed model.
+ * THE LAW (§4): the page answer never renders without its identity. The
+ * kit's `VerdictHeader` hands its chips through here before it renders its
+ * strip. A list with no present chip — empty, or every chip blank — is a
+ * missing identity, and is answered with the one refusal chip. Absence is
+ * decided on the chips' own text, which is data: there is no element here to
+ * smuggle an empty strip past the law. A list with at least one present chip
+ * comes back AS IT WAS HANDED — the same array, nothing dropped, nothing
+ * re-ordered: the law refuses absence, it does not edit identity.
  */
-export function verdictIdentityMissing(
-  identity: VerdictIdentityModel | null | undefined,
-): boolean {
-  if (identity === null || identity === undefined) return true;
-  return !VERDICT_IDENTITY_ORDER.some((slot) => clausePresent(identity[slot]));
-}
-
-/** One strip chip, ready to render verbatim: slot, resolved tone, parts. */
-export interface VerdictIdentityChip {
-  readonly slot: VerdictIdentitySlot;
-  readonly text: string | null;
-  readonly value: string | null;
-  readonly suffix: string | null;
-  readonly tone: ChipTone;
-}
-
-/** The present clauses, in §4 order, tones defaulted to quiet. */
-export function verdictIdentityChips(
-  identity: VerdictIdentityModel,
-): readonly VerdictIdentityChip[] {
-  const chips: VerdictIdentityChip[] = [];
-  for (const slot of VERDICT_IDENTITY_ORDER) {
-    const clause = identity[slot];
-    if (!clausePresent(clause)) continue;
-    chips.push({
-      slot,
-      text: clause.text !== undefined && clause.text.trim() !== "" ? clause.text : null,
-      value: clause.value !== undefined && clause.value.trim() !== "" ? clause.value : null,
-      suffix: clause.suffix !== undefined && clause.suffix.trim() !== "" ? clause.suffix : null,
-      tone: clause.tone ?? "quiet",
-    });
-  }
-  return chips;
-}
-
-export type VerdictBannerModel =
-  | {
-      kind: "refusal";
-      toneClass: "vWarn";
-      answer: string;
-      qualification: string;
-    }
-  | { kind: "banner"; toneClass: VerdictToneClass; identity: readonly VerdictIdentityChip[] };
-
-/** The banner's one decision: refuse without the strip, else wear the
- * variant's tone and carry the strip's chips in §4 order. */
-export function verdictBannerModel(
-  variant: VerdictVariant,
-  identity: VerdictIdentityModel | null | undefined,
-): VerdictBannerModel {
-  if (verdictIdentityMissing(identity)) {
-    return {
-      kind: "refusal",
-      toneClass: "vWarn",
-      answer: VERDICT_IDENTITY_REFUSAL.answer,
-      qualification: VERDICT_IDENTITY_REFUSAL.qualification,
-    };
-  }
-  return {
-    kind: "banner",
-    toneClass: VERDICT_TONE_CLASS[variant],
-    identity: verdictIdentityChips(identity ?? {}),
-  };
+export function headerIdentity(chips: IdentityChip[]): IdentityChip[] {
+  return chips.some(chipPresent) ? chips : [IDENTITY_MISSING_CHIP];
 }
 
 /* ---------------- chip family (§5–§6) ---------------- */

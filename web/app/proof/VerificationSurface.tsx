@@ -26,7 +26,7 @@ import { VerificationSubjects } from "./VerificationSubjects";
 
 type Schemas = components["schemas"];
 
-/** The one /v1/meta ask the Overview also makes: its answer or null, and whether it has settled — a tile is pending, never refused, until it has. */
+/** The one /v1/meta ask the Overview also makes: its answer or null, and whether it has settled — until it has, a null is a read in flight, and the view is told so. */
 interface MetaAsk {
   readonly settled: boolean;
   readonly value: Schemas["MetaResponse"] | null;
@@ -55,12 +55,21 @@ export function VerificationSurface() {
   const [reading, setReading] = useState<BookReading>(BOOK_LOADING);
   const [drawer, setDrawer] = useState<DrawerState>(CLOSED);
   const [showRaw, setShowRaw] = useState(false);
+  // Each retry is a new attempt: all three asks are made again, and every reader is back in flight — pending, not failed — until it answers.
+  const [attempt, setAttempt] = useState(0);
+  const retry = () => {
+    setState({ phase: "loading" });
+    setMeta({ settled: false, value: null });
+    setReading(BOOK_LOADING);
+    setAttempt((current) => current + 1);
+  };
 
   useEffect(() => {
     const controller = new AbortController();
     fetchEvidence(solventBaseUrl(), controller.signal)
       .then((manifest) => {
-        setState({ phase: "ok", manifest });
+        // An aborted ask answers nobody: the same guard its failure arm and both sibling asks carry.
+        if (!controller.signal.aborted) setState({ phase: "ok", manifest });
       })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
@@ -97,7 +106,7 @@ export function VerificationSurface() {
     return () => {
       controller.abort();
     };
-  }, []);
+  }, [attempt]);
 
   // A deep link lands on what it names. The browser's own hash scroll ran on the
   // loading tree, which may be shorter than the viewport; once the manifest has
@@ -109,7 +118,7 @@ export function VerificationSurface() {
     document.getElementById(id)?.scrollIntoView({ block: "start" });
   }, [state.phase]);
 
-  const view = deriveVerificationView({ state, meta: meta.value, book: reading });
+  const view = deriveVerificationView({ state, meta: meta.value, metaInFlight: !meta.settled, book: reading });
   const manifest = state.phase === "ok" ? state.manifest : null;
   const probeRows: KitRow[] = view.probes.map((row, index) => ({
     key: row.key,
@@ -138,22 +147,24 @@ export function VerificationSurface() {
         dek={view.headline.dek}
         chips={view.chips}
         actions={
-          <button
-            type="button"
-            className={`${kit.btn} ${kit.btnGhost}`}
-            onClick={() => setDrawer({ open: true, descriptor: null })}
-            data-testid="verification-drawer"
-          >
-            {VERIFICATION_COPY.drawerButton}
-          </button>
+          <>
+            {view.state === "unavailable" && (
+              <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={retry} data-testid="verification-retry">
+                {VERIFICATION_COPY.retry}
+              </button>
+            )}
+            <button
+              type="button"
+              className={`${kit.btn} ${kit.btnGhost}`}
+              onClick={() => setDrawer({ open: true, descriptor: null })}
+              data-testid="verification-drawer"
+            >
+              {VERIFICATION_COPY.drawerButton}
+            </button>
+          </>
         }
       />
-      <VerificationArchitecture
-        steps={view.steps}
-        receipt={view.receipt}
-        receiptLine={view.receiptLine}
-        pending={{ index: !meta.settled, compute: reading.phase === "loading", verify: state.phase === "loading" }}
-      />
+      <VerificationArchitecture steps={view.steps} receipt={view.receipt} receiptLine={view.receiptLine} />
       {manifest !== null && (
         <>
           <VerificationSubjects manifest={manifest} onExplain={(descriptor) => setDrawer({ open: true, descriptor })} />

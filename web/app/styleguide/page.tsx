@@ -4,6 +4,7 @@ import type { ChipTone } from "@/lib/kit";
 import type { FreshnessTier } from "@/lib/freshnessTiers";
 import { snapshotChipParts } from "@/lib/freshness";
 import { renderLookupOutcome, renderNullableDecimal, renderBlockTime } from "@/lib/format";
+import { deriveApiView } from "@/lib/api-view";
 import { IdentityChips, KpiTile, StatusPill, VerdictHeader } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { ExactValue } from "@/components/ExactValue";
@@ -22,19 +23,34 @@ import { InteractionRegisterDemo } from "./InteractionRegisterDemo";
 import { TableSpecimen } from "./TableSpecimen";
 import { DrawerDemo } from "./DrawerDemo";
 import { PaginationDemo } from "./PaginationDemo";
+import {
+  SPECIMEN_BATCH,
+  SPECIMEN_COVERAGE,
+  SPECIMEN_CRIT_HEADLINE,
+  SPECIMEN_OK_COVERAGE,
+  SPECIMEN_OK_HEADLINE,
+  SPECIMEN_REFUSAL_CAUSE,
+  SPECIMEN_REFUSAL_CODE,
+  SPECIMEN_REFUSAL_TITLE,
+} from "./specimen-book";
 import styles from "./styleguide.module.css";
 
 export const metadata: Metadata = { title: "Styleguide" };
 
 // ---------------------------------------------------------------------------
-// p1a-6 — THE LIVING CANON. The page is structured by the build contract's
-// own section order (§2 palette · §1 type · §4 the page answer · §5 freshness ·
+// THE LIVING CANON. The page is structured by the build contract's own
+// section order (§2 palette · §1 type · §4 the page answer · §5 freshness ·
 // §6 dimensions · §7 exact · §8 states · §9 table + pagination + drawer ·
 // §10 identity · §11 charts + interaction register), followed by the kit's
-// tiles and pills. The pre-kit components retired with the convergence (plan
-// 2026-09-16, R7); every section that showed one shows its kit successor.
-// Every value is a static SPECIMEN.
+// tiles and pills. Every section shows the kit the product composes, and the
+// canon follows the product: a specimen's words are a page's own words — built
+// by the function that page calls wherever one exists — and a refusal is
+// spelled with a wire code the phrasebook can read. Every value is a static
+// SPECIMEN.
 // ---------------------------------------------------------------------------
+
+/** The neutral header's specimen: a page whose headline is a statement of record — the API's own, from its own view model. */
+const RECORD = deriveApiView("https://api.specimen.example");
 
 const PALETTE = [
   "bg",
@@ -185,69 +201,91 @@ export default function StyleguidePage() {
 
       {/* ---- §4 the page answer ------------------------------------------ */}
       <section className={styles.section} data-testid="sg-verdict">
-        <h2>VerdictHeader · kicker · the computed sentence · dek · identity — four tones</h2>
+        <h2>VerdictHeader · kicker · the computed sentence · dek · identity — five tones</h2>
         <div className={styles.bannerStack}>
+          {/* crit — a verdict: the Book's own headline over the table specimen's rows, every figure the table's. */}
           <VerdictHeader
             testId="sg-verdict-crit"
-            tone="crit"
+            tone={SPECIMEN_CRIT_HEADLINE.tone}
             kicker="Cash book · right now"
-            emphasis="$6,840 of Cash debt is liquidatable right now,"
-            rest="across 2 accounts."
-            dek="2 more positions are technically liquidatable but total $75.75 — below the $100 line and not headlined. 1 account is within 10% of its borrow cap, carrying $142K. 1 position could not be computed this batch and is counted, not hidden."
+            emphasis={SPECIMEN_CRIT_HEADLINE.emphasis}
+            rest={SPECIMEN_CRIT_HEADLINE.rest}
+            dek={SPECIMEN_CRIT_HEADLINE.dek}
             chips={[
-              { label: "Batch", value: "18,251" },
+              { label: "Batch", value: SPECIMEN_BATCH },
               { label: "Snapshot", value: "48s · fresh", tone: "ok" },
-              { label: "Coverage", value: "551 / 552 computed" },
+              { label: "Coverage", value: SPECIMEN_COVERAGE },
               { label: "Current", value: "not projected" },
             ]}
           />
+          {/* warn — a verdict that fell short: Verification under a receipt that did not pass. Only the proof's
+              finding wears the tone; the scope beside it is ink, and the live batch is named in the dek alone. */}
           <VerdictHeader
             testId="sg-verdict-warn"
             tone="warn"
             kicker="Verification · this deployment"
-            emphasis="The proof receipt is absent."
-            dek="Two subjects, never one: the pinned proof and the live batch."
+            emphasis="The last reconcile run did not match the chain exactly,"
+            rest="84 of 87 checked rows matched; 3 rows drifted."
+            dek="No exactness is claimed for this deployment until a run passes. Batch 18,251, served now, is live data; no check covers it."
             chips={[
-              { label: "Pinned proof", value: "bk_019fb0a2" },
-              { label: "Live batch", value: "#18251" },
-              { label: "Receipt", value: "absent", tone: "warn" },
+              { label: "Proof pin", value: "5f0b3e2a" },
+              { label: "Live batch", value: SPECIMEN_BATCH },
+              { label: "Receipt", value: "failed · 84/87", tone: "crit" },
+              { label: "Batch key", value: "9a4a7c1d…f5a2b9" },
             ]}
           />
+          {/* ok — green is a HEALTH verdict and nothing else: the Book's own words when a complete walk finds no
+              position liquidatable. A record that merely answered never wears it. */}
           <VerdictHeader
             testId="sg-verdict-ok"
-            tone="ok"
-            kicker="History · Cash"
-            emphasis="Debt held near $9.10M across the last 7 days."
-            dek="One engine per view; a missing hour is a hole, never a zero."
+            tone={SPECIMEN_OK_HEADLINE.tone}
+            kicker="Cash book · right now"
+            emphasis={SPECIMEN_OK_HEADLINE.emphasis}
+            rest={SPECIMEN_OK_HEADLINE.rest}
+            dek={SPECIMEN_OK_HEADLINE.dek}
             chips={[
-              { label: "Engine", value: "debt_manager" },
-              { label: "Window", value: "7d · hourly" },
-              { label: "Holes", value: "2 absent · 1 withheld", tone: "warn" },
+              { label: "Batch", value: SPECIMEN_BATCH },
+              { label: "Snapshot", value: "48s · fresh", tone: "ok" },
+              { label: "Coverage", value: SPECIMEN_OK_COVERAGE },
+              { label: "Current", value: "not projected" },
             ]}
           />
+          {/* neutral — a statement of record is INK: the API page's own header, from its own view model. History,
+              Activity and the API state what is on record; none of them is a verdict, so none wears a colour. */}
+          <VerdictHeader
+            testId="sg-verdict-neutral"
+            tone={RECORD.headline.tone}
+            kicker={RECORD.kicker}
+            emphasis={RECORD.headline.emphasis}
+            rest={RECORD.headline.rest}
+            dek={RECORD.headline.dek}
+            chips={RECORD.chips}
+          />
+          {/* refused — a non-answer: ink-2 and a dashed chip, never a tier's colour. */}
           <VerdictHeader
             testId="sg-verdict-refused"
             tone="refused"
             kicker="Inspector · 0x80b3…6e1d"
             emphasis="Verdict unavailable — the engine won't guess."
-            dek="The Debt Manager sweep failed twice at this batch, so it refuses to value this account rather than serve an unproven number. Chain activity is retained below."
+            dek="The Debt Manager's collateral sweep failed at this batch, so it refuses to value this account rather than serve an unproven number. Chain activity is retained below."
             chips={[
-              { label: "Batch", value: "#18251" },
-              { label: "Snapshot", value: "48s" },
+              { label: "Batch", value: SPECIMEN_BATCH },
+              { label: "Snapshot", value: "48s · fresh", tone: "ok" },
               {
                 label: "Refused",
-                value: "sweep failed twice",
+                value: SPECIMEN_REFUSAL_CAUSE,
                 tone: "refused",
-                title: "sweep_failed_no_success",
+                title: SPECIMEN_REFUSAL_CODE,
               },
             ]}
           />
           {/* THE LAW, demonstrated: a header composed with an EMPTY chip list
               renders the dashed refusal chip that names the omission — the
-              answer never stands without its identity. */}
+              answer never stands without its identity. The sentence is a
+              record, so it is ink. */}
           <VerdictHeader
             testId="sg-verdict-identity-law"
-            tone="ok"
+            tone="neutral"
             kicker="specimen · the identity law"
             emphasis="This header was composed with an empty chip list on purpose."
             dek="The strip below is the kit's own refusal, not a chip this page passed."
@@ -255,8 +293,11 @@ export default function StyleguidePage() {
           />
         </div>
         <p className={styles.note}>
-          the emphasis carries the verdict color in the -text grade; a refused answer wears ink, never
-          a tier&apos;s color. The header never renders without identity — an empty chip list renders
+          a record is ink; only a verdict wears tone. crit and warn are verdicts that went wrong or fell short; ok
+          is a HEALTH verdict — nothing is liquidatable, the receipt is exact — and never means &quot;the data
+          answered&quot;; neutral is a statement of record (History, Activity, the API), whose holes ride a warn chip and
+          never the H1; refused is every non-answer, in ink-2 with a dashed chip. The emphasis carries a verdict&apos;s
+          color in the -text grade. The header never renders without identity — an empty chip list renders
           the dashed refusal chip. The page&apos;s drawer button rides the strip&apos;s trailing slot.
           A header whose data is superseded, refused or partial changes tone and sentence — it never
           keeps the happy sentence; partial coverage shows as the warn Coverage chip, superseded as
@@ -356,7 +397,7 @@ export default function StyleguidePage() {
           </p>
           <div className={styles.row}>
             <StatusChip tone="quiet">COMPUTED</StatusChip>
-            <RefusedChip cause="sweep failed twice" code="sweep_failed_no_success" />
+            <RefusedChip cause={SPECIMEN_REFUSAL_CAUSE} code={SPECIMEN_REFUSAL_CODE} />
             <RefusedChip word="WITHHELD" cause="missing observation" />
             <StatusChip tone="unknown">
               UNANSWERED · <ChipVal>not asked of this engine</ChipVal>
@@ -466,7 +507,7 @@ export default function StyleguidePage() {
         <div className={styles.dimRow} data-testid="sg-comp-3">
           <div className={styles.row}>
             <StatusChip tone="warn">VERDICT UNAVAILABLE</StatusChip>
-            <RefusedChip cause="sweep failed twice" code="sweep_failed_no_success" />
+            <RefusedChip cause={SPECIMEN_REFUSAL_CAUSE} code={SPECIMEN_REFUSAL_CODE} />
             <TierChip seconds={300} tier="aging" testId="sg-comp-3-snapshot" />
             <StatusChip tone="unknown">EVIDENCE UNAVAILABLE — CLAIM STANDS UNVERIFIED</StatusChip>
           </div>
@@ -542,8 +583,8 @@ export default function StyleguidePage() {
         <IdentityChips
           testId="sg-identity-strip"
           chips={[
-            { label: "Batch", value: "#18251" },
-            { label: "Snapshot", value: "48s", title: "specimen — snapshot freshness of batch #18251" },
+            { label: "Batch", value: SPECIMEN_BATCH },
+            { label: "Snapshot", value: "48s", title: `specimen — snapshot freshness of batch ${SPECIMEN_BATCH}` },
             { label: "Coverage", value: "2/2 engines" },
             { label: "Evidence", value: "3 pins" },
           ]}
@@ -557,9 +598,9 @@ export default function StyleguidePage() {
             { label: "Snapshot", value: "18h 12m · critical", tone: "crit" },
             {
               label: "Refused",
-              value: "sweep failed twice",
+              value: SPECIMEN_REFUSAL_CAUSE,
               tone: "refused",
-              title: "sweep_failed_no_success",
+              title: SPECIMEN_REFUSAL_CODE,
             },
           ]}
         />
@@ -625,9 +666,7 @@ export default function StyleguidePage() {
       </section>
 
       {/* ---- the kit's tiles and pills ----------------------------------- */}
-      <p className={styles.groupNote}>
-        the kit — the primitives every page composes; the pre-kit set retired with the convergence
-      </p>
+      <p className={styles.groupNote}>the kit — the primitives every page composes</p>
 
       <section className={styles.section} data-testid="sg-kpi">
         <h2>KpiTile · neutral · crit · warn · ok · refused (dashed) · pending</h2>
@@ -674,15 +713,16 @@ export default function StyleguidePage() {
           <StatusPill tone="crit">Liquidatable</StatusPill>
           <StatusPill tone="warn">Near cap</StatusPill>
           <StatusPill tone="ok">Healthy</StatusPill>
-          <StatusPill tone="refused" title="sweep_failed_no_success">
+          <StatusPill tone="refused" title={SPECIMEN_REFUSAL_TITLE}>
             Not computed
           </StatusPill>
           <StatusPill tone="projection">Projection · ETH −20% v3</StatusPill>
         </div>
         <p className={styles.note}>
           crit only from the engine&apos;s comparator verdict · warn is the presentation band · green is
-          rationed to the comfortable verdict · refused wears no tier&apos;s color, its plain cause is the
-          label and its wire code the title · projection is dashed and never filled.
+          rationed to the comfortable verdict · refused wears no tier&apos;s color, its label is the state and its
+          title the plain cause then the wire code, as the Book&apos;s table prints it · projection is dashed and never
+          filled.
         </p>
       </section>
 

@@ -4,6 +4,9 @@
 // version — the page cannot say what the contract does not, and a tile's sub
 // is counted from the extract, never typed beside it. The one
 // deployment-specific value is the base URL, stated once.
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { apiDek, contractParagraphs, deriveApiView, errorStatuses, verbCensus } from "../../lib/api-view";
 import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS } from "../../lib/proof-contract.gen";
@@ -60,7 +63,7 @@ test("header: the kicker names the contract's version once; the headline counts 
 
 test("the dek: no key or sign-in but a rate limit, where each sample comes from, and what the fidelity test does — each clause licensed by the extract", () => {
   expect(apiDek()).toBe(
-    "No key or sign-in; requests are rate-limited per client. Every sample below is the contract's own example (api/openapi.yaml, v1.8.0) or a committed client fixture validated against it, cited beside each. A CI test re-reads both and fails if this page's extract has drifted.",
+    "No key or sign-in; requests are rate-limited per client. Every sample below is the contract's own example (api/openapi.yaml, v1.8.0) or a committed client fixture, cited beside each. A CI test re-reads both and fails if this page's extract has drifted from either; the fixtures are checked against the contract by the client package's own tests.",
   );
   // "No key" is never left to read as "no limit": the clause stands because the contract carries a 429.
   expect(ERROR_RESPONSES.some((e) => e.status === 429)).toBe(true);
@@ -70,6 +73,31 @@ test("the dek: no key or sign-in but a rate limit, where each sample comes from,
   for (const source of cited) expect(source).toMatch(/^(api\/openapi\.yaml|packages\/client-ts\/test\/fixtures\/)/);
   // The fidelity test the last sentence speaks of is the one the drawer names.
   expect(deriveApiView(BASE).doctrine[2]).toContain("tests/unit/proof-contract-fidelity.spec.ts re-extracts from api/openapi.yaml on every run");
+});
+
+test("the dek claims of CI only what CI runs: the fidelity test compares bytes, and the fixtures' validity is named as the client package's own tests' — for exactly the fixtures that test validates", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const repoRoot = path.resolve(here, "..", "..", "..");
+  const read = (...parts: string[]): string => readFileSync(path.join(repoRoot, ...parts), "utf8");
+  // A fixture "validated against the contract" is a claim about packages/client-ts/test/fixtures.test.ts, which no CI step runs — so the dek never says "validated" of CI's test, and names the test's owner.
+  expect(apiDek()).not.toMatch(/validated/i);
+  const [, ciSentence = ""] = /(A CI test [^;.]*)[;.]/.exec(apiDek()) ?? [];
+  expect(ciSentence).toBe("A CI test re-reads both and fails if this page's extract has drifted from either");
+  expect(ciSentence).not.toMatch(/contract-valid|checked against|valid/i);
+  expect(apiDek()).toContain("the fixtures are checked against the contract by the client package's own tests.");
+  // What licenses that clause: the client test validates every file in FIXTURE_FILES against api/openapi.yaml…
+  const clientTest = read("packages", "client-ts", "test", "fixtures.test.ts");
+  expect(clientTest).toContain("for (const name of Object.keys(FIXTURE_FILES)");
+  expect(clientTest).toContain("contract.validate(schemaFor(name), fixtureJson(FIXTURE_FILES[name]))");
+  // …and every fixture this page cites is one of those files.
+  const block = /export const FIXTURE_FILES = \{([\s\S]*?)\} as const;/.exec(read("packages", "client-ts", "test", "fixtures", "data.ts"))?.[1] ?? "";
+  const validated = new Set([...block.matchAll(/: "([^"]+)"/g)].map((m) => m[1]));
+  expect(validated.size).toBeGreaterThan(0);
+  const citedFiles = [...OPERATIONS.map((op) => op.exampleSource), ...ERROR_RESPONSES.map((e) => e.source)]
+    .map((source) => /^packages\/client-ts\/test\/fixtures\/([\w./-]+)/.exec(source ?? "")?.[1])
+    .filter((file): file is string => file !== undefined);
+  expect(citedFiles.length).toBeGreaterThan(0);
+  for (const file of citedFiles) expect(validated.has(file), `${file} is cited on the page but not validated by the client package's test`).toBe(true);
 });
 
 test("chips: Contract · Base URL · Source, in that order — identity only; the base URL as given; the source path the extract's", () => {

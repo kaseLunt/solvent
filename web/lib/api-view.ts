@@ -42,7 +42,7 @@ export interface ApiView {
   readonly doctrine: readonly string[];
 }
 
-/** The adjudicated intro (the R1 clarity ruling), verbatim — drawer doctrine; its closing clause is the law the header's dek states as facts. */
+/** The page's intro, verbatim — drawer doctrine; its closing clause is the law the header's dek states as facts. */
 export const API_INTRO =
   "The committed API contract, rendered from its own examples: read-only JSON, no auth, every money value a decimal string. If a handler disagrees with this page, that is a failure, not documentation lag.";
 
@@ -76,11 +76,16 @@ export function errorStatuses(): string {
  * it does bound request rates, so "no key" is never left to read as "no
  * limit" — the clause prints exactly when the contract carries a 429. A
  * sample is the contract's own example or, where the contract has none, a
- * committed client fixture validated against it — the clause prints only
- * while some sample cites one, and each sample names its source beside it.
- * The last sentence says what the fidelity test does: it re-reads the
- * contract and the cited fixtures and fails on any drift in the extract this
- * page renders.
+ * committed client fixture — the clause prints only while some sample cites
+ * one, and each sample names its source beside it. The last sentence says
+ * two things and keeps them apart, because only one of them is gated by CI.
+ * The fidelity test (tests/unit/proof-contract-fidelity.spec.ts, run by the
+ * CI job) re-reads the contract and the cited fixtures' bytes and fails on
+ * any drift in the extract this page renders — it does not judge a fixture
+ * against the contract. That judgement is the client package's own test
+ * (packages/client-ts/test/fixtures.test.ts validates every fixture file
+ * against api/openapi.yaml), which no CI step runs: the dek names it as the
+ * client package's, and never as the CI test.
  */
 export function apiDek(): string {
   const limited = ERROR_RESPONSES.some((error) => error.status === 429);
@@ -89,10 +94,10 @@ export function apiDek(): string {
   const contract = `the contract's own example (${CONTRACT_META.sourcePath}, v${CONTRACT_META.version})`;
   return [
     limited ? "No key or sign-in; requests are rate-limited per client." : "No key or sign-in.",
+    fixtures ? `Every sample below is ${contract} or a committed client fixture, cited beside each.` : `Every sample below is ${contract}.`,
     fixtures
-      ? `Every sample below is ${contract} or a committed client fixture validated against it, cited beside each.`
-      : `Every sample below is ${contract}.`,
-    `A CI test re-reads ${fixtures ? "both" : "the contract"} and fails if this page's extract has drifted.`,
+      ? "A CI test re-reads both and fails if this page's extract has drifted from either; the fixtures are checked against the contract by the client package's own tests."
+      : "A CI test re-reads the contract and fails if this page's extract has drifted.",
   ].join(" ");
 }
 

@@ -1,9 +1,7 @@
-/* The kit's chip family (canon §05/§06, p1a-5). The .chip/.val/.c* recipes
- * MATCH the landed appbar family in ribbon.module.css byte-for-byte — the
- * kit gets its own module (page surfaces must not couple to the appbar's
- * stylesheet) but the two families must stay visually identical. Sans 12px
- * uppercase state words, mono embedded values, outline-first: a fill is
- * the top escalation register only. */
+/* The status-chip family (canon §05/§06) — components/StatusChip.tsx's own
+ * module and the family's one home. Sans 12px uppercase state words, mono
+ * embedded values, outline-first: a fill is the top escalation register
+ * only. */
 
 .chip {
   display: inline-flex;
@@ -121,16 +119,4 @@
   font-size: var(--t-mono-floor);
   font-weight: 500;
   letter-spacing: normal;
-}
-
-/* ---- engine identity (§06): mono wire names only, on the chip ground ---- */
-.engineTag {
-  font-family: var(--mono);
-  font-size: var(--t-floor);
-  padding: 2px 7px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-xs);
-  background: var(--chip-bg);
-  color: var(--ink-2);
-  white-space: nowrap;
 }

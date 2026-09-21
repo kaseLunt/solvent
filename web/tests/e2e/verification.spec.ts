@@ -1,5 +1,5 @@
-// The Verification page-test contract (spec 2026-09-15 §5.5, §7; plan R1–R5,
-// R8). Mocked from the committed fixtures: the contract's own /v1/evidence
+// The Verification page-test contract (spec 2026-09-15 §5.5, §7). Mocked
+// from the committed fixtures: the contract's own /v1/evidence
 // example and its three documented deltas (tests/fixtures/proof.ts), and the
 // Overview's meta and book mocks for the architecture steps (the positions
 // mock stands so that a walk, if the page ever started one, would be counted
@@ -57,8 +57,10 @@ test("the committed example: state ok, receipt exact, the takeaway headline with
   await expect(headline(page).locator("b")).toHaveText("All 87 checked rows matched the chain exactly,");
   await expect(headline(page)).not.toContainText("batch");
   await expect(page.getByTestId("verification-verdict-dek")).toHaveText(
-    "That run is a fixed, reproducible check, finished Jul 29, 02:14 UTC; its result covers that run and nothing else. Batch 1, served now, is live data that was not re-checked and does not inherit it.",
+    "That run is a fixed, reproducible check, finished Jul 29, 02:14 UTC; its result covers that run and nothing else. Batch 1, served now, is live data; no check covers it, and it does not inherit that result.",
   );
+  // Of the live batch the manifest says only that no comparator applies: "re-checked" would say it had been checked once.
+  await expect(page.getByTestId("verification-verdict-dek")).not.toContainText(/re-?check/i);
 
   // Identity: both subjects named — the proof by its pin, never as a batch — the receipt's state and tally, the whole key behind the chip.
   await expect(chip(page, "Pinned batch")).toHaveCount(0);
@@ -149,7 +151,7 @@ test("the materialization key renders with a copy affordance that copies the COM
   expect(copied).toBe(REAL_KEY);
 });
 
-test("a failed receipt: data-receipt failed, the warn header, the rejected pill, the named drift, the failing receipt line, no PROOF · EXACT anywhere", async ({
+test("a failed receipt: data-receipt failed, the warn header, the rejected pill, the drift counted and where its rows are recorded — never 'named' — the failing receipt line, no PROOF · EXACT anywhere", async ({
   page,
 }) => {
   await mockAll(page, EVIDENCE_PROOF_FAILED);
@@ -169,6 +171,12 @@ test("a failed receipt: data-receipt failed, the warn header, the rejected pill,
   // The drift is real in the weld data, and it renders.
   await expect(page.getByTestId("verification-weld-debt_manager")).toContainText("26/29 exact");
   await expect(page.getByTestId("verification-kpi-verify")).toHaveAttribute("data-tone", "warn");
+  // The manifest carries the receipt's tallies and no row: the step counts the drift and says where the rows are recorded; nothing on the page promises a name it cannot print.
+  await expect(page.getByTestId("verification-step-verify")).toHaveText(
+    "84 of 87 gated rows reconciled exact against the chain; 3 rows drifted. This manifest carries the tallies, not the rows: they are recorded in the committed drift report, roadmap/evidence/artifacts/w1-reconcile/drift-report.json.",
+  );
+  await expect(page.getByTestId("verification-architecture")).not.toContainText("named");
+  await expect(page.getByTestId("verification-verdict")).not.toContainText("named");
   const receipt = page.getByTestId("verification-receipt");
   await expect(receipt).toHaveText('Reconcile receipt failed: receipt verdict "fail" (exit 1) — 84 of 87 gated rows exact, 3 drift');
   await expect(receipt).toHaveAttribute("data-tone", "warn");
@@ -176,6 +184,36 @@ test("a failed receipt: data-receipt failed, the warn header, the rejected pill,
   await expect(page.getByText("PROOF · EXACT @")).toHaveCount(0);
   // The live subject still serves — the split holds in this direction too.
   await expect(page.getByTestId("verification-live-status")).toHaveText("SERVING · WATERMARKED");
+});
+
+test("a receipt that gated no rows proves nothing: data-receipt empty, the refused header, never 'All 0 checked rows matched', no PROOF · EXACT anywhere", async ({
+  page,
+}) => {
+  const empty = structuredClone(EVIDENCE_MANIFEST);
+  if (empty.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  Object.assign(empty.reconcile, { gated_rows: 0, gated_exact: 0, gated_drift: 0, welds: [] });
+  await mockAll(page, empty);
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-state", "ok");
+  await expect(surface(page)).toHaveAttribute("data-receipt", "empty");
+  await expect(verdict(page)).toHaveAttribute("data-variant", "refused");
+  await expect(headline(page)).toHaveText("Nothing is proven for this deployment: the pinned reconcile run compared no rows.");
+  await expect(page.getByTestId("verification-verdict-dek")).toHaveText(
+    "That run gated no rows, so no exactness is claimed for this deployment until a run compares rows and passes. Batch 1, served now, is live data; no check covers it.",
+  );
+  await expect(chip(page, "Receipt")).toContainText("empty · 0/0");
+  await expect(chip(page, "Receipt")).toHaveClass(/chipRefused/);
+  const verify = page.getByTestId("verification-kpi-verify");
+  await expect(verify).toHaveAttribute("data-tone", "refused");
+  await expect(verify).toContainText("gated (must-match) rows · none compared");
+  await expect(page.getByTestId("verification-step-verify")).toHaveText(
+    "The pinned reconcile run gated no rows: nothing was compared, so nothing is verified against the chain.",
+  );
+  await expect(page.getByTestId("verification-receipt")).toHaveText("Reconcile receipt: the run gated no rows — nothing was compared, the proof badge refused");
+  await expect(page.getByTestId("verification-receipt")).toHaveAttribute("data-tone", "refused");
+  await expect(page.getByTestId("verification-proof-status")).toHaveText("RECEIPT COMPARED NO ROWS");
+  await expect(page.getByTestId("verification-subject-proof")).toContainText("NOTHING PROVEN · the run gated no rows, so nothing was compared");
+  for (const claim of ["All 0", "matched the chain", "PROOF · EXACT @", "ACCEPTED"]) await expect(page.locator("body")).not.toContainText(claim);
 });
 
 test("a missing receipt is a first-class state: data-receipt none, warn, the served reason, the refused proof-pin chip", async ({ page }) => {
@@ -279,14 +317,15 @@ test("a withheld Cash engine: the compute step prints the batch and names the ce
   await expect(page.locator("body")).not.toContainText("0 Cash accounts");
 });
 
-test("evidence unavailable: state unavailable, the refused header with the retry law, no subject invented, the other steps still answer", async ({
+test("evidence unavailable: state unavailable, the refused header with the retry law, the failure said once, a retry that asks again, no subject invented, the other steps still answer", async ({
   page,
 }) => {
   await page.route("**/v1/stream**", (route) => route.abort());
   await page.route("**/v1/book", (route) => json(route, BOOK));
   await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
   await page.route("**/v1/meta*", (route) => json(route, META));
-  await page.route("**/v1/evidence*", (route) => route.abort());
+  let reachable = false;
+  await page.route("**/v1/evidence*", (route) => (reachable ? json(route, EVIDENCE_MANIFEST) : route.abort()));
   await page.goto("/proof");
   await expect(surface(page)).toHaveAttribute("data-state", "unavailable");
   await expect(surface(page)).toHaveAttribute("data-receipt", "none");
@@ -305,7 +344,60 @@ test("evidence unavailable: state unavailable, the refused header with the retry
   await expect(page.getByTestId("verification-kpi-verify")).toContainText("unavailable");
   await expect(page.getByTestId("verification-kpi-verify")).toHaveAttribute("data-tone", "refused");
   await expect(page.getByTestId("verification-step-verify")).toHaveText(/The receipt could not be read\.$/);
-  await expect(page.getByTestId("verification-receipt")).toContainText("the evidence manifest could not be fetched");
+  // The failure is said once, in the header: the receipt strip stands down rather than say it again beneath the tiles.
+  await expect(page.getByTestId("verification-receipt")).toHaveCount(0);
+  const said = (await surface(page).innerText()).split("could not be fetched").length - 1;
+  expect(said).toBe(1);
+  // One thing to do next: the retry asks again, and the page answers from the new read.
+  const retry = page.getByTestId("verification-retry");
+  await expect(retry).toHaveText("Retry");
+  reachable = true;
+  await retry.click();
+  await expect(surface(page)).toHaveAttribute("data-state", "ok");
+  await expect(surface(page)).toHaveAttribute("data-receipt", "exact");
+  await expect(page.getByTestId("verification-retry")).toHaveCount(0);
+  await expect(page.getByTestId("verification-receipt")).toHaveText("Reconcile receipt: 87 gated rows exact, 0 drift");
+});
+
+test("a read in flight has not failed: while /v1/evidence, /v1/book and /v1/meta are unanswered every step is pending in its own words — 'could not be read' and 'unavailable' wait for a failure", async ({
+  page,
+}) => {
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/book", async (route) => {
+    await held;
+    await json(route, BOOK);
+  });
+  await page.route("**/v1/meta*", async (route) => {
+    await held;
+    await json(route, META);
+  });
+  await page.route("**/v1/evidence*", async (route) => {
+    await held;
+    await json(route, EVIDENCE_MANIFEST);
+  });
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-state", "loading");
+  for (const key of ["index", "compute", "verify"]) {
+    const tile = page.getByTestId(`verification-kpi-${key}`);
+    await expect(tile).toHaveAttribute("aria-busy", "true");
+    await expect(tile).toContainText("pending");
+    await expect(tile).toHaveAttribute("data-tone", "neutral");
+  }
+  await expect(page.getByTestId("verification-step-compute")).toHaveText("Reading the batch…");
+  await expect(page.getByTestId("verification-step-verify")).toHaveText("Reading the receipt…");
+  await expect(page.getByTestId("verification-receipt")).toHaveText("Reading the reconcile receipt…");
+  // Nothing has failed, so nothing says it has.
+  for (const words of ["could not be read", "could not be fetched", "unavailable"]) await expect(surface(page)).not.toContainText(words);
+  await expect(page.getByTestId("verification-retry")).toHaveCount(0);
+  release();
+  await expect(surface(page)).toHaveAttribute("data-state", "ok");
+  await expect(surface(page).locator("[aria-busy='true']")).toHaveCount(0);
+  await expect(page.getByTestId("verification-step-verify")).toHaveText("87 gated rows reconciled exact against the chain; 0 drift named.");
 });
 
 test("with the whole API unreachable every step but Serve is unavailable — unread, never an absence, never a zero", async ({ page }) => {

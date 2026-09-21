@@ -1,8 +1,7 @@
 "use client";
 
 // The §11 chart interaction register, demonstrated on one specimen chart —
-// THE REFERENCE IMPLEMENTATION Phase 3 copies onto every chart (APPROVED AS
-// BINDING, decisions 133–134):
+// THE REFERENCE IMPLEMENTATION every chart copies, and the register is binding:
 //
 //   · Tab enters the chart — ONE tab stop; marks are never individual stops.
 //   · ←/→ traverse marks in data order; Home/End jump to first/last.

@@ -1,6 +1,6 @@
 "use client";
 
-// The two subjects (plan AMENDMENT 1: the split is the product), as two kit
+// The two subjects (the split is the product: a manifest carries two, never one identity), as two kit
 // cards that must read as different instruments — the proof card accent-ruled,
 // the live card ok-ruled. Every word on both cards is the view model's
 // (`subjectCards`, lib/verification-view.ts): the status pill, the answer rows

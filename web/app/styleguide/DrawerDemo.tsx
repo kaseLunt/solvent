@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { Drawer } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
+import { SPECIMEN_EXACT } from "./specimen-book";
 import styles from "./styleguide.module.css";
 
 /**
- * SPECIMEN drawer on the kit (plan 2026-09-16, R3 + R7): the header's "Methodology & evidence" ghost button opens
- * the kit Drawer, which is where every page's doctrine lives. Focus moves in on open, Tab cycles inside, Escape
- * closes and restores focus to the button.
+ * SPECIMEN drawer on the kit: the header's "Methodology & evidence" ghost button opens the kit Drawer, which is
+ * where every page's doctrine lives. Focus moves in on open, Tab cycles inside, Escape closes and restores focus to
+ * the button.
  */
 export function DrawerDemo() {
   const [open, setOpen] = useState(false);
@@ -36,10 +37,11 @@ export function DrawerDemo() {
             <dt>marks</dt>
             <dd>balances ✓ params ✓ sweep ✓</dd>
             {/* The exact layer's kit home (the Inspector drawer's "Exact wire values"): the headline prints the
-                human figure, and the drawer states the exact wire value it truncates — here the crit header's. */}
+                human figure, and the drawer states the exact wire value it truncates — the crit header's, summed
+                from the table's own rows, so the three cannot disagree. */}
             <dt>liquidatable debt</dt>
             <dd data-testid="sg-drawer-exact">
-              $6,840 <span className={kit.sub}>· exact wire value</span> <code>6,840.238278</code>
+              {SPECIMEN_EXACT.human} <span className={kit.sub}>· exact wire value</span> <code>{SPECIMEN_EXACT.exact}</code>
             </dd>
           </dl>
         </div>

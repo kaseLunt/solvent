@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { splitInstants } from "@/lib/instant-split";
+import { headerIdentity } from "@/lib/kit";
 import { IdentityChips, type IdentityChip } from "./IdentityChips";
 import styles from "./kit.module.css";
 
@@ -42,10 +43,9 @@ function unbroken(text: string): ReactNode {
   });
 }
 
-/** The page answer. Never renders without identity: an empty chip list renders the refusal chip. */
+/** The page answer. Never renders without identity: a chip list that names nothing renders the refusal chip — the law is lib/kit's `headerIdentity`, pinned there. */
 export function VerdictHeader({ kicker, emphasis, rest = "", tone, dek, chips, actions, testId }: VerdictHeaderProps) {
-  const identity: IdentityChip[] =
-    chips.length > 0 ? chips : [{ label: "Identity", value: "missing", tone: "refused" }];
+  const identity = headerIdentity(chips);
   const sub = (suffix: string): string | undefined => (testId === undefined ? undefined : `${testId}-${suffix}`);
   return (
     <header data-testid={testId} data-variant={tone}>

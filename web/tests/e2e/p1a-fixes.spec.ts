@@ -239,12 +239,15 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     }
   });
 
-  test("the four VerdictHeader tones render their identity strips — and an empty chip list renders the refusal chip", async ({
+  test("the five VerdictHeader tones render their identity strips: a record is ink, only a verdict wears tone, green is a health verdict — and an empty chip list renders the refusal chip", async ({
     page,
   }) => {
     // RE-EXPRESSED from "the five banner variants render their identity strips" when VerdictBanner retired (plan
     // 2026-09-16, R7). The law is the same one — the answer never stands without its identity — on the kit's header.
-    for (const tone of ["crit", "warn", "ok", "refused"] as const) {
+    // Each tone's emphasis is read against the LIVE token, in the page's own theme: a verdict wears its -text grade,
+    // a statement of record wears --ink and no colour at all, a non-answer wears --ink-2.
+    const EMPHASIS_TOKEN = { crit: "--crit-text", warn: "--warn-text", ok: "--ok-text", neutral: "--ink", refused: "--ink-2" } as const;
+    for (const tone of ["crit", "warn", "ok", "neutral", "refused"] as const) {
       const header = page.getByTestId(`sg-verdict-${tone}`);
       await expect(header).toBeVisible();
       await expect(header).toHaveAttribute("data-variant", tone);
@@ -252,19 +255,33 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
       await expect(strip).toHaveCount(1);
       await expect(strip).toContainText(/\S/);
 
-      // The emphasis carries the verdict color in the -text grade; a refused answer wears ink, never a tier's color.
       const emphasis = page.getByTestId(`sg-verdict-${tone}-headline`).locator("b");
       const color = await emphasis.evaluate((el) => getComputedStyle(el).color);
-      expect(color, `${tone} emphasis`).toBe(
-        await resolveAppbarToken(page, tone === "refused" ? "--ink-2" : `--${tone}-text`),
-      );
+      expect(color, `${tone} emphasis`).toBe(await resolveAppbarToken(page, EMPHASIS_TOKEN[tone]));
     }
+    // Ink is not a verdict's colour: the record's emphasis differs from every tone that is one, in this theme.
+    const ink = await resolveAppbarToken(page, "--ink");
+    for (const verdict of ["--crit-text", "--warn-text", "--ok-text"] as const) expect(await resolveAppbarToken(page, verdict)).not.toBe(ink);
 
-    // The refused header names its cause on a dashed chip; the wire code rides in the title, never as the label.
+    // Green says health and nothing else: the ok specimen is the Book's own verdict that nothing is liquidatable —
+    // never a record that merely answered, and never a sentence about holes painted in the colour of health.
+    const healthy = page.getByTestId("sg-verdict-ok");
+    await expect(page.getByTestId("sg-verdict-ok-headline")).toHaveText("Nothing material is liquidatable on the Cash book right now.");
+    await expect(healthy).not.toContainText(/absent|withheld|hole/i);
+    // The record specimen is a page's own header — the API's — and its whole H1 is ink: the rest beside the emphasis too.
+    const record = page.getByTestId("sg-verdict-neutral-headline");
+    await expect(record).toContainText("read-only endpoints,");
+    expect(await record.evaluate((el) => getComputedStyle(el).color)).toBe(ink);
+
+    // The refused header names its cause on a dashed chip — the phrasebook's plain cause for a REAL wire code, which
+    // rides in the title, never as the label.
     const cause = page.getByTestId("sg-verdict-refused").locator('[data-chip="Refused"]');
-    await expect(cause).toHaveText("Refused sweep failed twice");
-    await expect(cause).toHaveAttribute("title", "sweep_failed_no_success");
+    await expect(cause).toHaveText("Refused collateral sweep failed");
+    await expect(cause).toHaveAttribute("title", "SWEEP_FAILED");
     expect((await readChipRegister(cause)).borderStyle).toBe("dashed");
+    // One refusal, one spelling: the mockup's lowercase code — which the phrasebook cannot read — is nowhere on the canon page.
+    await expect(page.locator("body")).not.toContainText("sweep_failed_no_success");
+    await expect(page.locator('[title*="sweep_failed_no_success"]')).toHaveCount(0);
 
     // The law's own specimen: a header composed with an EMPTY chip list renders the kit's dashed refusal chip —
     // the strip is still there, and it names the omission.
@@ -387,7 +404,7 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
       await expect(page.getByTestId(`sg-state-${state}`)).toBeVisible();
     }
     await expect(page.getByTestId("sg-state-refused")).toContainText(
-      "REFUSED · sweep failed twice · sweep_failed_no_success",
+      "REFUSED · collateral sweep failed · SWEEP_FAILED",
     );
     await expect(page.getByTestId("sg-state-unavailable")).toContainText("30 BATCHES NOT RETAINED");
     await expect(page.getByTestId("sg-state-invalid")).toContainText("0x80b3f19e2a6cZZZZ");
@@ -437,13 +454,15 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     await expect(toggle).toHaveAttribute("aria-checked", "false");
     await expect(toggle).toHaveText("Show 2 small & dust positions ($75.75)");
     await expect(table.locator("tbody tr")).toHaveCount(4);
+    // A row is named for the materiality tier it falls under: both folded rows are over $1, so both are "small".
+    await expect(page.getByTestId("sg-table-row-small-2")).toHaveCount(0);
     await expect(page.getByTestId("sg-table-row-dust")).toHaveCount(0);
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     await expect(table.locator("tbody tr")).toHaveCount(6);
-    await expect(page.getByTestId("sg-table-row-small")).toContainText("$61.20");
-    await expect(page.getByTestId("sg-table-row-dust")).toContainText("$14.55");
+    await expect(page.getByTestId("sg-table-row-small-1")).toContainText("$61.20");
+    await expect(page.getByTestId("sg-table-row-small-2")).toContainText("$14.55");
     // The refused row never folds, in either position.
     await expect(refused).toBeVisible();
   });
@@ -455,6 +474,9 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     const exact = page.getByRole("dialog").getByTestId("sg-drawer-exact");
     await expect(exact).toContainText("$6,840");
     await expect(exact.locator("code")).toHaveText("6,840.238278");
+    // One number in three places: the drawer's human figure is the crit header's, and both are the table's rows' sum.
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("sg-verdict-crit-headline").locator("b")).toHaveText("$6,840 of Cash debt is liquidatable right now,");
   });
 
   test("the kit specimens: KpiTile's tones with the dashed refusal and the pending tile, StatusPill's vocabulary, IdentityChips' tones", async ({
@@ -492,7 +514,7 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     ] as const) {
       await expect(pills.locator(`[data-tone="${tone}"]`)).toHaveText(label);
     }
-    await expect(pills.locator('[data-tone="refused"]')).toHaveAttribute("title", "sweep_failed_no_success");
+    await expect(pills.locator('[data-tone="refused"]')).toHaveAttribute("title", "collateral sweep failed · SWEEP_FAILED");
     const projection = await readChipRegister(pills.locator('[data-tone="projection"]'));
     expect(projection.borderStyle).toBe("dashed");
     expect(projection.bg).toBe("rgba(0, 0, 0, 0)");

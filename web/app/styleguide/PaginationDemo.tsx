@@ -1,6 +1,6 @@
 "use client";
 
-// Cursor pagination on the kit (plan 2026-09-16, R7): KitTable fed by `useCursorPages`, with the load-more
+// Cursor pagination on the kit: KitTable fed by `useCursorPages`, with the load-more
 // control a kit ghost button. The status line always states what is loaded against what exists, and an
 // exhausted walk says so in words — the control is never simply absent.
 
