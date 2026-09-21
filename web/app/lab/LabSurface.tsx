@@ -16,7 +16,12 @@ import { humanAge } from "@/lib/freshness";
 import { deriveInspectorView } from "@/lib/inspector-view";
 import { CASH } from "@/lib/inspector-position";
 import { addressWorkspace, rowOutcome } from "@/lib/lab-address";
-import { conflictNotice, deepLinkDecision } from "@/lib/lab-deep-link";
+import {
+  conflictNotice,
+  deepLinkDecision,
+  scenarioForBar,
+  unlistedScenarioNotice,
+} from "@/lib/lab-deep-link";
 import { useLabReading } from "@/lib/lab-reading";
 import { deriveLabView, type LabChip } from "@/lib/lab-view";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
@@ -92,6 +97,8 @@ export function LabSurface() {
     single: params.get("scenario"),
     set: params.get("scenarios"),
   }));
+  // Whether the reader has selected a scenario since the page opened: only then does the bar follow the subject shown.
+  const [readerSelected, setReaderSelected] = useState(false);
 
   const view = deriveLabView(reading, { selectedId, checked });
   const book = view.book;
@@ -117,13 +124,14 @@ export function LabSurface() {
     named,
   });
 
-  // The URL names the subject the workspace SHOWS. The subject is book mode's selection as the listing resolved it,
-  // and one-address mode's selected row — which is NOT the row clicked when the address was not stressed under it,
-  // and not the id a link named when the listing does not publish it. Once a scenario has been named — by the link or
-  // by a selection — the address bar is held to the subject on screen, so a reload or a shared link opens what the
-  // reader is looking at; while no subject is determined, and on a page nobody named a scenario on, nothing is
-  // written. In one-address mode the account is part of the subject, and is held the same way. The write is
-  // `replaceState`, read against the live address bar: a same-route navigation that drops the query is put right too.
+  // The subject the workspace SHOWS: book mode's selection as the listing resolved it, and one-address mode's
+  // selected row — which is NOT the row clicked when the address was not stressed under it, and not the id a link
+  // named when the listing does not publish it. The address bar is written only for a scenario somebody asked for
+  // (`scenarioForBar`): after the reader's own selection it follows the subject shown; an OPENED link is left exactly
+  // as it arrived, the mismatch said in words beside it — a rewritten `?scenario=` link would run, on reload, a
+  // scenario nobody asked for. In one-address mode the account the page shows is held in the bar the same way: it is
+  // the link's own or the reader's entry, never a default. The write is `replaceState`, read against the live
+  // address bar, so a same-route navigation that drops the query is put right too.
   const subjectId =
     mode === "book" ? view.selectedId : (space.selected?.id ?? null);
   useEffect(() => {
@@ -131,11 +139,21 @@ export function LabSurface() {
     if (window.location.pathname !== "/lab") return;
     const next = new URLSearchParams(window.location.search);
     const before = next.toString();
-    if (selectedId !== null && subjectId !== null)
-      next.set("scenario", subjectId);
-    if (mode === "address" && isAddress(address)) next.set("address", address);
+    const scenario = scenarioForBar({
+      inboundScenario: inbound.single,
+      readerSelected,
+      subjectId,
+      barScenario: next.get("scenario"),
+    });
+    if (scenario !== null) next.set("scenario", scenario);
+    if (
+      mode === "address" &&
+      isAddress(address) &&
+      next.get("address") !== address
+    )
+      next.set("address", address);
     if (next.toString() !== before) replaceUrl(labUrl(next));
-  }, [params, selectedId, subjectId, mode, address]);
+  }, [params, inbound, readerSelected, subjectId, mode, address]);
 
   // The batch's own age (the wire's number) anchored at the clocks this tab settled the result on,
   // so a re-selected older result does not restart its age at the moment of re-selection.
@@ -157,7 +175,16 @@ export function LabSurface() {
         )
       : null;
   // The conflict's notice claims only what the conflict gates — the book run — and says so when an address is being
-  // evaluated on the page beside it: that evaluation is the address lookup's own, and is shown.
+  // evaluated on the page beside it: that evaluation is the address lookup's own, and is shown. A single link whose
+  // id the listing does not publish is left as it arrived and said in words: what it named, and what is shown instead.
+  const listedIds =
+    reading.listing.phase === "ready"
+      ? reading.listing.value.scenarios.map((s) => s.id)
+      : [];
+  const shownLabel =
+    mode === "book"
+      ? (definition?.label ?? null)
+      : (space.selected?.label ?? null);
   const notice =
     decision === null
       ? null
@@ -165,7 +192,9 @@ export function LabSurface() {
         ? conflictNotice(mode === "address" && isAddress(address))
         : decision.kind === "set"
           ? decision.notice
-          : null;
+          : decision.kind === "single"
+            ? unlistedScenarioNotice(single, listedIds, shownLabel)
+            : null;
   const decided = useRef(false);
   useEffect(() => {
     if (
@@ -259,6 +288,7 @@ export function LabSurface() {
           items={items}
           onSelect={(id) => {
             setSelectedId(id);
+            setReaderSelected(true);
             // The address bar names the subject on screen, so a reload or a shared link opens the scenario the
             // reader was looking at — never the one the page was opened with. One URL names one scenario or a set,
             // never both (a link naming both runs nothing), so the selection takes the set's place in it.

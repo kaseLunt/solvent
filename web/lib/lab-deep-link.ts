@@ -3,7 +3,9 @@
 // link the page was OPENED with; the page's own URL writes are never decided
 // again. The decision gates BOOK runs and nothing else, and its notice claims
 // no more than that: an `?address=` in the same link is evaluated by the
-// address lookup, which these two params do not gate.
+// address lookup, which these two params do not gate. An opened link is never
+// rewritten to a scenario nobody asked for (`scenarioForBar`): where the page
+// shows another scenario than the link named, it says so in words.
 
 import { MAX_SET_RUN_SCENARIOS } from "./runbookSet";
 
@@ -52,6 +54,46 @@ export function conflictNotice(addressEvaluated: boolean): string {
   return addressEvaluated
     ? `${gated} The address's own evaluation is shown below: it applies every committed scenario to that one account, and neither selection gates it.`
     : gated;
+}
+
+/**
+ * A `?scenario=` link whose id this deployment does not publish. The page shows another scenario in its place — the
+ * listing's first, or in one-address mode the row the address carries — and the link itself is left exactly as it
+ * arrived, so the mismatch is said in words: the id the link named, that nothing was run for it, and what is shown
+ * instead. Null for a published id, for no id, and for an id that names nothing. `shownLabel` is null while nothing
+ * stands in its place, and then the clause is left out, never invented.
+ */
+export function unlistedScenarioNotice(scenarioParam: string | null, listedIds: readonly string[], shownLabel: string | null): string | null {
+  if (scenarioParam === null || scenarioParam.trim() === "" || listedIds.includes(scenarioParam)) return null;
+  const said = `This link names ?scenario=${scenarioParam}, and this deployment publishes no scenario of that id. Nothing was run for it, and the link is left as it arrived.`;
+  return shownLabel === null ? said : `${said} ${shownLabel} is shown instead.`;
+}
+
+/** What decides whether the page may write a scenario into its address bar. */
+export interface BarScenarioInput {
+  /** The scenario the link the page was OPENED with named; null when it named none. */
+  readonly inboundScenario: string | null;
+  /** Whether the reader has selected a scenario in the library since the page opened. */
+  readonly readerSelected: boolean;
+  /** The scenario the workspace shows; null while none is determined. */
+  readonly subjectId: string | null;
+  /** The scenario the address bar names now; null when it names none. */
+  readonly barScenario: string | null;
+}
+
+/**
+ * The scenario to write into the address bar, or null to leave the bar exactly as it is. A `?scenario=` link RUNS the
+ * scenario it names when it is opened, so the bar is only ever given a scenario somebody ASKED for: the reader's own
+ * selection — then the bar follows the subject shown, the selection or its disclosed fallback — or the scenario the
+ * inbound link itself named, when a same-route navigation has dropped it from the bar. An opened link that names a
+ * scenario the page does not show — an id the listing does not publish, a scenario the address was not stressed
+ * under — is never rewritten to the subject shown: the page says the mismatch in words, and a reload of that link
+ * runs nothing nobody asked for.
+ */
+export function scenarioForBar(input: BarScenarioInput): string | null {
+  const { inboundScenario, readerSelected, subjectId, barScenario } = input;
+  if (subjectId === null || subjectId === barScenario) return null;
+  return readerSelected || subjectId === inboundScenario ? subjectId : null;
 }
 
 /** "a, b and c" — the house list vocabulary. */

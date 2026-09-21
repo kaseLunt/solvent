@@ -4,7 +4,7 @@
 // `?scenarios=*`; more published ids than the cap dispatches nothing and
 // truncates nothing.
 import { expect, test } from "@playwright/test";
-import { conflictNotice, deepLinkDecision } from "../../lib/lab-deep-link";
+import { conflictNotice, deepLinkDecision, scenarioForBar, unlistedScenarioNotice } from "../../lib/lab-deep-link";
 
 const LISTED = ["eth_minus_30", "ethfi_minus_50", "dm_rate_horizon_plus_200bps"];
 
@@ -111,5 +111,55 @@ test.describe("the conflict notice claims only what the conflict gates", () => {
     expect(conflictNotice(true)).toBe(
       `${conflictNotice(false)} The address's own evaluation is shown below: it applies every committed scenario to that one account, and neither selection gates it.`,
     );
+  });
+});
+
+test.describe("the address bar is written only for a scenario somebody asked for", () => {
+  const bar = (overrides: Partial<Parameters<typeof scenarioForBar>[0]>) =>
+    scenarioForBar({ inboundScenario: null, readerSelected: false, subjectId: "eth_minus_30", barScenario: null, ...overrides });
+
+  test("an opened link is left exactly as it arrived: a link naming an id the listing does not publish, or a scenario the address does not carry, is never rewritten to the subject shown — a rewritten ?scenario= link would RUN what it names on reload", () => {
+    // `?scenario=ghost`: the page shows the first listed scenario, and the bar still says ghost.
+    expect(bar({ inboundScenario: "ghost", barScenario: "ghost", subjectId: "eth_minus_30" })).toBeNull();
+    // `?address=…&scenario=<not carried>`: the page shows the fallback, disclosed in words, and the bar is the link's.
+    expect(bar({ inboundScenario: "weeth_market_depeg_oracles_held", barScenario: "weeth_market_depeg_oracles_held", subjectId: "eth_minus_30" })).toBeNull();
+    // A link that names no scenario names none afterwards either, whatever the page shows by default.
+    expect(bar({ inboundScenario: null, barScenario: null, subjectId: "eth_minus_30" })).toBeNull();
+    // A link that names the subject shown needs no write.
+    expect(bar({ inboundScenario: "eth_minus_30", barScenario: "eth_minus_30", subjectId: "eth_minus_30" })).toBeNull();
+    // While no subject is determined — the listing or the stress rows still loading — nothing is written.
+    expect(bar({ inboundScenario: "ghost", barScenario: "ghost", subjectId: null })).toBeNull();
+    expect(bar({ readerSelected: true, barScenario: "ghost", subjectId: null })).toBeNull();
+  });
+
+  test("after the reader's own selection the bar follows the subject shown — the selection, or its disclosed fallback", () => {
+    expect(bar({ readerSelected: true, inboundScenario: "ghost", barScenario: "ghost", subjectId: "ethfi_minus_50" })).toBe("ethfi_minus_50");
+    // One-address mode: the row clicked is not carried, the subject is the fallback, and the bar names the subject.
+    expect(bar({ readerSelected: true, barScenario: "weeth_market_depeg_oracles_held", subjectId: "eth_minus_30" })).toBe("eth_minus_30");
+    expect(bar({ readerSelected: true, barScenario: null, subjectId: "ethfi_minus_50" })).toBe("ethfi_minus_50");
+    // Already named: no write.
+    expect(bar({ readerSelected: true, barScenario: "ethfi_minus_50", subjectId: "ethfi_minus_50" })).toBeNull();
+  });
+
+  test("a same-route navigation that dropped the query is put right only for a scenario that was asked for: the one the link itself named, never the listing's default", () => {
+    // Opened on `?scenario=ethfi_minus_50`, then the shell's Scenarios link: the bar reads `/lab` over that same subject.
+    expect(bar({ inboundScenario: "ethfi_minus_50", barScenario: null, subjectId: "ethfi_minus_50" })).toBe("ethfi_minus_50");
+    // Opened on `?scenario=ghost`, then the same navigation: the subject is the listing's first, which nobody asked for.
+    expect(bar({ inboundScenario: "ghost", barScenario: null, subjectId: "eth_minus_30" })).toBeNull();
+  });
+});
+
+test.describe("a link that names a scenario this deployment does not publish says so", () => {
+  test("the notice names the link's id, says nothing was run for it, and names what is shown instead; a published id, no id and an empty id say nothing", () => {
+    expect(unlistedScenarioNotice("ghost", LISTED, "ETH -30 percent")).toBe(
+      "This link names ?scenario=ghost, and this deployment publishes no scenario of that id. Nothing was run for it, and the link is left as it arrived. ETH -30 percent is shown instead.",
+    );
+    // With nothing shown in its place — an empty listing, rows still loading — the clause is left out, never invented.
+    expect(unlistedScenarioNotice("ghost", [], null)).toBe(
+      "This link names ?scenario=ghost, and this deployment publishes no scenario of that id. Nothing was run for it, and the link is left as it arrived.",
+    );
+    expect(unlistedScenarioNotice("eth_minus_30", LISTED, "ETH -30 percent")).toBeNull();
+    expect(unlistedScenarioNotice(null, LISTED, "ETH -30 percent")).toBeNull();
+    expect(unlistedScenarioNotice("  ", LISTED, "ETH -30 percent")).toBeNull();
   });
 });

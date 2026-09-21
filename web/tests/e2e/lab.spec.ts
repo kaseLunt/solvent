@@ -277,8 +277,10 @@ test("deep links: ?scenario= runs exactly one; an unlisted id runs nothing; both
   expect(one.runs()).toBe(1);
   await page.goto("/lab?scenario=ghost");
   await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  await expect(page.getByTestId("lab-deeplink-notice")).toContainText("This link names ?scenario=ghost");
   await page.waitForTimeout(300);
   expect(one.runs()).toBe(1);
+  expect(new URL(page.url()).search).toBe("?scenario=ghost");
   await page.goto("/lab?scenario=eth_minus_30&scenarios=ethfi_minus_50");
   await expect(page.getByTestId("lab-deeplink-notice")).toBeVisible();
   // The notice claims what the conflict gates — the book run — and no more.
@@ -1066,11 +1068,12 @@ test("one-address mode: the highlighted library row is the workspace's subject �
   await expect(chip(page, "Scenario")).toContainText("eth_minus_30");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "weeth_market_depeg_oracles_held")).not.toHaveAttribute("data-selected", "true");
-  // The fallback is never silent: the page says which scenario was not evaluated and which is shown, and the address
-  // bar names the subject SHOWN — never the scenario the link named.
+  // The fallback is never silent: the page says which scenario was not evaluated and which is shown. The link itself
+  // is left exactly as it arrived — an opened link is never rewritten to a scenario nobody asked for.
   const fallback = page.getByTestId("lab-address-fallback");
   await expect(fallback).toHaveText("weETH market depeg to 0.95 (oracles held) was not evaluated for 0x7a3f…c21e: the stress response carries no result for it. ETH -30 percent is shown instead — the first scenario this address carries.");
-  await expect(page).toHaveURL(new RegExp(`/lab\\?address=${DEMO_NEAR_ADDR}&scenario=eth_minus_30$`));
+  await page.waitForTimeout(300);
+  expect(new URL(page.url()).search).toBe(`?address=${DEMO_NEAR_ADDR}&scenario=weeth_market_depeg_oracles_held`);
   // A row the address carries moves the subject and the highlight together.
   await row(page, "ethfi_minus_50").getByRole("button").click();
   await expect(headline(page)).toContainText("ETHFI -50 percent");
@@ -1084,7 +1087,7 @@ test("one-address mode: the highlighted library row is the workspace's subject �
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "ethfi_minus_50")).not.toHaveAttribute("data-selected", "true");
   await expect(row(page, "weeth_market_depeg_oracles_held")).not.toHaveAttribute("data-selected", "true");
-  // …and the URL names the subject shown, disclosed beside it: a reload opens this same screen, under the scenario it shows.
+  // …and after the reader's own selection the URL names the subject shown, disclosed beside it: a reload opens this same screen, under the scenario it shows.
   await expect(fallback).toContainText("was not evaluated for 0x7a3f…c21e");
   await expect(page).toHaveURL(new RegExp(`/lab\\?address=${DEMO_NEAR_ADDR}&scenario=eth_minus_30$`));
   await expect(page).not.toHaveURL(/weeth_market_depeg_oracles_held/);
@@ -1553,8 +1556,65 @@ test("the address bar names the subject shown after a same-route navigation: the
       return namedInUrl === null ? selected === "eth_minus_30" : namedInUrl === selected;
     })
     .toBe(true);
-  // A link that names a scenario the listing does not publish shows the first listed one, and the bar names THAT.
+  // The same navigation on a link that was only OPENED: the bar is given back the scenario the link itself named…
+  await page.goto("/lab?scenario=ethfi_minus_50");
+  await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
+  await page.getByRole("navigation", { name: "app surfaces" }).getByRole("link", { name: "Scenarios" }).click();
+  await expect
+    .poll(async () => {
+      const selected = (await page.locator("[data-testid^='lab-library-row-'][data-selected='true']").getAttribute("data-testid"))?.replace("lab-library-row-", "");
+      const namedInUrl = new URL(page.url()).searchParams.get("scenario");
+      return namedInUrl === null ? selected === "eth_minus_30" : namedInUrl === selected;
+    })
+    .toBe(true);
+  // …and never the listing's default, which nobody asked for: after it, a ghost link names no scenario, or ghost still.
   await page.goto("/lab?scenario=ghost");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
-  await expect(page).toHaveURL(/\/lab\?scenario=eth_minus_30$/);
+  await page.getByRole("navigation", { name: "app surfaces" }).getByRole("link", { name: "Scenarios" }).click();
+  await page.waitForTimeout(300);
+  expect(new URL(page.url()).searchParams.get("scenario")).not.toBe("eth_minus_30");
+});
+
+test("a link nobody selected from is never rewritten: an opened link that names a scenario the page does not show is left exactly as it arrived and the mismatch is said in words — so a reload runs nothing nobody asked for; the bar follows the subject shown only after the reader's own selection", async ({ page }) => {
+  const counts = await mockLab(page);
+  // An id the listing does not publish: the first listed scenario is shown, not run; the notice names the link's id.
+  await page.goto("/lab?scenario=ghost");
+  await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  const notice = page.getByTestId("lab-deeplink-notice");
+  await expect(notice).toHaveText("This link names ?scenario=ghost, and this deployment publishes no scenario of that id. Nothing was run for it, and the link is left as it arrived. ETH -30 percent is shown instead.");
+  await page.waitForTimeout(300);
+  expect(new URL(page.url()).search).toBe("?scenario=ghost");
+  expect(counts.runs()).toBe(0);
+  // Reload of the untouched link: the same screen, the same notice, and still nothing run.
+  await page.reload();
+  await expect(notice).toContainText("This link names ?scenario=ghost");
+  await expect(surface(page)).toHaveAttribute("data-state", "not-run");
+  await page.waitForTimeout(300);
+  expect(new URL(page.url()).search).toBe("?scenario=ghost");
+  expect(counts.runs()).toBe(0);
+  // The reader's own selection: now the bar names the subject shown, and a selection runs nothing.
+  await row(page, "ethfi_minus_50").getByRole("button").click();
+  await expect(page).toHaveURL(/\/lab\?scenario=ethfi_minus_50$/);
+  await expect(notice).toContainText("ETHFI -50 percent is shown instead.");
+  await page.waitForTimeout(300);
+  expect(counts.runs()).toBe(0);
+
+  // One-address mode: the link names a scenario the address was not stressed under. The fallback is disclosed; the link is left alone.
+  const linked = `?address=${DEMO_NEAR_ADDR}&scenario=weeth_market_depeg_oracles_held`;
+  await page.goto(`/lab${linked}`);
+  await expect(surface(page)).toHaveAttribute("data-state", "rows");
+  await expect(page.getByTestId("lab-address-fallback")).toContainText("weETH market depeg to 0.95 (oracles held) was not evaluated for 0x7a3f…c21e");
+  await expect(page.getByTestId("lab-address-fallback")).toContainText("ETH -30 percent is shown instead");
+  await page.waitForTimeout(300);
+  expect(new URL(page.url()).search).toBe(linked);
+  // A published id names itself: no unlisted-id notice beside the fallback's own disclosure.
+  await expect(notice).toHaveCount(0);
+  // After a selection the bar names the subject shown — the row the address carries…
+  await row(page, "ethfi_minus_50").getByRole("button").click();
+  await expect(page).toHaveURL(new RegExp(`/lab\\?address=${DEMO_NEAR_ADDR}&scenario=ethfi_minus_50$`));
+  // …or, for a row it does not carry, the disclosed fallback.
+  await row(page, "weeth_market_depeg_oracles_held").getByRole("button").click();
+  await expect(page.getByTestId("lab-address-fallback")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/lab\\?address=${DEMO_NEAR_ADDR}&scenario=eth_minus_30$`));
 });
