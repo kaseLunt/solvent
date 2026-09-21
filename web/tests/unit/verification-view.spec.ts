@@ -7,7 +7,7 @@
 // and never an absence the wire did not state.
 import { expect, test } from "@playwright/test";
 import { UnavailableError } from "@solvent/client";
-import { proofTakeaway } from "../../lib/evidence";
+import { proofTakeaway, proofTakeawayArms } from "../../lib/evidence";
 import type { EvidenceResponse } from "../../lib/proof-data";
 import {
   BOOK_LOADING,
@@ -21,12 +21,14 @@ import {
   probesSummary,
   PUBLIC_ENDPOINTS,
   receiptState,
+  stepTileLabel,
   subjectCards,
   VERIFICATION_COPY,
-  VERIFICATION_DEK,
   VERIFICATION_INTRO,
   VERIFICATION_KICKER,
+  VERIFICATION_LOADING_DEK,
   VERIFICATION_SPLIT,
+  verificationDek,
   type BookReading,
   type EvidenceState,
 } from "../../lib/verification-view";
@@ -53,6 +55,13 @@ const REAL_KEY = EVIDENCE_MANIFEST.substrate?.materialization_key ?? "";
 if (REAL_KEY.length === 0) throw new Error("fixture invariant: the example carries a key");
 const DIGEST = EVIDENCE_MANIFEST.substrate?.substrate_digest ?? "";
 if (DIGEST.length === 0) throw new Error("fixture invariant: the example carries a digest");
+// An instant in prose is joined with U+00A0, so a pin writes the instant through `nb` — the rest of a sentence keeps its ordinary spaces.
+const nb = (text: string): string => text.replaceAll(" ", "\u00a0");
+const FINISHED = nb("Jul 29, 02:14 UTC");
+/** The committed example with its live subject welded to the demo Book's batch: one serving batch, named once. */
+const DEMO_MANIFEST: EvidenceResponse = structuredClone(EVIDENCE_MANIFEST);
+if (DEMO_MANIFEST.substrate === null) throw new Error("fixture invariant: the example carries a substrate");
+DEMO_MANIFEST.substrate.batch_id = DEMO_BOOK.batch.id;
 
 test("the compute step reads the census, not a walk: the Cash account count is /v1/book's own, through the population guard, and the book's failure keeps the wire's one absence", () => {
   // The census is the aggregate's count — no positions page is behind it.
@@ -145,7 +154,8 @@ test("the four steps carry the Overview's numbers: the OP block, the batch, the 
   expect(compute.line).toEqual({ before: "batch ", figure: "1", after: " · 2 Cash accounts" });
   const verify = byKey(steps, "verify");
   expect(verify.value).toBe("87/87");
-  expect(verify.sub).toBe("gated rows exact · drift 0");
+  // The tile glosses "gated" once; the Overview's line below keeps its own words.
+  expect(verify.sub).toBe("gated (must-match) rows exact · drift 0");
   expect(verify.tone).toBe("ok");
   expect(verify.sentence).toBe("87 gated rows reconciled exact against the chain; 0 drift named.");
   expect(verify.line).toEqual({ before: "", figure: "87/87", after: " gated rows exact · drift 0" });
@@ -156,6 +166,22 @@ test("the four steps carry the Overview's numbers: the OP block, the batch, the 
   expect(serve.sentence).toBe("17 read-only endpoints, every money value a decimal string.");
   // The Overview's line reads "17 endpoints · typed TypeScript client".
   expect(serve.line).toEqual({ before: "", figure: "17", after: " endpoints · typed TypeScript client" });
+});
+
+test("a step is headed once: Verification's tile label folds the step's number into its name, read from the ordinal the Overview still heads its steps with", () => {
+  const steps = pipelineSteps(META, EVIDENCE_MANIFEST, read(BOOK));
+  expect(steps.map(stepTileLabel)).toEqual(["01 · Index", "02 · Compute", "03 · Verify", "04 · Serve"]);
+  // The number is the ordinal's own — the two pages cannot count the steps differently — and the Overview's fields do not move.
+  for (const step of steps) expect(step.ordinal.startsWith(stepTileLabel(step).slice(0, 2))).toBe(true);
+  expect(steps.map((s) => s.ordinal)).toEqual(["01 · INDEX", "02 · COMPUTE", "03 · VERIFY", "04 · SERVE"]);
+  expect(steps.map((s) => `${s.line.before}${s.line.figure}${s.line.after}`)).toEqual([
+    "OP block 154,796,552 · Ethereum block 25,635,618",
+    "batch 1 · 2 Cash accounts",
+    "87/87 gated rows exact · drift 0",
+    "17 endpoints · typed TypeScript client",
+  ]);
+  // A refused step keeps its number: the label is the step's, not its reading's.
+  expect(pipelineSteps(null, null, UNREAD).map(stepTileLabel)).toEqual(["01 · Index", "02 · Compute", "03 · Verify", "04 · Serve"]);
 });
 
 test("the demo dataset's numbers group their thousands: block, batch and accounts", () => {
@@ -200,7 +226,7 @@ test("an absence the wire stated is worded as one: the 503 no-batch book, the ma
 });
 
 test("a receipt that did not pass turns the Verify step warn", () => {
-  expect(byKey(pipelineSteps(META, EVIDENCE_PROOF_FAILED, read(BOOK)), "verify")).toMatchObject({ value: "84/87", sub: "gated rows exact · drift 3", tone: "warn" });
+  expect(byKey(pipelineSteps(META, EVIDENCE_PROOF_FAILED, read(BOOK)), "verify")).toMatchObject({ value: "84/87", sub: "gated (must-match) rows exact · drift 3", tone: "warn" });
 });
 
 test("the receipt state reads the manifest: exact, failed, none — and drift for a passing verdict whose tallies disagree", () => {
@@ -224,32 +250,72 @@ test("the receipt state reads the manifest: exact, failed, none — and drift fo
   expect(receiptState(refusedClean)).toBe("failed");
 });
 
-test("the committed example: state ok, receipt exact, the headline is proofTakeaway, the dek is the split, the chips name both subjects", () => {
+test("the committed example: state ok, receipt exact, the headline is proofTakeaway's two arms — the proof finding toned, the scope ink — the dek is the two subjects as two facts, the chips name both subjects", () => {
   const v = view(ok(EVIDENCE_MANIFEST));
   expect(v.state).toBe("ok");
   expect(v.receipt).toBe("exact");
   expect(v.kicker).toBe(VERIFICATION_KICKER);
   expect(v.kicker).toBe("Verification · this deployment");
-  expect(v.headline).toEqual({ emphasis: proofTakeaway(EVIDENCE_MANIFEST), rest: "", tone: "ok", dek: VERIFICATION_DEK });
-  expect(v.headline.emphasis).toBe("receipt ACCEPTED at pin 5f0b3e2a; serving batch #1 under its watermark vector.");
-  expect(VERIFICATION_DEK).toBe("Two subjects, never one: the pinned proof and the live batch.");
-  expect(v.chips.map((c) => c.label)).toEqual(["Pinned batch", "Live batch", "Receipt", "Key"]);
-  expect(v.chips[0]).toMatchObject({ value: "pin 5f0b3e2a" });
-  expect(v.chips[0]?.title).toContain(EVIDENCE_MANIFEST.reconcile?.comparison_sha256 ?? "∅");
-  expect(v.chips[1]).toMatchObject({ value: "#1" });
+  const arms = proofTakeawayArms(EVIDENCE_MANIFEST);
+  expect(v.headline).toEqual({ emphasis: arms.proof, rest: arms.scope, tone: "ok", dek: verificationDek(EVIDENCE_MANIFEST) });
+  // The equals-law: the H1's text is the one takeaway sentence, whichever clause wears the tone.
+  expect(`${v.headline.emphasis} ${v.headline.rest}`).toBe(proofTakeaway(EVIDENCE_MANIFEST));
+  expect(v.headline.emphasis).toBe("All 87 checked rows matched the chain exactly,");
+  expect(v.headline.rest).toBe("in this deployment's pinned reconcile run.");
+  expect(v.headline.dek).toBe(
+    `That run is a fixed, reproducible check, finished ${FINISHED}; its result covers that run and nothing else. Batch 1, served now, is live data that was not re-checked and does not inherit it.`,
+  );
+  expect(v.chips.map((c) => c.label)).toEqual(["Proof pin", "Live batch", "Receipt", "Batch key"]);
+  // The pin is the receipt's comparison sha — never a batch; its title is the exact layer under the dek's humanised finish.
+  expect(v.chips[0]).toMatchObject({ value: "5f0b3e2a" });
+  expect(v.chips[0]?.title).toBe(`comparison sha256 ${EVIDENCE_MANIFEST.reconcile?.comparison_sha256 ?? "∅"} · finished 2026-07-29T02:14:07Z`);
+  expect(v.chips[1]).toMatchObject({ value: "1" });
   expect(v.chips[2]).toMatchObject({ value: "exact · 87/87", tone: "ok" });
   expect(v.chips[3]).toMatchObject({ value: "9a4a7c1d…f5a2b9", title: REAL_KEY });
   expect(v.steps.map((s) => s.value)).toEqual(["154,796,552", "1", "87/87", "17"]);
   expect(v.receiptLine).toBe("Reconcile receipt: 87 gated rows exact, 0 drift");
 });
 
-test("a failed receipt: warn tone, the crit receipt chip, the failing words on the receipt line", () => {
+test("the demo arm: one serving batch, named once — in the dek, in the human tier, with no '#', and never inside the proof's sentence", () => {
+  const v = view(ok(DEMO_MANIFEST));
+  expect(v.headline.dek).toBe(
+    `That run is a fixed, reproducible check, finished ${FINISHED}; its result covers that run and nothing else. Batch 18,251, served now, is live data that was not re-checked and does not inherit it.`,
+  );
+  expect(v.chips[1]).toEqual({ label: "Live batch", value: "18,251" });
+  // The proof's sentence is the same whatever batch is served: the live subject never rides it, nor does the hash or the wire's vocabulary.
+  expect(`${v.headline.emphasis} ${v.headline.rest}`).toBe(proofTakeaway(EVIDENCE_MANIFEST));
+  for (const word of ["18,251", "18251", "#", "5f0b3e2a", "watermark", "ACCEPTED"]) expect(`${v.headline.emphasis} ${v.headline.rest}`).not.toContain(word);
+  for (const word of ["#", "watermark vector", "5f0b3e2a"]) expect(v.headline.dek).not.toContain(word);
+  expect(subjectCards(DEMO_MANIFEST).live.takeaway).toBe("serving batch 18,251 · stamped with the chain blocks it was read at; operational, never the proof");
+});
+
+test("the dek's finish instant is the receipt's own finished_at read against the manifest's served_at: the year prints only when they differ, and a malformed instant prints verbatim — never the clock's", () => {
+  const lastYear = structuredClone(EVIDENCE_MANIFEST);
+  if (lastYear.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  lastYear.reconcile.finished_at = "2025-12-31T23:59:07Z";
+  expect(verificationDek(lastYear)).toContain(`finished ${nb("Dec 31, 2025, 23:59 UTC")};`);
+  const offset = structuredClone(EVIDENCE_MANIFEST);
+  if (offset.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  offset.reconcile.finished_at = "2026-07-29T02:14:07+02:00";
+  expect(verificationDek(offset)).toContain("finished 2026-07-29T02:14:07+02:00;");
+  // A served_at that is no UTC instant names no year, so the year prints.
+  const unreferenced = structuredClone(EVIDENCE_MANIFEST);
+  unreferenced.served_at = "";
+  expect(verificationDek(unreferenced)).toContain(`finished ${nb("Jul 29, 2026, 02:14 UTC")};`);
+});
+
+test("a failed receipt: warn tone on the finding, the crit receipt chip, the failing words on the receipt line — never worded as accepted, never as 0 drift", () => {
   const v = view(ok(EVIDENCE_PROOF_FAILED));
   expect(v.receipt).toBe("failed");
   expect(v.headline.tone).toBe("warn");
-  expect(v.headline.emphasis).toBe(proofTakeaway(EVIDENCE_PROOF_FAILED));
-  expect(v.headline.emphasis).toContain("RECEIPT REJECTED — the proof badge is refused");
-  expect(v.chips[0]).toMatchObject({ value: "pin 5f0b3e2a" });
+  expect(v.headline.emphasis).toBe(proofTakeawayArms(EVIDENCE_PROOF_FAILED).proof);
+  expect(`${v.headline.emphasis} ${v.headline.rest}`).toBe(proofTakeaway(EVIDENCE_PROOF_FAILED));
+  expect(v.headline.emphasis).toBe("The last reconcile run did not match the chain exactly,");
+  expect(v.headline.rest).toBe("84 of 87 checked rows matched; 3 rows drifted.");
+  // The proof's first sentence claims nothing; the live batch is still named, and no check is said to cover it.
+  expect(v.headline.dek).toBe("No exactness is claimed for this deployment until a run passes. Batch 1, served now, is live data; no check covers it.");
+  expect(v.headline.dek).not.toContain("does not inherit");
+  expect(v.chips[0]).toMatchObject({ value: "5f0b3e2a" });
   expect(v.chips[2]).toMatchObject({ value: "failed · 84/87", tone: "crit", title: 'receipt verdict "fail" (exit 1)' });
   expect(v.receiptLine).toBe('Reconcile receipt failed: receipt verdict "fail" (exit 1) — 84 of 87 gated rows exact, 3 drift');
 });
@@ -263,6 +329,8 @@ test("a drifted receipt: warn tone, the warn receipt chip, the drift named on th
   const v = view(ok(drifted));
   expect(v.receipt).toBe("drift");
   expect(v.headline.tone).toBe("warn");
+  expect(v.headline.emphasis).toBe("The last reconcile run did not match the chain exactly,");
+  expect(v.headline.rest).toBe("86 of 87 checked rows matched; 1 row drifted.");
   expect(v.chips[2]).toMatchObject({ value: "drift · 86/87", tone: "warn" });
   expect(v.receiptLine).toBe("Reconcile receipt: 86 of 87 gated rows exact, 1 drift — drift named, the proof badge refused");
   expect(byKey(v.steps, "verify").tone).toBe("warn");
@@ -273,29 +341,37 @@ test("a drifted receipt: warn tone, the warn receipt chip, the drift named on th
   weldShort.proof_subject = { ...weldShort.proof_subject, status: "rejected" };
   const short = view(ok(weldShort));
   expect(short.receipt).toBe("drift");
+  expect(short.headline.rest).toBe("Cash matched 26 of 29 compared rows.");
+  expect(`${short.headline.emphasis} ${short.headline.rest}`).not.toContain("0 drift");
   expect(short.receiptLine).toBe("Reconcile receipt: 87 of 87 gated rows exact, 0 drift — debt_manager weld 26/29 exact, the proof badge refused");
 });
 
-test("no committed receipt: receipt none, warn tone, the pinned batch and receipt chips refused, the absent words", () => {
+test("no committed receipt: receipt none, warn tone, the proof pin and receipt chips refused, the absence named as an absence — the served reason in the dek", () => {
   const v = view(ok(EVIDENCE_NO_RECEIPT));
   expect(v.receipt).toBe("none");
   expect(v.headline.tone).toBe("warn");
-  expect(v.headline.emphasis).toContain("NO COMMITTED RECEIPT — nothing is proven");
-  expect(v.chips[0]).toMatchObject({ value: "none", tone: "refused" });
+  expect(v.headline.emphasis).toBe("Nothing is proven for this deployment:");
+  expect(v.headline.rest).toBe("no reconcile receipt is committed.");
+  expect(v.headline.dek).toBe("No committed receipt artifact is present in this deployment. Batch 1, served now, is live data; no check covers it.");
+  expect(v.chips[0]).toMatchObject({ label: "Proof pin", value: "none", tone: "refused" });
   expect(v.chips[2]).toMatchObject({ value: "none", tone: "refused" });
-  expect(v.chips[1]).toMatchObject({ value: "#1" });
+  expect(v.chips[1]).toMatchObject({ value: "1" });
   expect(v.receiptLine).toBe(`No reconcile receipt: ${EVIDENCE_NO_RECEIPT.reconcile_unavailable_reason ?? "∅"}`);
   expect(v.receiptLine).toContain("no committed receipt artifact is present in this deployment");
   expect(byKey(v.steps, "verify")).toMatchObject({ value: "—", sub: "no committed receipt" });
 });
 
-test("no servable batch: the header is warn, the live batch and key chips refuse, the key is never fabricated, the proof stands", () => {
+test("no servable batch: the proof's finding keeps the receipt's tone and the absence is said in ink beside it; the live batch and key chips refuse, the key is never fabricated, the proof stands", () => {
   const v = view(ok(EVIDENCE_NO_BATCH));
   expect(v.receipt).toBe("exact");
-  // A sentence that ends in NO SERVABLE BATCH is not green.
-  expect(v.headline.tone).toBe("warn");
-  expect(v.headline.emphasis).toContain("NO SERVABLE BATCH");
-  expect(v.headline.emphasis).toContain("receipt ACCEPTED at pin 5f0b3e2a");
+  // The tone is the receipt's and only the finding wears it: warn means "the receipt is not exact" on this page and nothing else, so an absent batch is never painted with it — it is worded, in the ink clause, the dek and two refused chips.
+  expect(v.headline.tone).toBe("ok");
+  expect(v.headline.emphasis).toBe("All 87 checked rows matched the chain exactly,");
+  expect(v.headline.rest).toBe("in the pinned reconcile run — but no batch can be served right now.");
+  expect(v.headline.dek).toBe(
+    `That run is a fixed, reproducible check, finished ${FINISHED}; its result covers that run and nothing else. No complete risk batch is available. This is a statement about the SERVICE, NOT a claim that the book is empty. The proof still stands for its own run; it says nothing about live data.`,
+  );
+  expect(v.headline.dek).not.toContain("Batch ");
   expect(v.chips[1]).toMatchObject({ value: "none", tone: "refused" });
   expect(v.chips[1]?.title).toContain("no complete risk batch is available");
   expect(v.chips[3]).toMatchObject({ value: "—", tone: "refused", title: "no batch, no key; never fabricated" });
@@ -306,8 +382,10 @@ test("a wire that claims no_batch beside a non-null substrate is demoted everywh
   const doctored = structuredClone(EVIDENCE_MANIFEST);
   doctored.live_subject = { status: "no_batch", reason: "wire claims no_batch beside a non-null substrate" };
   const v = view(ok(doctored));
-  expect(v.headline.emphasis).toContain("NO SERVABLE BATCH");
-  expect(v.headline.tone).toBe("warn");
+  expect(v.headline.rest).toBe("in the pinned reconcile run — but the manifest contradicts itself about the live batch, so none is claimed.");
+  expect(v.headline.dek).toContain("CONTRADICTION · the wire's live_subject.status");
+  expect(v.headline.dek).not.toContain("Batch 1");
+  expect(v.headline.tone).toBe("ok");
   expect(v.chips[1]).toMatchObject({ value: "none", tone: "refused" });
   expect(v.chips[3]).toMatchObject({ value: "—", tone: "refused" });
   expect(JSON.stringify(v)).not.toContain(REAL_KEY);
@@ -322,12 +400,14 @@ test("evidence unavailable: state unavailable, refused headline with the message
   expect(timed.state).toBe("unavailable");
   expect(timed.receipt).toBe("none");
   expect(timed.headline.tone).toBe("refused");
-  expect(timed.headline.emphasis).toBe("Evidence unavailable: 503 no_batch: no complete risk batch is available (http://api/v1/evidence).");
+  expect(timed.headline.emphasis).toBe("The verification record could not be fetched.");
   expect(timed.headline.rest).toBe("");
   expect(timed.headline.dek).toBe(
-    "Retry after 30s. The manifest could not be fetched, and nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.",
+    "503 no_batch: no complete risk batch is available (http://api/v1/evidence). Retry after 30s. Nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.",
   );
-  expect(timed.chips.map((c) => c.label)).toEqual(["Pinned batch", "Live batch", "Receipt", "Key"]);
+  // The drawer keeps the whole refusal: the headline, then its dek.
+  expect(timed.doctrine.at(-1)).toBe(`${timed.headline.emphasis} ${timed.headline.dek}`);
+  expect(timed.chips.map((c) => c.label)).toEqual(["Proof pin", "Live batch", "Receipt", "Batch key"]);
   expect(timed.chips.every((c) => c.tone === "refused")).toBe(true);
   expect(timed.chips[2]).toMatchObject({ value: "unknown" });
   expect(timed.receiptLine).toBe("No reconcile receipt: the evidence manifest could not be fetched. Retry after 30s.");
@@ -337,15 +417,19 @@ test("evidence unavailable: state unavailable, refused headline with the message
   expect(timed.steps.map((s) => s.line.figure)).toEqual(["154,796,552", "1", "unavailable", "17"]);
   expect(byKey(timed.steps, "verify").sentence).toBe("The receipt could not be read.");
   const untimed = view({ phase: "error", message: "Failed to fetch", retryAfterSeconds: null });
-  expect(untimed.headline.emphasis).toBe("Evidence unavailable: Failed to fetch.");
-  expect(untimed.headline.dek).toContain("The service did not say when to retry.");
+  expect(untimed.headline.emphasis).toBe("The verification record could not be fetched.");
+  expect(untimed.headline.dek).toBe(
+    "Failed to fetch. The service did not say when to retry. Nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.",
+  );
 });
 
 test("loading: a refused headline, refused chips, nothing claimed", () => {
   const v = view({ phase: "loading" });
   expect(v.state).toBe("loading");
   expect(v.receipt).toBe("none");
-  expect(v.headline).toEqual({ emphasis: "Loading the evidence manifest…", rest: "", tone: "refused", dek: VERIFICATION_DEK });
+  expect(v.headline).toEqual({ emphasis: "Loading this deployment's verification record…", rest: "", tone: "refused", dek: VERIFICATION_LOADING_DEK });
+  // The loading dek says what the page will hold and claims none of it.
+  expect(VERIFICATION_LOADING_DEK).toBe("The result of its last check against the chain, and the identity of the batch it is serving.");
   expect(v.chips.every((c) => c.tone === "refused")).toBe(true);
   expect(v.probes).toEqual([]);
 });
@@ -420,7 +504,7 @@ test("the live card: the pill, the takeaway, the key row with its copy name, the
   expect(live.title).toBe("Live subject");
   expect(live.status).toEqual({ text: "SERVING · WATERMARKED", tone: "ok" });
   expect(live.explain).toBe("explain live subject");
-  expect(live.takeaway).toBe("serving batch #1 · watermarked, operational — never the proof");
+  expect(live.takeaway).toBe("serving batch 1 · stamped with the chain blocks it was read at; operational, never the proof");
   expect(live.rows).toEqual([{ label: "materialization key", value: REAL_KEY, tone: "default", id: "key", copy: "copy materialization key" }]);
   if (live.fold === null) throw new Error("the committed example folds its digest and note");
   expect(live.fold.summary).toBe("2 provenance row(s)");
@@ -518,4 +602,7 @@ test("a publishability refusal in a reason is refused at the chip, never rendere
   const v = view(ok(leaking));
   expect(v.chips[1]?.title).toContain("WITHHELD");
   expect(JSON.stringify(v.chips)).not.toContain("db-host");
+  // The dek states the same reason, through the same check.
+  expect(v.headline.dek).toContain("WITHHELD");
+  expect(JSON.stringify(v.headline)).not.toContain("db-host");
 });

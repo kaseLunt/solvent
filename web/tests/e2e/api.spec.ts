@@ -6,16 +6,20 @@
 // (lib/proof-contract.gen.ts), which tests/unit/proof-contract-fidelity.spec.ts
 // welds to api/openapi.yaml; every sentence is lib/api-view.ts's.
 //
-// What this pins: the verdict header and its four chips; the three tiles;
-// every operation rendered, in the TOC and as a card, none dropped; curl and
-// sample fidelity against the page's own base URL; the copy affordance copies
-// the verbatim command; params carry their required flags and the SSE route
-// invents no sample; the error envelope is one table with every response and
-// its byte-faithful body beneath; the quickstart is the real client API; the
-// page links to Verification; the response codes sit above the sample fold;
-// the doctrine lives in the drawer, verbatim; answer before evidence.
+// What this pins: the verdict header in ink and its three identity chips; the
+// three tiles, each with a sub counted from the extract; the base URL stated
+// once; every operation rendered, in the endpoint index and as a card, none
+// dropped, the index a column of plain anchors walked by Tab in order; curl
+// and sample fidelity against the page's own base URL; the copy affordance
+// copies the verbatim command; params carry their required flags and the SSE
+// route invents no sample; the contract's prose set as paragraphs at the
+// reading measure, its words unchanged; the error envelope is one table with
+// every response and its byte-faithful body beneath; the quickstart is the
+// real client API; the page links to Verification; the response codes sit
+// above the sample fold; the doctrine lives in the drawer, verbatim; answer
+// before evidence.
 import { expect, test, type Page } from "@playwright/test";
-import { deriveApiView } from "../../lib/api-view";
+import { contractParagraphs, deriveApiView } from "../../lib/api-view";
 import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS } from "../../lib/proof-contract.gen";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 
@@ -26,39 +30,65 @@ async function open(page: Page): Promise<void> {
   await page.goto("/developers");
 }
 
-/** The API origin the page states its samples target — read from the page, never assumed. */
+const chip = (page: Page, label: string) => page.getByTestId("api-verdict").locator(`[data-chip="${label}"]`);
+
+/** The API origin the page states its samples target — read from the one place the page states it, never assumed. */
 async function statedBaseUrl(page: Page): Promise<string> {
-  const value = (await page.getByTestId("api-base-url-value").textContent()) ?? "";
+  const value = (await chip(page, "Base URL").locator("b").textContent()) ?? "";
   expect(value.startsWith("http")).toBe(true);
   return value;
 }
 
-const chip = (page: Page, label: string) => page.getByTestId("api-verdict").locator(`[data-chip="${label}"]`);
-
-test("the verdict header: the contract named in the kicker, the operation count as the headline and the H1, the dek's one clause, four chips, tone ok", async ({ page }) => {
+test("the verdict header: the contract's version in the kicker, the endpoint count as the headline and the H1 in ink, the fact dek, three identity chips", async ({ page }) => {
   await open(page);
   const baseUrl = await statedBaseUrl(page);
   const view = deriveApiView(baseUrl);
   await expect(page.getByTestId("api-surface")).toBeVisible();
-  await expect(page.getByTestId("api-verdict")).toHaveAttribute("data-variant", "ok");
-  await expect(page.getByTestId("api-verdict")).toContainText(`API · ${CONTRACT_META.title} v${CONTRACT_META.version}`);
-  await expect(page.getByTestId("api-verdict-headline")).toHaveText(`${String(OPERATIONS.length)} read-only operations, every money value a decimal string.`);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(view.headline.emphasis);
-  await expect(page.getByTestId("api-verdict-dek")).toHaveText("If a handler disagrees with this page, that is a failure, not documentation lag.");
+  // A statement of record wears ink: green is a health verdict, and this page has none.
+  await expect(page.getByTestId("api-verdict")).toHaveAttribute("data-variant", "neutral");
+  await expect(page.getByTestId("api-verdict")).toContainText(`API · contract v${CONTRACT_META.version}`);
+  await expect(page.getByTestId("api-verdict-headline")).toHaveText(`${String(OPERATIONS.length)} read-only endpoints, every money value an exact decimal string.`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(`${view.headline.emphasis} ${view.headline.rest}`);
+  await expect(page.getByTestId("api-verdict-dek")).toHaveText(view.headline.dek);
+  await expect(page.getByTestId("api-verdict-dek")).toHaveText(
+    "No key or sign-in; requests are rate-limited per client. Every sample below is the contract's own example (api/openapi.yaml, v1.8.0) or a committed client fixture validated against it, cited beside each. A CI test re-reads both and fails if this page's extract has drifted.",
+  );
+  await expect(page.getByTestId("api-verdict-identity").locator("[data-chip]")).toHaveCount(3);
   await expect(chip(page, "Contract")).toContainText(`${CONTRACT_META.title} · v${CONTRACT_META.version}`);
-  await expect(chip(page, "Operations")).toContainText(String(OPERATIONS.length));
   await expect(chip(page, "Base URL")).toContainText(baseUrl);
   await expect(chip(page, "Source")).toContainText(CONTRACT_META.sourcePath);
+  // A count is a measure: its tile owns it, and no chip repeats it.
+  await expect(chip(page, "Operations")).toHaveCount(0);
+  await expect(chip(page, "Endpoints")).toHaveCount(0);
 });
 
-test("three tiles: operations, error responses, contract version — the extract's own figures", async ({ page }) => {
+test("the base URL is stated once: the header's mono chip carries it in full, the quickstart carries it copyably, and no second strip repeats it", async ({ page }) => {
   await open(page);
-  await expect(page.getByTestId("api-kpi-operations")).toContainText(String(OPERATIONS.length));
-  await expect(page.getByTestId("api-kpi-errors")).toContainText(String(ERROR_RESPONSES.length));
-  await expect(page.getByTestId("api-kpi-version")).toContainText(CONTRACT_META.version);
+  const baseUrl = await statedBaseUrl(page);
+  await expect(page.getByTestId("api-base-url")).toHaveCount(0);
+  await expect(page.locator("[data-chip='Base URL']")).toHaveCount(1);
+  const family = await chip(page, "Base URL").locator("b").evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(family.toLowerCase()).toContain("mono");
+  await expect(page.getByTestId("api-quickstart")).toContainText(`baseUrl: "${baseUrl}"`);
 });
 
-test("every contract operation renders — in the TOC and as a card; none added, none dropped", async ({ page }) => {
+test("three tiles: endpoints, error responses, contract version — the extract's own figures, each with a sub counted from the extract", async ({ page }) => {
+  await open(page);
+  const view = deriveApiView(await statedBaseUrl(page));
+  const endpoints = page.getByTestId("api-kpi-operations");
+  await expect(endpoints).toContainText("Endpoints");
+  await expect(endpoints).toContainText(String(OPERATIONS.length));
+  await expect(endpoints).toContainText(view.tiles.operations.sub);
+  await expect(endpoints).toContainText("15 GET · 2 POST");
+  const errors = page.getByTestId("api-kpi-errors");
+  await expect(errors).toContainText(String(ERROR_RESPONSES.length));
+  await expect(errors).toContainText(view.tiles.errors.sub);
+  await expect(errors).toContainText("400 · 404 · 409 · 429 · 500 · 503");
+  await expect(page.getByTestId("api-kpi-version")).toContainText(CONTRACT_META.version);
+  await expect(page.getByTestId("api-kpi-version")).toContainText(CONTRACT_META.sourcePath);
+});
+
+test("every contract operation renders — in the endpoint index and as a card; none added, none dropped", async ({ page }) => {
   await open(page);
   for (const op of OPERATIONS) {
     await expect(page.getByTestId(`api-endpoint-${op.operationId}`)).toBeVisible();
@@ -66,6 +96,37 @@ test("every contract operation renders — in the TOC and as a card; none added,
   }
   await expect(page.locator('[data-testid^="api-endpoint-"]')).toHaveCount(OPERATIONS.length);
   await expect(page.getByTestId("api-toc").locator("a")).toHaveCount(OPERATIONS.length);
+});
+
+test("the endpoint index is aligned rows of plain anchors: the method in its own coloured column, no button form, and Tab walks every row in the contract's order", async ({ page }) => {
+  await open(page);
+  const anchors = page.getByTestId("api-toc").locator("a");
+  // An anchor wears no button form: one tab away that form is a pressable filter.
+  for (const anchor of await anchors.all()) {
+    expect(await anchor.getAttribute("class")).not.toMatch(/btn/i);
+    expect(await anchor.evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe("0px");
+  }
+  // The method sits in a column of its own: within one index column every path starts at one x.
+  const first = anchors.nth(0);
+  const second = anchors.nth(1);
+  await expect(first.locator("span")).toHaveText(["GET", "/v1/book"]);
+  const x = async (row: typeof first, n: number) => (await row.locator("span").nth(n).boundingBox())?.x ?? Number.NaN;
+  expect(await x(first, 0)).toBe(await x(second, 0));
+  expect(await x(first, 1)).toBe(await x(second, 1));
+  // The method carries the card's verb colour: a POST is not a GET.
+  const post = page.getByTestId("api-toc").locator('a[href="#runBookScenario"] span').first();
+  await expect(post).toHaveText("POST");
+  const colour = (el: Element) => getComputedStyle(el).color;
+  expect(await post.evaluate(colour)).not.toBe(await first.locator("span").first().evaluate(colour));
+  // Keyboard: every row is a stop, in the contract's order — DOM order is reading order, down each column.
+  await first.focus();
+  for (let i = 0; i < OPERATIONS.length; i += 1) {
+    await expect(anchors.nth(i)).toBeFocused();
+    await page.keyboard.press("Tab");
+  }
+  // And a row still lands on its card.
+  await anchors.nth(0).click();
+  await expect(page).toHaveURL(/#getBook$/);
 });
 
 test("curl-sample fidelity: the evidence curl and the quickstart target the stated base URL; the 200 sample equals the fixture", async ({ page }) => {
@@ -99,6 +160,19 @@ test("params render with required flags; the SSE route invents no JSON sample", 
   const stream = page.getByTestId("api-endpoint-getStream");
   await expect(stream).toContainText("text/event-stream · no JSON sample");
   await expect(stream.locator('[data-testid="api-sample-getStream"]')).toHaveCount(0);
+});
+
+test("the contract's prose is set as paragraphs at the reading measure: the yaml's hard wraps are gone, the words are not", async ({ page }) => {
+  await open(page);
+  const op = OPERATIONS.find((o) => o.operationId === "getEvents");
+  if (op === undefined) throw new Error("contract invariant: getEvents exists");
+  const expected = contractParagraphs(op.description);
+  expect(expected.length).toBeGreaterThan(1);
+  const prose = page.getByTestId("api-description-getEvents");
+  await expect(prose.locator("p")).toHaveText([...expected]);
+  // A hard wrap is no longer preserved, and the column is the prose measure, not the card's width.
+  expect(await prose.locator("p").first().evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("normal");
+  expect((await prose.boundingBox())?.width ?? Number.NaN).toBeLessThanOrEqual(720);
 });
 
 test("the error envelope is one table: every contract response a row with its status, and each body byte-faithful beneath", async ({ page }) => {
@@ -154,8 +228,9 @@ test("the doctrine lives in the drawer, verbatim: the intro, the base-URL note, 
   await open(page);
   const baseUrl = await statedBaseUrl(page);
   const view = deriveApiView(baseUrl);
-  // The intro's opening is doctrine, not page copy; only its closing clause (the dek) stays in the header.
+  // The intro is doctrine, not page copy — its opening and its slogan alike; the header states the facts that make the slogan true.
   await expect(page.locator("main")).not.toContainText("rendered from its own examples");
+  await expect(page.locator("main")).not.toContainText("documentation lag");
   await expect(page.getByTestId("api-drawer-body")).toHaveCount(0);
 
   await page.getByTestId("api-drawer").click();
@@ -172,12 +247,11 @@ test("the doctrine lives in the drawer, verbatim: the intro, the base-URL note, 
   await expect(page.getByTestId("api-drawer")).toBeFocused();
 });
 
-test("answer before evidence: header above tiles above the base URL above the TOC above the quickstart above the endpoints above the errors", async ({ page }) => {
+test("answer before evidence: header above tiles above the endpoint index above the quickstart above the endpoints above the errors", async ({ page }) => {
   await open(page);
   const y = async (id: string) => (await page.getByTestId(id).boundingBox())?.y ?? Number.NaN;
   expect(await y("api-verdict")).toBeLessThan(await y("api-kpi-operations"));
-  expect(await y("api-kpi-operations")).toBeLessThan(await y("api-base-url"));
-  expect(await y("api-base-url")).toBeLessThan(await y("api-toc"));
+  expect(await y("api-kpi-operations")).toBeLessThan(await y("api-toc"));
   expect(await y("api-toc")).toBeLessThan(await y("api-quickstart"));
   expect(await y("api-quickstart")).toBeLessThan(await y("api-endpoint-getBook"));
   expect(await y("api-endpoint-getBook")).toBeLessThan(await y("api-errors"));

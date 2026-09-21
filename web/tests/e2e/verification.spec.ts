@@ -43,7 +43,7 @@ if (REAL_KEY.length === 0) throw new Error("fixture invariant: the example carri
 const dm = META.watermark_vector.find((w) => w.engine === "debt_manager");
 if (dm === undefined) throw new Error("fixture invariant: meta carries the debt_manager watermark");
 
-test("the committed example: state ok, receipt exact, the takeaway headline, the split dek, four chips, four tiles, four sentences, the receipt line", async ({
+test("the committed example: state ok, receipt exact, the takeaway headline with only the proof's finding toned, the two-fact dek, four chips, four numbered tiles, four sentences, the receipt line", async ({
   page,
 }) => {
   await mockAll(page);
@@ -52,28 +52,45 @@ test("the committed example: state ok, receipt exact, the takeaway headline, the
   await expect(surface(page)).toHaveAttribute("data-receipt", "exact");
   await expect(verdict(page)).toHaveAttribute("data-variant", "ok");
   await expect(verdict(page)).toContainText("Verification · this deployment");
-  await expect(headline(page)).toHaveText("receipt ACCEPTED at pin 5f0b3e2a; serving batch #1 under its watermark vector.");
-  await expect(page.getByTestId("verification-verdict-dek")).toHaveText("Two subjects, never one: the pinned proof and the live batch.");
+  await expect(headline(page)).toHaveText("All 87 checked rows matched the chain exactly, in this deployment's pinned reconcile run.");
+  // The tone stops where the proof's finding stops: the scope is ink, and the live batch is not in the sentence at all.
+  await expect(headline(page).locator("b")).toHaveText("All 87 checked rows matched the chain exactly,");
+  await expect(headline(page)).not.toContainText("batch");
+  await expect(page.getByTestId("verification-verdict-dek")).toHaveText(
+    "That run is a fixed, reproducible check, finished Jul 29, 02:14 UTC; its result covers that run and nothing else. Batch 1, served now, is live data that was not re-checked and does not inherit it.",
+  );
 
-  // Identity: both subjects named, the receipt's state and tally, the whole key behind the chip.
-  await expect(chip(page, "Pinned batch")).toContainText("pin 5f0b3e2a");
-  await expect(chip(page, "Live batch")).toContainText("#1");
+  // Identity: both subjects named — the proof by its pin, never as a batch — the receipt's state and tally, the whole key behind the chip.
+  await expect(chip(page, "Pinned batch")).toHaveCount(0);
+  await expect(chip(page, "Proof pin")).toContainText("5f0b3e2a");
+  // The exact layer under the dek's humanised finish: the whole sha and the wire's own instant.
+  await expect(chip(page, "Proof pin")).toHaveAttribute(
+    "title",
+    `comparison sha256 ${EVIDENCE_MANIFEST.reconcile?.comparison_sha256 ?? "∅"} · finished 2026-07-29T02:14:07Z`,
+  );
+  await expect(chip(page, "Live batch").locator("b")).toHaveText("1");
   await expect(chip(page, "Receipt")).toContainText("exact · 87/87");
-  await expect(chip(page, "Key")).toHaveAttribute("title", REAL_KEY);
+  await expect(chip(page, "Batch key")).toHaveAttribute("title", REAL_KEY);
 
-  // The four steps — the Overview's numbers, each with its one sentence.
+  // The four steps — the Overview's numbers, each headed once (its number on its tile) and each with its one sentence.
+  await expect(page.getByTestId("verification-kpi-index")).toContainText("01 · Index");
+  await expect(page.getByTestId("verification-kpi-compute")).toContainText("02 · Compute");
+  await expect(page.getByTestId("verification-kpi-verify")).toContainText("03 · Verify");
+  await expect(page.getByTestId("verification-kpi-serve")).toContainText("04 · Serve");
   await expect(page.getByTestId("verification-kpi-index")).toContainText(dm.last_block.toLocaleString("en-US"));
   await expect(page.getByTestId("verification-kpi-compute")).toContainText("1");
   await expect(page.getByTestId("verification-kpi-compute")).toContainText("batch · 2 Cash accounts");
   await expect(page.getByTestId("verification-kpi-verify")).toContainText("87/87");
+  await expect(page.getByTestId("verification-kpi-verify")).toContainText("gated (must-match) rows exact · drift 0");
   await expect(page.getByTestId("verification-kpi-verify")).toHaveAttribute("data-tone", "ok");
   await expect(page.getByTestId("verification-kpi-serve")).toContainText("17");
-  await expect(page.getByTestId("verification-step-index")).toContainText("Chain heights indexed per engine, ahead of every batch.");
-  await expect(page.getByTestId("verification-step-compute")).toContainText(
+  // The sentence carries no second heading: it is the whole of its paragraph.
+  await expect(page.getByTestId("verification-step-index")).toHaveText("Chain heights indexed per engine, ahead of every batch.");
+  await expect(page.getByTestId("verification-step-compute")).toHaveText(
     "Batch 1 computed at 2026-07-29T10:00:00Z; every position's health from the wire's own integers.",
   );
-  await expect(page.getByTestId("verification-step-verify")).toContainText("87 gated rows reconciled exact against the chain; 0 drift named.");
-  await expect(page.getByTestId("verification-step-serve")).toContainText("17 read-only endpoints, every money value a decimal string.");
+  await expect(page.getByTestId("verification-step-verify")).toHaveText("87 gated rows reconciled exact against the chain; 0 drift named.");
+  await expect(page.getByTestId("verification-step-serve")).toHaveText("17 read-only endpoints, every money value a decimal string.");
   const receipt = page.getByTestId("verification-receipt");
   await expect(receipt).toHaveText("Reconcile receipt: 87 gated rows exact, 0 drift");
   await expect(receipt).toHaveAttribute("data-tone", "ok");
@@ -101,6 +118,25 @@ test("the split renders as two subjects; PROOF · EXACT lives ONLY on the proof 
   await expect(live).not.toContainText("EXACT");
 });
 
+test("the two cards share a bottom edge, and an identifier's row stacks so the whole key holds one line, left-set, beside its copy chip", async ({ page }) => {
+  await mockAll(page);
+  await page.goto("/proof");
+  const proof = await page.getByTestId("verification-subject-proof").boundingBox();
+  const live = await page.getByTestId("verification-subject-live").boundingBox();
+  if (proof === null || live === null) throw new Error("expected both cards laid out");
+  expect(Math.abs(proof.y + proof.height - (live.y + live.height))).toBeLessThanOrEqual(1);
+  const keyRow = page.getByTestId("verification-key");
+  // One line box: the 64-hex key is never broken mid-token.
+  const key = keyRow.getByText(REAL_KEY, { exact: true });
+  expect(await key.evaluate((el) => el.getClientRects().length)).toBe(1);
+  // Stacked and left-set: the value begins under its label, not against the card's right edge.
+  const label = await keyRow.locator("span").first().boundingBox();
+  const value = await key.boundingBox();
+  if (label === null || value === null) throw new Error("expected the key row laid out");
+  expect(value.y).toBeGreaterThan(label.y);
+  expect(Math.abs(value.x - label.x)).toBeLessThanOrEqual(1);
+});
+
 test("the materialization key renders with a copy affordance that copies the COMPLETE key", async ({ page }) => {
   await mockAll(page);
   await page.goto("/proof");
@@ -120,7 +156,12 @@ test("a failed receipt: data-receipt failed, the warn header, the rejected pill,
   await page.goto("/proof");
   await expect(surface(page)).toHaveAttribute("data-receipt", "failed");
   await expect(verdict(page)).toHaveAttribute("data-variant", "warn");
-  await expect(headline(page)).toContainText("RECEIPT REJECTED — the proof badge is refused");
+  // Never worded as accepted, and never as "0 drift": the receipt's own tally is the finding.
+  await expect(headline(page)).toHaveText("The last reconcile run did not match the chain exactly, 84 of 87 checked rows matched; 3 rows drifted.");
+  await expect(headline(page).locator("b")).toHaveText("The last reconcile run did not match the chain exactly,");
+  await expect(page.getByTestId("verification-verdict-dek")).toHaveText(
+    "No exactness is claimed for this deployment until a run passes. Batch 1, served now, is live data; no check covers it.",
+  );
   await expect(chip(page, "Receipt")).toContainText("failed · 84/87");
   await expect(chip(page, "Receipt")).toHaveClass(/chipCrit/);
   await expect(page.getByTestId("verification-proof-status")).toHaveText("RECEIPT REJECTED");
@@ -137,14 +178,18 @@ test("a failed receipt: data-receipt failed, the warn header, the rejected pill,
   await expect(page.getByTestId("verification-live-status")).toHaveText("SERVING · WATERMARKED");
 });
 
-test("a missing receipt is a first-class state: data-receipt none, warn, the served reason, the refused pinned-batch chip", async ({ page }) => {
+test("a missing receipt is a first-class state: data-receipt none, warn, the served reason, the refused proof-pin chip", async ({ page }) => {
   await mockAll(page, EVIDENCE_NO_RECEIPT);
   await page.goto("/proof");
   await expect(surface(page)).toHaveAttribute("data-receipt", "none");
   await expect(verdict(page)).toHaveAttribute("data-variant", "warn");
-  await expect(headline(page)).toContainText("NO COMMITTED RECEIPT — nothing is proven");
-  await expect(chip(page, "Pinned batch")).toContainText("none");
-  await expect(chip(page, "Pinned batch")).toHaveClass(/chipRefused/);
+  // An absence named as an absence — never a zero, never a pass.
+  await expect(headline(page)).toHaveText("Nothing is proven for this deployment: no reconcile receipt is committed.");
+  await expect(page.getByTestId("verification-verdict-dek")).toHaveText(
+    "No committed receipt artifact is present in this deployment. Batch 1, served now, is live data; no check covers it.",
+  );
+  await expect(chip(page, "Proof pin")).toContainText("none");
+  await expect(chip(page, "Proof pin")).toHaveClass(/chipRefused/);
   await expect(chip(page, "Receipt")).toContainText("none");
   await expect(page.getByTestId("verification-proof-status")).toHaveText("NO COMMITTED RECEIPT");
   await expect(page.getByTestId("verification-subject-proof")).toContainText("no committed receipt artifact is present in this deployment");
@@ -163,13 +208,17 @@ test("a missing batch renders loudly, refuses the live chips and fabricates NO m
   await mockAll(page, EVIDENCE_NO_BATCH);
   await page.goto("/proof");
   await expect(surface(page)).toHaveAttribute("data-receipt", "exact");
-  await expect(headline(page)).toContainText("receipt ACCEPTED at pin 5f0b3e2a; NO SERVABLE BATCH.");
-  // A sentence that ends in NO SERVABLE BATCH is not green.
-  await expect(verdict(page)).toHaveAttribute("data-variant", "warn");
+  await expect(headline(page)).toHaveText("All 87 checked rows matched the chain exactly, in the pinned reconcile run — but no batch can be served right now.");
+  // The tone is the receipt's and only the finding wears it; the absent batch is said in the ink clause, the dek and two refused chips — never painted with the colour that means "the receipt is not exact".
+  await expect(verdict(page)).toHaveAttribute("data-variant", "ok");
+  await expect(headline(page).locator("b")).toHaveText("All 87 checked rows matched the chain exactly,");
+  await expect(page.getByTestId("verification-verdict-dek")).toContainText(
+    "No complete risk batch is available. This is a statement about the SERVICE, NOT a claim that the book is empty. The proof still stands for its own run; it says nothing about live data.",
+  );
   await expect(chip(page, "Live batch")).toContainText("none");
   await expect(chip(page, "Live batch")).toHaveClass(/chipRefused/);
-  await expect(chip(page, "Key")).toContainText("—");
-  await expect(chip(page, "Key")).toHaveClass(/chipRefused/);
+  await expect(chip(page, "Batch key")).toContainText("—");
+  await expect(chip(page, "Batch key")).toHaveClass(/chipRefused/);
   await expect(page.getByTestId("verification-live-status")).toHaveText("NO SERVABLE BATCH");
   await expect(page.getByTestId("verification-subject-live")).toContainText("no complete risk batch is available");
   await expect(page.getByTestId("verification-key")).toContainText("never fabricated");
@@ -242,8 +291,8 @@ test("evidence unavailable: state unavailable, the refused header with the retry
   await expect(surface(page)).toHaveAttribute("data-state", "unavailable");
   await expect(surface(page)).toHaveAttribute("data-receipt", "none");
   await expect(verdict(page)).toHaveAttribute("data-variant", "refused");
-  await expect(headline(page)).toContainText(/^Evidence unavailable: /);
-  await expect(page.getByTestId("verification-verdict-dek")).toContainText("nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.");
+  await expect(headline(page)).toHaveText("The verification record could not be fetched.");
+  await expect(page.getByTestId("verification-verdict-dek")).toContainText("Nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.");
   await expect(chip(page, "Receipt")).toContainText("unknown");
   // Neither subject is invented while the manifest is unreachable; the probes have nothing to list.
   await expect(page.getByTestId("verification-subject-proof")).toHaveCount(0);
@@ -383,7 +432,7 @@ test("the live card leads with its takeaway; the key stays visible; digest + not
   const live = page.getByTestId("verification-subject-live");
   const digest = EVIDENCE_MANIFEST.substrate?.substrate_digest ?? "";
   if (digest.length === 0) throw new Error("fixture invariant: the example carries a digest");
-  await expect(live.getByTestId("verification-live-takeaway")).toHaveText("serving batch #1 · watermarked, operational — never the proof");
+  await expect(live.getByTestId("verification-live-takeaway")).toHaveText("serving batch 1 · stamped with the chain blocks it was read at; operational, never the proof");
   await expect(live.getByTestId("verification-key")).toBeVisible();
   const fold = live.getByTestId("verification-live-forensics");
   await expect(fold.locator("summary")).toHaveText("2 provenance row(s)");
@@ -472,9 +521,10 @@ test("a wire that claims no_batch beside a non-null substrate is demoted everywh
   doctored.live_subject = { status: "no_batch", reason: "wire claims no_batch beside a non-null substrate" };
   await mockAll(page, doctored);
   await page.goto("/proof");
-  await expect(headline(page)).toContainText("NO SERVABLE BATCH");
+  await expect(headline(page)).toContainText("but the manifest contradicts itself about the live batch, so none is claimed.");
+  await expect(page.getByTestId("verification-verdict-dek")).not.toContainText("Batch 1");
   await expect(page.getByTestId("verification-live-status")).toHaveText("NO SERVABLE BATCH");
   await expect(chip(page, "Live batch")).toContainText("none");
-  await expect(chip(page, "Key")).toContainText("—");
+  await expect(chip(page, "Batch key")).toContainText("—");
   await expect(page.getByText(REAL_KEY)).toHaveCount(0);
 });

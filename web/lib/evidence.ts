@@ -19,6 +19,8 @@ import { readWirePopulation, readWireScale } from "./wireGuard";
 import { classifyFactorPrice } from "./factorPriceGuard";
 import { liqBonusEvidenceValue, paramPercent, paramScaleNote } from "./params-format";
 import { noPricePathTitle } from "./liq-distance";
+import { engineName } from "./inspector-headline";
+import { groupInt } from "./prose";
 
 export type EvidenceTone = "default" | "ok" | "warn" | "crit" | "dim";
 
@@ -690,28 +692,114 @@ export function proofPin(reconcile: ManifestReconcile): string {
 }
 
 /**
- * The Proof Center's head takeaway (W-3L, inventory 439): both subjects'
- * statuses in ONE computed sentence. BY LAW both failing arms surface here
- * — a head that says nothing while the receipt is rejected, or while no
- * batch serves, reads as a pass. Composed from the same status derivations
- * the two cards render (one source), so the head and the cards cannot
- * disagree — including under wire contradictions, which those derivations
- * already demote.
+ * The head takeaway's two arms. `proof` is the receipt's own finding — the
+ * only clause a page may tone, and only by the receipt's state. `scope` ends
+ * the sentence in ink: where the finding holds, and the live subject's
+ * absence when no batch is claimed. A SERVING batch is never named here: it
+ * is the live subject, and it may not stand inside the proof's finding as
+ * though it shared it.
+ */
+export interface ProofTakeawayArms {
+  readonly proof: string;
+  readonly scope: string;
+}
+
+const DID_NOT_MATCH = "The last reconcile run did not match the chain exactly,";
+
+const rowsWord = (count: number): string => (count === 1 ? "row" : "rows");
+
+/**
+ * The live subject's absence as the head words it: after an accepted finding
+ * (`but`), or as a sentence of its own after a failing one (`also`). A
+ * manifest that contradicts itself about its batch is said to — "no batch can
+ * be served" would be a claim the contradiction does not license.
+ */
+const LIVE_ABSENCE = {
+  "no-batch": {
+    but: "but no batch can be served right now.",
+    also: "No batch can be served right now either.",
+  },
+  contradicted: {
+    but: "but the manifest contradicts itself about the live batch, so none is claimed.",
+    also: "The manifest also contradicts itself about the live batch, so none is claimed.",
+  },
+} as const;
+
+function liveAbsence(manifest: EvidenceManifest): keyof typeof LIVE_ABSENCE | null {
+  if (liveSubjectStatus(manifest).kind === "serving") return null;
+  const derived = deriveLiveSubjectStatus(manifest).kind;
+  const wire = manifest.live_subject as EvidenceManifest["live_subject"] | undefined;
+  const claimed = wire === undefined ? derived : wire.status === "serving" ? "serving" : "no-batch";
+  return claimed === derived ? "no-batch" : "contradicted";
+}
+
+/**
+ * A rejected receipt's finding, by the receipt's OWN numbers and in the order
+ * a reader needs them: the gated tally, then a short weld, then a verdict
+ * that is not a clean pass. A drift of zero is never printed — a failing
+ * receipt is not worded by the one tally it happens to keep clean. The wire
+ * refusing a receipt that passes on its own numbers is a finding of its own.
+ */
+function rejectedArms(manifest: EvidenceManifest, reconcile: ManifestReconcile): ProofTakeawayArms {
+  if (deriveProofSubjectStatus(manifest).kind !== "rejected") {
+    return { proof: "The proof cannot be accepted:", scope: "the manifest contradicts its own receipt." };
+  }
+  const exact = readWirePopulation(reconcile.gated_exact, "gated_exact");
+  const rows = readWirePopulation(reconcile.gated_rows, "gated_rows");
+  const drift = readWirePopulation(reconcile.gated_drift, "gated_drift");
+  if (drift !== 0 || exact !== rows) {
+    const drifted = drift === 0 ? "" : `; ${groupInt(drift)} ${rowsWord(drift)} drifted`;
+    return { proof: DID_NOT_MATCH, scope: `${groupInt(exact)} of ${groupInt(rows)} checked ${rowsWord(rows)} matched${drifted}.` };
+  }
+  const short = reconcile.welds.find(
+    (weld) => readWirePopulation(weld.rows_exact, "rows_exact") !== readWirePopulation(weld.rows_compared, "rows_compared"),
+  );
+  if (short !== undefined) {
+    return {
+      proof: DID_NOT_MATCH,
+      scope: `${engineName(short.engine)} matched ${groupInt(short.rows_exact)} of ${groupInt(short.rows_compared)} compared ${rowsWord(short.rows_compared)}.`,
+    };
+  }
+  return {
+    proof: "The last reconcile run did not pass:",
+    scope: `its receipt records a verdict that is not a clean pass (exit code ${String(readWirePopulation(reconcile.exit_code, "exit_code"))}).`,
+  };
+}
+
+/**
+ * Both arms, from the same status derivations the two cards render (one
+ * source), so the head and the cards cannot disagree — including under wire
+ * contradictions, which those derivations already demote. A failed or absent
+ * receipt is never worded as a match, and an absent batch is named in every
+ * proof arm.
+ */
+export function proofTakeawayArms(manifest: EvidenceManifest): ProofTakeawayArms {
+  const proof = proofSubjectStatus(manifest);
+  const absence = liveAbsence(manifest);
+  if (proof.kind === "accepted") {
+    const rows = readWirePopulation(proof.reconcile.gated_rows, "gated_rows");
+    return {
+      proof: rows === 1 ? "The 1 checked row matched the chain exactly," : `All ${groupInt(rows)} checked rows matched the chain exactly,`,
+      scope: absence === null ? "in this deployment's pinned reconcile run." : `in the pinned reconcile run — ${LIVE_ABSENCE[absence].but}`,
+    };
+  }
+  const failing: ProofTakeawayArms =
+    proof.kind === "rejected"
+      ? rejectedArms(manifest, proof.reconcile)
+      : { proof: "Nothing is proven for this deployment:", scope: "no reconcile receipt is committed." };
+  return absence === null ? failing : { proof: failing.proof, scope: `${failing.scope} ${LIVE_ABSENCE[absence].also}` };
+}
+
+/**
+ * The head takeaway, whole: the two arms, joined by one space. BY LAW both
+ * failing arms surface here — a head that says nothing while the receipt is
+ * rejected, or while no batch serves, reads as a pass. The sentence is
+ * composed FROM the arms, so a page that tones one arm and inks the other
+ * prints this sentence and no other.
  */
 export function proofTakeaway(manifest: EvidenceManifest): string {
-  const proof = proofSubjectStatus(manifest);
-  const live = liveSubjectStatus(manifest);
-  const proofArm =
-    proof.kind === "accepted"
-      ? `receipt ACCEPTED at pin ${proofPin(proof.reconcile)}`
-      : proof.kind === "rejected"
-        ? "RECEIPT REJECTED — the proof badge is refused"
-        : "NO COMMITTED RECEIPT — nothing is proven";
-  const liveArm =
-    live.kind === "serving"
-      ? `serving batch #${String(readWirePopulation(live.substrate.batch_id, "batch_id"))} under its watermark vector`
-      : "NO SERVABLE BATCH";
-  return `${proofArm}; ${liveArm}.`;
+  const arms = proofTakeawayArms(manifest);
+  return `${arms.proof} ${arms.scope}`;
 }
 
 const PROOF_COMPARATOR =

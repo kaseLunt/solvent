@@ -1,6 +1,6 @@
 import { KpiTile, SectionHead } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { VERIFICATION_COPY, type PipelineStep, type ReceiptState } from "@/lib/verification-view";
+import { stepTileLabel, VERIFICATION_COPY, type PipelineStep, type ReceiptState } from "@/lib/verification-view";
 import styles from "./verification.module.css";
 
 const RECEIPT_TONE: Record<ReceiptState, "ok" | "warn" | "refused"> = {
@@ -20,9 +20,11 @@ export interface VerificationArchitectureProps {
 
 /**
  * Architecture & verification (plan R4): the Overview's four steps as tiles,
- * each with its one sentence, and the reconcile receipt beneath. The section
- * is `#architecture` — where the Overview's "Architecture & verification →"
- * link lands. Every word is the step's; this component prints.
+ * each with its one sentence, and the reconcile receipt beneath. A step is
+ * headed once: its number rides its tile's label, and the sentence under the
+ * tile carries no second heading. The section is `#architecture` — where the
+ * Overview's "Architecture & verification →" link lands. Every word is the
+ * step's; this component prints.
  */
 export function VerificationArchitecture({ steps, receipt, receiptLine, pending }: VerificationArchitectureProps) {
   return (
@@ -35,7 +37,7 @@ export function VerificationArchitecture({ steps, receipt, receiptLine, pending 
             <KpiTile
               key={step.key}
               testId={`verification-kpi-${step.key}`}
-              label={step.label}
+              label={stepTileLabel(step)}
               value={step.value}
               sub={step.sub}
               tone={isPending ? "neutral" : step.tone}
@@ -47,7 +49,6 @@ export function VerificationArchitecture({ steps, receipt, receiptLine, pending 
       <div className={styles.steps}>
         {steps.map((step) => (
           <p key={step.key} className={styles.step} data-testid={`verification-step-${step.key}`}>
-            <span className={styles.stepNum}>{step.ordinal}</span>
             {step.sentence}
           </p>
         ))}

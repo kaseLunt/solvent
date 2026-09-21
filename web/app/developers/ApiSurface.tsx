@@ -2,7 +2,7 @@ import { KitTable, KpiTile, SectionHead, VerdictHeader, type KitColumn, type Kit
 import kit from "@/components/kit/kit.module.css";
 import { solventBaseUrl } from "@/lib/api";
 import { deriveApiView } from "@/lib/api-view";
-import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS } from "@/lib/proof-contract.gen";
+import { ERROR_RESPONSES, OPERATIONS } from "@/lib/proof-contract.gen";
 import { ApiDrawer } from "./ApiDrawer";
 import styles from "./api.module.css";
 import { CodeBlock } from "./CodeBlock";
@@ -13,8 +13,9 @@ import { EndpointCard } from "./EndpointCard";
 // extracted by tests/fixtures/generate-proof.mjs, drift-gated by
 // tests/unit/proof-contract-fidelity.spec.ts — so the docs cannot say what the
 // contract does not. No fetch happens at build or request time; the only
-// deployment-specific value is the API origin the samples target. The page is
-// a server component; the drawer is its one client island.
+// deployment-specific value is the API origin the samples target, stated once
+// in the header's Base URL chip and carried copyably by the quickstart. The
+// page is a server component; the drawer is its one client island.
 
 function quickstart(baseUrl: string): string {
   return `import { SolventClient } from "@solvent/client";
@@ -72,22 +73,19 @@ export function ApiSurface() {
       />
 
       <div className={styles.tiles}>
-        <KpiTile testId="api-kpi-operations" label="Operations" value={view.tiles.operations} />
-        <KpiTile testId="api-kpi-errors" label="Error responses" value={view.tiles.errors} />
-        <KpiTile testId="api-kpi-version" label="Contract version" value={view.tiles.version} sub={CONTRACT_META.sourcePath} />
+        <KpiTile testId="api-kpi-operations" label={view.tiles.operations.label} value={view.tiles.operations.value} sub={view.tiles.operations.sub} />
+        <KpiTile testId="api-kpi-errors" label={view.tiles.errors.label} value={view.tiles.errors.value} sub={view.tiles.errors.sub} />
+        <KpiTile testId="api-kpi-version" label={view.tiles.version.label} value={view.tiles.version.value} sub={view.tiles.version.sub} />
       </div>
 
-      <div className={styles.baseUrl} data-testid="api-base-url">
-        <span className={styles.baseUrlLabel}>Base URL</span>
-        <span className={styles.baseUrlValue} data-testid="api-base-url-value">
-          {baseUrl}
-        </span>
-      </div>
-
+      {/* The endpoint index: aligned rows, read down a verb column. Each row is an anchor and nothing else — it wears no
+          button form, because one tab away that form is a pressable filter. DOM order is reading order, so Tab walks the
+          index top to bottom, column by column. */}
       <nav className={styles.toc} aria-label="endpoints" data-testid="api-toc">
-        {OPERATIONS.map((op) => (
-          <a key={op.operationId} href={`#${op.operationId}`} className={`${kit.btn} ${kit.btnGhost} ${styles.tocChip}`}>
-            {op.method} {op.path}
+        {view.index.map((row) => (
+          <a key={row.id} href={`#${row.id}`} className={styles.tocRow}>
+            <span className={`${styles.tocVerb} ${row.method === "POST" ? styles.tocVerbPost : ""}`}>{row.method}</span>{" "}
+            <span className={styles.tocPath}>{row.path}</span>
           </a>
         ))}
       </nav>
@@ -97,7 +95,7 @@ export function ApiSurface() {
 
       <SectionHead
         title="Endpoints"
-        qualifier={`${String(OPERATIONS.length)} operations, ${CONTRACT_META.sourcePath} verbatim`}
+        qualifier={view.endpointsQualifier}
         link={{ href: "/proof", label: "Verification →" }}
       />
       {OPERATIONS.map((op) => (

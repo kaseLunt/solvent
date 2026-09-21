@@ -13,14 +13,16 @@ import {
   liveSubjectStatus,
   proofPin,
   proofSubjectStatus,
-  proofTakeaway,
+  proofTakeawayArms,
   type EvidenceDescriptor,
 } from "./evidence";
 import { EM_DASH } from "./format";
+import { humanUtc } from "./human-utc";
 import { CASH, LEGACY } from "./inspector-position";
-import { refused, terminated, type LabHeadline } from "./lab-headline";
+import { refused, sentence, terminated, type LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
 import { publishable, type EvidenceResponse } from "./proof-data";
+import { groupInt } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import { isWirePopulation, readWirePopulation } from "./wireGuard";
 
@@ -118,8 +120,8 @@ export const PUBLIC_ENDPOINTS = [
 ] as const;
 
 export const VERIFICATION_KICKER = "Verification · this deployment";
-/** The one clause of the doctrine the header keeps visible (plan R3). */
-export const VERIFICATION_DEK = "Two subjects, never one: the pinned proof and the live batch.";
+/** The loading arm's dek: what the page will hold, claimed of nothing yet. */
+export const VERIFICATION_LOADING_DEK = "The result of its last check against the chain, and the identity of the batch it is serving.";
 /** The adjudicated intro (the R1 clarity ruling), verbatim — drawer doctrine now. */
 export const VERIFICATION_INTRO =
   "What this deployment is, exactly: the pinned proof of its last reconcile and the identity of the batch it serves now. Nothing here is measured on request: every field is carried by the build or persisted by a batch.";
@@ -130,8 +132,7 @@ const PROOF_CAPTION =
   "Proof subject — the pinned, exactly-reproducible acceptance evidence: the committed reconcile receipt and the build it speaks for. Never the live batch.";
 const LIVE_CAPTION =
   "Live subject — the currently-serving batch's identity: watermarked, operational, and NOT reconcile-welded. Exactness lives on the proof subject, at its pin.";
-const NO_SUBSTITUTE =
-  "The manifest could not be fetched, and nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.";
+const NO_SUBSTITUTE = "Nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.";
 
 /** The page's chrome, every word of it: what the components print between the view's figures. */
 export const VERIFICATION_COPY = {
@@ -236,6 +237,16 @@ const ORDINAL: Record<PipelineStep["key"], string> = {
   serve: "04 · SERVE",
 };
 
+/**
+ * Verification's tile label: the step's number folded into its name —
+ * "01 · Index" — so a step is headed once, by its tile. The number is the
+ * ordinal's own, read from it; the Overview heads its steps with `ordinal`,
+ * which does not move.
+ */
+export function stepTileLabel(step: Pick<PipelineStep, "ordinal" | "label">): string {
+  return `${step.ordinal.slice(0, step.ordinal.indexOf(" · "))} · ${step.label}`;
+}
+
 const INDEX_SENTENCE = "Chain heights indexed per engine, ahead of every batch.";
 const COMPUTE_UNREAD = "The batch could not be read.";
 const COMPUTE_ABSENT = "No batch is servable; nothing is computed.";
@@ -334,7 +345,8 @@ export function pipelineSteps(meta: MetaResponse | null, evidence: EvidenceRespo
           label: "Verify",
           ordinal: ORDINAL.verify,
           value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
-          sub: `gated rows exact · drift ${n(recon.gated_drift)}`,
+          // The tile glosses "gated" once — the rows that must match for a pass — so the headline's "checked rows" and this tally read as one number. The Overview's `line` keeps its own words.
+          sub: `gated (must-match) rows exact · drift ${n(recon.gated_drift)}`,
           tone: receiptReadable(recon) && receiptState(evidence) === "exact" ? "ok" : "warn",
           sentence: `${n(recon.gated_exact)} gated rows reconciled exact against the chain; ${n(recon.gated_drift)} drift named.`,
           line: {
@@ -530,7 +542,7 @@ function liveCard(manifest: EvidenceResponse): SubjectCard {
     title: "Live subject",
     status: { text: "SERVING · WATERMARKED", tone: "ok" },
     explain: "explain live subject",
-    takeaway: `serving batch #${String(substrate.batch_id)} · watermarked, operational — never the proof`,
+    takeaway: `serving batch ${n(substrate.batch_id)} · stamped with the chain blocks it was read at; operational, never the proof`,
     rows,
     fold: foldOf([{ title: null, rows: foldRows }]),
   };
@@ -608,17 +620,18 @@ function chips(manifest: EvidenceResponse, receipt: ReceiptState): LabChip[] {
   const proof = proofSubjectStatus(manifest);
   const live = liveSubjectStatus(manifest);
   const reconcile = manifest.reconcile;
+  // The pin is the receipt's comparison sha — a run's identity, never a batch's — so the chip is named for the proof and sits beside "Live batch" without borrowing its noun. Its title is the exact layer under the dek's humanised finish.
   const pinned: LabChip =
     reconcile === null
-      ? { label: "Pinned batch", value: "none", tone: "refused", title: proof.kind === "unavailable" ? pub(proof.reason) : undefined }
+      ? { label: "Proof pin", value: "none", tone: "refused", title: proof.kind === "unavailable" ? pub(proof.reason) : undefined }
       : {
-          label: "Pinned batch",
-          value: `pin ${proofPin(reconcile)}`,
+          label: "Proof pin",
+          value: proofPin(reconcile),
           title: `comparison sha256 ${reconcile.comparison_sha256} · finished ${reconcile.finished_at}`,
         };
   const liveBatch: LabChip =
     live.kind === "serving"
-      ? { label: "Live batch", value: `#${n(live.substrate.batch_id)}` }
+      ? { label: "Live batch", value: n(live.substrate.batch_id) }
       : { label: "Live batch", value: "none", tone: "refused", title: pub(live.reason) };
   const tally = reconcile === null ? "" : ` · ${n(reconcile.gated_exact)}/${n(reconcile.gated_rows)}`;
   const receiptChip: LabChip = {
@@ -629,18 +642,18 @@ function chips(manifest: EvidenceResponse, receipt: ReceiptState): LabChip[] {
   };
   const key: LabChip =
     live.kind === "serving"
-      ? { label: "Key", value: shortKey(live.substrate.materialization_key), title: live.substrate.materialization_key }
-      : { label: "Key", value: EM_DASH, tone: "refused", title: "no batch, no key; never fabricated" };
+      ? { label: "Batch key", value: shortKey(live.substrate.materialization_key), title: live.substrate.materialization_key }
+      : { label: "Batch key", value: EM_DASH, tone: "refused", title: "no batch, no key; never fabricated" };
   return [pinned, liveBatch, receiptChip, key];
 }
 
 /** Every chip refused: nothing is known before the manifest answers, and nothing is invented when it cannot. */
 function unknownChips(): LabChip[] {
   return [
-    { label: "Pinned batch", value: EM_DASH, tone: "refused" },
+    { label: "Proof pin", value: EM_DASH, tone: "refused" },
     { label: "Live batch", value: EM_DASH, tone: "refused" },
     { label: "Receipt", value: "unknown", tone: "refused" },
-    { label: "Key", value: EM_DASH, tone: "refused" },
+    { label: "Batch key", value: EM_DASH, tone: "refused" },
   ];
 }
 
@@ -697,7 +710,7 @@ export interface VerificationView {
   readonly receipt: ReceiptState;
   readonly kicker: "Verification · this deployment";
   readonly headline: LabHeadline;
-  /** Pinned batch · Live batch · Receipt · Key. */
+  /** Proof pin · Live batch · Receipt · Batch key. */
   readonly chips: LabChip[];
   readonly steps: readonly PipelineStep[];
   /** "Reconcile receipt: N gated rows exact, M drift", or the failing / absent words. */
@@ -705,6 +718,36 @@ export interface VerificationView {
   readonly probes: readonly ProbeRow[];
   /** The intro, the split, both subjects' captions and the identity line, verbatim — the drawer's doctrine. */
   readonly doctrine: readonly string[];
+}
+
+/**
+ * The header's dek: the two subjects as two facts, each from its own data and
+ * neither borrowing the other's claim. The first speaks for the proof — what
+ * the pinned run is and when it finished: the receipt's own `finished_at`,
+ * read against the manifest's `served_at` for its year and never against a
+ * clock, its exact instant on the Proof pin chip's title and the proof card.
+ * A receipt that did not pass claims no exactness; an absent one states the
+ * served reason; a contradicted one prints the contradiction. The second
+ * speaks for the live subject: the batch served now, which the manifest holds
+ * operational whatever the receipt says, or the reason none is served.
+ */
+export function verificationDek(manifest: EvidenceResponse): string {
+  const proof = proofSubjectStatus(manifest);
+  const live = liveSubjectStatus(manifest);
+  const first =
+    proof.kind === "accepted"
+      ? `That run is a fixed, reproducible check, finished ${humanUtc(proof.reconcile.finished_at, manifest.served_at)}; its result covers that run and nothing else.`
+      : proof.kind === "unavailable"
+        ? sentence(pub(proof.reason))
+        : deriveProofSubjectStatus(manifest).kind === "rejected"
+          ? "No exactness is claimed for this deployment until a run passes."
+          : terminated(pub(proof.detail));
+  if (live.kind === "no-batch") {
+    const absent = sentence(pub(live.reason));
+    return proof.kind === "accepted" ? `${first} ${absent} The proof still stands for its own run; it says nothing about live data.` : `${first} ${absent}`;
+  }
+  const batch = `Batch ${groupInt(readWirePopulation(live.substrate.batch_id, "batch_id"))}, served now, is live data`;
+  return proof.kind === "accepted" ? `${first} ${batch} that was not re-checked and does not inherit it.` : `${first} ${batch}; no check covers it.`;
 }
 
 export function deriveVerificationView(input: VerificationInput): VerificationView {
@@ -717,7 +760,7 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
       state: "loading",
       receipt: "none",
       kicker: VERIFICATION_KICKER,
-      headline: refused("Loading the evidence manifest…", VERIFICATION_DEK),
+      headline: refused("Loading this deployment's verification record…", VERIFICATION_LOADING_DEK),
       chips: unknownChips(),
       steps,
       receiptLine: "Reconcile receipt: loading /v1/evidence…",
@@ -727,28 +770,30 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
   }
   if (state.phase === "error") {
     const retry = retryWords(state.retryAfterSeconds);
-    const emphasis = terminated(`Evidence unavailable: ${state.message}`);
+    const emphasis = "The verification record could not be fetched.";
+    // The cause is the fetch's own words, then when to retry, then the law: nothing stands in for an unread manifest.
+    const dek = [sentence(state.message), retry, NO_SUBSTITUTE].filter((part) => part !== "").join(" ");
     return {
       state: "unavailable",
       receipt: "none",
       kicker: VERIFICATION_KICKER,
-      headline: refused(emphasis, `${retry} ${NO_SUBSTITUTE}`),
+      headline: refused(emphasis, dek),
       chips: unknownChips(),
       steps,
       receiptLine: `No reconcile receipt: the evidence manifest could not be fetched. ${retry}`,
       probes: [],
-      doctrine: [...doctrine, `${emphasis} ${retry} ${NO_SUBSTITUTE}`],
+      doctrine: [...doctrine, `${emphasis} ${dek}`],
     };
   }
   const manifest = state.manifest;
   const receipt = receiptState(manifest);
-  const serving = liveSubjectStatus(manifest).kind === "serving";
+  const arms = proofTakeawayArms(manifest);
   return {
     state: "ok",
     receipt,
     kicker: VERIFICATION_KICKER,
-    // R2: the page's own computed sentence; ok only when the receipt passed unqualified AND a batch serves — a sentence that ends in NO SERVABLE BATCH is not green.
-    headline: { emphasis: proofTakeaway(manifest), rest: "", tone: receipt === "exact" && serving ? "ok" : "warn", dek: VERIFICATION_DEK },
+    // The proof's finding is the only verdict on the page, so it alone wears a tone, and only the receipt's: ok for an unqualified pass, warn for anything less. The scope is ink, and the live batch — named in the dek — never wears the proof's colour, present or absent.
+    headline: { emphasis: arms.proof, rest: arms.scope, tone: receipt === "exact" ? "ok" : "warn", dek: verificationDek(manifest) },
     chips: chips(manifest, receipt),
     steps,
     receiptLine: receiptLine(manifest, receipt),

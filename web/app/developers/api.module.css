@@ -1,21 +1,19 @@
 /* API: the committed contract set in the Console register. Page-local rules only — the header, tiles, cards and
- * table are the kit's; these are the contract's own vocabulary (verb, path, params, response codes), the base-URL
- * strip, and the terminal treatment for code, which the kit does not carry. Every figure on the page is the
+ * table are the kit's; these are the contract's own vocabulary (verb, path, params, response codes), the endpoint
+ * index, and the terminal treatment for code, which the kit does not carry. Every figure on the page is the
  * contract's own text; the styling only sets it. */
 .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 28px 0 24px; }
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 /* A URL is an identifier: mono wherever the page prints it, the identity chip included. */
 .page [data-chip="Base URL"] b { font-family: var(--mono); font-size: var(--type-mono-sm); }
 
-/* ---- base URL strip: the one deployment-specific value, stated once, in full ---- */
-.baseUrl { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.baseUrlLabel { color: var(--ink-2); font-size: var(--type-label); }
-.baseUrlValue { font-family: var(--mono); font-size: var(--type-mono); font-weight: var(--w-medium); color: var(--ink); overflow-wrap: anywhere; }
-
-/* ---- TOC: the kit's ghost buttons as anchors, mono because they name routes ---- */
-.toc { display: flex; flex-wrap: wrap; gap: 8px; }
-.toc .tocChip { font-family: var(--mono); font-size: var(--type-small); padding: 4px 10px; color: var(--ink-2); }
-.toc .tocChip:hover { color: var(--ink); border-color: var(--accent); }
+/* ---- endpoint index: aligned mono rows read down a verb column; an anchor wears no button form ---- */
+.toc { columns: 3; column-gap: 24px; }
+.tocRow { display: grid; grid-template-columns: 5ch minmax(0, 1fr); gap: 8px; padding: 3px 0; border: 0; font-family: var(--mono); font-size: var(--type-small); color: var(--ink-2); break-inside: avoid; }
+.tocRow:hover .tocPath { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.tocVerb { color: var(--accent-text); }
+.tocVerbPost { color: var(--warn-text); }
+.tocPath { min-width: 0; overflow-wrap: anywhere; }
 
 /* ---- endpoint card: the kit's .card, the contract's rows stacked inside it ---- */
 .endpoint { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; scroll-margin-top: 90px; }
@@ -24,7 +22,9 @@
 .verbPost { border-color: var(--warn); color: var(--warn-text); }
 .path { font-family: var(--mono); font-size: var(--type-mono); font-weight: var(--w-semibold); color: var(--ink); overflow-wrap: anywhere; }
 .summary { font-size: var(--type-body); color: var(--ink-2); }
-.description { margin: 0; font-size: var(--type-body); color: var(--ink-2); white-space: pre-wrap; }
+/* The contract's prose at the reading measure: paragraphs, never the yaml's hard wraps. */
+.description { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-width: 720px; font-size: var(--type-body); color: var(--ink-2); }
+.description p, .paramDescription p { margin: 0; }
 
 /* ---- params: one row each, the yaml's words ---- */
 .params { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--line); }
@@ -32,7 +32,7 @@
 .paramName { font-family: var(--mono); font-size: var(--type-mono); font-weight: var(--w-semibold); color: var(--ink); }
 .paramMeta { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-3); white-space: nowrap; }
 .paramRequired { color: var(--warn-text); }
-.paramDescription { flex: 1 1 320px; color: var(--ink-2); white-space: pre-wrap; }
+.paramDescription { flex: 1 1 320px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; max-width: 720px; color: var(--ink-2); }
 
 /* ---- code: the terminal treatment; the rendered text and the copied text are one string ---- */
 .codeWrap { position: relative; min-width: 0; }
@@ -64,4 +64,5 @@ details[open] > .sampleSummary::before { content: "▾ "; }
 .method { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--type-body); color: var(--ink); }
 .method p { margin: 0; }
 
-@media (max-width: 640px) { .tiles { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .toc { columns: 2; } }
+@media (max-width: 640px) { .tiles { grid-template-columns: 1fr; } .toc { columns: 1; } }

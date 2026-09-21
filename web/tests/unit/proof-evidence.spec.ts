@@ -24,6 +24,7 @@ import {
   proofSubjectEvidence,
   proofSubjectStatus,
   proofTakeaway,
+  proofTakeawayArms,
   type EvidenceManifest,
 } from "../../lib/evidence";
 import { findEndpointLeaks, publishable } from "../../lib/proof-data";
@@ -205,36 +206,135 @@ test("the committed artifacts the manifest example cites EXIST and are leak-free
 });
 
 // ---------------------------------------------------------------------------
-// W-3L (inventory 439) — proofTakeaway: both subjects' statuses in one head
-// sentence, and BY LAW each failing arm surfaces there — a head that says
-// nothing while the receipt is rejected reads as a pass.
+// W-3L (inventory 439) — proofTakeaway: the head sentence, composed FROM its
+// two arms. BY LAW each failing arm surfaces there — a head that says nothing
+// while the receipt is rejected, or while no batch serves, reads as a pass.
+// The proof arm is the receipt's finding and the only clause a page may tone;
+// the scope arm is ink. A serving batch is never named in either: it is the
+// live subject, and it may not stand inside the proof's finding.
 // ---------------------------------------------------------------------------
 
+/** The committed example with its receipt's tallies changed — the wire's status left claiming "accepted", so every arm is reached the way a lying wire would reach it. */
+function receiptWith(change: (reconcile: NonNullable<EvidenceManifest["reconcile"]>) => void, from: EvidenceManifest = EVIDENCE_MANIFEST): EvidenceManifest {
+  const manifest: EvidenceManifest = structuredClone(from);
+  if (manifest.reconcile === null) throw new Error("fixture invariant: receipt expected");
+  change(manifest.reconcile);
+  return manifest;
+}
+
+const WELD_SHORT = receiptWith((r) => {
+  r.welds = r.welds.map((w) => (w.engine === "aave_v3_etherfi" ? { ...w, rows_exact: 13 } : w));
+});
+const CASH_WELD_SHORT = receiptWith((r) => {
+  r.welds = r.welds.map((w) => (w.engine === "debt_manager" ? { ...w, rows_exact: 28 } : w));
+});
+const ROW_SHORT_NO_DRIFT = receiptWith((r) => {
+  r.gated_exact = 86;
+});
+const ONE_DRIFT = receiptWith((r) => {
+  r.gated_exact = 86;
+  r.gated_drift = 1;
+});
+const CLEAN_TALLIES_NO_PASS = receiptWith((r) => {
+  r.result = "fail";
+  r.exit_code = 2;
+});
+const PASS_WITH_EXIT = receiptWith((r) => {
+  r.exit_code = 3;
+});
+const WIRE_REFUSES_CLEAN: EvidenceManifest = { ...structuredClone(EVIDENCE_MANIFEST), proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } };
+const LIVE_CONTRADICTED: EvidenceManifest = { ...structuredClone(EVIDENCE_MANIFEST), live_subject: { status: "no_batch", reason: "wire claims no_batch beside a non-null substrate" } };
+
+const EVERY_ARM: readonly EvidenceManifest[] = [
+  EVIDENCE_MANIFEST,
+  EVIDENCE_PROOF_FAILED,
+  EVIDENCE_NO_RECEIPT,
+  EVIDENCE_NO_BATCH,
+  WELD_SHORT,
+  CASH_WELD_SHORT,
+  ROW_SHORT_NO_DRIFT,
+  ONE_DRIFT,
+  CLEAN_TALLIES_NO_PASS,
+  PASS_WITH_EXIT,
+  WIRE_REFUSES_CLEAN,
+  LIVE_CONTRADICTED,
+];
+
 test.describe("W-3L — proofTakeaway", () => {
-  test("accepted + serving: the pin and the batch id in one sentence", () => {
-    expect(proofTakeaway(EVIDENCE_MANIFEST)).toBe(
-      "receipt ACCEPTED at pin 5f0b3e2a; serving batch #1 under its watermark vector.",
-    );
+  test("the sentence is its two arms joined by one space — in every arm, so a page that tones one and inks the other prints this sentence and no other", () => {
+    for (const manifest of EVERY_ARM) {
+      const arms = proofTakeawayArms(manifest);
+      expect(proofTakeaway(manifest)).toBe(`${arms.proof} ${arms.scope}`);
+      // The proof arm ends where the tone ends; the scope ends the sentence.
+      expect(arms.proof).toMatch(/[,:]$/);
+      expect(arms.scope).toMatch(/\.$/);
+    }
   });
 
-  test("a rejected receipt SURFACES in the head — never a silent pass", () => {
+  test("accepted + serving: the receipt's own tally is the finding, the pinned run its scope — and the serving batch is NOT in the head", () => {
+    expect(proofTakeawayArms(EVIDENCE_MANIFEST)).toEqual({
+      proof: "All 87 checked rows matched the chain exactly,",
+      scope: "in this deployment's pinned reconcile run.",
+    });
+    expect(proofTakeaway(EVIDENCE_MANIFEST)).toBe("All 87 checked rows matched the chain exactly, in this deployment's pinned reconcile run.");
+    // The live subject is named in the dek and on its chip, never inside the proof's sentence; nor is the pin's hash, the watermark vector or a shouted enum.
+    for (const word of ["batch", "#", "5f0b3e2a", "watermark", "ACCEPTED"]) expect(proofTakeaway(EVIDENCE_MANIFEST)).not.toContain(word);
+    // A tally of one is one row, not "all 1 rows".
+    const single = receiptWith((r) => {
+      r.gated_rows = 1;
+      r.gated_exact = 1;
+    });
+    expect(proofTakeawayArms(single).proof).toBe("The 1 checked row matched the chain exactly,");
+  });
+
+  test("a rejected receipt SURFACES in the head — never a silent pass, never worded as a match, never as '0 drift'", () => {
     const line = proofTakeaway(EVIDENCE_PROOF_FAILED);
-    expect(line).toBe(
-      "RECEIPT REJECTED — the proof badge is refused; serving batch #1 under its watermark " +
-        "vector.",
-    );
-    expect(line).not.toContain("ACCEPTED");
+    expect(line).toBe("The last reconcile run did not match the chain exactly, 84 of 87 checked rows matched; 3 rows drifted.");
+    expect(line).not.toContain("All 87");
+    expect(proofTakeaway(ONE_DRIFT)).toBe("The last reconcile run did not match the chain exactly, 86 of 87 checked rows matched; 1 row drifted.");
+    // A row short with no drift counted: the tally is the fault, and a zero drift is not printed beside it.
+    expect(proofTakeaway(ROW_SHORT_NO_DRIFT)).toBe("The last reconcile run did not match the chain exactly, 86 of 87 checked rows matched.");
+    for (const manifest of EVERY_ARM) expect(proofTakeaway(manifest)).not.toMatch(/\b0 (rows? )?drift/);
   });
 
-  test("a missing receipt says NOTHING IS PROVEN in the head", () => {
-    expect(proofTakeaway(EVIDENCE_NO_RECEIPT)).toBe(
-      "NO COMMITTED RECEIPT — nothing is proven; serving batch #1 under its watermark vector.",
-    );
+  test("a weld short with the gated tally clean names the engine in the reader's word, and its own compared rows", () => {
+    expect(proofTakeaway(WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly, Aave v3 market (legacy) matched 13 of 14 compared rows.");
+    expect(proofTakeaway(CASH_WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly, Cash matched 28 of 29 compared rows.");
   });
 
-  test("a missing batch SURFACES beside the intact proof arm — no key, no batch id", () => {
+  test("a receipt whose tallies are clean but whose verdict is not a clean pass says so — it is never worded by the tallies it kept clean", () => {
+    expect(proofTakeaway(CLEAN_TALLIES_NO_PASS)).toBe("The last reconcile run did not pass: its receipt records a verdict that is not a clean pass (exit code 2).");
+    expect(proofTakeaway(PASS_WITH_EXIT)).toBe("The last reconcile run did not pass: its receipt records a verdict that is not a clean pass (exit code 3).");
+    for (const manifest of [CLEAN_TALLIES_NO_PASS, PASS_WITH_EXIT]) expect(proofTakeaway(manifest)).not.toContain("matched");
+  });
+
+  test("the wire refusing a receipt that passes on its own numbers is a finding of its own — the badge is refused, the contradiction named", () => {
+    expect(proofTakeaway(WIRE_REFUSES_CLEAN)).toBe("The proof cannot be accepted: the manifest contradicts its own receipt.");
+  });
+
+  test("a missing receipt says NOTHING IS PROVEN in the head — an absence named as an absence", () => {
+    expect(proofTakeaway(EVIDENCE_NO_RECEIPT)).toBe("Nothing is proven for this deployment: no reconcile receipt is committed.");
+  });
+
+  test("a missing batch SURFACES beside the intact proof arm — no key, no batch id — and beside every failing arm too", () => {
     const line = proofTakeaway(EVIDENCE_NO_BATCH);
-    expect(line).toBe("receipt ACCEPTED at pin 5f0b3e2a; NO SERVABLE BATCH.");
-    expect(line).not.toContain("batch #");
+    expect(line).toBe("All 87 checked rows matched the chain exactly, in the pinned reconcile run — but no batch can be served right now.");
+    expect(line).not.toContain("Batch ");
+    const failedNoBatch: EvidenceManifest = { ...structuredClone(EVIDENCE_PROOF_FAILED), substrate: null, substrate_unavailable_reason: "no complete risk batch is available", live_subject: { status: "no_batch", reason: "no complete risk batch is available" } };
+    expect(proofTakeaway(failedNoBatch)).toBe(
+      "The last reconcile run did not match the chain exactly, 84 of 87 checked rows matched; 3 rows drifted. No batch can be served right now either.",
+    );
+    const noneNoBatch: EvidenceManifest = { ...structuredClone(EVIDENCE_NO_RECEIPT), substrate: null, substrate_unavailable_reason: "no complete risk batch is available", live_subject: { status: "no_batch", reason: "no complete risk batch is available" } };
+    expect(proofTakeaway(noneNoBatch)).toBe("Nothing is proven for this deployment: no reconcile receipt is committed. No batch can be served right now either.");
+  });
+
+  test("a manifest that contradicts itself about its batch claims none — and is not worded as 'no batch can be served', which the contradiction does not license", () => {
+    expect(proofTakeaway(LIVE_CONTRADICTED)).toBe(
+      "All 87 checked rows matched the chain exactly, in the pinned reconcile run — but the manifest contradicts itself about the live batch, so none is claimed.",
+    );
+    const claimsServing: EvidenceManifest = { ...structuredClone(EVIDENCE_NO_BATCH), live_subject: { status: "serving", reason: "" } };
+    expect(proofTakeawayArms(claimsServing).scope).toBe("in the pinned reconcile run — but the manifest contradicts itself about the live batch, so none is claimed.");
+    const failedContradicted: EvidenceManifest = { ...structuredClone(EVIDENCE_PROOF_FAILED), live_subject: LIVE_CONTRADICTED.live_subject };
+    expect(proofTakeawayArms(failedContradicted).scope).toBe("84 of 87 checked rows matched; 3 rows drifted. The manifest also contradicts itself about the live batch, so none is claimed.");
   });
 });

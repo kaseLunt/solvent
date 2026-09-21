@@ -2,8 +2,11 @@
 // generated extract (lib/proof-contract.gen.ts) into the kit's card. Summary,
 // description, params and response codes are the yaml's text VERBATIM; the
 // response sample is the contract's own example, its provenance cited beside it.
+// Prose is set as paragraphs at the reading measure: the yaml's hard wraps are
+// a property of the file, not of the sentence, and the words do not change.
 
 import kit from "@/components/kit/kit.module.css";
+import { contractParagraphs } from "@/lib/api-view";
 import type { ContractOperation } from "@/lib/proof-contract.gen";
 import styles from "./api.module.css";
 import { CodeBlock } from "./CodeBlock";
@@ -24,7 +27,13 @@ export function EndpointCard({ op, baseUrl }: { op: ContractOperation; baseUrl: 
         <span className={styles.summary}>{op.summary}</span>
       </div>
 
-      {op.description.length > 0 && <p className={styles.description}>{op.description}</p>}
+      {op.description.length > 0 && (
+        <div className={styles.description} data-testid={`api-description-${op.operationId}`}>
+          {contractParagraphs(op.description).map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
+          ))}
+        </div>
+      )}
 
       {op.parameters.length > 0 && (
         <div className={styles.params}>
@@ -34,7 +43,13 @@ export function EndpointCard({ op, baseUrl }: { op: ContractOperation; baseUrl: 
               <span className={styles.paramMeta}>
                 {param.in} · {param.required ? <span className={styles.paramRequired}>required</span> : "optional"}
               </span>
-              {param.description.length > 0 && <span className={styles.paramDescription}>{param.description}</span>}
+              {param.description.length > 0 && (
+                <div className={styles.paramDescription}>
+                  {contractParagraphs(param.description).map((paragraph, index) => (
+                    <p key={index}>{paragraph}</p>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
