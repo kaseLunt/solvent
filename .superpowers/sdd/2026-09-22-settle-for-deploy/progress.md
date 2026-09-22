@@ -1,0 +1,13 @@
+# Plan 5 — Settle for deploy · ledger
+
+Plan: `docs/plans/2026-09-22-settle-for-deploy.md` · Spec: `docs/specs/2026-09-22-settle-for-deploy-design.md`.
+
+## Direction (the owner's words)
+- 2026-09-21 13:36 "what is left to do in the next session" → 15:01 "the goal is the resume piece. keep moving toward that. use your judgement".
+- 2026-09-22: on the deploy question, "just do a local build for now, i will deploy when everything looks settled"; on the approaches, "let's take care of A i guess if it is a quick win, then we can start on B". Integrator's read: A is low-risk but ~8 small tasks; trimmed to what changes the first three minutes; B (every page's reader classifies its envelope, + the kit's pending headline) is the next plan.
+
+## Log
+- 2026-09-22 ~12:20 lease renewed through 2026-09-23T19:18Z (f28d89d).
+- Understand workflow wf_fbdabd4f-2b1 (seven read-only readers, each followed by an adversarial skeptic; `model: fable` with fallback): interrupted by a usage limit ~12:49; owner switched accounts 13:20; resumed from the journal (13 of 14 agents cached; the vocabulary skeptic re-ran). Results: `understand.json` (reads + verdicts), `understand-verdicts.md` (every refuted / unverifiable claim, proposal problem and miss), `understand-proposals.md`.
+- KEY CORRECTIONS the skeptics made (binding on the plan): the Book's 2 + 47 below-line = History's 49 (the same partition; the Book never states it); Verification's two welds (29 + 14) are NOT a subset of the 87 checked rows — 10 of the 14 legacy rows are advisory, so "the other 44 gated checks" would have been FALSE; the Cash movers are accounts whose eligibility flips false→true ranked by debt (= the "Newly liquidatable 118"), the legacy movers are health-factor drops; the demo's Cash liquidations are SUB-DOLLAR (0.35812 USD repaid) — the reader's "358.12 USD" was 1000× too large; the Overview hero's 70,000 is an external active-cards figure (Crypto Briefing 2026-09-04: ~70,000 active cards, ~300,000 accounts; recon/v4-proposal-arfc-post1.html:7 "tens of thousands of cardholders"), not borrowers, and no source is in the system; the Go engine never persists debt on a refused Debt Manager row (the demo's ~$178K "not computed debt" exists only in the fixture); a README may cite a component as proven only with a recorded Codex approval (D-006 clause 5); the committed reconcile artifact reports 30,838 gated rows (the page's 87 is the contract example).
+- Spec and plan written under the owner's delegation (the brainstorming gate taken by "use your judgement" + "let's take care of A"); rulings of record in spec §6 for the owner's review.
