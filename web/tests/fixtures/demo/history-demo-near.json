@@ -1504,7 +1504,7 @@
           "refusal": {
             "code": "SWEEP_NEVER",
             "detail": "collateral sweep never ran for this account",
-            "note": "a refused row keeps its persisted debt for display; no verdict is served for it."
+            "note": "SWEEP_NEVER: this account has never had a successful collateral sweep, so its collateral is of UNKNOWN size — not zero. Serving a health factor near zero over it would be a false liquidation alarm."
           },
           "health_factor": null,
           "liquidatable": null,

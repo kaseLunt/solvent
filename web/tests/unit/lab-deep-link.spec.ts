@@ -46,10 +46,27 @@ test.describe("the deep-link decision", () => {
     if (decision.kind !== "set") return;
     expect(decision.runIds).toEqual(["eth_minus_30"]);
     expect(decision.filteredIds).toEqual(["stable_depeg_0995_in_band", "nope_id"]);
-    expect(decision.notice).toContain("You asked for 3 scenario(s)");
+    expect(decision.notice).toContain("You asked for 3 scenarios");
     expect(decision.notice).toContain("this deployment publishes 1 of them");
     expect(decision.notice).toContain("stable_depeg_0995_in_band and nope_id");
-    expect(decision.notice).toContain("Only the 1 published one(s) were dispatched");
+    expect(decision.notice).toContain("Only the 1 published one was dispatched");
+  });
+
+  test("the filtered notice counts in real plurals: one scenario, one published one, never a '(s)'", () => {
+    const two = deepLinkDecision(null, "eth_minus_30,ethfi_minus_50,nope_id", LISTED);
+    if (two.kind !== "set") throw new Error(two.kind);
+    expect(two.notice).toBe(
+      "You asked for 3 scenarios; this deployment publishes 2 of them. Not published here: nope_id. Only the 2 published ones were dispatched.",
+    );
+    // One id asked for and not published: the sentence speaks of it, never of "them".
+    const one = deepLinkDecision(null, "ghost_one", LISTED);
+    if (one.kind !== "set") throw new Error(one.kind);
+    expect(one.notice).toBe("You asked for 1 scenario; this deployment does not publish it. Not published here: ghost_one. Nothing was dispatched.");
+    for (const link of ["eth_minus_30,nope_id", "eth_minus_30,ethfi_minus_50,nope_id", "ghost_one", "ghost_one,ghost_two", "*"]) {
+      const decision = deepLinkDecision(null, link, LISTED);
+      if (decision.kind !== "set") throw new Error(decision.kind);
+      expect(decision.notice ?? "", link).not.toContain("(s)");
+    }
   });
 
   test("a link of only unknown ids dispatches nothing, and says so", () => {

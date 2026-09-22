@@ -62,10 +62,19 @@ test("the near account is the mockup's: cap, debt, room, legs, boundary", () => 
 test("liquidatable, healthy and refused accounts read as their states", () => {
   expect(readCashPosition(cashOf(DEMO_ADDRESS_LIQUIDATABLE)).status).toBe("liquidatable");
   expect(readCashPosition(cashOf(DEMO_ADDRESS_HEALTHY)).status).toBe("healthy");
-  const refused = readCashPosition(cashOf(DEMO_ADDRESS_REFUSED));
+  const refusedWire = cashOf(DEMO_ADDRESS_REFUSED);
+  const refused = readCashPosition(refusedWire);
   expect(refused.computed).toBe(false);
-  expect(refused.debt).toBe(4100000000n);
+  // A refused Cash row carries no debt, as the engine serves it: a refusal writes no totals, so neither debt field
+  // holds a figure and the reader reads none.
+  expect(refusedWire.borrowings).toBeNull();
+  expect(refusedWire.total_debt_base).toBeNull();
+  expect(refused.debt).toBeNull();
   expect(refused.refusal?.code).toBe("SWEEP_NEVER");
+  // The refusal's note is the engine's own for its code — the same words the Book's demo refused rows carry.
+  expect(refusedWire.refusal?.note).toBe(
+    "SWEEP_NEVER: this account has never had a successful collateral sweep, so its collateral is of UNKNOWN size — not zero. Serving a health factor near zero over it would be a false liquidation alarm.",
+  );
 });
 
 test("the history's newest point IS the position; 14 batches sit under the 10 % line; one refused point, two withheld batches", () => {

@@ -52,6 +52,18 @@ test("a stale price input travels through the chain with a visible (non-default)
   expect(staleRow?.tone).toBe("warn");
 });
 
+test("the reorg posture counts its unacked epochs in real plurals, never 'epoch(s)'", () => {
+  const posture = (unacked: number) => {
+    const watermarks = batch.watermarks.map((w) => (w.engine === aave.engine ? { ...w, acked_epoch: 4, max_epoch_at_compute: 4 + unacked } : w));
+    const rows = hfEvidence(aave, { ...batch, watermarks }, "1.08").sections.flatMap((s) => s.rows);
+    return rows.find((row) => row.label === "reorg posture");
+  };
+  expect(posture(0)).toMatchObject({ value: "none unacked", tone: "ok" });
+  expect(posture(1)).toMatchObject({ value: "1 unacked epoch at compute · acked 4 of 5", tone: "crit" });
+  expect(posture(2)).toMatchObject({ value: "2 unacked epochs at compute · acked 4 of 6", tone: "crit" });
+  for (const n of [1, 2, 3]) expect(posture(n)?.value).not.toContain("(s)");
+});
+
 // ---------------------------------------------------------------------------
 // p0-8 finding 1, consistency leg — the DRAWER must obey the same law as the
 // row: the ceil-health sentence ("at exactly this price the position is still

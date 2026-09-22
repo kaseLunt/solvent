@@ -4,6 +4,8 @@
 // near-cap account) and the openapi-example fixtures for the other outcomes.
 // Every headline string here is produced by lib/inspector-headline.ts.
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { notComputedHeadline } from "../../lib/inspector-headline";
+import { plainCause } from "../../lib/refusal-phrasebook";
 import { BOOK_ERROR_UNAVAILABLE } from "../fixtures/book";
 import {
   DEMO_ADDRESS_HEALTHY,
@@ -121,15 +123,21 @@ test("liquidatable and healthy — the other two spec templates, verbatim", asyn
   await expect(page.getByTestId("inspector-kpi-status")).toHaveAttribute("data-tone", "ok");
 });
 
-test("a refused Cash position: cannot say, tiles refused, the last readable debt named, never $0", async ({ page }) => {
+test("a refused Cash position: cannot say, tiles refused, no debt served and none named, never $0", async ({ page }) => {
   await mockInspector(page, { address: DEMO_ADDRESS_REFUSED });
   await page.goto(`/inspector/${DEMO_REFUSED_ADDR}`);
   await expect(surface(page)).toHaveAttribute("data-state", "not-computed");
   await expect(headline(page)).toHaveText("Cannot say — this account's Cash position was not computed this batch.");
-  await expect(dek(page)).toContainText("Its last readable debt is $4,100; no verdict is served for it.");
+  // A refused row carries no debt, as the engine serves it: the dek names the cause and no last figure.
+  await expect(dek(page)).toContainText(notComputedHeadline(plainCause("SWEEP_NEVER"), null).dek);
+  await expect(dek(page)).toContainText("Collateral sweep never ran. No verdict is served for it.");
+  await expect(dek(page)).not.toContainText("last readable debt");
   for (const id of ["debt", "cap", "room", "collateral", "status"]) {
     await expect(page.getByTestId(`inspector-kpi-${id}`)).toHaveAttribute("data-tone", "refused");
   }
+  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("—");
+  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("not computed");
+  await expect(page.getByTestId("inspector-kpi-debt")).not.toContainText("last readable");
   await expect(page.getByTestId("inspector-kpi-cap")).toContainText("—");
   await expect(page.getByTestId("inspector-trust-computed")).toHaveAttribute("data-state", "refused");
   await expect(page.locator("main")).not.toContainText("$0");

@@ -74,7 +74,7 @@
       "value_decimals": 6,
       "health_factor": null,
       "total_collateral_base": null,
-      "total_debt_base": "4100000000",
+      "total_debt_base": null,
       "weighted_lt_sum": null,
       "avg_lt_bps": null,
       "legs": [
@@ -160,12 +160,12 @@
       "refusal": {
         "code": "SWEEP_NEVER",
         "detail": "collateral sweep never ran for this account",
-        "note": "a refused row keeps its persisted debt for display; no verdict is served for it."
+        "note": "SWEEP_NEVER: this account has never had a successful collateral sweep, so its collateral is of UNKNOWN size — not zero. Serving a health factor near zero over it would be a false liquidation alarm."
       },
       "liquidatable": null,
       "collateral_value_usd": null,
       "max_borrow_lt": null,
-      "borrowings": "4100000000",
+      "borrowings": null,
       "liquidation_price": null
     }
   ],

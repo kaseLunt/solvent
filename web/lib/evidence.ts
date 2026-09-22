@@ -92,7 +92,7 @@ function reorgPostureRow(stamp: Stamp | undefined): EvidenceRow {
     ? { label: "reorg posture", value: "none unacked", tone: "ok" }
     : {
         label: "reorg posture",
-        value: `${String(unacked)} unacked epoch(s) at compute · acked ${String(acked)} of ${String(maxEpoch)}`,
+        value: `${plural(unacked, "unacked epoch")} at compute · acked ${String(acked)} of ${String(maxEpoch)}`,
         tone: "crit",
       };
 }

@@ -12,6 +12,10 @@
 //   - the ETHFI asset is READ from ../scenarios.json — the committed
 //     ethfi_minus_50 scenario's shock asset (the generator throws if it is
 //     absent); USDC is the /v1/events example's OP USDC;
+//   - the refused account's refusal note is the engine's own for its code, read
+//     VERBATIM from ../positions-dm-page-1.json's refused row, and the row
+//     carries no debt and no totals: a refusal writes none
+//     (internal/riskfeed/assemble.go refuseWithPrices);
 //   - every activity row is a shape the Debt Manager deriver emits (DM_EMITS
 //     below: its raw type and amount unit per display class; the generator
 //     throws on any other);
@@ -36,6 +40,7 @@ const book = read("book.demo.json");
 const meta = read("meta.demo.json");
 const scenarios = readFixture("scenarios.json");
 const stressTemplate = readFixture("stress-dm.json");
+const positionsTemplate = readFixture("positions-dm-page-1.json");
 
 const BATCH = book.batch;
 const SERVED_AT = book.served_at;
@@ -60,7 +65,9 @@ const projectionScenario = stressTemplate.scenarios.find((x) => x.id === "dm_rat
 const PROJECTION_NOTE = projectionScenario?.results?.[0]?.projection?.note;
 if (typeof PROJECTION_NOTE !== "string") throw new Error("stress-dm.json must carry the dm_rate_horizon_plus_200bps projection note");
 const HF_NOTE = "the Debt Manager's MaxBorrowLT / Borrowings as an exact rational — a disclosure, not the verdict; the strict boolean decides.";
-const REFUSAL_NOTE = "a refused row keeps its persisted debt for display; no verdict is served for it.";
+const refusedTemplate = positionsTemplate.positions.find((p) => p.status === "refused" && p.refusal?.code === "SWEEP_NEVER");
+if (typeof refusedTemplate?.refusal?.note !== "string") throw new Error("positions-dm-page-1.json must carry a SWEEP_NEVER refused row with its note");
+const REFUSAL_NOTE = refusedTemplate.refusal.note;
 
 const NEAR_ADDR = "0x7a3f19e2c8b4d0a6f1e3b5c7d9a2f4e6b8c0c21e";
 const LIQ_ADDR = "0x5d11c0ffee00000000000000000000000000a1b2";
@@ -108,13 +115,18 @@ function legsFor(weethUnits, ethfiUnits) {
   });
 }
 
-/** One Cash position. Returns the wire body and the bigints the other bodies weld to. */
+/**
+ * One Cash position. Returns the wire body and the bigints the other bodies weld to. A refused position takes no
+ * debt: the engine serves a refusal with no health factor, no totals and no debt — the absence of a number, never a
+ * kept figure.
+ */
 function cashPosition({ account, weethUnits, ethfiUnits, debt, refused = false }) {
   const legs = legsFor(weethUnits, ethfiUnits);
   const collateral = legs.reduce((sum, l) => sum + l.value, 0n);
   const cap = legs.reduce((sum, l) => sum + l.contribution, 0n);
-  const debtUsd = USD(debt);
-  const liquidatable = debtUsd > cap;
+  if (refused && debt !== undefined) throw new Error("a refused position serves no debt");
+  const debtUsd = refused ? null : USD(debt);
+  const liquidatable = debtUsd !== null && debtUsd > cap;
   const wireLegs = legs.map((l) => ({
     asset: l.token.asset,
     symbol: l.token.symbol,
@@ -140,7 +152,7 @@ function cashPosition({ account, weethUnits, ethfiUnits, debt, refused = false }
     // The DM rational, disclosed on the position as the Book's rows and this account's history points disclose it.
     health_factor: refused ? null : { wad: null, num: s(cap), den: s(debtUsd), infinite: false, note: HF_NOTE },
     total_collateral_base: refused ? null : s(collateral),
-    total_debt_base: s(debtUsd),
+    total_debt_base: refused ? null : s(debtUsd),
     weighted_lt_sum: null,
     avg_lt_bps: null,
     legs: wireLegs,
@@ -165,10 +177,10 @@ function cashPosition({ account, weethUnits, ethfiUnits, debt, refused = false }
       liquidatable: null,
       collateral_value_usd: null,
       max_borrow_lt: null,
-      borrowings: s(debtUsd),
+      borrowings: null,
       liquidation_price: null,
     };
-    return { position, cap: null, collateral: null, debt: debtUsd, legs };
+    return { position, cap: null, collateral: null, debt: null, legs };
   }
   // Boundary: weETH alone falls with ETHFI flat — ethfi + weeth·k = debt ⇒ k = (debt − ethfi) / weeth.
   const [weeth, ethfi] = legs;
@@ -424,7 +436,7 @@ const writeChecked = (name, body) => {
 const near = cashPosition({ account: NEAR_ADDR, weethUnits: 2.1, ethfiUnits: 3250, debt: 4822 });
 const liq = cashPosition({ account: LIQ_ADDR, weethUnits: 2.1, ethfiUnits: 3250, debt: 5400 });
 const healthy = cashPosition({ account: HEALTHY_ADDR, weethUnits: 2.1, ethfiUnits: 3250, debt: 2100 });
-const refused = cashPosition({ account: REFUSED_ADDR, weethUnits: 2.1, ethfiUnits: 3250, debt: 4100, refused: true });
+const refused = cashPosition({ account: REFUSED_ADDR, weethUnits: 2.1, ethfiUnits: 3250, refused: true });
 
 writeChecked("address-demo-near.json", addressBody(NEAR_ADDR, near.position));
 writeChecked("address-demo-liquidatable.json", addressBody(LIQ_ADDR, liq.position));

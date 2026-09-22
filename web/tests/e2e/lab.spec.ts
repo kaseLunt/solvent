@@ -363,6 +363,11 @@ test("deep links: ?scenarios= posts exactly the listed ids it names, once, and p
 
   await page.goto("/lab?scenarios=eth_minus_30,ghost");
   await expect(page.getByTestId("lab-deeplink-notice")).toContainText("ghost");
+  // The counts are said in real plurals: one published one, never "(s)".
+  await expect(page.getByTestId("lab-deeplink-notice")).toHaveText(
+    "You asked for 2 scenarios; this deployment publishes 1 of them. Not published here: ghost. Only the 1 published one was dispatched.",
+  );
+  await expect(page.getByTestId("lab-deeplink-notice")).not.toContainText("(s)");
   await expect.poll(() => counts.sets()).toBe(2);
   expect(counts.posted()[1]).toBe('{"scenario_ids":["eth_minus_30"]}');
 });

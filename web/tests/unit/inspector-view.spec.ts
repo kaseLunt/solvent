@@ -7,6 +7,7 @@ import { lookup, type components } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { deriveInspectorView, drawerEmptyText, historyFinding, historyHead, stressBatchNote, stressEmptyText } from "../../lib/inspector-view";
+import { DEMO_ADDRESS_REFUSED, DEMO_REFUSED_ADDR } from "../fixtures/demo";
 import { ADDRESS_FOUND, ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, FOUND_ADDR, HISTORY } from "../fixtures/inspector";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 import { near } from "./helpers/cash-position";
@@ -170,6 +171,15 @@ test("the contract fixture: Cash liquidatable beside a legacy position; the kick
   expect(view.headline.emphasis).toBe("Liquidatable now — $4,620 against a $4,200 cap.");
   expect(view.legacy?.engine).toBe("aave_v3_etherfi");
   expect(view.boundary?.kind).toBe("breached");
+});
+
+test("the demo's refused account serves no debt, as the engine serves a refusal, so its dek names no last debt", () => {
+  const refused = deriveInspectorView(reading({ address: DEMO_REFUSED_ADDR, lookup: { phase: "ready", value: lookup(DEMO_ADDRESS_REFUSED) } }), TIER_FALLBACK);
+  expect(refused.state).toBe("not-computed");
+  expect(refused.refusedTiles).toBe(true);
+  expect(refused.cash?.debt).toBeNull();
+  expect(refused.headline.dek).toBe("Collateral sweep never ran. No verdict is served for it.");
+  expect(refused.headline.dek).not.toContain("last readable debt");
 });
 
 test("legacy only, not computed, no position, cannot compute — each is its own state and none prints a Cash figure", () => {

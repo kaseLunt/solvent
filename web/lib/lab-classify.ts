@@ -269,9 +269,9 @@ export function classifyRunBookEngine(engine: LabRunBookEngine): { malformedFiel
       checks.push([`movers[${String(index)}].debt_usd`, isNullableWireDecimal(mover.debt_usd)]);
     });
   }
-  // The FULL mover count — the movers caption's own denominator ("showing 20
-  // of N"). Unjudged, a malformed total renders "NaN are not on this page" as
-  // a computed-looking clause.
+  // The FULL mover count — the movers caption's own denominator ("the 20
+  // largest of the N accounts that become liquidatable"). Unjudged, a
+  // malformed total renders "NaN" in that clause as a computed-looking count.
   checks.push(["movers_total", isWirePopulation(e.movers_total)]);
   // The wire's own words about its ranking and its truncation, carried to the movers caption's tooltip: the
   // schema's required string, judged like the two notes the drawer prints.

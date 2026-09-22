@@ -7,6 +7,7 @@
 // rewritten to a scenario nobody asked for (`scenarioForBar`): where the page
 // shows another scenario than the link named, it says so in words.
 
+import { plural } from "./prose";
 import { MAX_SET_RUN_SCENARIOS } from "./runbookSet";
 
 /** What a /lab URL's two scenario params, read together, ask this page to do. */
@@ -149,17 +150,20 @@ export function deepLinkDecision(
       `${String(MAX_SET_RUN_SCENARIOS)}. Nothing was dispatched and nothing was silently truncated: trim ` +
       `the link to at most ${String(MAX_SET_RUN_SCENARIOS)} ids.`
     : null;
+  // The counts are said in real plurals: a public notice never prints "(s)".
   const dispatchedTail = overCap
     ? ""
     : runIds.length > 0
-      ? ` Only the ${String(runIds.length)} published one(s) were dispatched.`
+      ? ` Only the ${plural(runIds.length, "published one")} ${runIds.length === 1 ? "was" : "were"} dispatched.`
       : " Nothing was dispatched.";
 
   const clauses: string[] = [];
   if (filteredIds.length > 0) {
+    // One id asked for and filtered is one scenario this deployment does not publish: it is "it", never "0 of them".
+    const published =
+      askedIds.length === 1 ? "this deployment does not publish it" : `this deployment publishes ${String(runIds.length)} of them`;
     clauses.push(
-      `You asked for ${String(askedIds.length)} scenario(s); this deployment publishes ` +
-        `${String(runIds.length)} of them. Not published here: ${listWords(filteredIds)}.` +
+      `You asked for ${plural(askedIds.length, "scenario")}; ${published}. Not published here: ${listWords(filteredIds)}.` +
         dispatchedTail,
     );
   }

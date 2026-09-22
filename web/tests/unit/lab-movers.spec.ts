@@ -132,7 +132,12 @@ test("the movers caption says which accounts they are, in the contract's own ter
 
 test("no mover is a count the service stated; a list its own count cannot hold is said as it stands, never as all of them", () => {
   expect(moversCaption(table({ shown: 0, total: 0 }), "debt_manager")).toBe("no account becomes liquidatable");
-  expect(moversCaption(table({ shown: 0, total: 0 }), "aave_v3_etherfi")).toBe("no account's health factor drops");
+  // The legacy zero claims only what the service's note licenses: no health factor it measured on both sides strictly
+  // dropped. An account with no debt has none to drop and is not counted, so the zero is never "no account's" anything.
+  expect(moversCaption(table({ shown: 0, total: 0 }), "aave_v3_etherfi")).toBe(
+    "of the health factors measured today and after the shock, none drops · an account with no debt has none to drop",
+  );
+  expect(moversCaption(table({ shown: 0, total: 0 }), "aave_v3_etherfi")).not.toMatch(/\bno account\b/);
   expect(moversCaption(table({ shown: 5, total: 3 }), "debt_manager")).toBe("5 accounts listed · the service states 3 in all");
   expect(moversCaption(table({ shown: 0, total: 5 }), "aave_v3_etherfi")).toBe("0 accounts listed · the service states 5 in all");
   // A list longer than the stated cap is never captioned "at most 20" — the rows on the page would contradict it.

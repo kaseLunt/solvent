@@ -139,7 +139,14 @@ export function moversCaption(t: MoversTable, engine: "debt_manager" | "aave_v3_
   if (t.total === null) return `${accounts(t.shown)} shown · total not stated`;
   const total = t.total;
   const cash = engine === "debt_manager";
-  if (total === 0 && t.shown === 0) return cash ? "no account becomes liquidatable" : "no account's health factor drops";
+  // The legacy zero claims only what the service's `movers_note` licenses: no health factor it measured on both
+  // sides strictly dropped. An account with no debt has an unbounded health factor, no drop to rank, and is not
+  // counted — so the zero is never "no account's health factor drops", a negative over accounts it never tested.
+  if (total === 0 && t.shown === 0) {
+    return cash
+      ? "no account becomes liquidatable"
+      : "of the health factors measured today and after the shock, none drops · an account with no debt has none to drop";
+  }
   // A list longer than its own full count, or empty under a count above zero,
   // is not a window onto that count: it is said as it stands, never as "all".
   if (t.shown > total || t.shown === 0) return `${accounts(t.shown)} listed · the service states ${groupInt(total)} in all`;
