@@ -7,8 +7,9 @@
 //   (1)  `never` → `no price path`, with the wire reason in the hover, a
 //        RENDERED legend, and the column header's own scope title;
 //   (4)  feed amounts are scaled by the engine's OWN value_decimals when the
-//        wire supplies them, and stay raw + tagged when nothing licenses a
-//        scale;
+//        wire supplies them — the stream's, or /v1/book's beneath it, routed
+//        explicitly in every arm — and stay raw + tagged when nothing
+//        licenses a scale;
 //   (5)  RETIRED with the Scenarios rebuild (2026-09-16, Plan 3) — the laws are
 //        in tests/e2e/lab.spec.ts (the cold load, the not-found arm, the mode
 //        toggle's words);
@@ -33,9 +34,20 @@
 // Ledger: .superpowers/sdd/progress-ui-overhaul.md, "Plan 2 (Inspector) — retirements".
 
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { DEMO_BOOK } from "../fixtures/demo";
 import { FEED_UNITS, FEED_POSTURE_SNAPSHOT } from "../fixtures/feed";
 
 const CORS = { "access-control-allow-origin": "*" };
+
+/** DERIVED from the demo book: every engine's value_decimals removed — a book that licenses no scale. */
+const BOOK_WITHOUT_SCALES: unknown = {
+  ...DEMO_BOOK,
+  engines: DEMO_BOOK.engines.map((engine) => {
+    const rest: Record<string, unknown> = { ...engine };
+    delete rest.value_decimals;
+    return rest;
+  }),
+};
 
 function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
   return route.fulfill({
@@ -73,6 +85,8 @@ test("(4) a DM amount is scaled by the engine's OWN value_decimals, with separat
     }),
   );
   await page.route("**/v1/events*", (route) => fulfillJson(route, FEED_UNITS));
+  // The book the page also reads for scales is routed to one that states none: the stream alone licenses this scale.
+  await page.route("**/v1/book*", (route) => fulfillJson(route, BOOK_WITHOUT_SCALES));
   await page.goto("/feed");
 
   // The fixture's DM borrow is 1199403000 normalized-debt units.
@@ -80,11 +94,31 @@ test("(4) a DM amount is scaled by the engine's OWN value_decimals, with separat
   await expect(page.getByTestId("activity-amount").filter({ hasText: "1199403000" })).toHaveCount(0);
 });
 
+test("(4) with the stream muted, the book's own value_decimals scale the DM amount; with a book that states none it stays RAW and TAGGED", async ({
+  page,
+}) => {
+  await muteStream(page);
+  await page.route("**/v1/events*", (route) => fulfillJson(route, FEED_UNITS));
+  await page.route("**/v1/book*", (route) => fulfillJson(route, DEMO_BOOK));
+  await page.goto("/feed");
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "1,199.403" })).toBeVisible();
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "1199403000" })).toHaveCount(0);
+
+  await page.unroute("**/v1/book*");
+  await page.route("**/v1/book*", (route) => fulfillJson(route, BOOK_WITHOUT_SCALES));
+  await page.goto("/feed");
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "1199403000" })).toBeVisible();
+  await expect(page.getByTestId("activity-unit").filter({ hasText: "normalized debt" })).toContainText("raw units");
+});
+
 test("(4) an aave_scaled amount with no leg decimals stays RAW and is TAGGED as such", async ({
   page,
 }) => {
   await muteStream(page);
   await page.route("**/v1/events*", (route) => fulfillJson(route, FEED_UNITS));
+  // A book that DOES state the legacy engine's value_decimals (8, its base currency): still never applied to a
+  // ray-scaled token amount, a different unit entirely.
+  await page.route("**/v1/book*", (route) => fulfillJson(route, DEMO_BOOK));
   await page.goto("/feed");
 
   // The ray-scaled aToken amount is NOT divided by the engine's base-currency

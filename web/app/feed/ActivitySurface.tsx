@@ -5,7 +5,9 @@
 //   - the record = GET /v1/events on cursor pages (lib/feed-data: the events
 //     seam under the ordering and amount-unit laws); the live state = the
 //     global SSE provider (FeedLiveStrip) — the two are separate instruments
-//     and are never conflated: live posture is never history;
+//     and are never conflated: live posture is never history; GET /v1/book is
+//     read once for one thing only, each engine's value scale beneath the
+//     stream's;
 //   - the ordering regime is DISCLOSED per mode, and switching mode (or any
 //     filter) drops the walk entirely — an engine-scoped cursor and a
 //     cross-engine cursor rank by different keys and are NEVER interchanged;
@@ -29,11 +31,12 @@ import kit from "@/components/kit/kit.module.css";
 import {
   ACTIVITY_LIST_TITLE,
   END_OF_FEED,
+  activityScales,
   deriveActivityView,
   notABlockNumberNotice,
   sinceBlockDroppedNotice,
 } from "@/lib/activity-view";
-import { solventBaseUrl } from "@/lib/api";
+import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import {
   InspectorFetchError,
   fetchFeedPage,
@@ -79,19 +82,29 @@ export function ActivitySurface() {
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Each engine's own `value_decimals`, FROM THE WIRE — the SSE snapshot's
-  // aggregates, the same numbers /v1/book publishes. The page does not fetch a
-  // second endpoint and does not hardcode a scale: an engine the stream has
-  // not (yet) described simply has no licensed scale, and its amounts render
-  // raw with the `raw units` tag.
+  // Each engine's own `value_decimals`, FROM THE WIRE and never hardcoded: the
+  // SSE snapshot's aggregates where the stream has described an engine, and
+  // beneath them /v1/book's — the same per-engine constant, read once on mount.
+  // Until a source answers, and wherever none does (a failed read included),
+  // an engine has no licensed scale and its amounts render raw with the
+  // `raw units` tag: a failed read is the absence of a scale, never a refusal.
   const posture = usePosture();
-  const valueDecimals = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const aggregate of posture.engines ?? []) {
-      map[aggregate.engine] = aggregate.value_decimals;
-    }
-    return map;
-  }, [posture.engines]);
+  const [bookAnswer, setBookAnswer] = useState<unknown>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    getSolventClient()
+      .book(controller.signal)
+      .then(
+        (answer: unknown) => {
+          if (!controller.signal.aborted) setBookAnswer(answer);
+        },
+        () => undefined,
+      );
+    return () => {
+      controller.abort();
+    };
+  }, []);
+  const valueDecimals = useMemo(() => activityScales(posture.engines ?? null, bookAnswer), [posture.engines, bookAnswer]);
 
   const scope: FeedScope = {
     engine,

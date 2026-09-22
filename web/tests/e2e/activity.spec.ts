@@ -22,7 +22,11 @@
 // liquidation's extract with the wire's note as page text, dimming with its
 // row in the untimed tail;
 // load more appending and the tiles counting; degraded envelopes and the
-// empty filter as real answers; amount units named or raw, never a dollar;
+// empty filter as real answers; amount units named or raw, never a dollar —
+// a Cash figure placed by the book's own value_decimals, raw and tagged when
+// no source licenses a scale (/v1/book is routed explicitly wherever an
+// amount is asserted); a liquidation's repaid unit named; the three raw enum
+// types and the applied filter said in words;
 // the live strip as its own instrument, one plain line naming no roadmap;
 // a broken ordering as a standing alert; the doctrine in the drawer; answer
 // before evidence.
@@ -44,9 +48,10 @@ import {
   ACTIVITY_TAIL_NOTE,
   ACTIVITY_TAIL_NOTICE,
   ACTIVITY_TAIL_NOTICE_UNORDERED,
+  FILTER_APPLIED_LABEL,
 } from "../../lib/activity-view";
-import { feedTakeaway, type FeedTakeawayScope } from "../../lib/feed-view";
-import { DEMO_FEED_PAGE_1 } from "../fixtures/demo";
+import { RECORD_ONLY_TITLE, feedTakeaway, type FeedTakeawayScope } from "../../lib/feed-view";
+import { DEMO_BOOK, DEMO_FEED_PAGE_1 } from "../fixtures/demo";
 import {
   FEED_CROSS_PAGE_1,
   FEED_CROSS_PAGE_2,
@@ -71,6 +76,24 @@ function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
 async function muteStream(page: Page): Promise<void> {
   await page.route("**/v1/stream**", (route) => route.abort());
 }
+
+/**
+ * The book the page reads once for each engine's value_decimals — routed explicitly wherever an amount is asserted,
+ * so the scale on the page is the test's own and never a local API's: a body, or a status the read fails with.
+ */
+async function routeBook(page: Page, answer: unknown, status = 200): Promise<void> {
+  await page.route("**/v1/book*", (route) => fulfillJson(route, answer, status));
+}
+
+/** DERIVED from the demo book: every engine's value_decimals removed — a book that licenses no scale. */
+const BOOK_WITHOUT_SCALES: unknown = {
+  ...DEMO_BOOK,
+  engines: DEMO_BOOK.engines.map((engine) => {
+    const rest: Record<string, unknown> = { ...engine };
+    delete rest.value_decimals;
+    return rest;
+  }),
+};
 
 /** Route /v1/events by inspecting each request's params; records the params of every request. */
 async function mockEvents(
@@ -115,6 +138,7 @@ const headline = (page: Page) => page.getByTestId("activity-verdict-headline");
 
 test("cold load: the demo page — 50 rows in wire order, the headline IS feedTakeaway's sentence and the H1 in ink, the scope in the kicker, the dek's computed facts, five chips with the exact newest instant, two tiles, the amount column aligned with its unit beside it, state ok", async ({ page }) => {
   await muteStream(page);
+  await routeBook(page, DEMO_BOOK);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
 
@@ -141,7 +165,9 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   // The exact layer of the spoken instant: the wire's own string, verbatim. The row count is the tile's, said once.
   await expect(chip(page, "Newest")).toContainText("2026-08-08T20:21:05Z");
   await expect(chip(page, "Rows")).toHaveCount(0);
-  await expect(chip(page, "Filter echo")).toContainText("engine — · types all · since_block — · limit 50");
+  // The service's echo of the filter it applied, in words: "any" for a null constraint — the dash means refused here.
+  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("any engine · all types · any block · 50 per page");
+  await expect(chip(page, "Filter echo")).toHaveCount(0);
 
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("50");
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("more available");
@@ -159,18 +185,80 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   await expect(head.getByTestId("activity-tx")).toHaveAttribute("href", `https://optimistic.etherscan.io/tx/${first.tx_hash}`);
   await expect(rows(page).first()).toHaveAttribute("data-testid", `activity-row-10·${first.tx_hash}·38·0`);
 
-  // The amount stands alone in its right-aligned cell — the wire's integer verbatim (no scale is licensed with the
-  // stream muted), aligned and never reformatted — and its unit sits in the quiet column beside it, not upper-cased.
+  // The amount stands alone in its right-aligned cell — a Cash figure placed by the book's own value_decimals (the
+  // stream is muted, so the book is the one scale source) — and its unit sits in the quiet column beside it, not
+  // upper-cased and no longer tagged raw.
   const headCells = page.getByTestId("activity-table").locator("thead th");
   await expect(headCells).toHaveText(["When", "Engine", "Type", "Account", ACTIVITY_AMOUNT_HEADER, "Unit", "Tx"]);
-  await expect(head.locator("td").nth(4)).toHaveText(first.amount ?? "");
+  expect(first.amount).toBe("252733333");
+  await expect(head.locator("td").nth(4)).toHaveText("252.733333");
   await expect(head.locator("td").nth(4)).toHaveCSS("text-align", "right");
   await expect(head.locator("td").nth(4).getByTestId("activity-unit")).toHaveCount(0);
-  await expect(head.locator("td").nth(5).getByTestId("activity-unit")).toHaveText("normalized debt · raw units · USDC");
+  await expect(head.locator("td").nth(5).getByTestId("activity-unit")).toHaveText("normalized debt · USDC");
   await expect(head.getByTestId("activity-unit")).toHaveCSS("text-transform", "none");
+  // The legacy market's scaled rows stay raw and tagged: the book's 8 is its base currency, not a token's decimals.
+  const legacy = DEMO_FEED_PAGE_1.events.findIndex((event) => event.engine === "aave_v3_etherfi" && event.amount !== null);
+  await expect(rows(page).nth(legacy).locator("td").nth(4)).toHaveText(DEMO_FEED_PAGE_1.events[legacy]?.amount ?? "NEVER");
+  await expect(rows(page).nth(legacy).getByTestId("activity-unit")).toHaveText("aave-scaled · raw units · USDC");
 
   // No unit on this page licenses a dollar figure.
   expect((await page.getByTestId("activity-table").innerText()).includes("$")).toBe(false);
+});
+
+test("no licensed scale: a book that states no value_decimals, or a book read that fails, leaves every Cash amount the wire's integer verbatim and tagged raw — the absence of a scale, never a refusal of the page", async ({ page }) => {
+  const first = DEMO_FEED_PAGE_1.events[0];
+  if (first === undefined) throw new Error("fixture: the demo page has rows");
+  const head = () => page.getByTestId(`activity-row-10·${first.tx_hash}·38·0`);
+  await muteStream(page);
+  await routeBook(page, BOOK_WITHOUT_SCALES);
+  await mockEvents(page, demoWalk);
+  await page.goto("/feed");
+  await expect(rows(page)).toHaveCount(50);
+  await expect(head().locator("td").nth(4)).toHaveText("252733333");
+  await expect(head().getByTestId("activity-unit")).toHaveText("normalized debt · raw units · USDC");
+
+  // A failed read: the same raw arm, and the page's own state is untouched by it.
+  await page.unroute("**/v1/book*");
+  await routeBook(page, { error: "unavailable", message: "no complete risk batch is available" }, 503);
+  await page.goto("/feed");
+  await expect(rows(page)).toHaveCount(50);
+  await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
+  await expect(head().locator("td").nth(4)).toHaveText("252733333");
+  await expect(head().getByTestId("activity-unit")).toHaveText("normalized debt · raw units · USDC");
+  await expect(page.getByTestId("activity-error")).toHaveCount(0);
+  await expect(page.getByTestId("activity-refusal")).toHaveCount(0);
+});
+
+test("the three raw enum words print plain: the type buttons and the Type cells say them in words with the wire's word as the title, and pressing one still asks the service in its own word", async ({ page }) => {
+  await muteStream(page);
+  await routeBook(page, DEMO_BOOK);
+  const requests: URLSearchParams[] = [];
+  await mockEvents(page, demoWalk, requests);
+  await page.goto("/feed");
+  await expect(rows(page)).toHaveCount(50);
+
+  for (const [wire, word] of [
+    ["collateral_enabled", "collateral enabled"],
+    ["collateral_disabled", "collateral disabled"],
+    ["deficit_created", "bad debt realised"],
+    ["borrow", "borrow"],
+  ] as const) {
+    await expect(page.getByTestId(`activity-type-${wire}`)).toHaveText(word);
+    await expect(page.getByTestId(`activity-type-${wire}`)).toHaveAttribute("title", wire);
+  }
+  await expect(page.getByTestId("activity-types")).not.toContainText("_");
+  // The write-off's crit pill says what happened; its wire word rides the title.
+  const deficit = DEMO_FEED_PAGE_1.events.findIndex((event) => event.type === "deficit_created");
+  const pill = rows(page).nth(deficit).locator('[data-tone="crit"]');
+  await expect(pill).toHaveText("bad debt realised");
+  await expect(pill).toHaveAttribute("title", "deficit_created");
+  const enabled = DEMO_FEED_PAGE_1.events.findIndex((event) => event.type === "collateral_enabled");
+  await expect(rows(page).nth(enabled).locator("td").nth(2)).toHaveText("collateral enabled");
+  await expect(rows(page).nth(enabled).locator("td").nth(2).locator("[title]")).toHaveAttribute("title", "collateral_enabled");
+  await expect(page.getByTestId("activity-table").locator("tbody")).not.toContainText(/collateral_|deficit_/);
+
+  await page.getByTestId("activity-type-deficit_created").click();
+  await expect.poll(() => requests.some((params) => params.get("types") === "deficit_created")).toBe(true);
 });
 
 test("the untimed tail: the two rows without header time are last and dim, their block numbers where the time would be; nothing above them dims; no drift is claimed", async ({ page }) => {
@@ -193,6 +281,7 @@ test("the untimed tail: the two rows without header time are last and dim, their
 
 test("the ledger view pins the type to liquidation: the request says so, three rows each a crit pill with its extract behind it, the chips and the note say so, the walk restarts cursor-less", async ({ page }) => {
   await muteStream(page);
+  await routeBook(page, DEMO_BOOK);
   const requests: URLSearchParams[] = [];
   await mockEvents(
     page,
@@ -210,7 +299,7 @@ test("the ledger view pins the type to liquidation: the request says so, three r
   for (const params of requests) expect(params.get("cursor")).toBeNull();
 
   await expect(chip(page, "View")).toContainText("liquidations ledger");
-  await expect(chip(page, "Filter echo")).toContainText("types liquidation");
+  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("any engine · liquidation · any block · 50 per page");
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("3");
   await expect(page.getByTestId("activity-types")).toHaveCount(0);
   await expect(page.getByTestId("activity-types-note")).toContainText("pinned to liquidation");
@@ -227,6 +316,12 @@ test("the ledger view pins the type to liquidation: the request says so, three r
   await expect(extracts.first()).toBeVisible();
   await expect(extracts.first()).toContainText("seized 0.65625 weETH");
   await expect(extracts.first()).toContainText("bonus realized — / configured 500 bps");
+  // What each repaid figure is counted in: the legacy row's own symbol, never an address prefix; the Debt Manager's
+  // own USD — the demo's Cash liquidations are sub-dollar positions, printed as the fixture holds them.
+  await expect(extracts.nth(0)).toContainText("debt repaid 2,500 USDC");
+  await expect(extracts.nth(0)).not.toContainText("0xA0b86991");
+  await expect(extracts.nth(1)).toContainText("debt repaid 0.35812 USD");
+  await expect(extracts.nth(2)).toContainText("debt repaid 0.409762 USD");
   await expect(extracts.first().getByTestId("activity-liquidator")).toHaveAttribute(
     "href",
     "/inspector/0xBBbB000000000000000000000000000000000002",
@@ -377,7 +472,7 @@ test("since-block: a stated impossibility with no single engine — short form, 
   await input.press("Enter");
   await expect(rows(page)).toHaveCount(1);
   await expect(page.getByTestId("activity-since-applied")).toHaveText("≥ 25635600");
-  await expect(chip(page, "Filter echo")).toContainText("since_block 25635600");
+  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("Aave v3 market (legacy) · all types · from block 25,635,600 · 2 per page");
 
   // Back to every engine: the bound is REMOVED with a visible notice, never silently re-meant.
   await page.getByTestId("activity-engine-all").click();
@@ -542,8 +637,9 @@ test("an empty filtered feed is a real answer: the exhausted state, the table's 
   await expect(page.getByTestId("activity-end")).toBeVisible();
 });
 
-test("amount units render honestly: named, raw where unlicensed and tagged, the record-only word, never a fake USD", async ({ page }) => {
+test("amount units render honestly: named, raw where unlicensed and tagged, a record-only dash with its word in the unit column, never a fake USD", async ({ page }) => {
   await muteStream(page);
+  await routeBook(page, BOOK_WITHOUT_SCALES);
   await mockEvents(page, (params, route) => fulfillJson(route, FEED_UNITS));
   await page.goto("/feed");
   await expect(rows(page)).toHaveCount(4);
@@ -552,17 +648,22 @@ test("amount units render honestly: named, raw where unlicensed and tagged, the 
   await expect(units.filter({ hasText: "aave-scaled" })).toHaveCount(1);
   await expect(units.filter({ hasText: "normalized debt" })).toHaveCount(1);
   await expect(units.filter({ hasText: "opaque units" })).toHaveCount(1);
-  // With the stream muted no engine has a licensed scale: every non-null amount is raw and says so.
+  // With the stream muted and a book that states no scale, no engine has a licensed scale: every non-null amount is raw and says so.
   await expect(units.filter({ hasText: "raw units" })).toHaveCount(3);
 
-  // The record-only row (unit `none`, null amount) is its own statement, not a zero — and not a value: it is set in
-  // the table's dim sub register, never the mono of a figure, with no unit beside it.
-  const recordOnly = page.getByTestId("activity-amount").filter({ hasText: "record-only" });
-  await expect(recordOnly).toHaveCount(1);
+  // The record-only row (unit `none`, null amount) is its own statement, not a zero — and not a value: its amount cell
+  // holds a dash set in the table's dim sub register, never the mono of a figure, and its word stands in the unit
+  // column with what the dash means as its title — as the Inspector says it.
+  expect(FEED_UNITS.events[2]?.amount).toBeNull();
+  const recordOnly = rows(page).nth(2).getByTestId("activity-amount");
+  await expect(recordOnly).toHaveText("—");
   await expect(recordOnly).toHaveClass(/sub/);
   await expect(recordOnly).not.toHaveClass(/addr/);
+  await expect(rows(page).nth(2).getByTestId("activity-unit")).toHaveText("record-only");
+  await expect(rows(page).nth(2).getByTestId("activity-unit")).toHaveAttribute("title", RECORD_ONLY_TITLE);
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "record-only" })).toHaveCount(0);
   await expect(page.getByTestId("activity-amount").filter({ hasText: "123456789" })).toHaveClass(/addr/);
-  await expect(units).toHaveCount(3);
+  await expect(units).toHaveCount(4);
 
   // The opaque amount is the RAW integer — its decimals were NOT applied.
   await expect(page.getByTestId("activity-amount").filter({ hasText: "123456789" })).toHaveCount(1);

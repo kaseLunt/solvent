@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { DEMO_EVENTS_NEAR } from "../fixtures/demo";
 import { EVENTS } from "../fixtures/inspector";
 import { actionLabel, activityEmptyText, activityFailureText, activityRows, activityTakeaway } from "../../lib/activity-rows";
+import { RECORD_ONLY_TITLE, RECORD_ONLY_WORD } from "../../lib/feed-view";
 
 // A page failure beside loaded rows is its own line: the table's empty words print only with no rows, so a
 // refused "Load more" folded into them would never show. The rows stand; the failure speaks in its own words.
@@ -32,7 +34,7 @@ test("a liquidation row carries its extract: liquidator, repaid, seized", () => 
   expect(liq?.detail).toBe("liquidator 0xBBbB…0002 repaid 2,500 USDC; seized 0.6562 weETH");
 });
 
-test("amounts come from the feed's own vocabulary; a record-only event prints a dash", () => {
+test("amounts come from the feed's own vocabulary; a record-only event prints a dash with the Activity page's word beside it", () => {
   const rows = activityRows(EVENTS.events);
   expect(rows[1]?.amount.length).toBeGreaterThan(0);
   expect(rows[1]?.amountTitle).not.toBeNull();
@@ -40,6 +42,22 @@ test("amounts come from the feed's own vocabulary; a record-only event prints a 
   if (first === undefined) throw new Error("fixture");
   const recordOnly = activityRows([{ ...first, amount: null, amount_unit: "none" }])[0];
   expect(recordOnly?.amount).toBe("—");
+  // The two surfaces agree: a dash where the figure would be, the record's word in the unit words, its statement in the title.
+  expect(recordOnly?.unit).toBe(RECORD_ONLY_WORD);
+  expect(recordOnly?.amountTitle).toBe(RECORD_ONLY_TITLE);
+  expect(recordOnly?.rawUnits).toBe(false);
+});
+
+test("a normalized figure is never followed by a bare symbol: the value alone, then the unit words in the Activity page's order", () => {
+  const rows = activityRows(DEMO_EVENTS_NEAR.events, { valueDecimalsByEngine: { debt_manager: 6 } });
+  expect(rows[0]).toMatchObject({ action: "Borrow", asset: "USDC", amount: "622", unit: "normalized debt · USDC", rawUnits: false });
+  expect(rows.map((r) => r.amount)).not.toContain("622 USDC");
+  // The signed repay keeps its sign; no amount cell carries a symbol.
+  expect(rows.find((r) => r.action === "Repay")).toMatchObject({ amount: "-150", unit: "normalized debt · USDC" });
+  for (const row of rows) expect(row.amount).not.toMatch(/[A-Za-z]/);
+  // No licensed scale: the raw integer, the raw-units pill's flag, and the same unit words — the symbol never touches the digits.
+  const raw = activityRows(DEMO_EVENTS_NEAR.events);
+  expect(raw[0]).toMatchObject({ amount: "622000000", unit: "normalized debt · USDC", rawUnits: true });
 });
 
 test("the wire's own scale places the decimal and raw units are named; empty seizures and unscaled repayments are stated; the Cash repaid unit is USD; short hashes and raw types pass verbatim", () => {
@@ -49,7 +67,7 @@ test("the wire's own scale places the decimal and raw units are named; empty sei
   expect(scaled[1]?.rawUnits).toBe(false);
   const unscaled = activityRows(EVENTS.events);
   expect(unscaled[1]?.rawUnits).toBe(true);
-  expect(unscaled[1]?.unitChip).not.toBeNull();
+  expect(unscaled[1]?.unit).toBe("normalized debt · USDC");
 
   const first = EVENTS.events[0];
   if (first === undefined || first.liquidation === null) throw new Error("fixture");

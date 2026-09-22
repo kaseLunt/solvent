@@ -3,14 +3,17 @@
 import { KitTable, SectionHead, StatusPill, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { activityEmptyText, activityFailureText, activityRows, activityTakeaway, type ActivityScale } from "@/lib/activity-rows";
+import { ACTIVITY_AMOUNT_HEADER } from "@/lib/activity-view";
 import { useAddressActivity } from "@/lib/address-lookup";
+import { RAW_UNITS_TAG } from "@/lib/feed-view";
 import styles from "../inspector.module.css";
 
+// The Amount head carries the Activity page's caveat where the number is read: engine units, never dollars.
 const COLUMNS = [
   { key: "when", header: "When" },
   { key: "action", header: "Action" },
   { key: "asset", header: "Asset" },
-  { key: "amount", header: "Amount", align: "right" as const },
+  { key: "amount", header: ACTIVITY_AMOUNT_HEADER, align: "right" as const },
   { key: "tx", header: "Tx", align: "right" as const },
 ];
 
@@ -38,11 +41,16 @@ export function ActivityTable({ addr, valid, scale }: { addr: string; valid: boo
             <>
               {" "}
               <StatusPill tone="refused" title={r.amountTitle ?? undefined}>
-                raw units
+                {RAW_UNITS_TAG}
               </StatusPill>
             </>
           )}
-          {!r.rawUnits && r.unitChip !== null && <span className={kit.sub}> {r.unitChip}</span>}
+          {r.unit !== "" && (
+            <span className={kit.sub} title={r.amountTitle ?? undefined} data-testid="inspector-activity-unit">
+              {" "}
+              {r.unit}
+            </span>
+          )}
         </>
       ),
       tx:

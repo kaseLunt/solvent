@@ -1,8 +1,9 @@
 // This account's chain actions as table rows (spec 2026-09-15 §5.3; plan 2
 // ruling R12). Times are custodied header times or nothing — a null
 // block_time renders the block number, never an invented clock. Amounts speak
-// the feed's own accounting vocabulary (lib/feed-view.ts).
-import { feedAmount } from "./feed-view";
+// the feed's own accounting vocabulary (lib/feed-view.ts), in the Activity
+// page's order: the figure, then what it is counted in.
+import { RECORD_ONLY_TITLE, RECORD_ONLY_WORD, feedAmount } from "./feed-view";
 import { renderBlockTime, truncateAddress } from "./format";
 import { humanAmount } from "./human-price";
 import { txExplorerUrl, type ChainEvent, type EventDisplayType } from "./inspector-data";
@@ -32,10 +33,14 @@ export interface ActivityRow {
   /** The engine's own event word (`raw_type`), verbatim, for the hover; the visible label comes from `type`. */
   readonly actionTitle: string;
   readonly asset: string;
+  /** The figure alone — never followed by a symbol, which would read a normalized or scaled value as a token amount — or a dash for a record with no amount. */
   readonly amount: string;
   readonly amountTitle: string | null;
-  /** The feed's unit chip beside the value; null for a record-only row or the plain asset-units path. */
-  readonly unitChip: string | null;
+  /**
+   * What the figure is counted in, in the Activity page's order: the feed's unit words then the symbol ("normalized
+   * debt · USDC"), or the record-only word beside a dash.
+   */
+  readonly unit: string;
   /** True when `amount` is the wire's raw integer because no scale was licensed — the renderer tags it visibly. */
   readonly rawUnits: boolean;
   readonly tx: { hash: string; short: string; url: string | null };
@@ -91,9 +96,12 @@ export function activityRows(events: readonly ChainEvent[], scale?: ActivityScal
       action: actionLabel(event.type),
       actionTitle: event.raw_type,
       asset: event.symbol ?? (event.asset === null ? "—" : truncateAddress(event.asset)),
-      amount: amount.kind === "record-only" ? "—" : `${amount.display}${amount.symbol === null ? "" : ` ${amount.symbol}`}`,
-      amountTitle: amount.kind === "record-only" ? "record only: this event carries no amount" : (amount.unitTitle ?? amount.unitChip),
-      unitChip: amount.kind === "record-only" ? null : amount.unitChip,
+      amount: amount.kind === "record-only" ? "—" : amount.display,
+      amountTitle: amount.kind === "record-only" ? RECORD_ONLY_TITLE : (amount.unitTitle ?? amount.unitChip),
+      unit:
+        amount.kind === "record-only"
+          ? RECORD_ONLY_WORD
+          : [amount.unitChip, amount.symbol].filter((part): part is string => part !== null).join(" · "),
       rawUnits: amount.kind === "record-only" ? false : amount.rawUnits,
       tx: { hash: event.tx_hash, short: shortHash(event.tx_hash), url: txExplorerUrl(event.chain_id, event.tx_hash) },
       detail: liquidationDetail(event),

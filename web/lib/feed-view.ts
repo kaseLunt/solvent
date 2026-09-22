@@ -85,6 +85,15 @@ export interface FeedAmountScale {
 /** The tag rendered beside a verbatim integer — never a silent raw number. */
 export const RAW_UNITS_TAG = "raw units";
 
+/**
+ * A null amount's word, printed where the unit is named — never in the figure's place, which holds a dash: the row
+ * is a record with no amount, a different statement from zero. Both surfaces that list chain actions print it.
+ */
+export const RECORD_ONLY_WORD = "record-only";
+
+/** The record-only word's title: what the dash beside it means. */
+export const RECORD_ONLY_TITLE = "record only: this event carries no amount";
+
 /** Exact placement + thousands separators, via the shared money formatter. */
 function scaled(amount: string, decimals: number): string {
   return groupDecimalString(renderNullableDecimal(amount, { decimals }));

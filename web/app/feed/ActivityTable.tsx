@@ -19,7 +19,7 @@ function LiquidationLine({ detail, dim }: { detail: ActivityLiquidation; dim: bo
         {truncateAddress(detail.liquidator)}
       </Link>{" "}
       · debt repaid <b>{detail.repaid}</b>
-      {detail.repaidAsset !== null && <span className={kit.dim}> {detail.repaidAsset}</span>} · seized <b>{detail.seized}</b> · bonus realized{" "}
+      {detail.repaidUnit !== null && <span className={kit.dim}> {detail.repaidUnit}</span>} · seized <b>{detail.seized}</b> · bonus realized{" "}
       <b>{detail.bonusRealized}</b> / configured <b>{detail.bonusConfigured}</b>
       {detail.note !== "" && (
         <span className={styles.detailNote} data-testid="activity-liquidation-note">
@@ -42,11 +42,12 @@ const COLUMNS: KitColumn[] = [
 
 /**
  * The paged record as the kit's table: every loaded row in WIRE ORDER (the service orders, the page discloses),
- * the untimed tail dim with its block number where the time would be, a liquidation's pill crit with its typed
- * extract visible beneath it, the account opening the Inspector, the amount alone in its right-aligned column so
- * the digits share an edge — the wire's integer verbatim, aligned and never reformatted — with its unit named in the
- * quiet column beside it, the tx on its chain's explorer. A record-only row's word is a statement, not a value, and
- * is set as one. Every cell is the view model's word; nothing is decided here.
+ * the untimed tail dim with its block number where the time would be, the type in the page's words with the wire's
+ * word as its title, a liquidation's pill crit with its typed extract visible beneath it, the account opening the
+ * Inspector, the amount alone in its right-aligned column so the digits share an edge — placed only by a scale the
+ * wire licensed, otherwise the wire's integer verbatim, aligned and never reformatted — with its unit named in the
+ * quiet column beside it, the tx on its chain's explorer. A record-only row's dash is a statement, not a value, and
+ * is set as one; its word stands in the unit column. Every cell is the view model's word; nothing is decided here.
  */
 export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[]; emptyText: string }) {
   const kitRows: KitRow[] = rows.map((row) => ({
@@ -58,7 +59,15 @@ export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[
       engine: row.engine,
       type: (
         <>
-          {row.tone === "crit" ? <StatusPill tone="crit">{row.type}</StatusPill> : <span className={styles.type}>{row.type}</span>}
+          {row.tone === "crit" ? (
+            <StatusPill tone="crit" title={row.type}>
+              {row.typeLabel}
+            </StatusPill>
+          ) : (
+            <span className={styles.type} title={row.type}>
+              {row.typeLabel}
+            </span>
+          )}
           {row.detail !== null && <LiquidationLine detail={row.detail} dim={row.dim} />}
         </>
       ),

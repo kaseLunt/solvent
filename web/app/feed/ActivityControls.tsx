@@ -1,7 +1,7 @@
 "use client";
 
 import kit from "@/components/kit/kit.module.css";
-import { ACTIVITY_SINCE_FULL, ACTIVITY_SINCE_SHORT, ALL_ENGINES, LEDGER_TYPES_NOTE } from "@/lib/activity-view";
+import { ACTIVITY_SINCE_FULL, ACTIVITY_SINCE_SHORT, ALL_ENGINES, LEDGER_TYPES_NOTE, typeLabel } from "@/lib/activity-view";
 import {
   EVENT_DISPLAY_TYPES,
   FEED_ENGINES,
@@ -31,7 +31,8 @@ const BTN = `${kit.btn} ${kit.btnGhost} ${styles.chipBtn}`;
 /**
  * The walk's scope as pressed ghost buttons, in two rows: engine (all engines or one of the two, named as the page
  * names them) and view (every action or the liquidations ledger, which pins the type); then the type vocabulary (the
- * wire's own words, never invented) and the since-block bound — a real control only with one engine chosen; with
+ * wire's own classes, never invented, printed in the page's words with the wire's word as the title) and the
+ * since-block bound — a real control only with one engine chosen; with
  * none it is a stated impossibility in short form (what would be here and how to get it), its full sentence in the
  * title and the drawer: a property of chains, not a disabled control and not an error. The pressed look is the kit's
  * one toggle grammar. The surface owns what each press does to the walk; this component only names the choices.
@@ -124,11 +125,12 @@ export function ActivityControls({
                 className={BTN}
                 aria-pressed={types.includes(candidate)}
                 data-testid={`activity-type-${candidate}`}
+                title={candidate}
                 onClick={() => {
                   onType(candidate);
                 }}
               >
-                {candidate}
+                {typeLabel(candidate)}
               </button>
             ))}
           </span>

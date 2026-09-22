@@ -108,3 +108,32 @@ test("events: six rows for the near account, newest first, exactly one without a
   expect(new Set(hashes).size).toBe(hashes.length);
   expect(DEMO_PARAMS_DM.params[0]?.fields[0]?.name).toBe("borrow_apy");
 });
+
+/**
+ * The Debt Manager deriver's display classes as the service serves them (internal/store/p5_events.go dmEventDisplay):
+ * display type → [raw_type, amount_unit]. It emits no collateral toggle and no opaque unit; its supply and withdraw
+ * rows are the supplier side's record-only flows in the borrow token.
+ */
+const DM_EMITS: Readonly<Record<string, readonly [string, string]>> = {
+  borrow: ["borrow", "dm_normalized_debt"],
+  repay: ["repay", "dm_normalized_debt"],
+  supply: ["supplied", "none"],
+  withdraw: ["withdraw_borrow_token", "none"],
+  liquidation: ["liquidation", "dm_normalized_debt"],
+};
+
+test("events: every row is a shape the Debt Manager deriver emits — its raw type and unit for the display class, no amount exactly when the unit is none, the borrow token on the supplier side", () => {
+  for (const e of DEMO_EVENTS_NEAR.events) {
+    expect(e.engine).toBe("debt_manager");
+    const shape = DM_EMITS[e.type];
+    expect(shape, `${e.type} is not a class the Debt Manager emits`).toBeDefined();
+    expect([e.raw_type, e.amount_unit]).toEqual(shape);
+    expect(e.amount === null).toBe(e.amount_unit === "none");
+    expect(e.amount_decimals).toBeNull();
+  }
+  const usdc = DEMO_EVENTS_NEAR.events.find((e) => e.type === "borrow")?.asset;
+  for (const e of DEMO_EVENTS_NEAR.events.filter((x) => x.type === "supply" || x.type === "withdraw")) expect(e.asset).toBe(usdc);
+  // The page's record-only arm is shown, and the raw-units arm no Cash row can honestly carry is not.
+  expect(DEMO_EVENTS_NEAR.events.filter((e) => e.amount === null).length).toBeGreaterThan(0);
+  expect(DEMO_EVENTS_NEAR.events.some((e) => e.amount_unit === "opaque")).toBe(false);
+});

@@ -12,6 +12,9 @@
 //   - the ETHFI asset is READ from ../scenarios.json — the committed
 //     ethfi_minus_50 scenario's shock asset (the generator throws if it is
 //     absent); USDC is the /v1/events example's OP USDC;
+//   - every activity row is a shape the Debt Manager deriver emits (DM_EMITS
+//     below: its raw type and amount unit per display class; the generator
+//     throws on any other);
 //   - tx hashes are sha256 over a `solvent-demo:<seed>` string: deterministic,
 //     distinct, well-formed, and never a real transaction.
 // The near account is the mockup's (pages-console.html:224-247): debt $4,822,
@@ -272,39 +275,59 @@ function historyBody(account, near) {
   };
 }
 
+/**
+ * Every display class the Debt Manager deriver emits, as the service serves it (internal/store/p5_events.go
+ * dmEventDisplay): display type → [raw_type, amount_unit]. It emits no collateral toggle and no opaque unit — its
+ * collateral is read by sweeps, not events — and its supply and withdraw rows are the supplier side's record-only
+ * flows in the borrow token (recon/derivation-notes.md, `Supplied`), with no amount on the wire.
+ */
+const DM_EMITS = {
+  borrow: ["borrow", "dm_normalized_debt"],
+  repay: ["repay", "dm_normalized_debt"],
+  supply: ["supplied", "none"],
+  withdraw: ["withdraw_borrow_token", "none"],
+  liquidation: ["liquidation", "dm_normalized_debt"],
+};
+
 function eventsBody(account) {
   // `block_time` follows the history's own cadence — OP's 2-second blocks, 15 per 30-second batch — so two
   // distinct blocks never share a stamp; one row is left untimed on purpose (its header not yet custodied).
-  const ev = (blocksBack, timed, type, token, amount, unit, logIndex) => ({
-    chain_id: 10,
-    engine: "debt_manager",
-    block_number: dm.last_block - blocksBack,
-    block_time: timed ? iso(servedMs - blocksBack * 2000) : null,
-    tx_hash: hash((dm.last_block - blocksBack) * 1000 + logIndex),
-    log_index: logIndex,
-    seq: 0,
-    type,
-    raw_type: type,
-    account,
-    asset: token.asset,
-    symbol: token.symbol,
-    amount,
-    amount_unit: unit,
-    amount_decimals: null, // the contract: null on every row it serves; `opaque` never carries a scale
-    liquidation: null,
-  });
+  const ev = (blocksBack, timed, type, token, amount, logIndex) => {
+    const shape = DM_EMITS[type];
+    if (shape === undefined) throw new Error(`the Debt Manager deriver emits no ${type} row`);
+    const [rawType, unit] = shape;
+    if ((unit === "none") !== (amount === null)) throw new Error(`${type}: unit ${unit} with amount ${String(amount)}`);
+    return {
+      chain_id: 10,
+      engine: "debt_manager",
+      block_number: dm.last_block - blocksBack,
+      block_time: timed ? iso(servedMs - blocksBack * 2000) : null,
+      tx_hash: hash((dm.last_block - blocksBack) * 1000 + logIndex),
+      log_index: logIndex,
+      seq: 0,
+      type,
+      raw_type: rawType,
+      account,
+      asset: token.asset,
+      symbol: token.symbol,
+      amount,
+      amount_unit: unit,
+      amount_decimals: null, // the contract: null on every row it serves
+      liquidation: null,
+    };
+  };
   return {
     served_at: SERVED_AT,
     filter: { engine: null, account, types: [], since_block: null },
     limit: 25,
     events: [
-      ev(344, true, "borrow", USDC, "622000000", "dm_normalized_debt", 12),
-      ev(1444, true, "supply", WEETH, s(TOKEN(0.6)), "opaque", 4),
-      ev(1454, true, "collateral_enabled", WEETH, null, "none", 3),
-      ev(2944, true, "supply", ETHFI, s(TOKEN(1250)), "opaque", 7),
-      ev(5444, true, "borrow", USDC, "4200000000", "dm_normalized_debt", 2),
+      ev(344, true, "borrow", USDC, "622000000", 12),
+      ev(1444, true, "supply", USDC, null, 4),
+      ev(1454, true, "withdraw", USDC, null, 3),
+      ev(2944, true, "supply", USDC, null, 7),
+      ev(5444, true, "borrow", USDC, "4200000000", 2),
       // The SIGNED delta: a repay is negative on the debt side (the contract's ChainEvent.amount).
-      ev(8444, false, "repay", USDC, "-150000000", "dm_normalized_debt", 9),
+      ev(8444, false, "repay", USDC, "-150000000", 9),
     ],
     next_cursor: null,
     notes: ["`block_time` is null until the block's header is custodied — never fabricated. Render the block number in the meantime."],

@@ -19,7 +19,10 @@
 //     that doctrine lives in the drawer;
 //   - a row's amount is the engine's own accounting unit, named beside it
 //     (feedAmount's arms printed as the list printed them, the raw-units tag
-//     included) and never a dollar figure;
+//     included) and never a dollar figure; its scale is the wire's own —
+//     the stream's aggregates, then the book's — or none, and a record with
+//     no amount is a dash with its word in the unit cell;
+//   - a type prints in the page's words, the wire's word kept for its title;
 //   - a cross-engine row without custodied header time is the untimed tail:
 //     dimmed, its block number where the time would be, never an invented
 //     timestamp; engine-scoped a null time is a per-row fallback, not a tail;
@@ -32,6 +35,7 @@
 //   - every wire integer printed here passes the population guard first.
 
 import { groupDecimalString } from "./book-format";
+import { bookEnvelopeFault } from "./cash-refusal";
 import {
   splitUntimedTail,
   txExplorerUrl,
@@ -40,15 +44,25 @@ import {
   type FeedEngine,
   type FeedOrderMode,
 } from "./feed-data";
-import { RAW_UNITS_TAG, feedAmount, feedNewest, feedRowKey, feedTagTone, feedTakeaway, renderBps } from "./feed-view";
-import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal } from "./format";
+import {
+  RAW_UNITS_TAG,
+  RECORD_ONLY_TITLE,
+  RECORD_ONLY_WORD,
+  feedAmount,
+  feedNewest,
+  feedRowKey,
+  feedTagTone,
+  feedTakeaway,
+  renderBps,
+} from "./feed-view";
+import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal, truncateAddress } from "./format";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import { refused, sentence, type LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
 import { engineInProse, groupInt, joinAnd, plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
-import { isWirePopulation, readWirePopulation } from "./wireGuard";
+import { isWirePopulation, isWireScale, readWirePopulation } from "./wireGuard";
 
 export type ActivityState = "loading" | "ok" | "refused" | "error" | "exhausted";
 
@@ -56,6 +70,7 @@ export type ActivityState = "loading" | "ok" | "refused" | "error" | "exhausted"
 export interface ActivityEnvelope {
   readonly filter: {
     readonly engine: string | null;
+    readonly account?: string | null;
     readonly types: readonly string[] | null;
     readonly since_block: number | null;
   };
@@ -95,10 +110,13 @@ export interface ActivityInput {
 export interface ActivityLiquidation {
   readonly liquidator: string;
   readonly liquidatorHref: string;
-  /** The repaid debt at the extract's own decimals, or an em dash when the wire carried none. */
+  /** The repaid debt at the extract's own decimals; the wire's digits verbatim when it carried no scale; an em dash when it carried no figure. */
   readonly repaid: string;
-  /** The debt asset, shortened, or null when the wire carried none. */
-  readonly repaidAsset: string | null;
+  /**
+   * What the figure is counted in: the Debt Manager's own USD, the legacy row's symbol (its debt asset shortened when
+   * no symbol is carried), the raw-units tag for an unscaled figure; null beside a dash, or when nothing names it.
+   */
+  readonly repaidUnit: string | null;
   /** Every seizure leg as `amount symbol`, comma-joined; the no-legs statement when none was carried. */
   readonly seized: string;
   readonly bonusRealized: string;
@@ -114,16 +132,19 @@ export interface ActivityRow {
   /** The custodied header time, or the block number when the time is null. */
   readonly when: string;
   readonly engine: string;
+  /** The wire's display type: the tone's input and the printed word's title. */
   readonly type: EventDisplayType;
+  /** The type in the page's words (typeLabel). */
+  readonly typeLabel: string;
   readonly tone: "crit" | "info";
   readonly account: string;
-  /** The amount as far as its unit licenses, or the record-only word. */
+  /** The amount as far as its unit licenses, or a dash for a record with no amount. */
   readonly amount: string;
-  /** A null amount: the word is a statement about the record, not a value, and the table sets it as one. */
+  /** A null amount: the dash is a statement about the record, not a value, and the table sets it as one. */
   readonly recordOnly: boolean;
-  /** The unit named beside the amount: the unit tag, the raw-units tag when unscaled, the symbol. */
+  /** The unit named beside the amount: the unit tag, the raw-units tag when unscaled, the symbol — or the record-only word. */
   readonly unit: string;
-  /** What the unit is and what converting it would take; null for a record-only row. */
+  /** What the unit is and what converting it would take; for a record-only row, what its dash means. */
   readonly unitTitle: string | null;
   /** The chain's explorer link for the transaction, or null when no explorer is configured for the chain. */
   readonly tx: string | null;
@@ -273,26 +294,90 @@ export function notABlockNumberNotice(draft: string): string {
   return `"${draft.slice(0, 32)}" is not a block number, so nothing was requested`;
 }
 
-function echoTypes(types: readonly string[] | null): string {
-  return types === null || types.length === 0 ? "all" : types.join(",");
+/**
+ * The three display types whose wire word is an identifier, in the page's words: the contract's own gloss — the Aave
+ * usage-as-collateral toggles and the pool's own bad-debt realization event. Every other type is already a word.
+ */
+export const TYPE_WORDS: Readonly<Partial<Record<EventDisplayType, string>>> = {
+  collateral_enabled: "collateral enabled",
+  collateral_disabled: "collateral disabled",
+  deficit_created: "bad debt realised",
+};
+
+/** A display type as the page prints it; a word outside the vocabulary prints as the wire sent it, never guessed at. */
+export function typeLabel(type: string): string {
+  return (TYPE_WORDS as Readonly<Record<string, string | undefined>>)[type] ?? type;
 }
 
-/** The wire's own filter echo; its integers pass the population guard before they print. */
-function filterEcho(envelope: ActivityEnvelope): string {
-  const since =
-    envelope.filter.since_block === null
-      ? EM_DASH
-      : String(readWirePopulation(envelope.filter.since_block, "since_block"));
-  const limit = String(readWirePopulation(envelope.limit, "limit"));
-  return `engine ${envelope.filter.engine ?? EM_DASH} · types ${echoTypes(envelope.filter.types)} · since_block ${since} · limit ${limit}`;
+/** The chip that says the filter the service applied: its own echo, so a defaulted request still states its scope. */
+export const FILTER_APPLIED_LABEL = "Filter applied";
+
+/**
+ * The service's echo of the filter it applied, in the page's words: the engine by its name, the types as the page
+ * prints them, the block bound and the page size grouped — each integer through the population guard first. A null
+ * constraint is "any" (an empty type list, every type): the dash means refused or absent on this page, and a
+ * constraint the service did not apply is neither. An account the service echoed is said, shortened.
+ */
+export function appliedFilter(envelope: ActivityEnvelope): string {
+  const { engine, account, types, since_block: since } = envelope.filter;
+  return [
+    engine === null ? "any engine" : engineName(engine),
+    ...(account === undefined || account === null ? [] : [`account ${truncateAddress(account)}`]),
+    types === null || types.length === 0 ? "all types" : joinAnd(types.map(typeLabel)),
+    since === null ? "any block" : `from block ${groupInt(readWirePopulation(since, "since_block"))}`,
+    `${groupInt(readWirePopulation(envelope.limit, "limit"))} per page`,
+  ].join(" · ");
+}
+
+/** One engine's scale as a wire source states it. */
+export interface EngineScale {
+  readonly engine: string;
+  readonly value_decimals: number;
+}
+
+/**
+ * Each engine's `value_decimals`, FROM THE WIRE: the stream's aggregates where they describe an engine, `/v1/book`'s
+ * beneath them for an engine the stream has not described — the same per-engine constant, published twice. The book
+ * is judged whole before it is read (an answer that is not a book licenses nothing), and every scale passes the
+ * scale guard: one it refuses licenses nothing. An engine with no licensed scale keeps its raw integers, tagged.
+ */
+export function activityScales(stream: readonly EngineScale[] | null, book: unknown): Readonly<Record<string, number>> {
+  const scales: Record<string, number> = {};
+  if (bookEnvelopeFault(book) === null) {
+    for (const entry of (book as { readonly engines: readonly Readonly<Record<string, unknown>>[] }).engines) {
+      const { engine, value_decimals: decimals } = entry;
+      if (typeof engine === "string" && isWireScale(decimals)) scales[engine] = decimals;
+    }
+  }
+  for (const { engine, value_decimals: decimals } of stream ?? []) {
+    if (isWireScale(decimals)) scales[engine] = decimals;
+  }
+  return scales;
+}
+
+/**
+ * What a liquidation's repaid figure is counted in. The row's asset IS the debt asset on both engines, so the legacy
+ * row's symbol names it (its debt asset, shortened, when no symbol was carried); the Debt Manager's figure is its own
+ * USD at its value_decimals, as the wire's note on the row says. A figure the wire carried no scale for is its raw
+ * integer, tagged — never dressed as dollars or tokens — and a dash has no unit.
+ */
+function repaidUnit(event: FeedChainEvent, detail: NonNullable<FeedChainEvent["liquidation"]>): string | null {
+  if (detail.debt_repaid === null) return null;
+  if (!isWireScale(detail.debt_decimals)) return RAW_UNITS_TAG;
+  if (event.engine === CASH) return "USD";
+  const symbol = event.symbol ?? null;
+  if (symbol !== null) return symbol;
+  return detail.debt_asset === null ? null : `${detail.debt_asset.slice(0, 10)}…`;
 }
 
 /** The typed extract as parts: liquidator, repaid debt, seized legs, both bonus figures, the wire's note. An unestablished field is an em dash, never an estimate. */
-function liquidationDetail(detail: NonNullable<FeedChainEvent["liquidation"]>): ActivityLiquidation {
+function liquidationDetail(event: FeedChainEvent, detail: NonNullable<FeedChainEvent["liquidation"]>): ActivityLiquidation {
   const repaid =
     detail.debt_repaid === null
       ? EM_DASH
-      : groupDecimalString(renderNullableDecimal(detail.debt_repaid, { decimals: detail.debt_decimals ?? undefined }));
+      : isWireScale(detail.debt_decimals)
+        ? groupDecimalString(renderNullableDecimal(detail.debt_repaid, { decimals: detail.debt_decimals }))
+        : detail.debt_repaid;
   const seized =
     detail.seized.length === 0
       ? `${EM_DASH} (no seizure legs carried)`
@@ -306,7 +391,7 @@ function liquidationDetail(detail: NonNullable<FeedChainEvent["liquidation"]>): 
     liquidator: detail.liquidator,
     liquidatorHref: `/inspector/${detail.liquidator}`,
     repaid,
-    repaidAsset: detail.debt_asset === null ? null : `${detail.debt_asset.slice(0, 10)}…`,
+    repaidUnit: repaidUnit(event, detail),
     seized,
     bonusRealized: renderBps(detail.realized_bonus_bps),
     bonusConfigured: renderBps(detail.configured_bonus_bps),
@@ -328,9 +413,10 @@ function activityRow(
   const coordinates = `${block}log ${String(log)}${seq === 0 ? "" : ` · seq ${String(seq)}`}`;
   const explorer =
     url === null ? ` (no explorer configured for chain ${String(readWirePopulation(event.chain_id, "chain_id"))})` : "";
+  // A record with no amount: a dash where the figure would be, its word where the unit is named.
   const unit =
     amount.kind === "record-only"
-      ? ""
+      ? RECORD_ONLY_WORD
       : [amount.unitChip, amount.rawUnits ? RAW_UNITS_TAG : null, amount.symbol]
           .filter((part): part is string => part !== null)
           .join(" · ");
@@ -340,16 +426,17 @@ function activityRow(
     when: renderBlockTime(event.block_number, event.block_time),
     engine: engineName(event.engine),
     type: event.type,
+    typeLabel: typeLabel(event.type),
     tone: feedTagTone(event.type),
     account: event.account,
-    amount: amount.kind === "record-only" ? "record-only" : amount.display,
+    amount: amount.kind === "record-only" ? EM_DASH : amount.display,
     recordOnly: amount.kind === "record-only",
     unit,
-    unitTitle: amount.kind === "record-only" ? null : amount.unitTitle,
+    unitTitle: amount.kind === "record-only" ? RECORD_ONLY_TITLE : amount.unitTitle,
     tx: url,
     txLabel: `${event.tx_hash.slice(0, 10)}…`,
     txTitle: `${event.tx_hash}${explorer} · ${coordinates}`,
-    detail: event.liquidation === null ? null : liquidationDetail(event.liquidation),
+    detail: event.liquidation === null ? null : liquidationDetail(event, event.liquidation),
   };
 }
 
@@ -658,7 +745,7 @@ export function deriveActivityView(input: ActivityInput): ActivityView {
     { label: "View", value: view === "all" ? "all actions" : "liquidations ledger" },
     { label: "Order", value: engine === null ? "by block time" : "by block number" },
     ...newestChip,
-    ...(envelope === null ? [] : [{ label: "Filter echo", value: filterEcho(envelope) }]),
+    ...(envelope === null ? [] : [{ label: FILTER_APPLIED_LABEL, value: appliedFilter(envelope) }]),
   ];
   return {
     state,

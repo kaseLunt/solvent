@@ -81,10 +81,10 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
     });
 
     await page.goto("/feed");
-    // The filter echo is the Activity header's own chip now (the page converged onto the kit); the law is unchanged.
-    const foot = page.getByTestId("activity-verdict").locator('[data-chip="Filter echo"]');
-    // The initial cross-engine walk settles first (its own echo: types all).
-    await expect(foot).toContainText("types all");
+    // The filter echo is the Activity header's own chip, the applied filter said in words; the law is unchanged.
+    const foot = page.getByTestId("activity-verdict").locator('[data-chip="Filter applied"]');
+    // The initial cross-engine walk settles first (its own echo: every type).
+    await expect(foot).toContainText("any engine · all types ·");
 
     const chips = page.getByTestId("activity-types");
     // Filter change ONE: walk A (types=borrow) — its page is HELD by the shim.
@@ -95,7 +95,7 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
     await requestA;
     // Filter change TWO, rapidly after: walk B (types=borrow,repay), answered.
     await chips.getByRole("button", { name: "repay", exact: true }).click();
-    await expect(foot).toContainText("types borrow,repay");
+    await expect(foot).toContainText("any engine · borrow and repay ·");
 
     // Release walk A's held page: its continuation runs AFTER the reset that
     // dropped its walk. The envelope echo must keep naming the SECOND scope.
@@ -103,10 +103,10 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
       (window as unknown as { __releaseHeldEvents: (() => void) | null }).__releaseHeldEvents?.();
     });
     await page.waitForTimeout(300); // the stale continuation gets its turn
-    await expect(foot).toContainText("types borrow,repay");
-    // The stale echo's own spelling (types borrow · since_block …) may not
-    // stand anywhere in the foot.
-    await expect(foot).not.toContainText("types borrow ·");
+    await expect(foot).toContainText("any engine · borrow and repay ·");
+    // The stale echo's own spelling (any engine · borrow · any block …) may
+    // not stand anywhere in the foot.
+    await expect(foot).not.toContainText("any engine · borrow ·");
   });
 
   test("fix 3: the History header states the wire's own served_at verbatim (the Served chip)", async ({

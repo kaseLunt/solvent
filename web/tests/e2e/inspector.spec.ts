@@ -244,11 +244,28 @@ test("activity: six rows, a null block_time falls back to the block number, the 
   await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
   const table = page.getByTestId("inspector-activity");
   await expect(table.locator("tbody tr")).toHaveCount(6);
-  await expect(table).toContainText("Borrow");
-  await expect(table).toContainText("Collateral enabled");
+  // The Debt Manager's own rows: borrows and a repay, and the supplier side's record-only supply and withdraw.
+  await expect(table.locator("tbody tr td:nth-child(2)")).toHaveText(["Borrow", "Supply", "Withdraw", "Supply", "Borrow", "Repay"]);
   await expect(table.locator("tbody tr").last()).toContainText("block 155,315,000");
   await expect(page.getByTestId("inspector-activity-takeaway")).toContainText("5 with custodied header time, newest first; 1 untimed row(s) follow");
   await expect(page.getByTestId("inspector-activity-more")).toHaveCount(0);
+});
+
+test("activity amounts: the Activity page's caveat heads the column; a normalized figure stands alone, its unit words after it and never a bare symbol on the digits; a record with no amount is a dash with the record-only word", async ({ page }) => {
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  const table = page.getByTestId("inspector-activity");
+  await expect(table.locator("tbody tr")).toHaveCount(6);
+  await expect(table.locator("thead th").nth(3)).toHaveText("Amount · engine units, not USD");
+  // The near account holds a Cash position, so its own value_decimals place the decimal.
+  const amount = (row: number) => table.locator("tbody tr").nth(row).locator("td").nth(3);
+  await expect(amount(0)).toHaveText("622 normalized debt · USDC");
+  await expect(amount(0).getByTestId("inspector-activity-unit")).toHaveText("normalized debt · USDC");
+  await expect(amount(5)).toHaveText("-150 normalized debt · USDC");
+  await expect(amount(1)).toHaveText("— record-only");
+  await expect(amount(1).getByTestId("inspector-activity-unit")).toHaveAttribute("title", "record only: this event carries no amount");
+  await expect(table).not.toContainText("622 USDC");
+  await expect(table).not.toContainText("raw units");
 });
 
 test("stress: the committed scenarios inline — two flips, one projection", async ({ page }) => {
