@@ -66,12 +66,23 @@ NEXT_PUBLIC_SHOW_STYLEGUIDE=1 npm run build
 
 Both are inlined at **build** time (Next `NEXT_PUBLIC_` semantics).
 
-## Vercel
+## Deploy
 
-`vercel.json` overrides install (`npm ci --prefix ../packages/client-ts &&
-npm ci`) and build. Project settings: **Root Directory = `web`** with
-"Include source files outside of the Root Directory" enabled (the `file:`
-dependency lives one level up).
+The deploy target is not yet decided, and nothing is publicly deployed. What
+any host needs:
+
+- The repository around `web/`, not `web/` alone: `@solvent/client` is a
+  `file:../packages/client-ts` dependency that `scripts/ensure-client.mjs`
+  builds before every build.
+- `NEXT_PUBLIC_SOLVENT_API_URL` set to the deployed API's origin at **build**
+  time (it is inlined; unset, the pages read `http://localhost:8080`).
+- `npm ci && npm run build`, then `npm run start` (port 3111).
+
+`vercel.json` carries the install (`npm ci --prefix ../packages/client-ts &&
+npm ci`) and build commands for a Vercel project, which would also need
+**Root Directory = `web`** with "Include source files outside of the Root
+Directory" enabled. It is kept so that option stays open; no host has been
+chosen.
 
 ## Honest-UI ground rules
 

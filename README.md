@@ -2,20 +2,237 @@
 
 ![ci](https://github.com/kaseLunt/solvent/actions/workflows/ci.yml/badge.svg)
 
-Real-time solvency companion for ether.fi Cash borrowers. Work in progress.
+A read-only risk surface for ether.fi Cash, where people borrow against crypto to spend on a
+Visa card. Solvent reads the Cash lending contracts on OP Mainnet and Ethereum, rebuilds every
+position from chain logs and periodic collateral sweeps, computes how close each account is to
+liquidation in exact integer arithmetic, and serves the result through an OpenAPI-contracted
+REST + SSE API and an eight-page web app. It holds no funds, sends no transactions, connects no
+wallet and has no user accounts. A portfolio project, not affiliated with ether.fi.
 
-Reorg-safe indexer → PostgreSQL event log → (coming) risk engine, public API, alerts, web.
-Positions are derived state: everything is rebuildable from `raw_logs`. Reorg recovery uses
-verified-ancestor rewind — on a cursor-hash mismatch the walker probes stored block hashes
-against the live chain and rewinds to the first provably canonical block, so forks of any
-depth are handled, not just shallow ones.
+**Status (2026-09-22).** Built and tested on a development machine. Not publicly deployed; the
+deploy target is not yet decided. `@solvent/client` is not published to npm. Alerts are planned
+(roadmap phase P4), not built. Remote CI (`.github/workflows/ci.yml`) has not passed since
+2026-07-30. The pixel-screenshot pins are a local gate: they skip when `CI` is set.
 
-## Dev
+## What it is
 
-    cp .env.example .env
-    make db-up
-    make test
+Two lending engines, each judged by its own rule. Every aggregate is per engine, and the two are
+never summed.
 
-Store integration tests need the database: they skip when `TEST_DATABASE_URL`
-is unset (the Makefile loads it from `.env`, so the three commands above run
-them for real).
+| Engine | Chain | Wire id | Verdict |
+| --- | --- | --- | --- |
+| The Cash Debt Manager | OP Mainnet (chain ID 10) | `debt_manager` | a strict `liquidatable` boolean over 6-decimal USD |
+| The legacy Aave v3 ether.fi market | Ethereum (chain ID 1) | `aave_v3_etherfi` | a continuous health factor in the pool's 8-decimal base currency |
+
+The web app has eight pages:
+
+| Page | Route | What it shows |
+| --- | --- | --- |
+| Overview | `/` | The front door: an address box, the Cash book's current headline, and how the pipeline works. |
+| Book | `/book` | The Cash book walked page by page: what is liquidatable, what is near the cap, what could not be computed and why; the legacy market's own finding beneath it. |
+| Inspector | `/inspector/<address>` | One address: its position and verdict, backing collateral, stress results, history, recorded activity, and a five-item trust checklist. |
+| Scenarios | `/lab` | The committed price-shock scenarios run against the whole book, and what the model leaves out. |
+| History | `/observatory` | The hourly record of each engine's debt, collateral, accounts and liquidatable positions. |
+| Activity | `/feed` | Borrows, repays, supplies, withdrawals and liquidations, as recorded from the chain. |
+| Verification | `/proof` | The committed reconcile receipt, and the identity of the batch being served. |
+| API | `/developers` | The contract's endpoints, with samples generated from `api/openapi.yaml`. |
+
+## How it works
+
+```text
+ OP Mainnet (chain 10)                     Ethereum (chain 1)
+ Debt Manager                              Aave v3 ether.fi Pool + its four aTokens,
+                                           PoolConfigurator, four Chainlink feeds
+        |   eth_getLogs windows (2,000 blocks, 5 confirmations)
+        |   + periodic on-chain collateral sweeps for the Debt Manager
+        v
+ cmd/indexer    the single writer (a Postgres advisory lock); owns and runs the migrations;
+        |       raw logs -> decoded events -> derived positions, prices, params, sweeps
+        v
+ PostgreSQL 16
+        |
+        v
+ cmd/riskd      zero RPC calls; recomputes when the derived-state watermark vector moves;
+        |       one append-only risk batch per recompute
+        v
+ cmd/api        REST + SSE (/v1/stream); zero RPC calls; read-only; never migrates;
+        |       refuses to start against a schema version other than its own
+        v
+ @solvent/client (packages/client-ts)   types generated from api/openapi.yaml
+        |
+        v
+ web/ (Next.js)  eight pages; @solvent/client is its only data path
+
+ cmd/reconcile  read-only acceptance harness: derived state vs direct chain reads at hash-pinned blocks
+ alerts         planned (P4), not built
+```
+
+- **Positions are derived state.** Raw chain logs are stored as the source of truth and positions
+  are derived from them, except Debt Manager collateral: it is the live token balance of each
+  borrower's Safe, which no event tracks, so the indexer reads it with periodic on-chain view
+  sweeps (`internal/snapshot`).
+- **Refusals are rows, not errors.** A position that cannot be valued honestly is served as a
+  refused row naming its reason and counted in every containing aggregate's refusal count
+  (`api/openapi.yaml`, `cmd/api/handlers.go`).
+- **The contract is `api/openapi.yaml`** (v1.8.0, 17 paths). Every money quantity on the wire is
+  a decimal string, never a JSON number.
+
+## What is verified
+
+Each claim below names its code and tests, and links the recorded approval of the project's
+adversarial reviewer (see [How the work is reviewed](#how-the-work-is-reviewed)).
+
+| Claim | Where it lives | Approval record |
+| --- | --- | --- |
+| **Reorgs of any depth are recovered.** When a stored cursor's block hash no longer matches the chain, the walker walks its stored logs downward until one's block hash matches the live chain and rewinds there; forks are suffixes, so this is safe at any depth, unlike a fixed-distance rewind. | `internal/ingest/walker.go` (`rewindToVerifiedAncestor`), [D-003](roadmap/decisions/D-003-verified-ancestor-reorg-protocol.md), `TestDeepForkWalksBackToVerifiedAncestor` and the walker's rewind suite | `internal/ingest/**` approved at `7e58317` (Phase 2, round 18, session `019fa249-0fdf-7590-9e46-3b6109fbf604`); Phase 2 exit whole-branch review closed approved (session `019fa6bf-1916-7973-9f98-98af9dddd879`) — [ledger](.superpowers/sdd/progress-phase2.md) |
+| **The derived state matches the chain.** The committed reconcile receipt; figures [below](#the-reconcile-receipt). | `cmd/reconcile`, [drift-report.json](roadmap/evidence/artifacts/w1-reconcile/drift-report.json), [receipt](roadmap/evidence/receipts/E-w2-acceptance.md) | Phase 3 Task 6 closed approved (round 15, session `019fb5d3-6577-7de2-867c-fdf0d0c67a4a`); the pre-receipt review train closed approved at round 9 — [ledger](.superpowers/sdd/progress-phase3.md), [receipt](roadmap/evidence/receipts/E-w2-acceptance.md) |
+| **Money is exact integers.** The wire carries decimal strings; `internal/risk` contains no float type or float literal and performs no I/O; `@solvent/client` parses the strings to `bigint` and throws rather than rounds. | `TestNoFloatAnywhereInNonTestSources` (a go/types check), `TestPackageIsIOFree`, `packages/client-ts` | `internal/risk` (Phase 3 Task 4, session `019faf40-9500-7e83-aa31-be0e9fa11467`); `cmd/api` (Task 7, session `019fb272-25d7-7313-80dc-265dc1e4bc2f`); the client (Task 8, session `019fb431-48bd-7920-9a7e-2d95806d3ef1`) — [ledger](.superpowers/sdd/progress-phase3.md) |
+| **The API, the contract and the client agree.** `cmd/api`'s tests validate handler responses against `api/openapi.yaml` with kin-openapi and prove the validator can reject; the contract's run-book examples are bodies the production handlers serve; the client's types are generated from the contract and its fixtures are checked contract-valid. | `cmd/api/fixture_db_test.go` (`loadContract`), `TestContractValidatorCanReject`, `TestRunBookExampleIsAServedBody`, `packages/client-ts/test/fixtures.test.ts` | `cmd/api` (Task 7) and the client (Task 8) as above; the contract's examples (round 39) and contract 1.8.0 (round 67) each closed approved — [ledger](.superpowers/sdd/progress-phase3.md) |
+| **Each engine's verdict is computed by that engine's own rule.** The Aave health factor and the Debt Manager's strict boolean are separate code paths; every rounding direction is pinned in tests by on-chain integers read at hash-bound blocks. | `internal/risk` (see its package comment), `cmd/riskd`, `recon/p3-probes.md` | `internal/risk` (Task 4, above); `cmd/riskd` (Task 5, session `019fb0f0-3222-7b53-8ad1-411a4936121c`); the later risk waves each closed by an approving round — [ledger](.superpowers/sdd/progress-phase3.md) |
+| **riskd and the API make zero RPC calls; the API never writes.** Import-graph tests keep every chain client out of both binaries; a scan of the API's SQL finds no writing statement; the API never migrates. | `TestRiskdLinksNoChainClient`, `TestAPILinksNoChainClient`, `TestAPIIssuesNoWritingSQL`, `TestAPINeverMigrates` | `cmd/api` (Task 7) and `cmd/riskd` (Task 5), as above |
+| **Replays against forked mainnet (opt-in).** `make test-fork-replay` checks derived Debt Manager borrower state bit-exactly against direct view calls on a local anvil fork of OP at a hash-pinned block; `make test-pipeline-replay` drives the whole ingest, decode and derive pipeline over three legs on anvil forks of Ethereum, one of them a manufactured governance change that is reorged. | `internal/forkreplay`, `internal/pipelinereplay` | fork replay (Phase 2 Task 10, round 22, session `019fa60e-7d2c-7ae2-8aae-ebac9fbf8f0d`) — [ledger](.superpowers/sdd/progress-phase2.md); pipeline replay (Phase 3 Tasks 2+3, session `019fb007-f18d-7ef3-92f5-dd969dfbff33`) — [ledger](.superpowers/sdd/progress-phase3.md) |
+
+**Built and tested, not listed above.** The web app has unit specs on its view models in
+`web/lib` and Playwright end-to-end specs, and it has been through adversarial review rounds, but
+no closing approval is recorded for its current tree. That includes the web's own contract
+check, `web/tests/unit/proof-contract-fidelity.spec.ts`, which re-extracts the API page's
+load-bearing fields from `api/openapi.yaml` on every unit run.
+
+## The reconcile receipt
+
+`cmd/reconcile` compares derived state with direct chain reads at hash-pinned blocks, and the
+chain is the expected side of every comparison. The committed run, from
+[`roadmap/evidence/artifacts/w1-reconcile/drift-report.json`](roadmap/evidence/artifacts/w1-reconcile/drift-report.json):
+
+| | |
+| --- | --- |
+| Run | 2026-08-02, 01:54:05 to 02:42:31 UTC, acceptance posture |
+| Pins | Ethereum block 25,664,030 and OP block 155,018,419, each hash-checked against the chain before and after the run |
+| Checked rows (`gated_rows`), the rows that must match for the run to pass | 30,838: 30,838 exact, 0 drift |
+| Result | pass, 0 gated failures |
+| Advisory rows, recorded beside the verdict | 699 |
+| Comparison sha256 | `a34d7a53af58a117c74333f156864de73f13927f6d41f2c8d4b6485c287978e0` |
+
+The API serves this artifact's summary at `/v1/evidence` and marks it accepted only when the
+receipt passed with every checked row exact and no drift; otherwise it is served as rejected,
+naming the failed condition (`cmd/api/p5_evidence.go`). `make reconcile` re-runs the harness
+against your own database, strictly read-only; its golden reads need an archive-capable Ethereum
+RPC in `SOLVENT_RECON_RPC_ETH`.
+
+## Run it locally
+
+You need Go 1.24 or later, Docker with Compose, Node.js 20 or later (CI uses 22), and RPC
+endpoints for OP Mainnet and Ethereum mainnet. No Go binary reads `.env` itself: the Makefile
+exports it for its targets.
+
+```sh
+cp .env.example .env
+# Edit .env: set SOLVENT_RPC_OP and SOLVENT_RPC_ETH to endpoints you control
+# (one URL, or a comma-separated list the client fails over between).
+make db-up          # Postgres 16 in Docker: `solvent` (live) and `solvent_test` (scratch)
+make run-indexer    # runs the migrations, then walks both chains from each stream's
+                    # start block in config/contracts.json
+```
+
+Once the indexer has started (riskd and the API refuse to start against any other schema
+version), run each of these in its own terminal from the repository root:
+
+```sh
+set -a; . ./.env; set +a    # riskd has no make target: export .env into this shell
+go run ./cmd/riskd          # writes a risk batch whenever the indexed state moves
+```
+
+```sh
+make run-api                # REST + SSE on :8080; needs only a database URL
+```
+
+```sh
+cd web
+npm ci
+npm run dev                 # http://localhost:3000; reads the API at NEXT_PUBLIC_SOLVENT_API_URL
+                            # (default http://localhost:8080)
+```
+
+riskd prefers `SOLVENT_RISKD_DATABASE_URL` (the `solvent_riskd` role migration 00013 creates:
+read-only on the indexer's tables) and the API prefers `SOLVENT_API_DATABASE_URL` (for a
+SELECT-only role); both fall back to `SOLVENT_DATABASE_URL`, and riskd logs a warning when it
+does. The served app has no demo mode: with no API running, the Book, Scenarios, History,
+Activity and Verification pages each say in their headline what they could not fetch. The demo
+dataset exists only as test fixtures, which the Playwright specs and the screenshot script route
+in place of the API.
+
+### Tests
+
+Two `cmd/reconcile` tests read ether.fi's cash-v3 contract source, which is not committed here.
+Clone it at the commit the tests were written against, then run the suites:
+
+```sh
+git clone https://github.com/etherfi-protocol/cash-v3 recon/cash-v3
+git -C recon/cash-v3 checkout 247faab2206cb651e2e81b2331404eed841145b8
+
+make test                                  # Go; DB-backed tests use solvent_test (TEST_DATABASE_URL)
+(cd packages/client-ts && npm ci && npm test)
+(cd web && npm ci && npm run build && npx playwright install chromium && npm run test:e2e)
+```
+
+- `make test` includes one read-only smoke of the live `solvent` database, which passes only
+  after the indexer has migrated it.
+- `make test-acceptance` fails on any skipped test. `make test-fork-replay` and
+  `make test-pipeline-replay` are opt-in: they need `ANVIL_BIN` and an archive-capable RPC
+  (`ANVIL_FORK_RPC` for OP, `ANVIL_FORK_RPC_ETH` for Ethereum), and skip without them. The fork
+  replay reads your backfilled `solvent` database; the pipeline replay derives its own scratch
+  databases from `TEST_DATABASE_URL`.
+- `npm run test:e2e` runs the unit project (no browser) and the end-to-end project against a
+  production build on port 3111. The pixel pins in `web/tests/e2e/screenshots.spec.ts` skip when
+  `CI` is set (font rendering differs on CI runners).
+
+## Screenshots
+
+Demo dataset; the live stream is not connected in these captures. Dark theme, 1440 × 900.
+
+| | |
+| --- | --- |
+| ![Overview, dark theme, demo dataset](docs/readme/overview-dark-fold.png) Overview | ![Book, dark theme, demo dataset](docs/readme/book-dark-fold.png) Book |
+| ![Inspector, dark theme, demo dataset](docs/readme/inspector-dark-fold.png) Inspector | ![Scenarios, dark theme, demo dataset](docs/readme/lab-dark-fold.png) Scenarios |
+| ![History, dark theme, demo dataset](docs/readme/history-dark-fold.png) History | ![Activity, dark theme, demo dataset](docs/readme/activity-dark-fold.png) Activity |
+| ![API, dark theme, demo dataset](docs/readme/api-dark-fold.png) API | |
+
+To regenerate them, start a production build (`cd web && npm run build && npm run start`), then
+from `web/` run `node scripts/screenshot-pages.mjs ../docs/readme overview book inspector lab
+history activity api`. The script imports the TypeScript fixtures directly, so it needs Node
+22.18 or later.
+
+## Repository map
+
+| Path | What |
+| --- | --- |
+| `api/openapi.yaml` | The contract (v1.8.0, 17 paths) |
+| `cmd/indexer` | Ingest, decode, derive, prices, collateral sweeps, health endpoint; owns the migrations |
+| `cmd/riskd` | The risk materializer |
+| `cmd/api` | The REST + SSE read surface |
+| `cmd/reconcile` | The read-only acceptance harness that writes the drift report |
+| `cmd/backfill-blocktimes` | A one-shot block-time backfill, refused unless `SOLVENT_BACKFILL_BLOCKTIMES=1` |
+| `internal/` | `chain` (RPC failover), `config`, `decode`, `derive`, `ingest` (the walker), `prices`, `risk` (pure math), `riskfeed`, `snapshot` (collateral sweeps), `store` (Postgres and the 19 migrations), `forkreplay`, `pipelinereplay` |
+| `packages/client-ts` | `@solvent/client`, the typed TypeScript client (private; not published) |
+| `web/` | The Next.js app; see [web/README.md](web/README.md) |
+| `config/contracts.json` | Chains, streams, addresses and start blocks |
+| `recon/` | ABIs, the oracle feed registry, derivation notes and probe records |
+| `roadmap/` | The control plane: vision, roadmap, status, decisions, evidence receipts and artifacts |
+| `docs/` | Design specs and implementation plans |
+| `.superpowers/sdd/` | Execution ledgers: every review round, its verdict and its session id |
+
+## How the work is reviewed
+
+Under the project's review policy, every correctness-critical component (money math, chain-state
+derivation, reorg and consistency invariants, persistence of source-of-truth data) gets an
+adversarial review from OpenAI's Codex on top of the standard per-task review, and is not trusted
+until Codex approves it: a fix wave on a
+Codex finding goes back to Codex until a round finds nothing new, and only approved components are
+cited here ([D-006](roadmap/decisions/D-006-codex-approval-gate.md)). The bar is honest-use
+correctness: a finding that could give an honest user or operator a wrong answer is fixed, and one
+that needs a hostile operator is disclosed ([D-013](roadmap/decisions/D-013-honest-use-correctness-bar.md)).
+Verdicts and session ids are in the execution ledgers under `.superpowers/sdd/`.
+
+## License
+
+[MIT](LICENSE)
