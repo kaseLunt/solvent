@@ -173,7 +173,7 @@ function cashPosition({ account, weethUnits, ethfiUnits, debt, refused = false }
       flags: [],
       // SWEEP_NEVER is the code the engine actually emits for a row it cannot value (internal/riskfeed/assemble.go):
       // a sweep that fails AFTER a success does not refuse the row — it is served against its last good sweep.
-      refusal: { code: "SWEEP_NEVER", detail: "collateral sweep never ran for this account", note: REFUSAL_NOTE },
+      refusal: { code: "SWEEP_NEVER", detail: "account has no snapshot_sweeps row: its collateral has NEVER been read, and unknown collateral is not zero collateral", note: REFUSAL_NOTE },
       liquidatable: null,
       collateral_value_usd: null,
       max_borrow_lt: null,
@@ -248,7 +248,7 @@ function historyBody(account, near) {
     const common = { batch_id: id, computed_at: iso(computedMs - back * CADENCE_MS), balances_block: balancesBlock, sweep_block: balancesBlock - 54 };
     if (id === refusedAt) {
       // SWEEP_NEVER at that batch: no successful sweep persisted, so the point's sweep_block is 0 (the contract's own wording).
-      points.push({ ...common, sweep_block: 0, status: "refused", refusal: { code: "SWEEP_NEVER", detail: "collateral sweep never ran for this account", note: REFUSAL_NOTE }, health_factor: null, liquidatable: null, total_collateral_base: null, total_debt_base: null });
+      points.push({ ...common, sweep_block: 0, status: "refused", refusal: { code: "SWEEP_NEVER", detail: "account has no snapshot_sweeps row: its collateral has NEVER been read, and unknown collateral is not zero collateral", note: REFUSAL_NOTE }, health_factor: null, liquidatable: null, total_collateral_base: null, total_debt_base: null });
       continue;
     }
     let cap;

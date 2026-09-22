@@ -80,7 +80,7 @@ test("a refused row reads as not computed with null figures — never zero", () 
   expect(r.room).toBeNull();
   expect(r.band).toBeNull();
   expect(r.refusal).toEqual({ code: "SWEEP_NEVER", detail: "the sweep never ran" });
-  expect(notComputedCause(r)).toBe("collateral sweep never ran · SWEEP_NEVER");
+  expect(notComputedCause(r)).toBe("collateral never read · SWEEP_NEVER");
 });
 
 test("a refused row keeps a readable debt for display but never enters the liquidatable sum", () => {

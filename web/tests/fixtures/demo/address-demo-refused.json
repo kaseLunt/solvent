@@ -159,7 +159,7 @@
       "flags": [],
       "refusal": {
         "code": "SWEEP_NEVER",
-        "detail": "collateral sweep never ran for this account",
+        "detail": "account has no snapshot_sweeps row: its collateral has NEVER been read, and unknown collateral is not zero collateral",
         "note": "SWEEP_NEVER: this account has never had a successful collateral sweep, so its collateral is of UNKNOWN size — not zero. Serving a health factor near zero over it would be a false liquidation alarm."
       },
       "liquidatable": null,

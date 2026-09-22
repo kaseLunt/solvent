@@ -117,7 +117,7 @@ test("a withheld Cash book under found is withheld and names its engine; duplica
   const cashWithheld: Body = { ...STRESS_DM, lookup_complete: false, withheld_engines: [{ engine: "debt_manager", code: "SWEEP_NEVER", detail: "", note: "" }] };
   const w = stressReading(lookup(cashWithheld), STRESS_DM.address);
   expect(w.kind).toBe("withheld");
-  if (w.kind === "withheld") expect(w.cause).toContain("Cash — collateral sweep never ran");
+  if (w.kind === "withheld") expect(w.cause).toContain("Cash — collateral never read");
 
   const rowsOf = (body: Body) => {
     const r = stressReading(lookup(body), STRESS_DM.address);

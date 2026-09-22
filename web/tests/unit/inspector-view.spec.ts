@@ -178,7 +178,7 @@ test("the demo's refused account serves no debt, as the engine serves a refusal,
   expect(refused.state).toBe("not-computed");
   expect(refused.refusedTiles).toBe(true);
   expect(refused.cash?.debt).toBeNull();
-  expect(refused.headline.dek).toBe("Collateral sweep never ran. No verdict is served for it.");
+  expect(refused.headline.dek).toBe("Collateral never read. No verdict is served for it.");
   expect(refused.headline.dek).not.toContain("last readable debt");
 });
 
@@ -428,7 +428,7 @@ test("stressEmptyText: loading, error, withheld with its cause, no position, and
     value: lookup({ ...STRESS_DM, lookup_complete: false, withheld_engines: [{ engine: "debt_manager", code: "SWEEP_NEVER", detail: "", note: "" }] }),
   });
   expect(withheld.stress?.kind).toBe("withheld");
-  expect(stressEmptyText(withheld)).toBe("Stress withheld: Cash — collateral sweep never ran.");
+  expect(stressEmptyText(withheld)).toBe("Stress withheld: Cash — collateral never read.");
   expect(stressEmptyText(withStress({ phase: "ready", value: lookup({ ...STRESS_DM, found: false, scenarios: [] }) }))).toBe("No position to stress.");
   const rows = withStress({ phase: "ready", value: lookup({ ...STRESS_DM, scenarios: [] }) });
   expect(rows.stress).toEqual({ kind: "rows", rows: [], batchId: 1 });

@@ -133,7 +133,7 @@ test("a zero cap, legacy beside foreign engines, one terminal period, a non-posi
       { engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "" },
       { engine: "aave_v3_etherfi", code: "SWEEP_NEVER", detail: "" },
     ]).dek,
-  ).toBe("Collateral-flag custody unproven; collateral sweep never ran. A withheld book is never “no position”: this account may hold a position the service cannot currently read.");
+  ).toBe("Collateral-flag custody unproven; collateral never read. A withheld book is never “no position”: this account may hold a position the service cannot currently read.");
   // a cause that already ends in a period ends once
   expect(notComputedHeadline("collateral sweep timed out.", null).dek).toBe("Collateral sweep timed out. No verdict is served for it.");
   // a zero span is no span: the streak sentence prints without a parenthesis

@@ -130,7 +130,7 @@ test("a refused Cash position: cannot say, tiles refused, no debt served and non
   await expect(headline(page)).toHaveText("Cannot say — this account's Cash position was not computed this batch.");
   // A refused row carries no debt, as the engine serves it: the dek names the cause and no last figure.
   await expect(dek(page)).toContainText(notComputedHeadline(plainCause("SWEEP_NEVER"), null).dek);
-  await expect(dek(page)).toContainText("Collateral sweep never ran. No verdict is served for it.");
+  await expect(dek(page)).toContainText("Collateral never read. No verdict is served for it.");
   await expect(dek(page)).not.toContainText("last readable debt");
   for (const id of ["debt", "cap", "room", "collateral", "status"]) {
     await expect(page.getByTestId(`inspector-kpi-${id}`)).toHaveAttribute("data-tone", "refused");

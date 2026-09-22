@@ -2,7 +2,7 @@
 /** Wire refusal code → the plain cause a reader sees first (spec §3.2). The code itself is shown on hover / in evidence. */
 // A Map, not an object: a wire code such as "constructor" must never resolve to an Object.prototype member.
 const PHRASEBOOK: ReadonlyMap<string, string> = new Map([
-  ["SWEEP_NEVER", "collateral sweep never ran"],
+  ["SWEEP_NEVER", "collateral never read"],
   ["SWEEP_FAILED", "collateral sweep failed"],
   ["FLAG_CUSTODY_UNPROVEN", "collateral-flag custody unproven"],
   ["STALE_PRICE", "price input past its freshness ceiling"],

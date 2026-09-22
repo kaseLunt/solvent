@@ -55,7 +55,7 @@ test("the committed page derives the material headline, tier-toned chips, and a 
   expect(v.badDebt).toEqual({ reading: { kind: "value", value: 239_603_961n, text: "$239.60" }, insolvent: 1, cause: null });
   expect(v.bookEntryLine).toBe("$0 within 10% of cap");
   // The sixth tile: the aggregate's refused count under its own cause — nothing unreadable, so nothing added to either.
-  expect(v.notComputedTile).toEqual({ value: "1", sub: "collateral sweep never ran" });
+  expect(v.notComputedTile).toEqual({ value: "1", sub: "collateral never read" });
   expect(v.chips).toHaveLength(4);
 });
 
@@ -375,7 +375,7 @@ test("the sixth tile counts what has no verdict here — the engine's refused po
   expect(one.settled).toBe(true);
   // Beside the engine's own refusals: the sum, and both words.
   const both = deriveCashView(reading({ cash: { rows: [...rows, bad, bad] } }), TIER_FALLBACK);
-  expect(both.notComputedTile).toEqual({ value: "3", sub: "collateral sweep never ran · 2 unreadable" });
+  expect(both.notComputedTile).toEqual({ value: "3", sub: "collateral never read · 2 unreadable" });
   // Mid-walk the unreadable count is what has landed so far.
   const walking = deriveCashView(reading({ cash: { engine: clean, rows: [bad], walkComplete: false } }), TIER_FALLBACK);
   expect(walking.notComputedTile).toEqual({ value: "1", sub: "nothing refused · 1 unreadable so far" });

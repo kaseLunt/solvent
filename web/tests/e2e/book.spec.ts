@@ -77,7 +77,7 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   await expect(page.getByTestId("book-kpi-near")).toContainText("0 accounts");
   await expect(page.getByTestId("book-kpi-baddebt")).toContainText("$239.60");
   await expect(page.getByTestId("book-kpi-notcomputed")).toHaveAttribute("data-tone", "refused");
-  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("collateral sweep never ran");
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("collateral never read");
 
   const rows = page.getByTestId("book-attention").locator("tbody tr");
   await expect(rows).toHaveCount(2);

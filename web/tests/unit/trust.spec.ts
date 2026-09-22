@@ -109,7 +109,7 @@ test("a refused position names its cause; a stale price names the asset and the 
     sweep,
     evidence,
   });
-  expect(byId(refused).computed).toMatchObject({ state: "refused", detail: "collateral sweep never ran", title: "SWEEP_NEVER" });
+  expect(byId(refused).computed).toMatchObject({ state: "refused", detail: "collateral never read", title: "SWEEP_NEVER" });
   const base = near();
   const stale = base.price_inputs.map((i, k) => (k === 0 ? { ...i, age_seconds: 210, verdict: "stale" as const, fresh: false } : i));
   expect(byId(trustChecklist({ position: near({ price_inputs: stale }), batchId: 1, sweep, evidence })).prices).toMatchObject({
