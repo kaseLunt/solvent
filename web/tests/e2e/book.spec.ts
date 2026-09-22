@@ -4,7 +4,14 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
 import { readCashRow } from "../../lib/cash-rows";
-import { liquidatableTileLabel, liquidatableTileSub, summarizeCash, tileBoundNote } from "../../lib/cash-summary";
+import {
+  belowLineToggleLabel,
+  liquidatableTileLabel,
+  liquidatableTileSub,
+  nearCapToggleLabel,
+  summarizeCash,
+  tileBoundNote,
+} from "../../lib/cash-summary";
 import { belowLineSentence } from "../../lib/materiality";
 import { BATCH_SUPERSEDED, BOOK, BOOK_ENGINE_REFUSED, BOOK_ERROR_UNAVAILABLE, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { DEMO_BOOK, DEMO_META, DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2 } from "../fixtures/demo";
@@ -76,6 +83,7 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   await expect(rows.nth(1)).toContainText("Not computed");
   await expect(rows.nth(1)).toHaveClass(/dim/);
   await expect(page.getByTestId("book-dust-toggle")).toHaveCount(0); // nothing below the line
+  await expect(page.getByTestId("book-near-toggle")).toHaveCount(0); // nothing near the cap to hide
 
   // Cross-page links name their subject: a row opens its own address, the preview opens its own scenario.
   const rowHref = await rows.nth(0).locator("a").first().getAttribute("href");
@@ -87,7 +95,8 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   const legacy = page.getByTestId("book-legacy");
   await expect(legacy).not.toHaveAttribute("open", /.*/);
   await expect(legacy.locator("summary")).toContainText("Legacy · Aave v3 market");
-  await expect(legacy.locator("summary")).toContainText("2 positions");
+  // The market's own finding over the positions it computed: 1 of the 2 was refused and is counted on its own.
+  await expect(legacy.locator("summary")).toHaveText("Legacy · Aave v3 market — 0 of 1 computed position is liquidatable · $6,000 debt · 1 refused");
   // The section head states the census and anchors to the legacy block that is on the page.
   await expect(page.getByTestId("book-section-cash")).toContainText("Debt Manager engine · OP Mainnet · 2 borrowing accounts");
   await expect(page.getByTestId("book-section-cash").getByRole("link", { name: "Legacy Aave v3 market ↓" })).toHaveAttribute("href", "#legacy");
@@ -122,7 +131,8 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
   await expect(tile).toContainText("2 accounts · 47 more under $100 · 49 in all");
   await expect(page.getByTestId("book-kpi-near")).toContainText("27 accounts");
   const toggle = page.getByTestId("book-dust-toggle");
-  await expect(toggle).toContainText("Show 47 small & dust positions");
+  expect(belowLineToggleLabel(DEMO_SUMMARY.belowLine.count, DEMO_SUMMARY.belowLine.sum, 6)).toBe("Show 47 small & dust positions ($109.45)");
+  await expect(toggle).toContainText("Show 47 small & dust positions ($109.45)");
   const before = await page.getByTestId("book-attention").locator("tbody tr").count();
   await toggle.click();
   await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(before + 47);
@@ -131,8 +141,60 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
     .locator("[data-count]")
     .evaluateAll((els) => els.reduce((n, el) => n + Number(el.getAttribute("data-count")), 0));
   expect(counts).toBe(1406);
-  // Refused rows are counted, not hidden: every one of the 6 sits in the default table, dimmed, with its debt.
-  await expect(page.getByTestId("book-attention").locator("tbody tr.dim, tbody tr[class*='dim']")).toHaveCount(6);
+  // Refused rows are counted, not hidden: every one of the 6 sits in the default table, dimmed — and, as the engine
+  // serves a refusal, with no debt: the Debt cell is a dash, never a figure the engine did not write.
+  const dim = page.getByTestId("book-attention").locator("tbody tr.dim, tbody tr[class*='dim']");
+  await expect(dim).toHaveCount(6);
+  for (const row of await dim.all()) await expect(row.locator("td").nth(2)).toHaveText("—");
+  // The legacy fold's line states the market's own finding over its computed positions — never summed with Cash.
+  await expect(page.getByTestId("book-legacy").locator("summary")).toHaveText(
+    "Legacy · Aave v3 market — 46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused",
+  );
+});
+
+test("the near-cap fold shows the rows the table hides: collapsed it is today's table; open, the other 21 near-cap accounts follow in room order", async ({
+  page,
+}) => {
+  await mockDemo(page);
+  await page.goto("/book");
+  const rows = page.getByTestId("book-attention").locator("tbody tr");
+  const ids = () => rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+  // The lib's own partition of the demo walk: material first by room, then near cap by room, then the rows with no verdict.
+  const byRoom = (a: { roomTenths: bigint | null }, b: { roomTenths: bigint | null }) => {
+    const x = a.roomTenths ?? 0n;
+    const y = b.roomTenths ?? 0n;
+    return x < y ? -1 : x > y ? 1 : 0;
+  };
+  const material = [...DEMO_SUMMARY.liquidatable.material].sort(byRoom).map((r) => `book-row-${r.account}`);
+  const near = DEMO_SUMMARY.nearCapRows.map((r) => `book-row-${r.account}`);
+  const refusedAccounts = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions]
+    .filter((p) => p.status !== "computed")
+    .map((p) => `book-row-${p.account}`);
+  expect(material).toHaveLength(2);
+  expect(near).toHaveLength(27);
+  expect(refusedAccounts).toHaveLength(6);
+
+  // Collapsed: exactly today's table — 2 material, the first 6 near-cap rows by room, the 6 refused.
+  await expect(rows).toHaveCount(14);
+  expect(await ids()).toEqual([...material, ...near.slice(0, 6), ...refusedAccounts]);
+  // The fold names what it hides — the other 21 and their debt — never "all 27", a total the tile refuses mid-walk.
+  const fold = page.getByTestId("book-near-toggle");
+  expect(nearCapToggleLabel(DEMO_SUMMARY.nearCapRows.slice(6), 6)).toBe("Show 21 more near-cap accounts ($622K)");
+  await expect(fold).toHaveText("Show 21 more near-cap accounts ($622K)");
+  await expect(fold).not.toContainText(/\ball\b/);
+
+  // Open: the 21 follow the 6 in room order, ahead of the refused rows.
+  await fold.click();
+  await expect(rows).toHaveCount(14 + 21);
+  expect(await ids()).toEqual([...material, ...near, ...refusedAccounts]);
+  // Both folds open: the small & dust rows join after, and nothing is counted twice.
+  await page.getByTestId("book-dust-toggle").click();
+  await expect(rows).toHaveCount(14 + 21 + 47);
+  // Closed again: the table is today's table.
+  await fold.click();
+  await page.getByTestId("book-dust-toggle").click();
+  await expect(rows).toHaveCount(14);
+  expect(await ids()).toEqual([...material, ...near.slice(0, 6), ...refusedAccounts]);
 });
 
 test("the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero — the card's placeholder counts print nowhere", async ({ page }) => {

@@ -6,6 +6,8 @@
 .lines a { color: var(--ink); }
 .lines a:hover { color: var(--accent-text); }
 .walkFailure { color: var(--warn-text); font-size: var(--type-body); margin: 12px 0 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* The attention table's folds stack, each on its own line under the table. */
+.toggles { display: grid; justify-items: start; }
 .legacy { margin-top: 26px; border: 1px solid var(--line); border-radius: 10px; padding: 0 20px 18px; background: var(--panel-2); }
 .legacy summary { cursor: pointer; padding: 14px 0; font-size: var(--type-card); font-weight: var(--w-semibold); color: var(--ink); }
 .method { display: grid; gap: 8px; font-size: var(--type-body); color: var(--ink); }

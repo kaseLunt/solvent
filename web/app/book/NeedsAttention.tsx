@@ -5,7 +5,7 @@ import { useState } from "react";
 import { KitTable, SmallToggle, StatusPill, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { notComputedCause, rowStandingLabel, type CashRow, type SizedCashRow } from "@/lib/cash-rows";
-import { attentionEmptyText, type CashSummary } from "@/lib/cash-summary";
+import { attentionEmptyText, belowLineToggleLabel, nearCapToggleLabel, type CashSummary } from "@/lib/cash-summary";
 import { humanUsd } from "@/lib/human-usd";
 import styles from "./book.module.css";
 
@@ -75,14 +75,19 @@ export interface NeedsAttentionProps {
 /** Material liquidatable first, then near cap by room, then the rows with no verdict (refused or unreadable) — dimmed, never dropped. */
 export function NeedsAttention({ summary, rows, walkFailure, onRetry }: NeedsAttentionProps) {
   const [showSmall, setShowSmall] = useState(false);
+  const [showNear, setShowNear] = useState(false);
   const material = [...summary.liquidatable.material].sort(byRoom).map((r) => toRow(r, "liquidatable"));
-  const near = summary.nearCapRows.map((r) => toRow(r, "near"));
+  // Near-cap fills the default rows; the rest are held behind their own fold, in the same room order.
+  const nearShown = summary.nearCapRows.slice(0, Math.max(0, DEFAULT_ROWS - material.length));
+  const nearHidden = summary.nearCapRows.slice(nearShown.length);
   const refused = rows.filter((r) => !r.computed).map(refusedRow);
   const belowLine = [...summary.liquidatable.small, ...summary.liquidatable.dust]
     .sort(byRoom)
     .map((r) => toRow(r, "liquidatable"));
-  // Material rows always show; near-cap fills the default rows; rows with no verdict are ALWAYS appended (counted, not hidden).
-  const base = [...material, ...near.slice(0, Math.max(0, DEFAULT_ROWS - material.length)), ...refused];
+  // Material rows always show; the near-cap fold extends the near rows in room order; rows with no verdict are ALWAYS
+  // appended (counted, not hidden).
+  const near = [...nearShown, ...(showNear ? nearHidden : [])].map((r) => toRow(r, "near"));
+  const base = [...material, ...near, ...refused];
   const shown = showSmall ? [...base, ...belowLine] : base;
   const n = summary.liquidatable.counts.belowLine;
   return (
@@ -108,13 +113,25 @@ export function NeedsAttention({ summary, rows, walkFailure, onRetry }: NeedsAtt
           )}
         </p>
       )}
-      {n > 0 && (
-        <SmallToggle
-          on={showSmall}
-          onChange={setShowSmall}
-          testId="book-dust-toggle"
-          label={`Show ${String(n)} small & dust positions (${humanUsd(summary.liquidatable.sums.belowLine, summary.decimals)})`}
-        />
+      {(nearHidden.length > 0 || n > 0) && (
+        <div className={styles.toggles}>
+          {nearHidden.length > 0 && (
+            <SmallToggle
+              on={showNear}
+              onChange={setShowNear}
+              testId="book-near-toggle"
+              label={nearCapToggleLabel(nearHidden, summary.decimals)}
+            />
+          )}
+          {n > 0 && (
+            <SmallToggle
+              on={showSmall}
+              onChange={setShowSmall}
+              testId="book-dust-toggle"
+              label={belowLineToggleLabel(n, summary.liquidatable.sums.belowLine, summary.decimals)}
+            />
+          )}
+        </div>
       )}
     </>
   );

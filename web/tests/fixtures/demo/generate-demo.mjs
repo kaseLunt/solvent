@@ -8,8 +8,10 @@
 //     batch identity and the aggregate fields recomputed from the rows;
 //   * every Cash row is positions-dm-page-1.json's canonical COMPUTED row
 //     (positions[0]) with account, debt, cap and collateral varied by a seeded
-//     PRNG, or its REFUSED row (positions[1]) with account and debt varied
-//     (health_factor / total_collateral stay null: unknown, never zero); all
+//     PRNG, or its REFUSED row (positions[1]) with account varied and no
+//     figure at all — total_debt, total_collateral and health_factor null, as
+//     the engine serves a refusal (internal/riskfeed/assemble.go writes no
+//     totals on a refused position: a refusal is the absence of a number); all
 //     other fields verbatim;
 //   * a non-liquidatable row's liq_distance is the contract's `distance`
 //     kind: the boundary price multiple at which cap falls to debt is the
@@ -139,10 +141,14 @@ function computedRow(debtUsd, roomFraction) {
         },
   };
 }
-/** A refused Cash row: borrowings are known (varied like the book's), collateral is of UNKNOWN size — null, never zero. */
+/**
+ * A refused Cash row as the engine serves it: no health factor and no totals — debt and collateral alike are null,
+ * never zero and never a figure the engine did not write. The row's size draw is still taken, so the seeded stream
+ * every later row reads is the same with or without a figure on the refusal.
+ */
 function refusedRow() {
-  const debt = USD(Math.exp(between(Math.log(300), Math.log(120000))));
-  return { ...refusedTemplate, account: account(), total_debt: debt.toString(), refusal: { ...refusedTemplate.refusal, code: "SWEEP_NEVER" } };
+  between(Math.log(300), Math.log(120000));
+  return { ...refusedTemplate, account: account(), total_debt: null, total_collateral: null, refusal: { ...refusedTemplate.refusal, code: "SWEEP_NEVER" } };
 }
 
 const rows = [];

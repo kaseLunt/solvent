@@ -3,7 +3,7 @@
 // page through the client's own refinement, exactly as the hook reads them.
 import { expect, test } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
-import { readCashRow } from "../../lib/cash-rows";
+import { readCashRow, type SizedCashRow } from "../../lib/cash-rows";
 import type { WalkStopKind } from "../../lib/book-headline";
 import { NEAR_CAP_BAND_IDS } from "../../lib/cash-rows";
 import {
@@ -11,8 +11,10 @@ import {
   attentionFinding,
   bandsFinding,
   bandsSoFar,
+  belowLineToggleLabel,
   liquidatableTileLabel,
   liquidatableTileSub,
+  nearCapToggleLabel,
   summarizeCash,
   tileBoundNote,
   unavailableHeadline,
@@ -447,4 +449,30 @@ test("an answer that is not a book has its own headline: it was not 'not loaded'
   expect(h.emphasis).toBe("The Cash book's answer could not be read.");
   expect(h.dek).toBe("The service answered, and the body is not a book: engines is not a list (got null).");
   expect(`${h.emphasis} ${h.dek}`).not.toMatch(/could not be loaded|could not be computed|unavailable/);
+});
+
+/** `n` rows whose debts sum to `total` exactly: the first carries the remainder. */
+function rowsWithDebts(n: number, total: bigint): SizedCashRow[] {
+  const each = total / BigInt(n);
+  return Array.from({ length: n }, (_, i) => ({ ...far, account: `0xnear${String(i)}`, debt: i === 0 ? total - each * BigInt(n - 1) : each }));
+}
+
+test("the near-cap fold names the rows it hides and their debt — never 'all N', which would claim a total mid-walk", () => {
+  expect(nearCapToggleLabel(rowsWithDebts(21, 622_000_000_000n), 6)).toBe("Show 21 more near-cap accounts ($622K)");
+  expect(nearCapToggleLabel(rowsWithDebts(1, 12_000_000_000n), 6)).toBe("Show 1 more near-cap account ($12K)");
+  expect(belowLineToggleLabel(47, 109_450_000n, 6)).toBe("Show 47 small & dust positions ($109.45)");
+  expect(belowLineToggleLabel(1, 50_000_000n, 6)).toBe("Show 1 small & dust position ($50)");
+  for (const label of [nearCapToggleLabel(rowsWithDebts(21, 622_000_000_000n), 6), belowLineToggleLabel(47, 109_450_000n, 6)]) {
+    expect(label).not.toMatch(/\ball\b/);
+  }
+  // The demo walk, read whole: the attention table shows 8 rows ahead of the refused ones — its 2 material rows and the
+  // first 6 near-cap rows by room — so the fold holds the other 21 of the 27 and their debt.
+  const demo = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => readCashRow(refinePositionSummary(p)));
+  const read = summarizeCash({ rows: demo, decimals: 6, refusedPositions: 6, ...settled });
+  expect(read.nearCapRows).toHaveLength(27);
+  expect(read.liquidatable.counts.material).toBe(2);
+  expect(nearCapToggleLabel(read.nearCapRows.slice(6), read.decimals)).toBe("Show 21 more near-cap accounts ($622K)");
+  expect(belowLineToggleLabel(read.liquidatable.counts.belowLine, read.liquidatable.sums.belowLine, read.decimals)).toBe(
+    "Show 47 small & dust positions ($109.45)",
+  );
 });

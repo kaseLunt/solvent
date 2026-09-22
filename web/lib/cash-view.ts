@@ -415,6 +415,12 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
           count: readWirePopulation(b.count, `hf_histogram[aave_v3_etherfi].buckets[${String(i)}].count`),
         }));
   const debtWord = debt.kind === "value" ? `${debt.text} debt` : debt.kind === "absent" ? "debt withheld" : "debt unreadable";
+  // The line states the market's own finding over the positions it computed; with none computed no liquidatable
+  // clause is said (a negative over nothing), and the population stands in its place. Never a Cash figure.
+  const finding =
+    computed > 0
+      ? `${n(liquidatable)} of ${n(computed)} computed ${computed === 1 ? "position is" : "positions are"} liquidatable`
+      : `${n(positions)} position${positions === 1 ? "" : "s"}`;
   return {
     withheld: null,
     decimals,
@@ -426,6 +432,6 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
     eligibleDebt,
     bands,
     histogramWithheld,
-    summaryLine: `Legacy · Aave v3 market — ${n(positions)} positions · ${debtWord} · ${String(liquidatable)} liquidatable · ${String(refused)} refused`,
+    summaryLine: `Legacy · Aave v3 market — ${finding} · ${debtWord} · ${n(refused)} refused`,
   };
 }

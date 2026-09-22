@@ -11,6 +11,7 @@ import { readCashRow } from "../../lib/cash-rows";
 import { deriveCashView, deriveLegacyView, moneyText, readWireMoney } from "../../lib/cash-view";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { BOOK, BOOK_ENGINE_REFUSED, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
+import { DEMO_BOOK } from "../fixtures/demo";
 
 const rows = POSITIONS_DM_PAGE_1.positions.map((p) => readCashRow(refinePositionSummary(p)));
 const cashEngine = BOOK.engines.find((e) => e.engine === "debt_manager") ?? null;
@@ -256,7 +257,8 @@ test("the legacy view: a withheld engine names its cause and prints no populatio
 
   const legacy = { engine: find(BOOK.engines), badDebt: find(BOOK.bad_debt), histogram: find(BOOK.hf_histogram.engines), refusedWhole: null };
   const served = deriveLegacyView(legacy);
-  expect(served?.summaryLine).toBe("Legacy · Aave v3 market — 2 positions · $6,000 debt · 0 liquidatable · 1 refused");
+  // The line is the market's own finding over its computed positions; the refused one is a count of its own.
+  expect(served?.summaryLine).toBe("Legacy · Aave v3 market — 0 of 1 computed position is liquidatable · $6,000 debt · 1 refused");
   expect(served?.bands?.map((b) => b.count)).toEqual([0, 0, 0, 1, 0, 0, 0, 0]);
   expect(served?.eligibleDebt).toEqual({ kind: "value", value: 0n, text: "$0" });
   // A fractional bucket count refuses by name before it can weigh a bar.
@@ -385,4 +387,48 @@ test("the sixth tile counts what has no verdict here — the engine's refused po
   expect(withheld.notComputedTile).toEqual({ value: "—", sub: "collateral sweep failed" });
   const loading = deriveCashView(reading({ phase: "loading", book: null, cash: { engine: null, rows: [] } }), TIER_FALLBACK);
   expect(loading.notComputedTile).toEqual({ value: "—", sub: "loading…" });
+});
+
+const DEMO_LEGACY = DEMO_BOOK.engines.find((e) => e.engine === "aave_v3_etherfi");
+if (DEMO_LEGACY === undefined) throw new Error("fixture invariant: the demo book serves the legacy engine");
+/** The demo book's legacy total_debt: "190000000000000" at 8 decimals, $1.9M. */
+const DEMO_LEGACY_DEBT = DEMO_LEGACY.total_debt;
+
+/** The demo book's legacy card with its populations (and, when given, its debt) replaced — nothing else of the wire moves. */
+function legacyWith(c: { positions: number; computed: number; liquidatable: number; refused: number; debt?: string | null }): CashBookReading["legacy"] {
+  if (DEMO_LEGACY === undefined) throw new Error("fixture invariant: the demo book serves the legacy engine");
+  return {
+    engine: {
+      ...DEMO_LEGACY,
+      positions: c.positions,
+      computed_positions: c.computed,
+      liquidatable_positions: c.liquidatable,
+      refused_positions: c.refused,
+      total_debt: c.debt === undefined ? DEMO_LEGACY_DEBT : c.debt,
+    },
+    badDebt: null,
+    histogram: null,
+    refusedWhole: null,
+  };
+}
+
+test("the legacy fold's line is the market's own finding over computed positions; never a negative over nothing computed", () => {
+  expect(deriveLegacyView(legacyWith({ positions: 8552, computed: 8552, liquidatable: 46, refused: 0, debt: DEMO_LEGACY_DEBT }))?.summaryLine)
+    .toBe("Legacy · Aave v3 market — 46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
+  expect(deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3 }))?.summaryLine)
+    .toBe("Legacy · Aave v3 market — 3 positions · $1.9M debt · 3 refused");
+  // Nothing computed: no "0 of 0", no "0 liquidatable" — the liquidatable clause is omitted, the population and refusals stand.
+  const none = deriveLegacyView(legacyWith({ positions: 1, computed: 0, liquidatable: 0, refused: 1, debt: null }))?.summaryLine ?? "";
+  expect(none).toBe("Legacy · Aave v3 market — 1 position · debt withheld · 1 refused");
+  expect(none).not.toMatch(/liquidatable|\b0 of\b/);
+  // One computed position is said in the singular; counts are grouped.
+  expect(deriveLegacyView(legacyWith({ positions: 1, computed: 1, liquidatable: 1, refused: 0 }))?.summaryLine).toBe(
+    "Legacy · Aave v3 market — 1 of 1 computed position is liquidatable · $1.9M debt · 0 refused",
+  );
+  expect(deriveLegacyView(legacyWith({ positions: 12_000, computed: 10_500, liquidatable: 1_046, refused: 1_500 }))?.summaryLine).toBe(
+    "Legacy · Aave v3 market — 1,046 of 10,500 computed positions are liquidatable · $1.9M debt · 1,500 refused",
+  );
+  // The demo book as served: the same line, and no Cash figure in it.
+  const demo = deriveLegacyView({ engine: DEMO_LEGACY, badDebt: null, histogram: null, refusedWhole: null });
+  expect(demo?.summaryLine).toBe("Legacy · Aave v3 market — 46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
 });

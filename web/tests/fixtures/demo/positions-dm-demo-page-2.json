@@ -11837,7 +11837,7 @@
       "health_factor": null,
       "liquidatable": null,
       "total_collateral": null,
-      "total_debt": "2342652043",
+      "total_debt": null,
       "liq_distance": {
         "kind": "none",
         "scale_factor_num": null,
@@ -11863,7 +11863,7 @@
       "health_factor": null,
       "liquidatable": null,
       "total_collateral": null,
-      "total_debt": "614386524",
+      "total_debt": null,
       "liq_distance": {
         "kind": "none",
         "scale_factor_num": null,
@@ -11889,7 +11889,7 @@
       "health_factor": null,
       "liquidatable": null,
       "total_collateral": null,
-      "total_debt": "46249593616",
+      "total_debt": null,
       "liq_distance": {
         "kind": "none",
         "scale_factor_num": null,
@@ -11915,7 +11915,7 @@
       "health_factor": null,
       "liquidatable": null,
       "total_collateral": null,
-      "total_debt": "7063922637",
+      "total_debt": null,
       "liq_distance": {
         "kind": "none",
         "scale_factor_num": null,
@@ -11941,7 +11941,7 @@
       "health_factor": null,
       "liquidatable": null,
       "total_collateral": null,
-      "total_debt": "112060308468",
+      "total_debt": null,
       "liq_distance": {
         "kind": "none",
         "scale_factor_num": null,
@@ -11967,7 +11967,7 @@
       "health_factor": null,
       "liquidatable": null,
       "total_collateral": null,
-      "total_debt": "10549872809",
+      "total_debt": null,
       "liq_distance": {
         "kind": "none",
         "scale_factor_num": null,

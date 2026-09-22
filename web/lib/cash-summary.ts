@@ -294,6 +294,20 @@ export function attentionEmptyText(
 }
 
 /**
+ * The near-cap fold's label: the rows the attention table hides and their debt. It counts only rows the page holds,
+ * so it grows with the walk and claims no total — never "all N", which a tile still walking refuses to state.
+ */
+export function nearCapToggleLabel(hidden: readonly SizedCashRow[], decimals: number): string {
+  const n = hidden.length;
+  return `Show ${groupInt(n)} more near-cap account${n === 1 ? "" : "s"} (${humanUsd(sumDebt(hidden), decimals)})`;
+}
+
+/** The small & dust fold's label: the positions under the line the table hides, and their debt together. */
+export function belowLineToggleLabel(count: number, sum: bigint, decimals: number): string {
+  return `Show ${groupInt(count)} small & dust position${count === 1 ? "" : "s"} (${humanUsd(sum, decimals)})`;
+}
+
+/**
  * The entry card's one line about the walk, from the summary alone. A
  * walk-derived figure is the card's micro-stat only over a book read whole;
  * short of that the card says what happened — a stop in its own frame, never
