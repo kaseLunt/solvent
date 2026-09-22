@@ -25,6 +25,9 @@
 /* The contract's prose at the reading measure: paragraphs, never the yaml's hard wraps. */
 .description { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-width: 720px; font-size: var(--type-body); color: var(--ink-2); }
 .description p, .paramDescription p { margin: 0; }
+/* The contract's two inline markers as formatting: a code span is an identifier, mono and ink, broken anywhere rather than overflow the measure; bold is ink at the semibold weight. */
+.description code, .paramDescription code { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink); overflow-wrap: anywhere; }
+.description strong, .paramDescription strong { font-weight: var(--w-semibold); color: var(--ink); }
 
 /* ---- params: one row each, the yaml's words ---- */
 .params { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--line); }

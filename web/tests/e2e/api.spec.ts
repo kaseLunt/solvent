@@ -13,13 +13,14 @@
 // and sample fidelity against the page's own base URL; the copy affordance
 // copies the verbatim command; params carry their required flags and the SSE
 // route invents no sample; the contract's prose set as paragraphs at the
-// reading measure, its words unchanged; the error envelope is one table with
+// reading measure, its words unchanged and its bold and code markers rendered
+// as formatting; the error envelope is one table with
 // every response and its byte-faithful body beneath; the quickstart is the
 // real client API; the page links to Verification; the response codes sit
 // above the sample fold; the doctrine lives in the drawer, verbatim; answer
 // before evidence.
 import { expect, test, type Page } from "@playwright/test";
-import { contractParagraphs, deriveApiView } from "../../lib/api-view";
+import { contractParagraphs, deriveApiView, inlineParts, type InlinePart } from "../../lib/api-view";
 import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS } from "../../lib/proof-contract.gen";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 
@@ -162,14 +163,30 @@ test("params render with required flags; the SSE route invents no JSON sample", 
   await expect(stream.locator('[data-testid="api-sample-getStream"]')).toHaveCount(0);
 });
 
-test("the contract's prose is set as paragraphs at the reading measure: the yaml's hard wraps are gone, the words are not", async ({ page }) => {
+test("the contract's prose is set as paragraphs at the reading measure: the yaml's hard wraps are gone, the words are not — its bold and code markers render as formatting", async ({ page }) => {
   await open(page);
   const op = OPERATIONS.find((o) => o.operationId === "getEvents");
   if (op === undefined) throw new Error("contract invariant: getEvents exists");
-  const expected = contractParagraphs(op.description);
+  // What a reader sees of each paragraph: the contract's words, in order, the markers rendered rather than printed.
+  const plain = (parts: readonly InlinePart[]): string => parts.map((part) => (part.kind === "strong" ? plain(inlineParts(part.text)) : part.text)).join("");
+  const expected = contractParagraphs(op.description).map((paragraph) => plain(inlineParts(paragraph)));
   expect(expected.length).toBeGreaterThan(1);
   const prose = page.getByTestId("api-description-getEvents");
   await expect(prose.locator("p")).toHaveText([...expected]);
+  // Every backtick pair is a code element, and no marker survives as a character.
+  const codes = contractParagraphs(op.description)
+    .flatMap((paragraph) => inlineParts(paragraph))
+    .filter((part) => part.kind === "code")
+    .map((part) => part.text);
+  expect(codes.length).toBeGreaterThan(0);
+  await expect(prose.locator("code")).toHaveText(codes);
+  await expect(prose).not.toContainText("`");
+  // The two bold spans the contract carries: getPositions' superseded cursor, its error code inside it as code; getScenarios' envelope.
+  const positions = page.getByTestId("api-description-getPositions");
+  await expect(positions.locator("strong")).toHaveText("409 batch_superseded");
+  await expect(positions.locator("strong code")).toHaveText("batch_superseded");
+  await expect(positions).not.toContainText("**");
+  await expect(page.getByTestId("api-description-getScenarios").locator("strong")).toHaveText("no batch envelope");
   // A hard wrap is no longer preserved, and the column is the prose measure, not the card's width.
   expect(await prose.locator("p").first().evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("normal");
   expect((await prose.boundingBox())?.width ?? Number.NaN).toBeLessThanOrEqual(720);

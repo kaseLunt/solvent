@@ -4,12 +4,34 @@
 // response sample is the contract's own example, its provenance cited beside it.
 // Prose is set as paragraphs at the reading measure: the yaml's hard wraps are
 // a property of the file, not of the sentence, and the words do not change.
+// The contract's two inline markers — bold and code — render as formatting
+// (lib/api-view `inlineParts`); every word between them prints as it came.
 
+import { Fragment } from "react";
 import kit from "@/components/kit/kit.module.css";
-import { contractParagraphs } from "@/lib/api-view";
+import { contractParagraphs, inlineParts } from "@/lib/api-view";
 import type { ContractOperation } from "@/lib/proof-contract.gen";
 import styles from "./api.module.css";
 import { CodeBlock } from "./CodeBlock";
+
+/** A contract paragraph with its markers rendered: a bold part reads its own code spans; plain text prints as it came. */
+function Prose({ text }: { text: string }) {
+  return (
+    <>
+      {inlineParts(text).map((part, index) =>
+        part.kind === "code" ? (
+          <code key={index}>{part.text}</code>
+        ) : part.kind === "strong" ? (
+          <strong key={index}>
+            <Prose text={part.text} />
+          </strong>
+        ) : (
+          <Fragment key={index}>{part.text}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
 
 /** The exact curl invocation for an operation, against this deployment's API origin. */
 export function curlFor(op: ContractOperation, baseUrl: string): string {
@@ -30,7 +52,9 @@ export function EndpointCard({ op, baseUrl }: { op: ContractOperation; baseUrl: 
       {op.description.length > 0 && (
         <div className={styles.description} data-testid={`api-description-${op.operationId}`}>
           {contractParagraphs(op.description).map((paragraph, index) => (
-            <p key={index}>{paragraph}</p>
+            <p key={index}>
+              <Prose text={paragraph} />
+            </p>
           ))}
         </div>
       )}
@@ -46,7 +70,9 @@ export function EndpointCard({ op, baseUrl }: { op: ContractOperation; baseUrl: 
               {param.description.length > 0 && (
                 <div className={styles.paramDescription}>
                   {contractParagraphs(param.description).map((paragraph, index) => (
-                    <p key={index}>{paragraph}</p>
+                    <p key={index}>
+                      <Prose text={paragraph} />
+                    </p>
                   ))}
                 </div>
               )}

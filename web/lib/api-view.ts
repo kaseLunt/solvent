@@ -124,6 +124,52 @@ export function contractParagraphs(text: string): readonly string[] {
   return blocks.map((lines) => lines.join(" "));
 }
 
+/** A run of a contract paragraph: plain text, bold, or code — the contract's words, its markers taken away. */
+export type InlinePart = { readonly kind: "text" | "strong" | "code"; readonly text: string };
+
+const STRONG = "**";
+const TICK = "`";
+
+/**
+ * The contract's two inline markers read as formatting, its words untouched.
+ * The contract's prose is CommonMark and uses exactly two inline markers:
+ * `**…**` for bold and a backtick pair for code. Read left to right, a marker
+ * opens a part only when its partner closes it around at least one character;
+ * a code span binds first, so a star inside one is literal. A bold part keeps
+ * its inner text raw — its own backtick pairs are read by reading it again —
+ * and a marker with no partner is the contract's character, printed as it
+ * came. Every part carries text; the parts' texts, markers removed, are the
+ * paragraph's own, in order.
+ */
+export function inlineParts(paragraph: string): readonly InlinePart[] {
+  const parts: InlinePart[] = [];
+  let text = "";
+  const flush = (): void => {
+    if (text !== "") parts.push({ kind: "text", text });
+    text = "";
+  };
+  let at = 0;
+  while (at < paragraph.length) {
+    const marker = paragraph.startsWith(TICK, at) ? TICK : paragraph.startsWith(STRONG, at) ? STRONG : null;
+    if (marker === null) {
+      text += paragraph.charAt(at);
+      at += 1;
+      continue;
+    }
+    const close = paragraph.indexOf(marker, at + marker.length);
+    if (close > at + marker.length) {
+      flush();
+      parts.push({ kind: marker === TICK ? "code" : "strong", text: paragraph.slice(at + marker.length, close) });
+      at = close + marker.length;
+    } else {
+      text += marker;
+      at += marker.length;
+    }
+  }
+  flush();
+  return parts;
+}
+
 export function deriveApiView(baseUrl: string): ApiView {
   return {
     kicker: `API · contract v${CONTRACT_META.version}`,

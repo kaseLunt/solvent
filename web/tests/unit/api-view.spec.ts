@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { apiDek, contractParagraphs, deriveApiView, errorStatuses, verbCensus } from "../../lib/api-view";
+import { apiDek, contractParagraphs, deriveApiView, errorStatuses, inlineParts, verbCensus, type InlinePart } from "../../lib/api-view";
 import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS } from "../../lib/proof-contract.gen";
 
 const BASE = "http://x";
@@ -160,4 +160,74 @@ test("the contract's prose reflows without a word changing: blank lines end para
     expect(words(paragraphs.join(" "))).toEqual(words(text));
     for (const paragraph of paragraphs) expect(paragraph).not.toContain("\n");
   }
+});
+
+/** What a reader sees of a paragraph once its parts render: a strong part's own code spans read again, every marker gone. */
+const plainOf = (parts: readonly InlinePart[]): string => parts.map((part) => (part.kind === "strong" ? plainOf(inlineParts(part.text)) : part.text)).join("");
+
+test("the contract's two markers become strong and code; its words stay verbatim; an unbalanced marker stays literal", () => {
+  expect(inlineParts("A **409 `batch_superseded`** restarts the walk.")).toEqual([
+    { kind: "text", text: "A " },
+    { kind: "strong", text: "409 `batch_superseded`" },
+    { kind: "text", text: " restarts the walk." },
+  ]);
+  // A strong part keeps its code spans raw; read again, they are code.
+  expect(inlineParts("409 `batch_superseded`")).toEqual([
+    { kind: "text", text: "409 " },
+    { kind: "code", text: "batch_superseded" },
+  ]);
+  expect(inlineParts("see `limit` and **THE EXCLUSION LAW**")).toEqual([
+    { kind: "text", text: "see " },
+    { kind: "code", text: "limit" },
+    { kind: "text", text: " and " },
+    { kind: "strong", text: "THE EXCLUSION LAW" },
+  ]);
+  // A marker with no partner is the contract's character, printed as it came.
+  expect(inlineParts("a lone ** marker and a lone ` tick")).toEqual([{ kind: "text", text: "a lone ** marker and a lone ` tick" }]);
+  expect(inlineParts("`x` and a ` alone")).toEqual([
+    { kind: "code", text: "x" },
+    { kind: "text", text: " and a ` alone" },
+  ]);
+  // A code span binds first: a star inside one is literal; a pair that encloses nothing marks nothing.
+  expect(inlineParts("`a**b` then **c**")).toEqual([
+    { kind: "code", text: "a**b" },
+    { kind: "text", text: " then " },
+    { kind: "strong", text: "c" },
+  ]);
+  expect(inlineParts("an empty **** or `` stays")).toEqual([{ kind: "text", text: "an empty **** or `` stays" }]);
+  // The list marker the paragraphs keep is one star, never a strong marker.
+  expect(inlineParts("* `first` — item one")).toEqual([
+    { kind: "text", text: "* " },
+    { kind: "code", text: "first" },
+    { kind: "text", text: " — item one" },
+  ]);
+  expect(inlineParts("")).toEqual([]);
+});
+
+test("over every description the page prints, no word is lost or added: the parts' plain text is the paragraph with its balanced markers removed", () => {
+  const prose = [...OPERATIONS.map((op) => op.description), ...OPERATIONS.flatMap((op) => op.parameters.map((p) => p.description))];
+  const counted = { strong: 0, code: 0 };
+  for (const text of prose) {
+    for (const paragraph of contractParagraphs(text)) {
+      // Every marker in the contract's prose has its partner, so removing them all is the independent reading of the words.
+      expect((paragraph.match(/\*\*/g) ?? []).length % 2, paragraph).toBe(0);
+      expect((paragraph.match(/`/g) ?? []).length % 2, paragraph).toBe(0);
+      const parts = inlineParts(paragraph);
+      expect(plainOf(parts)).toBe(paragraph.replaceAll("**", "").replaceAll("`", ""));
+      for (const part of parts) {
+        expect(part.text.length).toBeGreaterThan(0);
+        if (part.kind === "strong") counted.strong += 1;
+        if (part.kind === "code") counted.code += 1;
+        if (part.kind === "strong") counted.code += inlineParts(part.text).filter((inner) => inner.kind === "code").length;
+      }
+    }
+  }
+  // The census is not vacuous: the contract carries both markers.
+  expect(counted.strong).toBeGreaterThan(0);
+  expect(counted.code).toBeGreaterThan(0);
+  // The demo arm: getPositions' superseded cursor is bold, its error code inside it is code.
+  const positions = OPERATIONS.find((op) => op.operationId === "getPositions");
+  if (positions === undefined) throw new Error("contract invariant: getPositions exists");
+  const bold = contractParagraphs(positions.description).flatMap((p) => inlineParts(p)).filter((part) => part.kind === "strong");
+  expect(bold).toEqual([{ kind: "strong", text: "409 `batch_superseded`" }]);
 });
