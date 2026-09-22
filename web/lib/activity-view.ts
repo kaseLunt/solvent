@@ -54,6 +54,7 @@ import {
   feedTagTone,
   feedTakeaway,
   renderBps,
+  typeLabel,
 } from "./feed-view";
 import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal, truncateAddress } from "./format";
 import { engineName } from "./inspector-headline";
@@ -295,33 +296,25 @@ export function notABlockNumberNotice(draft: string): string {
 }
 
 /**
- * The three display types whose wire word is an identifier, in the page's words: the contract's own gloss — the Aave
- * usage-as-collateral toggles and the pool's own bad-debt realization event. Every other type is already a word.
+ * The type vocabulary lives beside the headline that speaks it (the headline's module is this one's import, never the
+ * reverse); the page's controls and cells read it from here.
  */
-export const TYPE_WORDS: Readonly<Partial<Record<EventDisplayType, string>>> = {
-  collateral_enabled: "collateral enabled",
-  collateral_disabled: "collateral disabled",
-  deficit_created: "bad debt realised",
-};
-
-/** A display type as the page prints it; a word outside the vocabulary prints as the wire sent it, never guessed at. */
-export function typeLabel(type: string): string {
-  return (TYPE_WORDS as Readonly<Record<string, string | undefined>>)[type] ?? type;
-}
+export { TYPE_WORDS, typeLabel } from "./feed-view";
 
 /** The chip that says the filter the service applied: its own echo, so a defaulted request still states its scope. */
 export const FILTER_APPLIED_LABEL = "Filter applied";
 
 /**
  * The service's echo of the filter it applied, in the page's words: the engine by its name, the types as the page
- * prints them, the block bound and the page size grouped — each integer through the population guard first. A null
- * constraint is "any" (an empty type list, every type): the dash means refused or absent on this page, and a
- * constraint the service did not apply is neither. An account the service echoed is said, shortened.
+ * prints them, the block bound and the page size grouped — each integer through the population guard first. No
+ * engine chosen is the Scope chip's own word beside it (one scope, one word); any other null constraint is "any" (an
+ * empty type list, every type): the dash means refused or absent on this page, and a constraint the service did not
+ * apply is neither. An account the service echoed is said, shortened.
  */
 export function appliedFilter(envelope: ActivityEnvelope): string {
   const { engine, account, types, since_block: since } = envelope.filter;
   return [
-    engine === null ? "any engine" : engineName(engine),
+    engine === null ? ALL_ENGINES : engineName(engine),
     ...(account === undefined || account === null ? [] : [`account ${truncateAddress(account)}`]),
     types === null || types.length === 0 ? "all types" : joinAnd(types.map(typeLabel)),
     since === null ? "any block" : `from block ${groupInt(readWirePopulation(since, "since_block"))}`,
@@ -516,7 +509,8 @@ function engineSplit(rows: readonly FeedChainEvent[]): string {
 /**
  * The answered page's dek: computed facts about the loaded rows, each sentence conditional on its own count — the
  * other crit type (bad debt realised), where the rows sit, and the untimed tail. Every number is counted here from
- * the rows. When none applies, the dek says how the list is ordered.
+ * the rows. A type is said in the page's words and glossed with no wire id the page does not print. When none
+ * applies, the dek says how the list is ordered.
  */
 function factDek(input: ActivityInput): string {
   const { rows, mode, engine } = input;
@@ -526,8 +520,8 @@ function factDek(input: ActivityInput): string {
   if (deficits > 0) {
     sentences.push(
       n === 1
-        ? "It records bad debt being realised (deficit_created)."
-        : `${groupInt(deficits)} of them record${deficits === 1 ? "s" : ""} bad debt being realised (deficit_created).`,
+        ? "It records bad debt being realised."
+        : `${groupInt(deficits)} of them record${deficits === 1 ? "s" : ""} bad debt being realised.`,
     );
   }
   if (mode === "cross-engine") {

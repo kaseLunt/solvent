@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test";
 import { DEMO_EVENTS_NEAR } from "../fixtures/demo";
 import { EVENTS } from "../fixtures/inspector";
 import { actionLabel, activityEmptyText, activityFailureText, activityRows, activityTakeaway } from "../../lib/activity-rows";
-import { RECORD_ONLY_TITLE, RECORD_ONLY_WORD } from "../../lib/feed-view";
+import { EVENT_DISPLAY_TYPES } from "../../lib/feed-data";
+import { RECORD_ONLY_TITLE, RECORD_ONLY_WORD, typeLabel } from "../../lib/feed-view";
 
 // A page failure beside loaded rows is its own line: the table's empty words print only with no rows, so a
 // refused "Load more" folded into them would never show. The rows stand; the failure speaks in its own words.
@@ -50,14 +51,14 @@ test("amounts come from the feed's own vocabulary; a record-only event prints a 
 
 test("a normalized figure is never followed by a bare symbol: the value alone, then the unit words in the Activity page's order", () => {
   const rows = activityRows(DEMO_EVENTS_NEAR.events, { valueDecimalsByEngine: { debt_manager: 6 } });
-  expect(rows[0]).toMatchObject({ action: "Borrow", asset: "USDC", amount: "622", unit: "normalized debt · USDC", rawUnits: false });
+  expect(rows[0]).toMatchObject({ action: "Borrow", asset: "USDC", amount: "622", unit: "· normalized debt · USDC", rawUnits: false });
   expect(rows.map((r) => r.amount)).not.toContain("622 USDC");
   // The signed repay keeps its sign; no amount cell carries a symbol.
-  expect(rows.find((r) => r.action === "Repay")).toMatchObject({ amount: "-150", unit: "normalized debt · USDC" });
+  expect(rows.find((r) => r.action === "Repay")).toMatchObject({ amount: "-150", unit: "· normalized debt · USDC" });
   for (const row of rows) expect(row.amount).not.toMatch(/[A-Za-z]/);
   // No licensed scale: the raw integer, the raw-units pill's flag, and the same unit words — the symbol never touches the digits.
   const raw = activityRows(DEMO_EVENTS_NEAR.events);
-  expect(raw[0]).toMatchObject({ amount: "622000000", unit: "normalized debt · USDC", rawUnits: true });
+  expect(raw[0]).toMatchObject({ amount: "622000000", unit: "· normalized debt · USDC", rawUnits: true });
 });
 
 test("the wire's own scale places the decimal and raw units are named; empty seizures and unscaled repayments are stated; the Cash repaid unit is USD; short hashes and raw types pass verbatim", () => {
@@ -67,7 +68,7 @@ test("the wire's own scale places the decimal and raw units are named; empty sei
   expect(scaled[1]?.rawUnits).toBe(false);
   const unscaled = activityRows(EVENTS.events);
   expect(unscaled[1]?.rawUnits).toBe(true);
-  expect(unscaled[1]?.unit).toBe("normalized debt · USDC");
+  expect(unscaled[1]?.unit).toBe("· normalized debt · USDC");
 
   const first = EVENTS.events[0];
   if (first === undefined || first.liquidation === null) throw new Error("fixture");
@@ -86,10 +87,16 @@ test("the wire's own scale places the decimal and raw units are named; empty sei
   expect(unscaled[1]?.actionTitle).toBe(EVENTS.events[1]?.raw_type);
 });
 
-test("action labels are human; an unknown wire word prints verbatim", () => {
+test("action labels are human, in the Activity page's own words for the same wire types; an unknown wire word prints verbatim", () => {
   expect(actionLabel("collateral_enabled")).toBe("Collateral enabled");
-  expect(actionLabel("deficit_created")).toBe("Deficit created");
+  expect(actionLabel("deficit_created")).toBe("Bad debt realised");
+  expect(actionLabel("borrow")).toBe("Borrow");
   expect(actionLabel("flash_thing")).toBe("flash_thing");
+  // One vocabulary on both surfaces: the Inspector's action is the Activity page's type word, sentence-cased.
+  for (const type of EVENT_DISPLAY_TYPES) {
+    const words = typeLabel(type);
+    expect(actionLabel(type)).toBe(`${words.charAt(0).toUpperCase()}${words.slice(1)}`);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -100,24 +107,30 @@ test("action labels are human; an unknown wire word prints verbatim", () => {
 test.describe("activityTakeaway", () => {
   test("all rows timed: newest-first is honest, and hasMore blocks the totality reading", () => {
     expect(activityTakeaway(3, 0, false)).toBe(
-      "3 custodied action(s) loaded for this account, newest first.",
+      "3 custodied actions loaded for this account, newest first.",
     );
     expect(activityTakeaway(3, 0, true)).toBe(
-      "3 custodied action(s) loaded for this account, newest first · more exist behind the cursor.",
+      "3 custodied actions loaded for this account, newest first · more exist behind the cursor.",
     );
   });
 
   test("a mixed list splits the claim: timed rows newest first, the untimed tail disclaimed", () => {
+    // Real plurals, never "(s)": one untimed row follows, one action is loaded.
+    expect(activityTakeaway(5, 1, false)).toBe(
+      "6 custodied actions loaded for this account: 5 with custodied header time, newest first; 1 untimed row follows, " +
+        "in an order that is not chronology.",
+    );
+    expect(activityTakeaway(1, 0, false)).toBe("1 custodied action loaded for this account, newest first.");
     expect(activityTakeaway(4, 2, false)).toBe(
-      "6 custodied action(s) loaded for this account: 4 with custodied header time, newest " +
-        "first; 2 untimed row(s) follow, in an order that is not chronology.",
+      "6 custodied actions loaded for this account: 4 with custodied header time, newest " +
+        "first; 2 untimed rows follow, in an order that is not chronology.",
     );
   });
 
   test("no timed rows: NO newest-first claim survives anywhere in the sentence", () => {
     const line = activityTakeaway(0, 2, false);
     expect(line).toBe(
-      "2 custodied action(s) loaded for this account, none with a custodied header time — " +
+      "2 custodied actions loaded for this account, none with a custodied header time — " +
         "their order is not chronology.",
     );
     expect(line).not.toContain("newest first");

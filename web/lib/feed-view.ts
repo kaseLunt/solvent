@@ -197,6 +197,33 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
 }
 
 /**
+ * The three display types whose wire word is an identifier, in the page's words: the contract's own gloss — the Aave
+ * usage-as-collateral toggles and the pool's own bad-debt realization event. Every other type is already a word.
+ */
+export const TYPE_WORDS: Readonly<Partial<Record<EventDisplayType, string>>> = {
+  collateral_enabled: "collateral enabled",
+  collateral_disabled: "collateral disabled",
+  deficit_created: "bad debt realised",
+};
+
+/**
+ * A display type as the page prints it — in a button, a cell, a chip and the headline alike; a word outside the
+ * vocabulary prints as the wire sent it, never guessed at.
+ */
+export function typeLabel(type: string): string {
+  return (TYPE_WORDS as Readonly<Record<string, string | undefined>>)[type] ?? type;
+}
+
+/**
+ * One row's type as a sentence names it: a type that is a noun takes its article ("a repay"); a type the page says as
+ * a phrase ("bad debt realised") is a statement and takes none.
+ */
+function typeInSentence(type: string): string {
+  const words = typeLabel(type);
+  return words === type ? `a ${type}` : words;
+}
+
+/**
  * Severity per the canon (color + form, not color alone): a liquidation and
  * the pool's own bad-debt realization are crit; everything else is the plain
  * informational tag. The class string itself always renders VERBATIM.
@@ -268,6 +295,7 @@ export const FEED_EXHAUSTED = "No recorded chain action matches this filter.";
  * loaded is never a count: it is a load in flight or the service's real empty answer. The newest claim is
  * `feedNewest`'s. The instant is spoken through `humanUtc` from the wire's own UTC fields with the envelope's
  * `served_at` as the reference year — never the browser's clock or zone; the exact instant rides the `Newest` chip.
+ * A type is said in the page's words (`typeLabel`), as the controls beside the headline say it — never the wire's id.
  */
 export function feedTakeaway(
   rows: readonly FeedChainEvent[],
@@ -297,7 +325,7 @@ export function feedTakeaway(
     const more = hasMore ? "more exist beyond this one." : "that is the only action matching this filter.";
     return ledger
       ? { emphasis: "1 liquidation loaded,", rest: `${where}; ${more}` }
-      : { emphasis: "1 chain action loaded,", rest: `a ${only?.type ?? "chain action"}, ${where}; ${more}` };
+      : { emphasis: "1 chain action loaded,", rest: `${only === undefined ? "a chain action" : typeInSentence(only.type)}, ${where}; ${more}` };
   }
 
   const loaded = plural(n, "chain action");
@@ -312,7 +340,7 @@ export function feedTakeaway(
     emphasis = `No liquidation among the ${loaded} loaded,`;
   } else {
     emphasis = `${loaded} loaded,`;
-    filtered = `filtered to ${joinAnd(types)}; `;
+    filtered = `filtered to ${joinAnd(types.map(typeLabel))}; `;
   }
 
   const claim =

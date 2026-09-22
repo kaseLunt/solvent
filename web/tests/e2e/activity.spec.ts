@@ -156,7 +156,7 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "neutral");
   await expect(page.getByTestId("activity-verdict")).toContainText("Activity · all engines");
   await expect(page.getByTestId("activity-verdict-dek")).toHaveText(
-    "1 of them records bad debt being realised (deficit_created). 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
+    "1 of them records bad debt being realised. 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
   );
 
   await expect(chip(page, "Scope")).toContainText("all engines");
@@ -165,8 +165,10 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   // The exact layer of the spoken instant: the wire's own string, verbatim. The row count is the tile's, said once.
   await expect(chip(page, "Newest")).toContainText("2026-08-08T20:21:05Z");
   await expect(chip(page, "Rows")).toHaveCount(0);
-  // The service's echo of the filter it applied, in words: "any" for a null constraint — the dash means refused here.
-  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("any engine · all types · any block · 50 per page");
+  // The service's echo of the filter it applied, in words: no engine chosen is the Scope chip's own word beside it,
+  // "any" for every other null constraint — the dash means refused here.
+  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("all engines · all types · any block · 50 per page");
+  await expect(chip(page, FILTER_APPLIED_LABEL)).not.toContainText("any engine");
   await expect(chip(page, "Filter echo")).toHaveCount(0);
 
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("50");
@@ -229,11 +231,24 @@ test("no licensed scale: a book that states no value_decimals, or a book read th
   await expect(page.getByTestId("activity-refusal")).toHaveCount(0);
 });
 
-test("the three raw enum words print plain: the type buttons and the Type cells say them in words with the wire's word as the title, and pressing one still asks the service in its own word", async ({ page }) => {
+/** A type-filtered first page: the demo page's own rows of the requested types, the filter echoed, the cursor spent. */
+const typedWalk = (params: URLSearchParams, route: Route): Promise<void> => {
+  const asked = params.get("types");
+  if (asked === null || params.get("cursor") !== null) return demoWalk(params, route);
+  const types = asked.split(",");
+  return fulfillJson(route, {
+    ...DEMO_FEED_PAGE_1,
+    events: DEMO_FEED_PAGE_1.events.filter((event) => types.includes(event.type)),
+    filter: { ...DEMO_FEED_PAGE_1.filter, types },
+    next_cursor: null,
+  });
+};
+
+test("the three raw enum words print plain: the type buttons, the Type cells and the headline say them in words with the wire's word as the title, and pressing one still asks the service in its own word", async ({ page }) => {
   await muteStream(page);
   await routeBook(page, DEMO_BOOK);
   const requests: URLSearchParams[] = [];
-  await mockEvents(page, demoWalk, requests);
+  await mockEvents(page, typedWalk, requests);
   await page.goto("/feed");
   await expect(rows(page)).toHaveCount(50);
 
@@ -259,6 +274,29 @@ test("the three raw enum words print plain: the type buttons and the Type cells 
 
   await page.getByTestId("activity-type-deficit_created").click();
   await expect.poll(() => requests.some((params) => params.get("types") === "deficit_created")).toBe(true);
+
+  // The headline speaks the buttons' words: a one-row answer names its type as a phrase, a type filter lists them.
+  const served = DEMO_FEED_PAGE_1.served_at;
+  const of = (...types: string[]) => DEMO_FEED_PAGE_1.events.filter((event) => types.includes(event.type));
+  await expect(rows(page)).toHaveCount(1);
+  const one = takeawayText(of("deficit_created"), "cross-engine", false, asServed(served, { types: ["deficit_created"] }));
+  expect(one).toBe(`1 chain action loaded, bad debt realised, at ${nb("Aug 8, 20:06 UTC")}; that is the only action matching this filter.`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(one);
+  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("all engines · bad debt realised · any block · 50 per page");
+
+  await page.getByTestId("activity-type-collateral_enabled").click();
+  await expect(rows(page)).toHaveCount(4);
+  const two = takeawayText(
+    of("deficit_created", "collateral_enabled"),
+    "cross-engine",
+    false,
+    asServed(served, { types: ["deficit_created", "collateral_enabled"] }),
+  );
+  expect(two).toBe(
+    `4 chain actions loaded, filtered to bad debt realised and collateral enabled; the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`,
+  );
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(two);
+  await expect(page.getByTestId("activity-verdict")).not.toContainText(/collateral_|deficit_/);
 });
 
 test("the untimed tail: the two rows without header time are last and dim, their block numbers where the time would be; nothing above them dims; no drift is claimed", async ({ page }) => {
@@ -299,7 +337,7 @@ test("the ledger view pins the type to liquidation: the request says so, three r
   for (const params of requests) expect(params.get("cursor")).toBeNull();
 
   await expect(chip(page, "View")).toContainText("liquidations ledger");
-  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("any engine · liquidation · any block · 50 per page");
+  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("all engines · liquidation · any block · 50 per page");
   await expect(page.getByTestId("activity-kpi-rows")).toContainText("3");
   await expect(page.getByTestId("activity-types")).toHaveCount(0);
   await expect(page.getByTestId("activity-types-note")).toContainText("pinned to liquidation");

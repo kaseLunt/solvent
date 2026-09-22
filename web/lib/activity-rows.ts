@@ -3,26 +3,23 @@
 // block_time renders the block number, never an invented clock. Amounts speak
 // the feed's own accounting vocabulary (lib/feed-view.ts), in the Activity
 // page's order: the figure, then what it is counted in.
-import { RECORD_ONLY_TITLE, RECORD_ONLY_WORD, feedAmount } from "./feed-view";
+import { EVENT_DISPLAY_TYPES } from "./feed-data";
+import { RECORD_ONLY_TITLE, RECORD_ONLY_WORD, feedAmount, typeLabel } from "./feed-view";
 import { renderBlockTime, truncateAddress } from "./format";
 import { humanAmount } from "./human-price";
-import { txExplorerUrl, type ChainEvent, type EventDisplayType } from "./inspector-data";
+import { txExplorerUrl, type ChainEvent } from "./inspector-data";
 import { CASH } from "./inspector-position";
+import { groupInt, plural } from "./prose";
 import { isWireDecimal, isWireScale } from "./wireGuard";
 
-const ACTION_LABEL: Record<EventDisplayType, string> = {
-  borrow: "Borrow",
-  repay: "Repay",
-  supply: "Supply",
-  withdraw: "Withdraw",
-  liquidation: "Liquidation",
-  collateral_enabled: "Collateral enabled",
-  collateral_disabled: "Collateral disabled",
-  deficit_created: "Deficit created",
-};
-
+/**
+ * An action as this card heads its row: the Activity page's word for the same wire type, sentence-cased — one
+ * vocabulary on both surfaces. A type outside the contract's vocabulary prints as the wire sent it, never guessed at.
+ */
 export function actionLabel(type: string): string {
-  return (ACTION_LABEL as Record<string, string | undefined>)[type] ?? type;
+  if (!(EVENT_DISPLAY_TYPES as readonly string[]).includes(type)) return type;
+  const words = typeLabel(type);
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
 export interface ActivityRow {
@@ -37,8 +34,9 @@ export interface ActivityRow {
   readonly amount: string;
   readonly amountTitle: string | null;
   /**
-   * What the figure is counted in, in the Activity page's order: the feed's unit words then the symbol ("normalized
-   * debt · USDC"), or the record-only word beside a dash.
+   * What the figure is counted in, in the Activity page's order and set off from the figure by the page's separator:
+   * the feed's unit words then the symbol ("· normalized debt · USDC", so the cell reads "622 · normalized debt ·
+   * USDC"), or the record-only word beside a dash, which is not a figure and takes none.
    */
   readonly unit: string;
   /** True when `amount` is the wire's raw integer because no scale was licensed — the renderer tags it visibly. */
@@ -83,6 +81,12 @@ function liquidationDetail(event: ChainEvent): string | null {
   return `liquidator ${truncateAddress(l.liquidator)} repaid ${repaid} ${debtUnit}; seized ${seized}`;
 }
 
+/** A figure's unit words, set off from the figure by the separator; nothing to name is nothing printed. */
+function unitWords(parts: readonly (string | null)[]): string {
+  const words = parts.filter((part): part is string => part !== null).join(" · ");
+  return words === "" ? "" : `· ${words}`;
+}
+
 /** The first ten characters; the ellipsis appears only when something was actually cut. */
 const shortHash = (hash: string): string => (hash.length > 10 ? `${hash.slice(0, 10)}…` : hash);
 
@@ -98,10 +102,7 @@ export function activityRows(events: readonly ChainEvent[], scale?: ActivityScal
       asset: event.symbol ?? (event.asset === null ? "—" : truncateAddress(event.asset)),
       amount: amount.kind === "record-only" ? "—" : amount.display,
       amountTitle: amount.kind === "record-only" ? RECORD_ONLY_TITLE : (amount.unitTitle ?? amount.unitChip),
-      unit:
-        amount.kind === "record-only"
-          ? RECORD_ONLY_WORD
-          : [amount.unitChip, amount.symbol].filter((part): part is string => part !== null).join(" · "),
+      unit: amount.kind === "record-only" ? RECORD_ONLY_WORD : unitWords([amount.unitChip, amount.symbol]),
       rawUnits: amount.kind === "record-only" ? false : amount.rawUnits,
       tx: { hash: event.tx_hash, short: shortHash(event.tx_hash), url: txExplorerUrl(event.chain_id, event.tx_hash) },
       detail: liquidationDetail(event),
@@ -119,19 +120,16 @@ export function activityRows(events: readonly ChainEvent[], scale?: ActivityScal
 export function activityTakeaway(timed: number, untimed: number, hasMore: boolean): string {
   const total = timed + untimed;
   const more = hasMore ? " · more exist behind the cursor" : "";
+  const loaded = `${plural(total, "custodied action")} loaded for this account`;
   if (untimed === 0) {
-    return `${String(total)} custodied action(s) loaded for this account, newest first${more}.`;
+    return `${loaded}, newest first${more}.`;
   }
   if (timed === 0) {
-    return (
-      `${String(total)} custodied action(s) loaded for this account, none with a custodied ` +
-      `header time — their order is not chronology${more}.`
-    );
+    return `${loaded}, none with a custodied header time — their order is not chronology${more}.`;
   }
   return (
-    `${String(total)} custodied action(s) loaded for this account: ${String(timed)} with ` +
-    `custodied header time, newest first; ${String(untimed)} untimed row(s) follow, in an ` +
-    `order that is not chronology${more}.`
+    `${loaded}: ${groupInt(timed)} with custodied header time, newest first; ${plural(untimed, "untimed row")} ` +
+    `${untimed === 1 ? "follows" : "follow"}, in an order that is not chronology${more}.`
   );
 }
 

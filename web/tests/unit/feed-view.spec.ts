@@ -27,16 +27,18 @@ import {
   FEED_EXHAUSTED,
   FEED_LOADING,
   RAW_UNITS_TAG,
+  TYPE_WORDS,
   feedAmount,
   feedNewest,
   feedTagTone,
   feedTakeaway,
   liquidationEstablished,
   renderBps,
+  typeLabel,
 } from "../../lib/feed-view";
-import { plural } from "../../lib/prose";
+import { joinAnd, plural } from "../../lib/prose";
 import { EM_DASH } from "../../lib/format";
-import type { FeedChainEvent } from "../../lib/feed-data";
+import { EVENT_DISPLAY_TYPES, type FeedChainEvent } from "../../lib/feed-data";
 import { FEED_LIQUIDATIONS, FEED_UNITS } from "../fixtures/feed";
 
 /**
@@ -341,6 +343,36 @@ test.describe("feedTakeaway", () => {
       emphasis: "1 liquidation loaded,",
       rest: "with no block time yet; that is the only action matching this filter.",
     });
+  });
+
+  test("a type in the headline is the page's word, never the wire's id: the filter clause and a one-row answer say it as the type buttons do", () => {
+    const at = { servedAt: "2026-07-29T10:00:05Z" };
+    const rows = [
+      row({ block_number: 25635601, block_time: "2026-07-29T09:57:11Z", type: "deficit_created" }),
+      row({ block_number: 25635580, block_time: "2026-07-29T09:55:02Z", type: "collateral_enabled" }),
+    ];
+    const types = ["deficit_created", "collateral_enabled"] as const;
+    expect(feedTakeaway(rows, "cross-engine", false, { ...at, types })).toEqual({
+      emphasis: "2 chain actions loaded,",
+      rest: `filtered to bad debt realised and collateral enabled; the newest at ${nb("Jul 29, 09:57 UTC")}; that is every action matching this filter.`,
+    });
+    expect(feedTakeaway(rows, "cross-engine", false, { ...at, types }).rest).toContain(`filtered to ${joinAnd(types.map(typeLabel))};`);
+    // One row: a type the page says as a phrase is a statement and takes no article; a type that is a noun keeps "a".
+    expect(feedTakeaway(rows.slice(0, 1), "engine-scoped", false).rest).toBe(
+      "bad debt realised, at block 25,635,601; that is the only action matching this filter.",
+    );
+    expect(feedTakeaway([row({ block_number: 25635601, block_time: null, type: "collateral_disabled" })], "engine-scoped", true).rest).toBe(
+      "collateral disabled, at block 25,635,601; more exist beyond this one.",
+    );
+    for (const type of EVENT_DISPLAY_TYPES) {
+      const one = feedTakeaway([row({ block_time: null, type })], "engine-scoped", false);
+      const filtered = feedTakeaway([row({ type }), row({ type, seq: 1 })], "engine-scoped", false, { types: [type] });
+      expect(`${one.rest} ${filtered.rest}`).not.toContain("_");
+    }
+    // The page's words for the three wire ids, and a word outside the vocabulary as the wire sent it.
+    expect(Object.keys(TYPE_WORDS).sort()).toEqual(["collateral_disabled", "collateral_enabled", "deficit_created"]);
+    expect(typeLabel("deficit_created")).toBe("bad debt realised");
+    expect(typeLabel("flash_thing")).toBe("flash_thing");
   });
 
   test("no sentence names the wire's internals or a dollar: no cursor, no custody word, no '(s)', no '$'", () => {

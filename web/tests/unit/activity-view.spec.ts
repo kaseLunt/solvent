@@ -233,6 +233,20 @@ test("the three raw enum words print plain — in the row and on the type button
   expect(rows.find((r) => r.type === "collateral_enabled")?.typeLabel).toBe("collateral enabled");
   expect(rows.find((r) => r.type === "borrow")?.typeLabel).toBe("borrow");
   expect(rows.every((r) => r.typeLabel === typeLabel(r.type))).toBe(true);
+
+  // The headline speaks the same words: a type filter, and a one-row answer, never print the wire's id.
+  const filtered = ROWS.filter((event) => event.type === "deficit_created" || event.type === "collateral_enabled");
+  const types = ["deficit_created", "collateral_enabled"] as const;
+  expect(h1(base({ rows: filtered, types, hasMore: false }))).toBe(
+    `4 chain actions loaded, filtered to bad debt realised and collateral enabled; the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`,
+  );
+  const lone = ROWS.filter((event) => event.type === "deficit_created");
+  expect(h1(base({ rows: lone, types: ["deficit_created"], hasMore: false }))).toBe(
+    `1 chain action loaded, bad debt realised, at ${nb("Aug 8, 20:06 UTC")}; that is the only action matching this filter.`,
+  );
+  for (const input of [base({ rows: filtered, types, hasMore: false }), base({ rows: lone, types: ["deficit_created"], hasMore: false })]) {
+    expect(h1(input)).not.toContain("_");
+  }
 });
 
 test("rows: the tx link is the chain's explorer or null, its label the short hash, its title the full hash with the row's chain coordinates (log always, block only beside a time, seq only when nonzero)", () => {
@@ -288,7 +302,7 @@ test("header: the kicker names the scope, the headline IS feedTakeaway's two par
   expect(v.headline).toEqual({
     ...takeaway,
     tone: "neutral",
-    dek: "1 of them records bad debt being realised (deficit_created). 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
+    dek: "1 of them records bad debt being realised. 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
   });
   expect(v.headline.emphasis).toBe("3 liquidations among the 50 chain actions loaded,");
   expect(v.headline.rest).toBe(`the newest at ${nb("Aug 8, 20:21 UTC")}; more exist beyond these.`);
@@ -316,7 +330,7 @@ test("the dek counts what is loaded, each sentence conditional on its own count:
   expect([deficits, cash, legacy, untimed]).toEqual([1, 21, 29, 2]);
   expect(cash + legacy).toBe(ROWS.length);
   expect(deriveActivityView(base()).headline.dek).toBe(
-    `${String(deficits)} of them records bad debt being realised (deficit_created). ${String(cash)} are on Cash and ${String(legacy)} on the legacy Aave v3 market. ${String(untimed)} have no block time yet and are listed last, by chain and then block number.`,
+    `${String(deficits)} of them records bad debt being realised. ${String(cash)} are on Cash and ${String(legacy)} on the legacy Aave v3 market. ${String(untimed)} have no block time yet and are listed last, by chain and then block number.`,
   );
 
   // No deficit, no tail: only the split is said. One engine among the rows: "All n".
@@ -333,14 +347,14 @@ test("the dek counts what is loaded, each sentence conditional on its own count:
   const deficit = ROWS.find((e) => e.type === "deficit_created");
   if (deficit === undefined) throw new Error("fixture: the demo page carries a deficit_created row");
   expect(deriveActivityView(base({ rows: [deficit, { ...deficit, log_index: 99 }, ...cashOnly] })).headline.dek).toBe(
-    "2 of them record bad debt being realised (deficit_created). 20 are on Cash and 2 on the legacy Aave v3 market.",
+    "2 of them record bad debt being realised. 20 are on Cash and 2 on the legacy Aave v3 market.",
   );
   // An engine this page does not name is counted as such, never folded into one of the two.
   const foreign = [...cashOnly.slice(0, 2), { ...deficit, type: "borrow" as const, engine: "morpho_blue" }];
   expect(deriveActivityView(base({ rows: foreign })).headline.dek).toBe("2 are on Cash and 1 on an engine this page does not name.");
   // One row: the headline names it, the dek says where it sits.
   expect(deriveActivityView(base({ rows: [deficit] })).headline.dek).toBe(
-    "It records bad debt being realised (deficit_created). It is on the legacy Aave v3 market.",
+    "It records bad debt being realised. It is on the legacy Aave v3 market.",
   );
 
   // One engine chosen: no split and no tail (a null time is a per-row fallback there); nothing else to say, so the order is said.
@@ -353,6 +367,10 @@ test("the dek counts what is loaded, each sentence conditional on its own count:
   // No dek names a dollar, a sum across engines, a cursor or the custody word.
   for (const rows of [ROWS, timed, cashOnly, oneCash, foreign]) {
     expect(deriveActivityView(base({ rows })).headline.dek).not.toMatch(/\$|cursor|custod|in total|combined/);
+  }
+  // The dek glosses no wire word the page no longer prints: a type is said in the page's words or not at all.
+  for (const rows of [ROWS, [deficit], [deficit, { ...deficit, log_index: 99 }, ...cashOnly]]) {
+    expect(deriveActivityView(base({ rows })).headline.dek).not.toMatch(/_|deficit_created/);
   }
 });
 
@@ -369,9 +387,12 @@ test("chips: Scope · View · Order · Newest · Filter applied in that order �
   expect(chipValue(base(), "Newest")).toBe("2026-08-08T20:21:05Z");
   expect(chipValue(base(), "Newest")).toBe(ROWS[0]?.block_time);
   // A null constraint is "any" — the dash means refused or absent everywhere else on the page — and no wire field name prints.
-  expect(chipValue(base(), "Filter applied")).toBe("any engine · all types · any block · 50 per page");
+  expect(chipValue(base(), "Filter applied")).toBe("all engines · all types · any block · 50 per page");
   expect(chipValue(base(), "Filter applied")).not.toContain(EM_DASH);
   expect(chipValue(base(), "Filter applied")).not.toMatch(/since_block|\blimit\b|types all|\bengine —/);
+  // One scope, one word: the applied filter's engine with none chosen is the Scope chip's own word beside it.
+  expect(chipValue(base(), "Filter applied")?.startsWith(`${ALL_ENGINES} · `)).toBe(true);
+  expect(chipValue(base(), "Filter applied")).not.toContain("any engine");
 
   expect(chipValue(base({ engine: "debt_manager", mode: "engine-scoped" }), "Scope")).toBe("Cash");
   expect(chipValue(base({ view: "ledger" }), "View")).toBe("liquidations ledger");
@@ -391,17 +412,17 @@ test("chips: Scope · View · Order · Newest · Filter applied in that order �
   });
   expect(chipValue(scoped, "Filter applied")).toBe("Aave v3 market (legacy) · borrow and repay · from block 25,635,600 · 50 per page");
   const served_at = DEMO_FEED_PAGE_1.served_at;
-  // The plan's literal arm: every constraint null, the wire's page size.
+  // Every constraint null: each is said as its scope with none chosen, and the page size is the wire's echo.
   expect(appliedFilter({ filter: { engine: null, account: null, types: null, since_block: null }, limit: 50, served_at: "…" })).toBe(
-    "any engine · all types · any block · 50 per page",
+    "all engines · all types · any block · 50 per page",
   );
   // Types in the page's own words; an empty list is every type; an account the service echoed is said, shortened.
   expect(appliedFilter({ filter: { engine: "debt_manager", types: ["deficit_created", "collateral_enabled", "liquidation"], since_block: null }, limit: 1000, served_at })).toBe(
     "Cash · bad debt realised, collateral enabled and liquidation · any block · 1,000 per page",
   );
-  expect(appliedFilter({ filter: { engine: null, types: [], since_block: null }, limit: 25, served_at })).toBe("any engine · all types · any block · 25 per page");
+  expect(appliedFilter({ filter: { engine: null, types: [], since_block: null }, limit: 25, served_at })).toBe("all engines · all types · any block · 25 per page");
   expect(appliedFilter({ filter: { engine: null, account: "0x7a3f19e2c8b4d0a6f1e3b5c7d9a2f4e6b8c0c21e", types: null, since_block: null }, limit: 25, served_at })).toBe(
-    "any engine · account 0x7a3f…c21e · all types · any block · 25 per page",
+    "all engines · account 0x7a3f…c21e · all types · any block · 25 per page",
   );
   // An echoed integer outside the population law is refused before render, never printed.
   expect(() => deriveActivityView(base({ envelope: { filter: { engine: null, types: null, since_block: -1 }, limit: 50, served_at } }))).toThrow(/since_block/);
