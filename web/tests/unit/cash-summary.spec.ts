@@ -367,8 +367,17 @@ const partitionOf = (material: number, belowLine: number) => ({
   material: { sum: 4_620_000_000n * BigInt(material), count: material },
   belowLine: { sum: 2_330_000n * BigInt(belowLine), count: belowLine },
 });
-const wholeSummaryWith = (c: { material: number; belowLine: number }) => ({ ...partitionOf(c.material, c.belowLine), whole: true });
-const walkingSummaryWith = (c: { material: number; belowLine: number }) => ({ ...partitionOf(c.material, c.belowLine), whole: false });
+const populationOf = (material: number, belowLine: number) => ({ computed: material + belowLine, notComputed: 0 });
+const wholeSummaryWith = (c: { material: number; belowLine: number }) => ({
+  ...partitionOf(c.material, c.belowLine),
+  ...populationOf(c.material, c.belowLine),
+  whole: true,
+});
+const walkingSummaryWith = (c: { material: number; belowLine: number }) => ({
+  ...partitionOf(c.material, c.belowLine),
+  ...populationOf(c.material, c.belowLine),
+  whole: false,
+});
 
 test("the liquidatable tile states the partition's total only over a book read whole", () => {
   expect(liquidatableTileLabel).toBe("Liquidatable · ≥ $100");
@@ -395,10 +404,38 @@ test("the liquidatable tile states the partition's total only over a book read w
     expect(sub).toBe(`1 account · 0 more under $100${tileBoundNote(s)}`);
     expect(sub).not.toContain("in all");
   }
-  // The demo walk, read whole: the tile states the same 49 the engine card and History carry.
+  // The demo walk, read whole: the tile states the same 49 as the batch aggregate's liquidatable_positions.
   const demo = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => readCashRow(refinePositionSummary(p)));
   const read = summarizeCash({ rows: demo, decimals: 6, refusedPositions: 6, ...settled });
   expect(liquidatableTileSub(read, tileBoundNote(read))).toBe("2 accounts · 47 more under $100 · 49 in all");
+});
+
+test("the liquidatable tile states no total over nothing computed, and no zero total a refused account could sit inside", () => {
+  const refusedRow = rows.find((r) => !r.computed);
+  if (refusedRow === undefined) throw new Error("fixture invariant: the committed page serves a refused row");
+  // A walk read whole over rows the engine refused one by one (every account SWEEP_NEVER on a fresh deploy): nothing
+  // was computed, the headline declines any verdict, and the tile states no total — zero or otherwise.
+  const noneComputed = summarizeCash({ rows: [refusedRow], decimals: 6, refusedPositions: 1, ...settled });
+  expect(noneComputed.whole).toBe(true);
+  expect(noneComputed.computed).toBe(0);
+  expect(noneComputed.headline.emphasis).toBe("No Cash account could be computed this batch.");
+  expect(liquidatableTileSub(noneComputed, tileBoundNote(noneComputed))).toBe("0 accounts · 0 more under $100");
+  // A book with nothing in it computed nothing either: no total is stated over it.
+  const empty = summarizeCash({ rows: [], decimals: 6, refusedPositions: 0, ...settled });
+  expect(empty.whole).toBe(true);
+  expect(liquidatableTileSub(empty, tileBoundNote(empty))).toBe("0 accounts · 0 more under $100");
+  // Computed accounts, none liquidatable, beside refused ones: the headline scopes its negative to the computed
+  // positions, and the tile claims no zero total the refused accounts would sit inside.
+  const zeroBesideRefused = summarizeCash({ rows: [far, refusedRow], decimals: 6, refusedPositions: 1, ...settled });
+  expect(zeroBesideRefused.headline.dek).toContain("No computed position is liquidatable.");
+  expect(liquidatableTileSub(zeroBesideRefused, tileBoundNote(zeroBesideRefused))).toBe("0 accounts · 0 more under $100");
+  // Nothing refused: the zero is the book's own finding, as the headline says it unscoped.
+  const zeroWhole = summarizeCash({ rows: [far], decimals: 6, refusedPositions: 0, ...settled });
+  expect(zeroWhole.headline.dek).toContain("No position is liquidatable.");
+  expect(liquidatableTileSub(zeroWhole, tileBoundNote(zeroWhole))).toBe("0 accounts · 0 more under $100 · 0 in all");
+  // A positive total beside refused accounts still stands: it counts the positions the engine computed liquidatable.
+  const committed = summarizeCash({ rows, decimals: 6, refusedPositions: 1, ...settled });
+  expect(liquidatableTileSub(committed, tileBoundNote(committed))).toBe("1 account · 0 more under $100 · 1 in all");
 });
 
 test("a walk served an account twice claims no bound anywhere, in its own words — never 'at least', never 'lower bound'", () => {

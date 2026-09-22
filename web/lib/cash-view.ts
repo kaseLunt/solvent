@@ -414,7 +414,16 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
           label: b.label,
           count: readWirePopulation(b.count, `hf_histogram[aave_v3_etherfi].buckets[${String(i)}].count`),
         }));
-  const debtWord = debt.kind === "value" ? `${debt.text} debt` : debt.kind === "absent" ? "debt withheld" : "debt unreadable";
+  // The aggregate sums debt over computed positions only: with none computed its figure is no position's debt, and the
+  // line names the debt as not computed rather than print that zero.
+  const debtWord =
+    computed === 0
+      ? "debt not computed"
+      : debt.kind === "value"
+        ? `${debt.text} debt`
+        : debt.kind === "absent"
+          ? "debt withheld"
+          : "debt unreadable";
   // The line states the market's own finding over the positions it computed; with none computed no liquidatable
   // clause is said (a negative over nothing), and the population stands in its place. Never a Cash figure.
   const finding =

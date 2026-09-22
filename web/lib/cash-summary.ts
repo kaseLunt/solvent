@@ -165,12 +165,19 @@ export const liquidatableTileLabel = `Liquidatable · ≥ $${MATERIAL_LINE_USD.t
 
 /**
  * The liquidatable tile's sub: the material accounts, the positions under the line, and — over a book read whole only —
- * the partition's total, the same liquidatable count the engine card carries. Short of a whole read no total is claimed:
- * the bound note keeps its place and says in which register the two counts stand.
+ * the partition's total, the same count as the batch aggregate's liquidatable_positions. Short of a whole read no total
+ * is claimed: the bound note keeps its place and says in which register the two counts stand. A total is a finding only
+ * over a computed population, and a zero total is said only where no refused account could sit inside it — the same
+ * scope the headline gives its own negative.
  */
-export function liquidatableTileSub(summary: Pick<CashSummary, "material" | "belowLine" | "whole">, boundNote: string): string {
+export function liquidatableTileSub(
+  summary: Pick<CashSummary, "material" | "belowLine" | "whole" | "computed" | "notComputed">,
+  boundNote: string,
+): string {
   const counts = `${plural(summary.material.count, "account")} · ${groupInt(summary.belowLine.count)} more under $${MATERIAL_LINE_USD.toString()}`;
-  const total = summary.whole ? ` · ${groupInt(summary.material.count + summary.belowLine.count)} in all` : "";
+  const inAll = summary.material.count + summary.belowLine.count;
+  const stated = summary.whole && summary.computed > 0 && (inAll > 0 || summary.notComputed === 0);
+  const total = stated ? ` · ${groupInt(inAll)} in all` : "";
   return `${counts}${total}${boundNote}`;
 }
 

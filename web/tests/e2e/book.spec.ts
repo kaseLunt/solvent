@@ -124,7 +124,7 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
   expect(below).toBe("47 more positions are technically liquidatable, each under the $100 line — $109.45 together — and not headlined.");
   await expect(page.getByTestId("book-verdict-dek")).toContainText(below ?? "");
   await expect(page.getByTestId("book-verdict-dek")).not.toContainText("below the $100 line");
-  // Read whole, the tile states the 49 liquidatable positions the engine card and History carry: 2 material + 47 under the line.
+  // Read whole, the tile states the batch aggregate's 49 liquidatable positions: 2 material + 47 under the line.
   const tile = page.getByTestId("book-kpi-liquidatable");
   await expect(tile).toContainText(liquidatableTileLabel);
   expect(liquidatableTileSub(DEMO_SUMMARY, tileBoundNote(DEMO_SUMMARY))).toBe("2 accounts · 47 more under $100 · 49 in all");
@@ -195,6 +195,31 @@ test("the near-cap fold shows the rows the table hides: collapsed it is today's 
   await page.getByTestId("book-dust-toggle").click();
   await expect(rows).toHaveCount(14);
   expect(await ids()).toEqual([...material, ...near.slice(0, 6), ...refusedAccounts]);
+});
+
+test("a Cash book whose every account the engine refused one by one: no verdict, and the liquidatable tile states no total over nothing computed", async ({
+  page,
+}) => {
+  // Every Debt Manager account refused on its own (SWEEP_NEVER before any collateral sweep) while the engine is served,
+  // not withheld: the walk runs, completes and reads every row, and not one of them carries a verdict.
+  const refusedOnly = POSITIONS_DM_PAGE_1.positions.filter((p) => p.status !== "computed");
+  expect(refusedOnly).toHaveLength(1);
+  const book = {
+    ...BOOK,
+    engines: BOOK.engines.map((e) =>
+      e.engine === "debt_manager"
+        ? { ...e, positions: 1, computed_positions: 0, refused_positions: 1, liquidatable_positions: 0, total_debt: "0", total_collateral: "0" }
+        : e,
+    ),
+  };
+  await mockCommitted(page, book);
+  // Registered last, so it answers ahead of the committed page: the walk's one page serves the refused row alone.
+  await page.route("**/v1/positions*", (route) => json(route, { ...POSITIONS_DM_PAGE_1, total_positions: 1, positions: refusedOnly }));
+  await page.goto("/book");
+  await expect(page.getByTestId("book-verdict-headline")).toHaveText("No Cash account could be computed this batch.");
+  const tile = page.getByTestId("book-kpi-liquidatable");
+  await expect(tile).toContainText("0 accounts · 0 more under $100");
+  await expect(tile).not.toContainText("in all");
 });
 
 test("the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero — the card's placeholder counts print nowhere", async ({ page }) => {

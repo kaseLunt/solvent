@@ -415,11 +415,14 @@ function legacyWith(c: { positions: number; computed: number; liquidatable: numb
 test("the legacy fold's line is the market's own finding over computed positions; never a negative over nothing computed", () => {
   expect(deriveLegacyView(legacyWith({ positions: 8552, computed: 8552, liquidatable: 46, refused: 0, debt: DEMO_LEGACY_DEBT }))?.summaryLine)
     .toBe("Legacy · Aave v3 market — 46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
-  expect(deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3 }))?.summaryLine)
-    .toBe("Legacy · Aave v3 market — 3 positions · $1.9M debt · 3 refused");
+  // The aggregate sums debt over computed positions only, so with none computed the wire serves a zero that is no
+  // position's debt: the line names the debt as not computed and never prints that zero.
+  const zero = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }))?.summaryLine ?? "";
+  expect(zero).toBe("Legacy · Aave v3 market — 3 positions · debt not computed · 3 refused");
+  expect(zero).not.toContain("$0");
   // Nothing computed: no "0 of 0", no "0 liquidatable" — the liquidatable clause is omitted, the population and refusals stand.
   const none = deriveLegacyView(legacyWith({ positions: 1, computed: 0, liquidatable: 0, refused: 1, debt: null }))?.summaryLine ?? "";
-  expect(none).toBe("Legacy · Aave v3 market — 1 position · debt withheld · 1 refused");
+  expect(none).toBe("Legacy · Aave v3 market — 1 position · debt not computed · 1 refused");
   expect(none).not.toMatch(/liquidatable|\b0 of\b/);
   // One computed position is said in the singular; counts are grouped.
   expect(deriveLegacyView(legacyWith({ positions: 1, computed: 1, liquidatable: 1, refused: 0 }))?.summaryLine).toBe(
