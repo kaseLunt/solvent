@@ -1,7 +1,7 @@
 import { KpiTile, type Tone } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { newlyTone, signedCount } from "@/lib/lab-headline";
-import type { EngineReading } from "@/lib/lab-view";
+import { LANE_TILE_LABEL, type EngineReading } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import { bookMoney, signedBookMoney } from "./money";
 
@@ -21,7 +21,7 @@ function refusedWord(reading: EngineReading | null): string {
 }
 
 /**
- * Newly liquidatable · Liquidatable debt Δ · Bad debt at liquidation Δ · Accounts moved — the same four in every state, so a refusal keeps its place on the page and never reads as an absence.
+ * Newly liquidatable · Liquidatable debt Δ · Bad debt at liquidation Δ · Accounts changing lane — the same four in every state, so a refusal keeps its place on the page and never reads as an absence.
  * The newly tile wears the headline's own tone (`newlyTone`): a net at or below zero beside crossings or band changes is never ok.
  */
 export function LabTiles({
@@ -72,7 +72,7 @@ export function LabTiles({
       />
       <KpiTile
         testId={`${testPrefix}-moved`}
-        label="Accounts moved"
+        label={LANE_TILE_LABEL}
         value={
           r === null || r.laneChanged === null ? "—" : groupInt(r.laneChanged)
         }

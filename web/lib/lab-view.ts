@@ -40,6 +40,29 @@ export { readEngine } from "./lab-engine";
 export type { EngineReading, EngineResult } from "./lab-engine";
 export type { Banner, HeldCondition, Retained } from "./lab-headline";
 
+/**
+ * Three populations, three words. The lane tile counts `lane_changed_rows`,
+ * rows whose lane changed, which the contract says is NOT `movers_total`, so
+ * it never says "moved". The movers table prints the service's rows in the
+ * service's own ranking (its caption, `moversCaption`, names which accounts
+ * they are). The dek's "move to a worse band" is the web's own band count.
+ */
+export const LANE_TILE_LABEL = "Accounts changing lane";
+export const MOVERS_TITLE = "Most affected accounts";
+export const MOVERS_QUALIFIER = "room today → after the shock · ranked by the service";
+export const MOVERS_LINK = `${MOVERS_TITLE} →`;
+/** An empty movers list states only that nothing is listed; which accounts, and how many, is the caption's. */
+export const MOVERS_EMPTY = "No account is listed.";
+/**
+ * The drawer opens on the run's assumptions and on the wire's list of what the
+ * scenario leaves out (`out_of_model`). The tiles' "not modelled" names an
+ * engine a scenario does not cover, a different fact, so these words never
+ * reuse it.
+ */
+export const ASSUMPTIONS_BUTTON = "Assumptions · What the model leaves out";
+export const ASSUMPTIONS_TITLE = "Assumptions & what the model leaves out";
+export const ASSUMPTIONS_LEFT_OUT = "Left out of the model";
+
 /** A chip on the identity strip; structurally the kit's IdentityChip, kept out of the component layer. */
 export interface LabChip {
   readonly label: string;

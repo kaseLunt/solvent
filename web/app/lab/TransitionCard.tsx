@@ -2,7 +2,7 @@ import { ChartCard, Heatmap, type HeatCellView } from "@/components/kit";
 import { engineName } from "@/lib/inspector-headline";
 import { heatIntensity } from "@/lib/lab-geometry";
 import type { HeatmapView } from "@/lib/lab-transitions";
-import type { EngineReading } from "@/lib/lab-view";
+import { MOVERS_LINK, type EngineReading } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import styles from "./lab.module.css";
 import { bookMoney } from "./money";
@@ -69,7 +69,7 @@ export function TransitionCard({
       link={
         r === null
           ? undefined
-          : { href: "#movers", label: "Most affected accounts →" }
+          : { href: "#movers", label: MOVERS_LINK }
       }
       finding={
         <span data-testid={`${testId}-finding`}>{words(reading, engine)}</span>

@@ -23,7 +23,7 @@ import {
   unlistedScenarioNotice,
 } from "@/lib/lab-deep-link";
 import { useLabReading } from "@/lib/lab-reading";
-import { deriveLabView, type LabChip } from "@/lib/lab-view";
+import { ASSUMPTIONS_BUTTON, deriveLabView, type LabChip } from "@/lib/lab-view";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { useMetaConstants } from "@/lib/meta";
 import { resultReceipt } from "@/lib/resultIdentity";
@@ -381,7 +381,7 @@ export function LabSurface() {
                     onClick={() => setDrawerOpen(true)}
                     data-testid="lab-drawer"
                   >
-                    Assumptions · Out of model
+                    {ASSUMPTIONS_BUTTON}
                   </button>
                 ) : undefined
               }
@@ -404,7 +404,7 @@ export function LabSurface() {
               testPrefix="lab-kpi"
             />
             <TransitionCard reading={book.cash} engine={CASH} />
-            {cashResult !== null && <MoversTable table={cashResult.movers} />}
+            {cashResult !== null && <MoversTable table={cashResult.movers} engine={CASH} />}
             {(view.compare.kind !== "idle" || view.checked.length >= 2) && (
               <CompareCard state={view.compare} />
             )}

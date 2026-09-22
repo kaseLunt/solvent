@@ -1,7 +1,7 @@
 "use client";
 
 import { Drawer } from "@/components/Drawer";
-import type { EngineResult } from "@/lib/lab-view";
+import { ASSUMPTIONS_LEFT_OUT, ASSUMPTIONS_TITLE, type EngineResult } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import type { LabRunBook } from "@/lib/runbook";
 import { isWireDecimal } from "@/lib/wireGuard";
@@ -13,10 +13,10 @@ const flags = (s: AppliedShock): string =>
   [s.snapped ? "snapped" : null, s.base_snapped ? "base snapped" : null, s.cap_bound ? "cap bound" : null].filter((f): f is string => f !== null).join(" · ");
 const exact = (v: string): string => (isWireDecimal(v) ? v : `unreadable (${JSON.stringify(v)})`);
 
-/** Path assumption, applied shocks, held-flat inputs, out of model, config, wire notes verbatim, the exact wire values: every figure the page rounds can be opened to the value the wire sent. */
+/** Path assumption, applied shocks, held-flat inputs, what the model leaves out, config, wire notes verbatim, the exact wire values: every figure the page rounds can be opened to the value the wire sent. */
 export function AssumptionsDrawer({ open, onClose, run, cash }: { open: boolean; onClose: () => void; run: LabRunBook | null; cash: EngineResult | null }) {
   return (
-    <Drawer open={open} onClose={onClose} title="Assumptions & out of model">
+    <Drawer open={open} onClose={onClose} title={ASSUMPTIONS_TITLE}>
       <div className={styles.method} data-testid="lab-drawer-body">
         {run === null ? (
           <p>No result is open.</p>
@@ -49,7 +49,7 @@ export function AssumptionsDrawer({ open, onClose, run, cash }: { open: boolean;
                 ))}
               </ul>
             )}
-            <h3>Out of model</h3>
+            <h3>{ASSUMPTIONS_LEFT_OUT}</h3>
             <ul>
               {run.out_of_model.map((o) => (
                 <li key={o}>{o}</li>

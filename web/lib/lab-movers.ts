@@ -2,6 +2,12 @@
 // side's room from the Cash ratio (cap ÷ debt) or the legacy market's health
 // factor from its wad. Every field passes the guards; a field that fails is
 // named and its cell prints "unreadable", never a number.
+//
+// The caption names WHICH accounts these are in the contract's own terms,
+// engine by engine: on Cash the accounts whose eligibility flips false → true,
+// ranked by debt; on the legacy market the accounts whose health factor
+// strictly drops, ranked by the drop. Neither is "moved" — that verb belongs
+// to the web's band count, and the lane tile's rows are a third population.
 import type { components } from "@solvent/client";
 import { hfDisplayFromWad } from "./book-format";
 import { humanUsdFull } from "./human-price";
@@ -41,6 +47,15 @@ export interface MoversTable {
   readonly decimals: number;
   readonly unreadable: readonly string[];
 }
+
+/**
+ * The service's bound on `movers`, as the contract states it: RunBookEngine
+ * `movers` is "BOUNDED to the top 20", a window onto `movers_total`
+ * (api/openapi.yaml; the server's named constant `runBookMoversCap` in
+ * cmd/api/p5_runbook.go). The caption says "at most" from this stated cap,
+ * never from the length of one answer.
+ */
+export const MOVERS_CAP = 20;
 
 /** The room a cap ÷ debt ratio means, floored to tenths. */
 export function roomFromRatio(num: bigint, den: bigint): string {
@@ -116,11 +131,28 @@ export function moversTable(engine: MoverEngine): MoversTable {
   return { rows, shown: rows.length, total, note: engine.movers_note, decimals, unreadable };
 }
 
-export function moversCaption(t: MoversTable): string {
+export function moversCaption(t: MoversTable, engine: "debt_manager" | "aave_v3_etherfi"): string {
   // A table refused for its scale states no count: "0 accounts" would be a
   // claim about the book, and the truth is that the scale could not be read.
   if (t.unreadable.includes("usd_decimals")) return "not readable: unreadable scale";
-  const noun = (n: number) => `${groupInt(n)} account${n === 1 ? "" : "s"} moved`;
-  if (t.total === null) return `showing ${noun(t.shown)} · total not stated`;
-  return `showing ${groupInt(t.shown)} of ${noun(t.total)}`;
+  const accounts = (n: number) => `${groupInt(n)} account${n === 1 ? "" : "s"}`;
+  if (t.total === null) return `${accounts(t.shown)} shown · total not stated`;
+  const total = t.total;
+  const cash = engine === "debt_manager";
+  if (total === 0 && t.shown === 0) return cash ? "no account becomes liquidatable" : "no account's health factor drops";
+  // A list longer than its own full count, or empty under a count above zero,
+  // is not a window onto that count: it is said as it stands, never as "all".
+  if (t.shown > total || t.shown === 0) return `${accounts(t.shown)} listed · the service states ${groupInt(total)} in all`;
+  if (t.shown < total) {
+    // The stated cap is named only beside a list it can bound: a longer list
+    // would make "at most" a claim the answer on the page contradicts.
+    const cap = t.shown <= MOVERS_CAP ? ` · the service returns at most ${groupInt(MOVERS_CAP)}` : "";
+    return cash
+      ? `the ${groupInt(t.shown)} largest of the ${groupInt(total)} accounts that become liquidatable, by debt${cap}`
+      : `the ${groupInt(t.shown)} largest health-factor drops of ${groupInt(total)} accounts${cap}`;
+  }
+  if (total === 1) return cash ? "the 1 account that becomes liquidatable" : "the 1 account whose health factor drops";
+  return cash
+    ? `all ${groupInt(total)} accounts that become liquidatable, by debt`
+    : `all ${groupInt(total)} accounts whose health factor drops, largest drop first`;
 }

@@ -55,6 +55,9 @@
 .btnGhost { background: none; }
 /* One pressed-toggle grammar: a ghost button that is a toggle wears the accent when pressed. */
 .btnGhost[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-text); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+/* A control that cannot act does not wear a live control's look: ink-2 on the panel-2 ground, the line for a border, no pointer — never a dimmed live button. `.btn:disabled` out-ranks `.btnPrimary`; the ghost rule follows the pressed rule it ties. */
+.btn:disabled { color: var(--ink-2); background: var(--panel-2); border-color: var(--line); cursor: not-allowed; }
+.btnGhost:disabled { background: none; }
 
 /* ---- section head ---- */
 .sec { display: flex; align-items: baseline; justify-content: space-between; margin-top: 26px; gap: 12px; }

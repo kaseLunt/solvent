@@ -172,7 +172,7 @@ async function openByKeyboard(tab: Page, button: Locator): Promise<void> {
 const DRAWERS: readonly { page: PageName; button: string; label: string }[] = [
   { page: "book", button: "book-methodology", label: "Methodology & evidence" },
   { page: "inspector", button: "inspector-drawer", label: "Inputs · Calculation · Provenance" },
-  { page: "scenarios", button: "lab-drawer", label: "Assumptions · Out of model" },
+  { page: "scenarios", button: "lab-drawer", label: "Assumptions · What the model leaves out" },
   { page: "history", button: "history-drawer", label: "Methodology & evidence" },
   { page: "activity", button: "activity-drawer", label: "Methodology & evidence" },
   { page: "verification", button: "verification-drawer", label: "Methodology & evidence" },

@@ -8,6 +8,16 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { compareRows } from "../../lib/lab-compare";
+import { moversCaption, moversTable } from "../../lib/lab-movers";
+import {
+  ASSUMPTIONS_BUTTON,
+  ASSUMPTIONS_LEFT_OUT,
+  ASSUMPTIONS_TITLE,
+  LANE_TILE_LABEL,
+  MOVERS_LINK,
+  MOVERS_QUALIFIER,
+  MOVERS_TITLE,
+} from "../../lib/lab-view";
 import {
   DEMO_ADDRESS_NEAR,
   DEMO_EVENTS_NEAR,
@@ -153,6 +163,35 @@ const shockFlags = (s: (typeof DEMO_RUN_BOOK_ETH)["applied_shocks"][number]): st
   const words = [s.snapped ? "snapped" : null, s.base_snapped ? "base snapped" : null, s.cap_bound ? "cap bound" : null].filter((w): w is string => w !== null);
   return words.length === 0 ? "" : ` · ${words.join(" · ")}`;
 };
+/** One token resolved on a live probe in the page's own theme: the colour a rule written with it computes to. */
+const resolveToken = (page: Page, token: string, channel: "color" | "background" = "color"): Promise<string> =>
+  page.evaluate(
+    ({ name, kind }) => {
+      const probe = document.createElement("span");
+      document.body.appendChild(probe);
+      if (kind === "background") probe.style.backgroundColor = `var(${name})`;
+      else probe.style.color = `var(${name})`;
+      const computed = getComputedStyle(probe);
+      const value = kind === "background" ? computed.backgroundColor : computed.color;
+      probe.remove();
+      return value;
+    },
+    { name: token, kind: channel },
+  );
+/**
+ * The kit's disabled register on a control that cannot act: disabled, no pointer, ink-2 text on the panel-2 ground
+ * (a ghost keeps no ground), the line for a border, and full opacity — the look is the register's own, never a live
+ * button dimmed below legibility.
+ */
+const expectDisabledRegister = async (page: Page, id: string, ground: "panel-2" | "none") => {
+  const button = page.getByTestId(id);
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveCSS("cursor", "not-allowed");
+  await expect(button).toHaveCSS("opacity", "1");
+  await expect(button).toHaveCSS("color", await resolveToken(page, "--ink-2"));
+  await expect(button).toHaveCSS("border-top-color", await resolveToken(page, "--line"));
+  await expect(button).toHaveCSS("background-color", ground === "none" ? "rgba(0, 0, 0, 0)" : await resolveToken(page, "--panel-2", "background"));
+};
 
 test("cold load: the library from the listing, the first scenario's definition, nothing dispatched, tiles in the not-run register", async ({ page }) => {
   const counts = await mockLab(page);
@@ -209,9 +248,15 @@ test("one click, one POST: the demo result — the §3.5 headline, the dek, the 
   await expect(tile(page, "baddebt")).toHaveAttribute("data-tone", "warn");
   await expect(tile(page, "moved")).toContainText("941");
   await expect(tile(page, "moved")).toContainText("of 1,406 measured · 0 improved");
+  // The tile counts rows whose lane changed — not the movers (118), not the dek's band count (425) — and says so.
+  await expect(tile(page, "moved")).toContainText(LANE_TILE_LABEL);
+  await expect(tile(page, "moved")).toContainText("Accounts changing lane");
+  await expect(tile(page, "moved")).not.toContainText(/\bmoved\b/i);
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "result");
   await expect(row(page, "eth_minus_30")).toContainText("+$1.2M liquidatable · 118 accounts");
   await expect(page.getByTestId("lab-drawer")).toBeVisible();
+  await expect(page.getByTestId("lab-drawer")).toHaveText(ASSUMPTIONS_BUTTON);
+  await expect(page.getByTestId("lab-drawer")).toHaveText("Assumptions · What the model leaves out");
   // Answer before evidence: header above tiles above the heatmap above the movers.
   const y = async (id: string) => (await page.getByTestId(id).boundingBox())?.y ?? Number.NaN;
   expect(await y("lab-verdict")).toBeLessThan(await y("lab-kpi-newly"));
@@ -242,7 +287,7 @@ test("where accounts move: the wire's lanes merged into seven room bands with th
   );
 });
 
-test("most affected accounts: the wire's movers, 20 of 118, rows open the Inspector, the verdict pill, the caption", async ({ page }) => {
+test("most affected accounts: the wire's movers, 20 of 118, rows open the Inspector, the verdict pill, the caption names which accounts they are and the service's cap", async ({ page }) => {
   await mockLab(page);
   await page.goto("/lab");
   await runIt(page);
@@ -253,7 +298,17 @@ test("most affected accounts: the wire's movers, 20 of 118, rows open the Inspec
   const firstRow = page.getByTestId(`lab-movers-row-${first.account}`);
   await expect(firstRow.locator("a")).toHaveAttribute("href", `/inspector/${first.account}`);
   await expect(firstRow).toContainText("Yes");
-  await expect(page.getByTestId("lab-movers-caption")).toHaveText("showing 20 of 118 accounts moved");
+  // The Cash movers are the accounts whose eligibility flips false → true, ranked by debt (the wire's movers_note),
+  // bounded by the contract's stated cap of 20: never "moved", the dek's word for the web's band count.
+  await expect(page.getByTestId("lab-movers-caption")).toHaveText(moversCaption(moversTable(cashEngine()), "debt_manager"));
+  await expect(page.getByTestId("lab-movers-caption")).toHaveText(
+    "the 20 largest of the 118 accounts that become liquidatable, by debt · the service returns at most 20",
+  );
+  await expect(page.getByTestId("lab-movers-caption")).toHaveAttribute("title", cashEngine().movers_note);
+  await expect(page.getByTestId("lab-movers").locator("h2")).toHaveText(`${MOVERS_TITLE}${MOVERS_QUALIFIER}`);
+  await expect(page.getByTestId("lab-movers").locator("h2 small")).toHaveText("room today → after the shock · ranked by the service");
+  // The heatmap card's link to the section names it in the same words.
+  await expect(page.getByTestId("lab-transitions").getByRole("link", { name: MOVERS_LINK })).toHaveAttribute("href", "#movers");
 });
 
 test("a second click while a run is in flight is ignored: one POST, the button disabled, the running state", async ({ page }) => {
@@ -514,12 +569,9 @@ test("a listing that cannot be fetched says so in the library and the workspace,
   await expect(headline(page)).toHaveText("The committed scenarios could not be listed.");
   await expect(page.getByTestId("lab-library")).toContainText("The committed scenarios could not be listed.");
   await expect(page.locator("[data-testid^='lab-library-row-']")).toHaveCount(0);
-  // Nothing can run, and no control beside that sentence looks as if it could: disabled, and wearing the disabled look.
-  for (const id of ["lab-run", "lab-compare"]) {
-    await expect(page.getByTestId(id)).toBeDisabled();
-    await expect(page.getByTestId(id)).toHaveCSS("cursor", "not-allowed");
-    await expect(page.getByTestId(id)).toHaveCSS("opacity", "0.45");
-  }
+  // Nothing can run, and no control beside that sentence looks as if it could: disabled, and wearing the kit's disabled register.
+  await expectDisabledRegister(page, "lab-run", "panel-2");
+  await expectDisabledRegister(page, "lab-compare", "none");
   await page.waitForTimeout(300);
   expect(counts.runs()).toBe(0);
   expect(counts.sets()).toBe(0);
@@ -595,6 +647,10 @@ test("the drawer: path assumption, applied shocks, held flat, out of model, the 
   await runIt(page);
   await page.getByTestId("lab-drawer").click();
   const body = page.getByTestId("lab-drawer-body");
+  // The drawer names what the model leaves out in its own words, never the tiles' "not modelled".
+  await expect(page.getByRole("dialog", { name: ASSUMPTIONS_TITLE })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Assumptions & what the model leaves out" })).toBeVisible();
+  await expect(body.locator("h3", { hasText: ASSUMPTIONS_LEFT_OUT })).toHaveText("Left out of the model");
   await expect(body).toContainText(DEMO_RUN_BOOK_ETH.path_assumption);
   await expect(body).toContainText("1,280,000.000000");
   const outOfModel = DEMO_RUN_BOOK_ETH.out_of_model[0];
@@ -1492,11 +1548,8 @@ test("a listing that ANSWERS and cannot be read is its own state — never ready
     await expect(page.getByTestId("lab-library")).toContainText("The committed scenarios could not be read.");
     await expect(page.locator("main")).not.toContainText("could not be listed");
     await expect(page.locator("[data-testid^='lab-library-row-']")).toHaveCount(0);
-    for (const id of ["lab-run", "lab-compare"]) {
-      await expect(page.getByTestId(id)).toBeDisabled();
-      await expect(page.getByTestId(id)).toHaveCSS("cursor", "not-allowed");
-      await expect(page.getByTestId(id)).toHaveCSS("opacity", "0.45");
-    }
+    await expectDisabledRegister(page, "lab-run", "panel-2");
+    await expectDisabledRegister(page, "lab-compare", "none");
     await expect(page.getByTestId("lab-compare")).toHaveText("Compare…");
     // The route stands: the shell is on the page, and the link's asks dispatched nothing.
     await expect(page.getByRole("banner")).toBeVisible();

@@ -5,7 +5,18 @@ import { expect, test } from "@playwright/test";
 import { readsAsAnswer } from "../../lib/lab-engine";
 import { listingPhase, withRunning, withSetRunning, withSetSettled, withSettled, type LabReading } from "../../lib/lab-reading";
 import type { RunRecord, SetRecord } from "../../lib/lab-library";
-import { deriveLabView, readEngine } from "../../lib/lab-view";
+import {
+  ASSUMPTIONS_BUTTON,
+  ASSUMPTIONS_LEFT_OUT,
+  ASSUMPTIONS_TITLE,
+  deriveLabView,
+  LANE_TILE_LABEL,
+  MOVERS_EMPTY,
+  MOVERS_LINK,
+  MOVERS_QUALIFIER,
+  MOVERS_TITLE,
+  readEngine,
+} from "../../lib/lab-view";
 import { compareRerunFailedLine, contradictoryHeadline, failureHeadline, staleBannerLine } from "../../lib/lab-headline";
 import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
 import { SCENARIOS } from "../fixtures/lab-book";
@@ -783,4 +794,18 @@ test("the listing is judged before it is ready: a 200 that is no listing — nul
   }
   // An unreadable listing is not an unavailable one: the fetch answered, and the page says which it was.
   expect(deriveLabView(reading({ listing: { phase: "error", message: "down" } }), ui()).book.state).toBe("listing-unavailable");
+});
+
+test("three populations, three words: the lane tile is not a count of movers, the movers are ranked by the service, and the assumptions never reuse the tiles' 'not modelled'", () => {
+  // `lane_changed_rows` counts rows whose lane changed; the contract says it is NOT `movers_total`.
+  expect(LANE_TILE_LABEL).toBe("Accounts changing lane");
+  expect(LANE_TILE_LABEL).not.toMatch(/\bmoved?\b/i);
+  expect(MOVERS_TITLE).toBe("Most affected accounts");
+  expect(MOVERS_QUALIFIER).toBe("room today → after the shock · ranked by the service");
+  expect(MOVERS_LINK).toBe("Most affected accounts →");
+  expect(MOVERS_EMPTY).toBe("No account is listed.");
+  expect(ASSUMPTIONS_BUTTON).toBe("Assumptions · What the model leaves out");
+  expect(ASSUMPTIONS_TITLE).toBe("Assumptions & what the model leaves out");
+  expect(ASSUMPTIONS_LEFT_OUT).toBe("Left out of the model");
+  for (const words of [ASSUMPTIONS_BUTTON, ASSUMPTIONS_TITLE, ASSUMPTIONS_LEFT_OUT]) expect(words.toLowerCase()).not.toContain("not modelled");
 });

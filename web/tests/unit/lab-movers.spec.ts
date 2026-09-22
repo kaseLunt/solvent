@@ -1,9 +1,33 @@
 // The most-affected table: the wire's movers in the wire's order, room from
 // the Cash ratio, HF wads for the legacy market, the $100 line as a display
-// tier, a null verdict as "cannot say", and unreadable fields named.
+// tier, a null verdict as "cannot say", and unreadable fields named. The
+// caption names which accounts they are in the contract's own terms per
+// engine, and the service's stated cap.
 import { expect, test } from "@playwright/test";
-import { moversCaption, moversTable, roomFromRatio } from "../../lib/lab-movers";
+import { MOVERS_CAP, moversCaption, moversTable, roomFromRatio, type MoversTable } from "../../lib/lab-movers";
 import { cashEngine, legacyEngine } from "./helpers/run-book-engine";
+
+/** A table as the reader builds it: `shown` rows in the wire's ranking, the wire's full count beside them (null when it failed its guard). */
+const table = ({ shown, total }: { shown: number; total: number | null }): MoversTable => ({
+  rows: Array.from({ length: shown }, (_, i) => ({
+    account: `0x${String(i + 1).padStart(40, "0")}`,
+    roomBefore: "5%",
+    roomAfter: "over cap",
+    hfBefore: null,
+    hfAfter: null,
+    debt: null,
+    debtText: "—",
+    tier: null,
+    becomesLiquidatable: true,
+  })),
+  shown,
+  total,
+  note: "",
+  decimals: 6,
+  unreadable: total === null ? ["movers_total"] : [],
+});
+/** A table refused for its scale, built by the reader itself. */
+const unreadableScale = (): MoversTable => moversTable(cashEngine({ 3: { 0: 1 } }, { usd_decimals: 1.5, movers_total: 1, movers_note: "" }));
 
 const mover = (account: string, num: string, den: string, debt: string | null, became: boolean | null) => ({
   account,
@@ -76,7 +100,43 @@ test("Cash movers: wire order, room today → after from the ratios, debt in the
   expect(four.debtText).toBe("—");
   expect(four.tier).toBeNull();
   expect(four.becomesLiquidatable).toBe(false);
-  expect(moversCaption(t)).toBe("showing 4 of 118 accounts moved");
+  expect(moversCaption(t, "debt_manager")).toBe(
+    "the 4 largest of the 118 accounts that become liquidatable, by debt · the service returns at most 20",
+  );
+});
+
+test("the movers caption says which accounts they are, in the contract's own terms, and the service's cap", () => {
+  // The cap is the contract's own ("BOUNDED to the top 20"), never read off the length of one answer.
+  expect(MOVERS_CAP).toBe(20);
+  expect(moversCaption(table({ shown: 20, total: 118 }), "debt_manager")).toBe(
+    "the 20 largest of the 118 accounts that become liquidatable, by debt · the service returns at most 20",
+  );
+  expect(moversCaption(table({ shown: 5, total: 5 }), "debt_manager")).toBe("all 5 accounts that become liquidatable, by debt");
+  expect(moversCaption(table({ shown: 1, total: 1 }), "debt_manager")).toBe("the 1 account that becomes liquidatable");
+  expect(moversCaption(table({ shown: 20, total: 300 }), "aave_v3_etherfi")).toBe(
+    "the 20 largest health-factor drops of 300 accounts · the service returns at most 20",
+  );
+  expect(moversCaption(table({ shown: 5, total: 5 }), "aave_v3_etherfi")).toBe("all 5 accounts whose health factor drops, largest drop first");
+  expect(moversCaption(table({ shown: 1, total: 1 }), "aave_v3_etherfi")).toBe("the 1 account whose health factor drops");
+  expect(moversCaption(table({ shown: 20, total: null }), "debt_manager")).toBe("20 accounts shown · total not stated");
+  expect(moversCaption(unreadableScale(), "debt_manager")).toBe("not readable: unreadable scale");
+  // No arm says "moved": that verb is the web's band count in the dek, and the lane tile is a third population.
+  for (const shown of [0, 1, 5, 20]) {
+    for (const total of [null, 0, 1, 5, 118]) {
+      for (const engine of ["debt_manager", "aave_v3_etherfi"] as const) {
+        expect(moversCaption(table({ shown, total }), engine)).not.toMatch(/\bmoved?\b/);
+      }
+    }
+  }
+});
+
+test("no mover is a count the service stated; a list its own count cannot hold is said as it stands, never as all of them", () => {
+  expect(moversCaption(table({ shown: 0, total: 0 }), "debt_manager")).toBe("no account becomes liquidatable");
+  expect(moversCaption(table({ shown: 0, total: 0 }), "aave_v3_etherfi")).toBe("no account's health factor drops");
+  expect(moversCaption(table({ shown: 5, total: 3 }), "debt_manager")).toBe("5 accounts listed · the service states 3 in all");
+  expect(moversCaption(table({ shown: 0, total: 5 }), "aave_v3_etherfi")).toBe("0 accounts listed · the service states 5 in all");
+  // A list longer than the stated cap is never captioned "at most 20" — the rows on the page would contradict it.
+  expect(moversCaption(table({ shown: 25, total: 118 }), "debt_manager")).toBe("the 25 largest of the 118 accounts that become liquidatable, by debt");
 });
 
 test("legacy movers speak wads; a null side is a dash, never a zero", () => {
@@ -109,7 +169,7 @@ test("legacy movers speak wads; a null side is a dash, never a zero", () => {
   expect(t.rows[0]?.hfAfter).toBe("0.756");
   expect(t.rows[0]?.roomBefore).toBe("—");
   expect(t.rows[0]?.debtText).toBe("—");
-  expect(moversCaption(t)).toBe("showing 1 of 1 account moved");
+  expect(moversCaption(t, "aave_v3_etherfi")).toBe("the 1 account whose health factor drops");
 });
 
 test("unreadable fields are named and never printed as numbers; an unreadable scale refuses the whole table", () => {
@@ -129,11 +189,11 @@ test("unreadable fields are named and never printed as numbers; an unreadable sc
   expect(t.rows[0]?.tier).toBeNull();
   expect(t.total).toBeNull();
   expect(t.unreadable).toEqual(["movers[0].hf_before_num", "movers[0].debt_usd", "movers_total"]);
-  expect(moversCaption(t)).toBe("showing 1 account moved · total not stated");
+  expect(moversCaption(t, "debt_manager")).toBe("1 account shown · total not stated");
   const badScale = moversTable(cashEngine({ 3: { 0: 1 } }, { usd_decimals: 1.5, movers: [mover("0x00000000000000000000000000000000000d0001", "2", "1", "5", true)], movers_total: 1, movers_note: "" }));
   expect(badScale.rows).toEqual([]);
   expect(badScale.unreadable).toEqual(["usd_decimals"]);
-  expect(moversCaption(badScale)).toBe("not readable: unreadable scale");
+  expect(moversCaption(badScale, "debt_manager")).toBe("not readable: unreadable scale");
 });
 
 test("a ratio pair with one side null names the null side and prints unreadable; a null pair is a dash", () => {
