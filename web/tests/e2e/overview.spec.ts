@@ -21,9 +21,11 @@ async function mockAll(page: Page) {
 test("hero, live strip, entries and pipeline render from the fixtures", async ({ page }) => {
   await mockAll(page);
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    "70,000 people borrow against crypto to spend on a Visa card.",
+  // The hero carries no figure the system does not serve; "each account" is the strip's own unit.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "People borrow against crypto to spend on a Visa card. This is how close each account is to liquidation — right now.",
   );
+  await expect(page.getByRole("heading", { level: 1 })).not.toContainText(/\d/);
   const live = page.getByTestId("overview-live");
   await expect(live).toHaveAttribute("data-variant", "material");
   await expect(page.getByTestId("overview-live-headline")).toHaveText(
@@ -53,7 +55,7 @@ test("hero, live strip, entries and pipeline render from the fixtures", async ({
 test("with the API unreachable the hero still renders and the strip refuses honestly", async ({ page }) => {
   await page.route("**/v1/**", (route) => route.abort());
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("70,000 people");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("People borrow against crypto to spend on a Visa card.");
   await expect(page.getByTestId("overview-live")).toHaveAttribute("data-variant", "refused");
   await expect(page.getByTestId("overview-live-headline")).toHaveText("The Cash book could not be loaded.");
   for (const id of ["index", "verify"]) {

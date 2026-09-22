@@ -45,17 +45,34 @@ test("partition keeps every row, sums by tier, and belowLine = small + dust", ()
 });
 
 test("the below-line sentence, plural and singular, and absent at zero", () => {
+  // The sum of positions each under the line may itself exceed the line: it is stated together, never "below" it.
   expect(belowLineSentence({ belowLine: 47 }, { belowLine: usd6(112) }, 6)).toBe(
-    "47 more positions are technically liquidatable but total $112 — below the $100 line and not headlined.",
+    "47 more positions are technically liquidatable, each under the $100 line — $112 together — and not headlined.",
   );
   expect(belowLineSentence({ belowLine: 1 }, { belowLine: usd6(4.62) }, 6)).toBe(
-    "1 more position is technically liquidatable but totals $4.62 — below the $100 line and not headlined.",
+    "1 more position is technically liquidatable, under the $100 line — $4.62 — and not headlined.",
   );
   expect(belowLineSentence({ belowLine: 0 }, { belowLine: 0n }, 6)).toBeNull();
 });
 
+test("the $100 line is per position: the below-line sentence never places the sum under it", () => {
+  expect(belowLineSentence({ belowLine: 47 }, { belowLine: 109_450_000n }, 6)).toBe(
+    "47 more positions are technically liquidatable, each under the $100 line — $109.45 together — and not headlined.",
+  );
+  expect(belowLineSentence({ belowLine: 1 }, { belowLine: 4_620_000n }, 6)).toBe(
+    "1 more position is technically liquidatable, under the $100 line — $4.62 — and not headlined.",
+  );
+  expect(belowLineSentence({ belowLine: 0 }, { belowLine: 0n }, 6)).toBeNull();
+  for (const sentence of [
+    belowLineSentence({ belowLine: 47 }, { belowLine: 109_450_000n }, 6),
+    belowLineSentence({ belowLine: 2 }, { belowLine: usd6(150) }, 6),
+  ]) {
+    expect(sentence).not.toMatch(/below the \$100 line|but totals?/);
+  }
+});
+
 test("dust that is sub-cent still prints as <$0.01 in the sentence", () => {
   expect(belowLineSentence({ belowLine: 46 }, { belowLine: 46n }, 8)).toBe(
-    "46 more positions are technically liquidatable but total <$0.01 — below the $100 line and not headlined.",
+    "46 more positions are technically liquidatable, each under the $100 line — <$0.01 together — and not headlined.",
   );
 });

@@ -1,4 +1,5 @@
 import { humanUsd } from "./human-usd";
+import { groupInt } from "./prose";
 import { isWireScale, WireIntegerError } from "./wireGuard";
 
 /** Whole dollars. A DISPLAY rule (spec 2026-09-15 §3.3): counts and Σ always exist in full. */
@@ -79,6 +80,9 @@ export function belowLineSentence(
 ): string | null {
   const n = counts.belowLine;
   if (n === 0) return null;
-  const one = n === 1;
-  return `${String(n)} more position${one ? "" : "s"} ${one ? "is" : "are"} technically liquidatable but total${one ? "s" : ""} ${humanUsd(sums.belowLine, decimals)} — below the $${MATERIAL_LINE_USD.toString()} line and not headlined.`;
+  const line = `$${MATERIAL_LINE_USD.toString()}`;
+  const sum = humanUsd(sums.belowLine, decimals);
+  // The line is per position: each row sits under it, and their sum — which may exceed it — is stated together, never "below" it.
+  if (n === 1) return `1 more position is technically liquidatable, under the ${line} line — ${sum} — and not headlined.`;
+  return `${groupInt(n)} more positions are technically liquidatable, each under the ${line} line — ${sum} together — and not headlined.`;
 }

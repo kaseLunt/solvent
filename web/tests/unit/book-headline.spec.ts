@@ -30,7 +30,7 @@ test("material: money first, the emphasized phrase carries the verdict", () => {
   expect(h.emphasis).toBe("$6,840 of Cash debt is liquidatable right now,");
   expect(h.rest).toBe(" across 2 accounts.");
   expect(h.dek).toBe(
-    "47 more positions are technically liquidatable but total $112 — below the $100 line and not headlined. " +
+    "47 more positions are technically liquidatable, each under the $100 line — $112 together — and not headlined. " +
       "27 accounts are within 10% of their borrow cap, carrying $312K. " +
       "6 positions could not be computed this batch and are counted, not hidden.",
   );
@@ -66,7 +66,7 @@ test("quiet: nothing material — the dek leads with the below-line count", () =
   expect(h.emphasis).toBe("Nothing material is liquidatable on the Cash book right now.");
   expect(h.rest).toBe("");
   expect(h.dek).toBe(
-    "46 more positions are technically liquidatable but total <$0.01 — below the $100 line and not headlined. No account is within 10% of its borrow cap.",
+    "46 more positions are technically liquidatable, each under the $100 line — <$0.01 together — and not headlined. No account is within 10% of its borrow cap.",
   );
 });
 

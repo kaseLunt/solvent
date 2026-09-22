@@ -11,6 +11,8 @@ import {
   attentionFinding,
   bandsFinding,
   bandsSoFar,
+  liquidatableTileLabel,
+  liquidatableTileSub,
   summarizeCash,
   tileBoundNote,
   unavailableHeadline,
@@ -356,6 +358,45 @@ test("the demo walk is read whole: not one unreadable row, so its settled render
   expect(s.whole).toBe(true);
   expect(tileBoundNote(s)).toBe("");
   expect(bandsFinding(s).barsNote).toBeNull();
+});
+
+/** The tile's inputs over a book read whole, and over a walk still running: the partition's counts, as summarizeCash states them. */
+const partitionOf = (material: number, belowLine: number) => ({
+  material: { sum: 4_620_000_000n * BigInt(material), count: material },
+  belowLine: { sum: 2_330_000n * BigInt(belowLine), count: belowLine },
+});
+const wholeSummaryWith = (c: { material: number; belowLine: number }) => ({ ...partitionOf(c.material, c.belowLine), whole: true });
+const walkingSummaryWith = (c: { material: number; belowLine: number }) => ({ ...partitionOf(c.material, c.belowLine), whole: false });
+
+test("the liquidatable tile states the partition's total only over a book read whole", () => {
+  expect(liquidatableTileLabel).toBe("Liquidatable · ≥ $100");
+  expect(liquidatableTileSub(wholeSummaryWith({ material: 2, belowLine: 47 }), "")).toBe("2 accounts · 47 more under $100 · 49 in all");
+  // mid-walk: no total is claimed; the bound note keeps its place
+  expect(liquidatableTileSub(walkingSummaryWith({ material: 2, belowLine: 47 }), " · lower bound, walking")).toBe(
+    "2 accounts · 47 more under $100 · lower bound, walking",
+  );
+  expect(liquidatableTileSub(wholeSummaryWith({ material: 1, belowLine: 0 }), "")).toBe("1 account · 0 more under $100 · 1 in all");
+  // Every register short of a book read whole keeps its own note and claims no total.
+  const first = POSITIONS_DM_PAGE_1.positions[0];
+  if (first === undefined) throw new Error("fixture invariant: the committed page serves a row");
+  const unreadableRow = readCashRow(refinePositionSummary({ ...first, account: "0xbad", status: "computed", refusal: null, liquidatable: true, total_debt: "1e6" }));
+  const registers = [
+    summarizeCash({ rows, decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: null, walkStopKind: null, refusedWhole: null }),
+    summarizeCash({ rows, decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: "Failed to fetch", walkStopKind: "before-end", refusedWhole: null }),
+    summarizeCash({ rows, decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: "past", walkStopKind: "over", refusedWhole: null }),
+    summarizeCash({ rows, decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: "twice", walkStopKind: "duplicate", refusedWhole: null }),
+    summarizeCash({ rows: [...rows, unreadableRow], decimals: 6, refusedPositions: 1, ...settled }),
+  ];
+  for (const s of registers) {
+    expect(s.whole).toBe(false);
+    const sub = liquidatableTileSub(s, tileBoundNote(s));
+    expect(sub).toBe(`1 account · 0 more under $100${tileBoundNote(s)}`);
+    expect(sub).not.toContain("in all");
+  }
+  // The demo walk, read whole: the tile states the same 49 the engine card and History carry.
+  const demo = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => readCashRow(refinePositionSummary(p)));
+  const read = summarizeCash({ rows: demo, decimals: 6, refusedPositions: 6, ...settled });
+  expect(liquidatableTileSub(read, tileBoundNote(read))).toBe("2 accounts · 47 more under $100 · 49 in all");
 });
 
 test("a walk served an account twice claims no bound anywhere, in its own words — never 'at least', never 'lower bound'", () => {

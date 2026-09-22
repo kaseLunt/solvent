@@ -6,10 +6,9 @@ import kit from "@/components/kit/kit.module.css";
 import { useCashBook } from "@/lib/cash-book";
 import { BAD_DEBT_NOT_REPORTED } from "@/lib/cash-refusal";
 import { NEAR_CAP_BAND_IDS } from "@/lib/cash-rows";
-import { attentionFinding, bandsFinding, bandsSoFar, tileBoundNote } from "@/lib/cash-summary";
+import { attentionFinding, bandsFinding, bandsSoFar, liquidatableTileLabel, liquidatableTileSub, tileBoundNote } from "@/lib/cash-summary";
 import { deriveCashView, deriveLegacyView, malformedSub, moneyText } from "@/lib/cash-view";
 import { humanUsd } from "@/lib/human-usd";
-import { MATERIAL_LINE_USD } from "@/lib/materiality";
 import { useMetaConstants } from "@/lib/meta";
 import { BookLegacy } from "./BookLegacy";
 import { BookMethodology } from "./BookMethodology";
@@ -102,7 +101,7 @@ export function BookSurface() {
         />
         <KpiTile
           testId="book-kpi-liquidatable"
-          label="Liquidatable · material"
+          label={liquidatableTileLabel}
           value={
             summary === null
               ? "—"
@@ -110,11 +109,7 @@ export function BookSurface() {
                 ? humanUsd(summary.material.sum, decimals)
                 : "—"
           }
-          sub={
-            summary === null
-              ? absentWord
-              : `${plural(summary.material.count, "account")} · ${String(summary.belowLine.count)} more under $${MATERIAL_LINE_USD.toString()}${boundNote}`
-          }
+          sub={summary === null ? absentWord : liquidatableTileSub(summary, boundNote)}
           tone={
             refusedTiles
               ? "refused"

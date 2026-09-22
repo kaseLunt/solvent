@@ -4,6 +4,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
 import { readCashRow } from "../../lib/cash-rows";
+import { liquidatableTileLabel, liquidatableTileSub, summarizeCash, tileBoundNote } from "../../lib/cash-summary";
+import { belowLineSentence } from "../../lib/materiality";
 import { BATCH_SUPERSEDED, BOOK, BOOK_ENGINE_REFUSED, BOOK_ERROR_UNAVAILABLE, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { DEMO_BOOK, DEMO_META, DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2 } from "../fixtures/demo";
 import { META } from "../fixtures/meta";
@@ -18,6 +20,17 @@ async function mockCommitted(page: Page, book: unknown = BOOK, bookStatus = 200)
   await page.route("**/v1/book", (route) => json(route, book, bookStatus));
   await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
 }
+
+/** The demo walk as the page reads it, whole: the lib's own figures for the tile and the dek. */
+const DEMO_SUMMARY = summarizeCash({
+  rows: [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => readCashRow(refinePositionSummary(p))),
+  decimals: 6,
+  refusedPositions: 6,
+  walkComplete: true,
+  walkStopped: null,
+  walkStopKind: null,
+  refusedWhole: null,
+});
 
 async function mockDemo(page: Page) {
   await page.route("**/v1/stream**", (route) => route.abort());
@@ -49,6 +62,9 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   await expect(page.getByTestId("book-kpi-debt")).toContainText("$4,200");
   await expect(page.getByTestId("book-kpi-liquidatable")).toHaveAttribute("data-tone", "crit");
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("$4,200");
+  // The label is the material line itself; over a book read whole the sub states the partition's total.
+  await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("Liquidatable · ≥ $100");
+  await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("1 account · 0 more under $100 · 1 in all");
   await expect(page.getByTestId("book-kpi-near")).toContainText("0 accounts");
   await expect(page.getByTestId("book-kpi-baddebt")).toContainText("$239.60");
   await expect(page.getByTestId("book-kpi-notcomputed")).toHaveAttribute("data-tone", "refused");
@@ -94,7 +110,16 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
   await expect(page.getByTestId("book-verdict-headline")).toHaveText(
     "$6,840 of Cash debt is liquidatable right now, across 2 accounts.",
   );
-  await expect(page.getByTestId("book-verdict-dek")).toContainText("47 more positions are technically liquidatable");
+  // The $100 line is per position: each of the 47 sits under it, and their sum is stated together — never "below" the line.
+  const below = belowLineSentence(DEMO_SUMMARY.liquidatable.counts, DEMO_SUMMARY.liquidatable.sums, 6);
+  expect(below).toBe("47 more positions are technically liquidatable, each under the $100 line — $109.45 together — and not headlined.");
+  await expect(page.getByTestId("book-verdict-dek")).toContainText(below ?? "");
+  await expect(page.getByTestId("book-verdict-dek")).not.toContainText("below the $100 line");
+  // Read whole, the tile states the 49 liquidatable positions the engine card and History carry: 2 material + 47 under the line.
+  const tile = page.getByTestId("book-kpi-liquidatable");
+  await expect(tile).toContainText(liquidatableTileLabel);
+  expect(liquidatableTileSub(DEMO_SUMMARY, tileBoundNote(DEMO_SUMMARY))).toBe("2 accounts · 47 more under $100 · 49 in all");
+  await expect(tile).toContainText("2 accounts · 47 more under $100 · 49 in all");
   await expect(page.getByTestId("book-kpi-near")).toContainText("27 accounts");
   const toggle = page.getByTestId("book-dust-toggle");
   await expect(toggle).toContainText("Show 47 small & dust positions");
@@ -383,6 +408,8 @@ test("a terminal page short of the advertised census stops the walk by name — 
   await expect(page.getByTestId("book-verdict-dek")).not.toContainText("before the last page");
   await expect(page.getByTestId("book-verdict-dek")).not.toContainText("No account is within 10%");
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("lower bound, walk stopped");
+  // A stopped walk claims no total: the partition's "in all" is said only over a book read whole.
+  await expect(page.getByTestId("book-kpi-liquidatable")).not.toContainText("in all");
   await expect(page.getByTestId("book-kpi-near")).toContainText("—");
   await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("data-tone", "refused");
   await expect(page.getByTestId("book-kpi-median")).toContainText("walk stopped");
@@ -551,6 +578,7 @@ test("a duplicate account never satisfies the census: page one returns A, the la
   // Counted once: the account's debt is never doubled, in the tile, the bar or the table.
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("$4,200");
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("1 account · 0 more under $100 · not a bound, the walk was served an account twice");
+  await expect(page.getByTestId("book-kpi-liquidatable")).not.toContainText("in all");
   await expect(page.getByTestId("book-bands").locator('[data-band="breached"]')).toContainText("$4,200 · 1");
   await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(1);
   await expect(page.getByTestId("book-bands-note")).toHaveText(
@@ -747,7 +775,7 @@ test("a liquidatable position under the $100 line is hidden by the display rule,
   await mockWith(page, book, small);
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("Nothing material is liquidatable on the Cash book right now.");
-  await expect(page.getByTestId("book-verdict-dek")).toContainText("1 more position is technically liquidatable but totals $50");
+  await expect(page.getByTestId("book-verdict-dek")).toContainText("1 more position is technically liquidatable, under the $100 line — $50 — and not headlined.");
   await expect(page.getByTestId("book-attention")).toContainText(
     "Nothing material needs attention; 1 liquidatable position under $100 ($50) is behind the small & dust toggle.",
   );

@@ -13,6 +13,7 @@ import {
 } from "./cash-rows";
 import { humanUsd } from "./human-usd";
 import { MATERIAL_LINE_USD, partitionByMateriality, type MaterialityPartition } from "./materiality";
+import { groupInt, plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 
 export interface CashSummaryInput {
@@ -157,6 +158,20 @@ export function tileBoundNote(walk: WalkState | null): string {
   if (register === "stopped") return " · lower bound, walk stopped";
   if (register === "running") return " · lower bound, walking";
   return register === "unreadable" ? ` · lower bound, ${rowsWord(walk.unreadable)} unreadable` : "";
+}
+
+/** The liquidatable tile's label: the material line it headlines, from the one constant that places it. */
+export const liquidatableTileLabel = `Liquidatable · ≥ $${MATERIAL_LINE_USD.toString()}`;
+
+/**
+ * The liquidatable tile's sub: the material accounts, the positions under the line, and — over a book read whole only —
+ * the partition's total, the same liquidatable count the engine card carries. Short of a whole read no total is claimed:
+ * the bound note keeps its place and says in which register the two counts stand.
+ */
+export function liquidatableTileSub(summary: Pick<CashSummary, "material" | "belowLine" | "whole">, boundNote: string): string {
+  const counts = `${plural(summary.material.count, "account")} · ${groupInt(summary.belowLine.count)} more under $${MATERIAL_LINE_USD.toString()}`;
+  const total = summary.whole ? ` · ${groupInt(summary.material.count + summary.belowLine.count)} in all` : "";
+  return `${counts}${total}${boundNote}`;
 }
 
 /** The attention card's finding: the table's order, under the walk's own qualifier. */

@@ -201,7 +201,7 @@ test.describe("the styleguide's Book specimen — one number in three places, by
     const below = SPECIMEN_BELOW_LINE_ROWS.reduce((sum, row) => sum + row.debt, 0n);
     expect(SPECIMEN_TOGGLE_LABEL).toBe(`Show ${String(SPECIMEN_BELOW_LINE_ROWS.length)} small & dust positions (${humanUsd(below, SPECIMEN_DECIMALS)})`);
     expect(SPECIMEN_TOGGLE_LABEL).toBe("Show 2 small & dust positions ($75.75)");
-    expect(SPECIMEN_CRIT_HEADLINE.dek).toContain(`total ${humanUsd(below, SPECIMEN_DECIMALS)}`);
+    expect(SPECIMEN_CRIT_HEADLINE.dek).toContain(`— ${humanUsd(below, SPECIMEN_DECIMALS)} together`);
     // The ok specimen is a HEALTH verdict in the Book's words — never a record, and never a sentence about holes.
     expect(SPECIMEN_OK_HEADLINE.tone).toBe("ok");
     expect(SPECIMEN_OK_HEADLINE.emphasis).toBe("Nothing material is liquidatable on the Cash book right now.");

@@ -10,7 +10,7 @@
 import { expect, test } from "@playwright/test";
 
 const SURFACES = [
-  { path: "/", label: "Overview", h1: /70,000 people borrow against crypto/ },
+  { path: "/", label: "Overview", h1: /^People borrow against crypto to spend on a Visa card\./ },
   { path: "/book", label: "Book", h1: /liquidatable|could not be computed|could not be loaded/ },
   { path: "/inspector", label: "Inspector", h1: "Is this address at risk?" },
   // With no API the listing cannot be fetched, and the Scenarios page says so as its H1.
