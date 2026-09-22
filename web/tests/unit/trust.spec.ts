@@ -42,8 +42,14 @@ test("five items, in the mockup's order; the happy account is all green except t
   const t = byId(items);
   expect(t.computed).toMatchObject({ label: "Computed this batch", detail: "batch 18,251", state: "ok" });
   expect(t.prices).toMatchObject({ label: "Prices fresh", detail: "35s · within 180s", state: "ok" });
-  // the fixture's sweep stamp: 1 of 3 rows failed, generation 4 — a book-wide caveat, so warn
-  expect(t.sweep).toMatchObject({ label: "Collateral sweep", detail: "1 of 3 rows failed · gen 4", state: "warn" });
+  // the fixture's sweep stamp: 1 of 3 attempted accounts failed, generation 4 — an engine-wide caveat, so warn; what it
+  // means for this account rides the title
+  expect(t.sweep).toMatchObject({
+    label: "Collateral sweep",
+    detail: "1 of 3 attempted accounts failed",
+    state: "warn",
+    title: "engine-wide sweep tally, gen 4 · this account's collateral is from its sweep at block 154,796,490",
+  });
   expect(t.provenance).toMatchObject({ label: "Price provenance", detail: "the engine's own inputs", state: "ok", title: "engine-exact" });
   // The receipt item says what the receipt IS — a pinned, dated run that matched the chain — and carries the run's own finish instant.
   expect(t.reconcile).toMatchObject({
@@ -117,6 +123,44 @@ test("a refused position names its cause; a stale price names the asset and the 
   expect(byId(trustChecklist({ position: near({ price_inputs: [] }), batchId: 1, sweep, evidence })).prices).toMatchObject({ state: "dim", detail: "no price inputs" });
 });
 
+test("sweep: the tally is engine-wide ATTEMPTED accounts (a failed count includes accounts never successfully swept), and the title says what it means for THIS account — proved by its own flag and its own sweep block, never that its collateral was excluded", () => {
+  const item = (position: TrustInput["position"], stamp: TrustInput["sweep"]) => byId(trustChecklist({ position, batchId: 18251, sweep: stamp, evidence })).sweep;
+  const own = near({ as_of: { ...near().as_of, sweep_block: 155323390 } });
+  const notStale = item(own, { ...sweep, rows: 3, failed: 1, generation: 4 });
+  // One line in the checklist's detail column: the tally and nothing else.
+  expect(notStale.detail).toBe("1 of 3 attempted accounts failed");
+  expect(notStale.state).toBe("warn");
+  expect(notStale.title).toBe("engine-wide sweep tally, gen 4 · this account's collateral is from its sweep at block 155,323,390");
+  // The engine flags an account whose OWN latest sweep failed; its collateral stays at its last successful sweep.
+  const staleOwn = near({ as_of: { ...near().as_of, sweep_block: 155323390 }, flags: ["collateral_sweep_stale"] });
+  const stale = item(staleOwn, { ...sweep, rows: 3, failed: 1, generation: 4 });
+  expect(stale.detail).toBe("1 of 3 attempted accounts failed");
+  expect(stale.state).toBe("warn");
+  expect(stale.title).toBe(
+    "engine-wide sweep tally, gen 4 · this account's last sweep failed — its collateral is from its last successful sweep at block 155,323,390",
+  );
+  // A flagged account is never green, whatever the engine-wide tally says; an unflagged one on a clean stamp says so.
+  const cleanStamp = { ...sweep, failed: 0, age_seconds: 1205 };
+  expect(item(staleOwn, cleanStamp)).toMatchObject({
+    state: "warn",
+    detail: "gen 4 · 20m ago",
+    title: "engine-wide sweep stamp · this account's last sweep failed — its collateral is from its last successful sweep at block 155,323,390",
+  });
+  expect(item(own, cleanStamp)).toMatchObject({
+    state: "ok",
+    title: "engine-wide sweep stamp · this account's collateral is from its sweep at block 155,323,390",
+  });
+  expect(item(own, { ...cleanStamp, generation_open: true })).toMatchObject({ state: "warn", detail: "gen 4 open · sweep in progress" });
+  // A tally that contradicts itself is named in the same words.
+  expect(item(own, { ...sweep, rows: 3, failed: 4 }).detail).toBe("4 failed of 3 attempted accounts · contradictory stamp");
+  // The account's own sweep block passes the population guard before it prints.
+  expect(() => item(near({ as_of: { ...near().as_of, sweep_block: -5 } }), sweep)).toThrow(/sweep_block/);
+  // Never "rows" (a stamp row is one account), never "swept accounts" (a failed row may never have succeeded), never a claim of exclusion.
+  for (const it of [notStale, stale, item(staleOwn, cleanStamp), item(own, cleanStamp)]) {
+    expect(`${it.detail} ${it.title ?? ""}`).not.toMatch(/\brows\b|swept accounts|exclud/);
+  }
+});
+
 test("sweep: never swept refuses; a clean stamp is ok with its generation and age; no stamp is dim", () => {
   const never = near({ as_of: { ...near().as_of, sweep_block: 0 } });
   expect(byId(trustChecklist({ position: never, batchId: 1, sweep, evidence })).sweep).toMatchObject({ state: "refused", detail: "never swept · collateral clock absent" });
@@ -177,7 +221,7 @@ test("sweep: the account's clock outranks a missing stamp; an empty, contradicto
   const stamp = (patch: TrustInput["sweep"]) => byId(trustChecklist({ position: near(), batchId: 1, sweep: patch, evidence })).sweep;
   expect(stamp({ ...sweep, rows: 0, failed: 0 })).toMatchObject({ state: "dim", detail: "sweep stamp empty" });
   expect(stamp({ ...sweep, generation_open: true, failed: 0 })).toMatchObject({ state: "warn", detail: "gen 4 open · sweep in progress" });
-  expect(stamp({ ...sweep, failed: 5, rows: 3 })).toMatchObject({ state: "warn", detail: "5 failed of 3 rows · contradictory stamp" });
+  expect(stamp({ ...sweep, failed: 5, rows: 3 })).toMatchObject({ state: "warn", detail: "5 failed of 3 attempted accounts · contradictory stamp" });
 });
 
 test("provenance: every off-direct word speaks plainly; several inputs are listed; an unstated word is dim", () => {

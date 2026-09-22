@@ -783,5 +783,6 @@ export function pointDetailTakeaway(entry: BucketEntry): string {
       `the engine's whole book was refused at capture time; no numbers served.`
     );
   }
-  return `captured at ${entry.point.bucket_start} · watermark block ${formatBlock(entry.point.last_block)}.`;
+  // last_block is the engine's balances watermark at capture — the bucket's own as-of, never a chain head seen later.
+  return `captured at ${entry.point.bucket_start} · balances as of block ${formatBlock(entry.point.last_block)}.`;
 }

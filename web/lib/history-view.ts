@@ -476,7 +476,8 @@ export interface PointRecord {
   readonly provenance: string;
 }
 
-export const HISTORY_RECORD_TITLE = "Bucket record";
+/** The selected bucket's record, named for what a bucket is: an hour (a stride only samples hours, verbatim). */
+export const HISTORY_RECORD_TITLE = "Hour record";
 
 export const HISTORY_ABSENT_NOTE =
   "The rollup wrote no row for this hour: no complete risk batch was observed in it. Either none existed when the rollup looked, or the rollup did not look or could not write — the record cannot tell these apart. Nobody refused it. An absent bucket is a hole in the record, stated by name: nothing is interpolated across it, and it never renders as zero.";

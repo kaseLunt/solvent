@@ -65,6 +65,9 @@ export interface TrustInput {
 
 const plural = (count: number, noun: string): string => (count === 1 ? noun : `${noun}s`);
 
+/** The engine's flag on a position whose own latest collateral sweep failed (internal/riskfeed/prices.go FlagSweepStale). */
+const SWEEP_STALE_FLAG = "collateral_sweep_stale";
+
 /** Plain words for the verdicts that refuse a price; the wire word itself goes in `title`. Total over the enum. */
 const BROKEN_WORDS: Readonly<Record<BrokenVerdict, string>> = {
   missing: "missing",
@@ -162,10 +165,25 @@ function sweepItem(position: RefinedPosition, sweep: SweepStamp | null): TrustIt
   const generation = readWirePopulation(sweep.generation, "sweep.generation");
   const age = sweep.age_seconds === null ? null : readWirePopulation(sweep.age_seconds, "sweep.age_seconds");
   if (rows === 0) return { id: "sweep", label, detail: "sweep stamp empty", state: "dim" };
-  if (failed > rows) return { id: "sweep", label, detail: `${groupInt(failed)} failed of ${groupInt(rows)} rows · contradictory stamp`, state: "warn" };
-  if (failed > 0) return { id: "sweep", label, detail: `${groupInt(failed)} of ${groupInt(rows)} rows failed · gen ${groupInt(generation)}`, state: "warn" };
-  if (sweep.generation_open) return { id: "sweep", label, detail: `gen ${groupInt(generation)} open · sweep in progress`, state: "warn" };
-  return { id: "sweep", label, detail: `gen ${groupInt(generation)}${age === null ? "" : ` · ${humanAge(age)} ago`}`, state: "ok" };
+  if (failed > rows) return { id: "sweep", label, detail: `${groupInt(failed)} failed of ${groupInt(rows)} attempted accounts · contradictory stamp`, state: "warn" };
+  // What the engine-wide stamp means for THIS account, from the account's own evidence: the engine flags a position
+  // whose own latest sweep failed and keeps its collateral at its last successful sweep (as_of.sweep_block) — kept and
+  // flagged stale, never excluded. Without the flag this account's own sweep succeeded, so a failed account in the
+  // tally is another one. Both come from the batch's own compute: the stamp is the batch's persisted watermark
+  // vector, never a live read.
+  const block = groupInt(readWirePopulation(position.as_of.sweep_block, "as_of.sweep_block"));
+  const stale = position.flags.includes(SWEEP_STALE_FLAG);
+  const own = stale
+    ? `this account's last sweep failed — its collateral is from its last successful sweep at block ${block}`
+    : `this account's collateral is from its sweep at block ${block}`;
+  // The tally counts accounts with a sweep row by their latest attempt: a failed one may never have succeeded, so the
+  // accounts are "attempted", never "swept". A flagged account is never green, whatever the tally.
+  if (failed > 0) {
+    return { id: "sweep", label, detail: `${groupInt(failed)} of ${groupInt(rows)} attempted accounts failed`, state: "warn", title: `engine-wide sweep tally, gen ${groupInt(generation)} · ${own}` };
+  }
+  const title = `engine-wide sweep stamp · ${own}`;
+  if (sweep.generation_open) return { id: "sweep", label, detail: `gen ${groupInt(generation)} open · sweep in progress`, state: "warn", title };
+  return { id: "sweep", label, detail: `gen ${groupInt(generation)}${age === null ? "" : ` · ${humanAge(age)} ago`}`, state: stale ? "warn" : "ok", title };
 }
 
 function provenanceItem(position: RefinedPosition): TrustItem {

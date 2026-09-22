@@ -85,7 +85,13 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   await expect(page.getByTestId("inspector-trust-computed")).toHaveAttribute("data-state", "ok");
   await expect(page.getByTestId("inspector-trust-prices")).toContainText("35s · within 180s");
   await expect(page.getByTestId("inspector-trust-sweep")).toHaveAttribute("data-state", "warn");
-  await expect(page.getByTestId("inspector-trust-sweep")).toContainText("1 of 3 rows failed · gen 4");
+  // The engine-wide tally in one line; what it means for THIS account rides the title, from its own sweep block.
+  await expect(page.getByTestId("inspector-trust-sweep")).toContainText("1 of 3 attempted accounts failed");
+  await expect(page.getByTestId("inspector-trust-sweep")).toHaveAttribute(
+    "title",
+    "engine-wide sweep tally, gen 4 · this account's collateral is from its sweep at block 155,323,390",
+  );
+  await expect(page.getByTestId("inspector-trust-sweep")).not.toContainText("rows failed");
   // The receipt item says what the receipt IS — a pinned, dated run that matched the chain — and nothing about this
   // batch or this account: the live batch does not inherit the run's result.
   const receipt = page.getByTestId("inspector-trust-reconcile");

@@ -25,6 +25,7 @@ import {
   HISTORY_METHOD,
   HISTORY_PROVENANCE,
   HISTORY_RATE_COLUMNS,
+  HISTORY_RECORD_TITLE,
   HISTORY_UNAVAILABLE_CLAUSE,
   HISTORY_UNREADABLE_SCALE,
   marksFor,
@@ -534,10 +535,15 @@ test.describe("pointRecord — the bucket record's rows and sentences", () => {
 
   test("the demo's newest bucket: captured; the answer rows in order with the exact ledger strings; the provenance rows behind a counted fold; the rate snapshot inside it", () => {
     const r = pointRecord(newestEntry, DEMO_OBSERVATORY_DM);
-    expect(r.title).toBe("Bucket record");
+    // Every bucket is an hour (a stride only samples hours, verbatim): the record is named for what it is.
+    expect(HISTORY_RECORD_TITLE).toBe("Hour record");
+    expect(r.title).toBe("Hour record");
     expect(r.bucket).toBe(newest.bucket_start);
     expect(r.kind).toBe("captured");
     expect(r.takeaway).toBe(pointDetailTakeaway(newestEntry));
+    // The demo's literal: the point's last_block is the engine's balances watermark at capture — its own as-of.
+    expect(r.takeaway).toBe("captured at 2026-08-08T20:00:00Z · balances as of block 155,323,444.");
+    expect(r.takeaway).not.toContain("watermark");
     expect(r.absentNote).toBeNull();
     expect(r.refusalCode).toBeNull();
     expect(labels(r.answer)).toEqual(["state", "debt (usd)", "collateral (usd)", "accounts", "refused position rows", "liquidatable positions"]);

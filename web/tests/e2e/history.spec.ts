@@ -14,8 +14,8 @@
 // the takeaway's emphasis + rest, the holes counted in the dek; five chips,
 // four tiles = the Book's figures); the engine switch (remount, kicker,
 // tiles, the request's engine); the holes (the withheld and absent buckets
-// as the chart's own gap marks, never a zero; the bucket record naming
-// each); the degraded rollup as
+// as the chart's own gap marks, never a zero; the hour record naming
+// each, with the block its balances are as of); the degraded rollup as
 // a named refused state with no tiles and no chart; the drawer (doctrine
 // verbatim, Escape, focus restored); the metric selector (the drawn series and
 // its labels move; the finding is the grid's and holds); the direct labels
@@ -38,6 +38,7 @@ import {
   HISTORY_INTRO,
   HISTORY_LOADING_DEK,
   HISTORY_MARKS,
+  HISTORY_RECORD_TITLE,
   HISTORY_UNAVAILABLE_CLAUSE,
 } from "../../lib/history-view";
 import { humanUsd } from "../../lib/human-usd";
@@ -524,7 +525,9 @@ test("provenance on a point: the record pins as-of, watermark, batch, key and ra
   await expect(record).toHaveAttribute("data-bucket", point.bucket_start);
   await expect(record).toHaveAttribute("data-kind", "captured");
   await expect(page.getByTestId("history-point-takeaway")).toHaveText(pointDetailTakeaway(entry));
-  await expect(page.getByTestId("history-point-takeaway")).toContainText(`watermark block ${formatBlock(point.last_block)}`);
+  await expect(page.getByTestId("history-point-takeaway")).toContainText(`balances as of block ${formatBlock(point.last_block)}`);
+  // The demo's literal: the hour and the block its balances are as of.
+  await expect(page.getByTestId("history-point-takeaway")).toHaveText("captured at 2026-08-08T20:00:00Z · balances as of block 155,323,444.");
   // The record's ANSWER stays visible without a click...
   await expect(record.getByText("debt (usd)")).toBeVisible();
   await expect(record.getByText("liquidatable positions")).toBeVisible();
@@ -808,9 +811,10 @@ test("a window with no hole carries no key — a key explains marks that are on 
   await expect(chip(page, "Hours")).toContainText("24 recorded · 0 withheld · 0 absent");
   // The record's accessible name IS its visible heading — the title and the hour, one node, one case.
   const newest = newestOf(whole);
-  const record = page.getByRole("region", { name: `Bucket record ${newest.bucket_start}` });
+  expect(HISTORY_RECORD_TITLE).toBe("Hour record");
+  const record = page.getByRole("region", { name: `${HISTORY_RECORD_TITLE} ${newest.bucket_start}` });
   await expect(record).toHaveAttribute("data-testid", "history-point");
-  await expect(record.getByRole("heading", { level: 3 })).toHaveText(`Bucket record ${newest.bucket_start}`);
+  await expect(record.getByRole("heading", { level: 3 })).toHaveText(`Hour record ${newest.bucket_start}`);
 });
 
 test("a phone's width (390): the page never scrolls sideways — the chips fit or wrap, the plot and the rate table scroll inside their own frames", async ({

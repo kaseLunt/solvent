@@ -466,8 +466,8 @@ const MATRIX: Cell[] = [
       await page.getByTestId("history-engine-aave_v3_etherfi").click();
     },
     verify: async (page) => {
-      // The record states its as-of (the newest bucket's own watermark)…
-      await expect(page.getByTestId("history-point")).toContainText("watermark block");
+      // The record states its as-of (the newest bucket's own balances watermark)…
+      await expect(page.getByTestId("history-point")).toContainText("balances as of block");
       // …and an ABSENT bucket is a NAMED gap on the axis, never interpolated.
       // (toBeAttached: a stroke-only SVG tick has a zero-width box, which
       // Playwright's visibility heuristic reports as hidden.)

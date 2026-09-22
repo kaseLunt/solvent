@@ -775,8 +775,9 @@ test.describe("W-3L — pointDetailTakeaway", () => {
       throw new Error("fixture invariant: aave newest entry is wire-backed");
     }
     expect(pointDetailTakeaway(capturedEntry)).toBe(
-      `captured at ${capturedEntry.point.bucket_start} · watermark block ${formatBlock(capturedEntry.point.last_block)}.`,
+      `captured at ${capturedEntry.point.bucket_start} · balances as of block ${formatBlock(capturedEntry.point.last_block)}.`,
     );
+    expect(pointDetailTakeaway(capturedEntry)).not.toContain("watermark");
 
     const dmAxis = buildBucketAxis(OBSERVATORY_SERIES_DM);
     const withheldEntry = dmAxis.entries[1];
