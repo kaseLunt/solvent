@@ -177,7 +177,7 @@ test("one word for the receipt's rows: checked rows; the welds are account compa
   expect(rows).toContain("checked rows | 87/87 exact · 0 drifted");
   expect(rows).toContain("Cash · account comparisons | 29/29 exact");
   expect(rows).toContain("Aave v3 market (legacy) · account comparisons | 14/14 exact");
-  expect(rows).toContain("account comparisons | include advisory rows; they are not a breakdown of the checked rows");
+  expect(rows).toContain("account comparisons | count every compared row, checked or advisory; they are not a breakdown of the checked rows");
   expect(rows).toContain("feeds registry | identical to service.registry_fingerprint, by construction");
   // The disclosure follows the last weld and wears no verdict's colour: it is a statement about what the tallies are, not a tally.
   const labels = proof.rows.map((r) => r.label);
@@ -191,6 +191,65 @@ test("one word for the receipt's rows: checked rows; the welds are account compa
   if (weldless.reconcile === null) throw new Error("fixture invariant: reconcile expected");
   weldless.reconcile.welds = [];
   expect(subjectCards(weldless).proof.rows.map((r) => r.label)).not.toContain("account comparisons");
+});
+
+test("a rejected receipt names its fault in the page's words — the checked rows' tally, a short weld by its engine's name — on the status row, the Receipt chip's title, the receipt strip and the drawer; never the receipt's term or an engine's wire id", () => {
+  const rejected = (edit: (reconcile: NonNullable<EvidenceResponse["reconcile"]>) => void): EvidenceResponse => {
+    const manifest = structuredClone(EVIDENCE_MANIFEST);
+    if (manifest.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+    edit(manifest.reconcile);
+    manifest.proof_subject = { ...manifest.proof_subject, status: "rejected" };
+    return manifest;
+  };
+  const legacyShort = rejected((r) => {
+    r.welds = r.welds.map((w) => (w.engine === "aave_v3_etherfi" ? { ...w, rows_exact: 13 } : w));
+  });
+  const cases: readonly [string, EvidenceResponse, string][] = [
+    ["a checked row short", rejected((r) => Object.assign(r, { gated_exact: 86 })), "checked rows 86/87 exact · 0 drifted"],
+    ["a checked row drifted", rejected((r) => Object.assign(r, { gated_exact: 86, gated_drift: 1 })), "checked rows 86/87 exact · 1 drifted"],
+    ["the legacy weld short", legacyShort, "Aave v3 market (legacy) · account comparisons 13/14 exact"],
+  ];
+  for (const [name, manifest, detail] of cases) {
+    const v = view(ok(manifest));
+    const { proof } = subjectCards(manifest);
+    const drawer = proofSubjectEvidence(manifest);
+    expect(proof.rows[0], name).toEqual({ label: "status", value: `REJECTED · ${detail}`, tone: "crit" });
+    expect(v.chips.find((c) => c.label === "Receipt")?.title, name).toBe(detail);
+    expect(drawer.subject, name).toBe(`RECEIPT REJECTED · ${detail}`);
+    expect(drawer.sections[0]?.rows[0], name).toEqual({ label: "status", value: `REJECTED · ${detail}`, tone: "crit" });
+    const said = [
+      v.headline.emphasis,
+      v.headline.rest,
+      v.headline.dek,
+      v.receiptLine,
+      ...v.chips.map((c) => `${c.label} ${c.value} ${c.title ?? ""}`),
+      ...v.steps.map((s) => `${s.sub} ${s.sentence}`),
+      proof.status.text,
+      ...proof.rows.map((r) => `${r.label} ${r.value}`),
+      drawer.subject,
+    ];
+    expect(said.join("\n"), name).not.toMatch(/gated|weld|debt_manager|aave_v3_etherfi/);
+  }
+  // The strip carries the weld's fault in the same words, beside the checked tally it does not break.
+  expect(view(ok(legacyShort)).receiptLine).toBe(
+    "Reconcile receipt: 87 of 87 checked rows exact, 0 drifted — Aave v3 market (legacy) · account comparisons 13/14 exact, the proof badge refused",
+  );
+  expect(view(ok(legacyShort)).headline.rest).toBe("Aave v3 market (legacy) matched 13 of 14 account comparisons.");
+});
+
+test("the line beneath the welds states their counting rule, true of every receipt: beside welds that compared no row it claims nothing about what the rows hold", () => {
+  const note = (manifest: EvidenceResponse) => subjectCards(manifest).proof.rows.find((r) => r.id === "welds-note");
+  const RULE = "count every compared row, checked or advisory; they are not a breakdown of the checked rows";
+  expect(note(EVIDENCE_MANIFEST)).toEqual({ label: "account comparisons", value: RULE, tone: "dim", id: "welds-note" });
+  // Welds of 0/0: the rule still holds, and no row is said to be advisory.
+  const vacuous = structuredClone(EVIDENCE_MANIFEST);
+  if (vacuous.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  Object.assign(vacuous.reconcile, { gated_rows: 0, gated_exact: 0, gated_drift: 0, advisory_rows: 0 });
+  for (const weld of vacuous.reconcile.welds) Object.assign(weld, { rows_compared: 0, rows_exact: 0 });
+  expect(note(vacuous)?.value).toBe(RULE);
+  const drawerNote = proofSubjectEvidence(vacuous).sections.flatMap((s) => s.rows).find((r) => r.label === "account comparisons");
+  expect(drawerNote).toEqual({ label: "account comparisons", value: RULE, tone: "dim" });
+  expect(`${note(vacuous)?.value ?? ""} ${drawerNote?.value ?? ""}`).not.toMatch(/include advisory/);
 });
 
 test("the accepted step says every checked row matched and none drifted; the Index and Compute sentences speak plainly", () => {
@@ -530,9 +589,9 @@ test("a drifted receipt: warn tone, the warn receipt chip, the drift counted on 
   weldShort.proof_subject = { ...weldShort.proof_subject, status: "rejected" };
   const short = view(ok(weldShort));
   expect(short.receipt).toBe("drift");
-  expect(short.headline.rest).toBe("Cash matched 26 of 29 compared rows.");
+  expect(short.headline.rest).toBe("Cash matched 26 of 29 account comparisons.");
   expect(`${short.headline.emphasis} ${short.headline.rest}`).not.toContain("0 drift");
-  expect(short.receiptLine).toBe("Reconcile receipt: 87 of 87 checked rows exact, 0 drifted — debt_manager weld 26/29 exact, the proof badge refused");
+  expect(short.receiptLine).toBe("Reconcile receipt: 87 of 87 checked rows exact, 0 drifted — Cash · account comparisons 26/29 exact, the proof badge refused");
 });
 
 test("no committed receipt: receipt none, warn tone, the proof pin and receipt chips refused, the absence named as an absence — the served reason in the dek", () => {
@@ -675,7 +734,7 @@ test("nothing is green under a receipt of no rows: a weld of 0/0 exact proves no
     ["checked rows", "0/0 exact · 0 drifted", "dim"],
     ["Cash · account comparisons", "0/0 exact", "dim"],
     ["Aave v3 market (legacy) · account comparisons", "0/0 exact", "dim"],
-    ["account comparisons", "include advisory rows; they are not a breakdown of the checked rows", "dim"],
+    ["account comparisons", "count every compared row, checked or advisory; they are not a breakdown of the checked rows", "dim"],
     // The registry's identity is a record, true whatever the receipt proved: it prints in ink and lends the card no pass's colour.
     ["feeds registry", "identical to service.registry_fingerprint, by construction", "default"],
   ]);
@@ -710,7 +769,7 @@ test("the proof card: the pin pill, the answer rows, the hazards hoisted, fiftee
     ["checked rows", "87/87 exact · 0 drifted", "ok", null],
     ["Cash · account comparisons", "29/29 exact", "ok", "weld-debt_manager"],
     ["Aave v3 market (legacy) · account comparisons", "14/14 exact", "ok", "weld-aave_v3_etherfi"],
-    ["account comparisons", "include advisory rows; they are not a breakdown of the checked rows", "dim", "welds-note"],
+    ["account comparisons", "count every compared row, checked or advisory; they are not a breakdown of the checked rows", "dim", "welds-note"],
     ["feeds registry", "identical to service.registry_fingerprint, by construction", "ok", null],
   ]);
   if (proof.fold === null) throw new Error("the committed example folds its provenance");

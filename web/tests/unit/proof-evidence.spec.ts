@@ -73,7 +73,11 @@ test('a "pass" with drift is demoted to rejected — internal consistency has te
   contradictory.reconcile.gated_drift = 1;
   const status = proofSubjectStatus(contradictory);
   expect(status.kind).toBe("rejected");
-  if (status.kind === "rejected") expect(status.detail).toContain("drift 1");
+  // The fault in the page's words: the checked rows' tally as the card's row prints it.
+  if (status.kind === "rejected") {
+    expect(status.detail).toContain("checked rows 86/87 exact · 1 drifted");
+    expect(status.detail).not.toContain("gated");
+  }
 });
 
 test("a weld short of its row count is rejected NAMING the engine", () => {
@@ -83,7 +87,11 @@ test("a weld short of its row count is rejected NAMING the engine", () => {
   weld.rows_exact = weld.rows_compared - 1;
   const status = proofSubjectStatus(short);
   expect(status.kind).toBe("rejected");
-  if (status.kind === "rejected") expect(status.detail).toContain("aave_v3_etherfi");
+  // Named by its name and its row's label, never by the wire's id.
+  if (status.kind === "rejected") {
+    expect(status.detail).toContain("Aave v3 market (legacy) · account comparisons 13/14 exact");
+    expect(status.detail).not.toContain("aave_v3_etherfi");
+  }
 });
 
 test("a missing receipt is UNAVAILABLE with the served reason; an absent reason is stated as absent", () => {
@@ -121,7 +129,7 @@ test("the proof drawer speaks the page's word — checked rows — and keeps the
   expect(said).toContain("checked rows | 87/87 exact · 0 drifted");
   expect(said).toContain("Cash · account comparisons | 29/29 exact");
   expect(said).toContain("Aave v3 market (legacy) · account comparisons | 14/14 exact");
-  expect(said).toContain("account comparisons | include advisory rows; they are not a breakdown of the checked rows");
+  expect(said).toContain("account comparisons | count every compared row, checked or advisory; they are not a breakdown of the checked rows");
   expect(said).toContain("feeds registry | identical to service.registry_fingerprint, by construction");
   // The receipt's own term survives in one row, its gloss beside it; the verbatim comparator keeps the wire's field names.
   const gated = rows.filter((row) => /gated/.test(`${row.label} ${row.value}`));
@@ -324,9 +332,13 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
     for (const manifest of EVERY_ARM) expect(proofTakeaway(manifest)).not.toMatch(/\b0 (rows? )?drift/);
   });
 
-  test("a weld short with the gated tally clean names the engine in the reader's word, and its own compared rows", () => {
-    expect(proofTakeaway(WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly, Aave v3 market (legacy) matched 13 of 14 compared rows.");
-    expect(proofTakeaway(CASH_WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly, Cash matched 28 of 29 compared rows.");
+  test("a weld short with the gated tally clean names the engine in the reader's word, and its own account comparisons — the weld row's noun", () => {
+    expect(proofTakeaway(WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly, Aave v3 market (legacy) matched 13 of 14 account comparisons.");
+    expect(proofTakeaway(CASH_WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly, Cash matched 28 of 29 account comparisons.");
+    const one = receiptWith((r) => {
+      r.welds = r.welds.map((w) => (w.engine === "debt_manager" ? { ...w, rows_compared: 1, rows_exact: 0 } : w));
+    });
+    expect(proofTakeaway(one)).toBe("The last reconcile run did not match the chain exactly, Cash matched 0 of 1 account comparison.");
   });
 
   test("a receipt whose tallies are clean but whose verdict is not a clean pass says so — it is never worded by the tallies it kept clean", () => {

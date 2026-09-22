@@ -217,6 +217,10 @@ test("the TypeScript quickstart is present and real — the actual client API, n
   const quickstart = page.getByTestId("api-quickstart");
   await expect(quickstart).toContainText("new SolventClient({ baseUrl:");
   await expect(quickstart).toContainText('case "unknowable"');
+  // The evidence manifest is read through the client's own method; the sample never says the client lacks one.
+  await expect(quickstart).toContainText("const evidence = await client.evidence();");
+  await expect(quickstart).not.toContainText("no client method");
+  await expect(quickstart).not.toContainText("fetch(");
 });
 
 test("the page links to Verification, where this deployment's evidence manifest renders", async ({ page }) => {

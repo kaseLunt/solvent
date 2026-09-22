@@ -20,7 +20,7 @@ import { classifyFactorPrice } from "./factorPriceGuard";
 import { liqBonusEvidenceValue, paramPercent, paramScaleNote } from "./params-format";
 import { noPricePathTitle } from "./liq-distance";
 import { engineName } from "./inspector-headline";
-import { groupInt } from "./prose";
+import { groupInt, plural } from "./prose";
 
 export type EvidenceTone = "default" | "ok" | "warn" | "crit" | "dim";
 
@@ -556,9 +556,11 @@ export type ProofSubjectStatus =
  *
  * Kept as the CROSS-CHECK against the wire's `proof_subject.status` —
  * `proofSubjectStatus` below is the consumer entry point. The `detail` names
- * the violated conjunct in the service's own words for it
- * (`proof_subject.detail`, cmd/api/p5_evidence.go proofSubjectFrom), so a page
- * that quotes it quotes the wire's register, not its own.
+ * the violated conjunct in the page's own words — the checked rows' tally as
+ * the card's row prints it, a short weld by its row's label, the engine by its
+ * name — because the pages print this detail as their own sentence, never as
+ * a quotation of the wire's `proof_subject.detail`. The receipt's own term
+ * stays in the drawer, once, glossed, and in its comparator.
  */
 export function deriveProofSubjectStatus(manifest: EvidenceManifest): ProofSubjectStatus {
   const reconcile = manifest.reconcile;
@@ -593,7 +595,7 @@ export function deriveProofSubjectStatus(manifest: EvidenceManifest): ProofSubje
     return {
       kind: "rejected",
       reconcile,
-      detail: `gated ${String(gatedExact)}/${String(gatedRows)} exact, drift ${String(gatedDrift)}`,
+      detail: `${CHECKED_ROWS_LABEL} ${checkedRowsTally(gatedExact, gatedRows, gatedDrift)}`,
     };
   }
   for (const weld of reconcile.welds) {
@@ -604,7 +606,7 @@ export function deriveProofSubjectStatus(manifest: EvidenceManifest): ProofSubje
       return {
         kind: "rejected",
         reconcile,
-        detail: `${weld.engine} weld ${String(weld.rows_exact)}/${String(weld.rows_compared)} exact`,
+        detail: `${weldLabel(weld.engine)} ${String(weld.rows_exact)}/${String(weld.rows_compared)} exact`,
       };
     }
   }
@@ -771,7 +773,7 @@ function rejectedArms(manifest: EvidenceManifest, reconcile: ManifestReconcile):
   if (short !== undefined) {
     return {
       proof: DID_NOT_MATCH,
-      scope: `${engineName(short.engine)} matched ${groupInt(short.rows_exact)} of ${groupInt(short.rows_compared)} compared ${rowsWord(short.rows_compared)}.`,
+      scope: `${engineName(short.engine)} matched ${groupInt(short.rows_exact)} of ${plural(short.rows_compared, "account comparison")}.`,
     };
   }
   return {
@@ -891,12 +893,15 @@ export function weldLabel(engine: string): string {
  * rows_compared = len(aave_rows) / len(dm_rows), rows_exact = the rows whose
  * verdict is exact (:332-352) — while the reconcile counts an Aave row that
  * is not gated as advisory (cmd/reconcile/main.go:1372-1373). So the welds
- * include advisory rows and are no subset of the checked rows: nothing on the
- * page may add them up against the checked tally.
+ * are no subset of the checked rows: nothing on the page may add them up
+ * against the checked tally. The line words that counting rule, which holds
+ * of every receipt — one whose compared rows are all checked, and one that
+ * compared none — and never what this receipt's rows happen to hold: the
+ * manifest carries no row's gate.
  */
 export const WELDS_NOTE: EvidenceRow = {
   label: "account comparisons",
-  value: "include advisory rows; they are not a breakdown of the checked rows",
+  value: "count every compared row, checked or advisory; they are not a breakdown of the checked rows",
   tone: "dim",
 };
 

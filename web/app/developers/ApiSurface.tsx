@@ -17,29 +17,6 @@ import { EndpointCard } from "./EndpointCard";
 // in the header's Base URL chip and carried copyably by the quickstart. The
 // page is a server component; the drawer is its one client island.
 
-function quickstart(baseUrl: string): string {
-  return `import { SolventClient } from "@solvent/client";
-
-const client = new SolventClient({ baseUrl: "${baseUrl}" });
-
-// Aggregates. Every money quantity is a DECIMAL STRING, exactly as the wire
-// carried it — nothing here converts, rounds, or floats.
-const book = await client.book();
-
-// Three-valued lookup: the wire's found true/false/null arrives as a sealed
-// outcome union — \`if (!result.found)\` does not compile, so a withheld
-// answer can never read as "no position".
-const result = await client.address("0xAAaA000000000000000000000000000000000001");
-switch (result.outcome) {
-  case "found":      /* result.response.positions */         break;
-  case "not-found":  /* definitive: no position in batch */  break;
-  case "unknowable": /* withheld engine — NOT "none" */      break;
-}
-
-// The deploy-bound evidence manifest (no client method yet — plain fetch).
-const evidence = await fetch("${baseUrl}/v1/evidence").then((r) => r.json());`;
-}
-
 const ERROR_COLUMNS: KitColumn[] = [
   { key: "status", header: "Status" },
   { key: "name", header: "Response" },
@@ -91,7 +68,7 @@ export function ApiSurface() {
       </nav>
 
       <SectionHead title="TypeScript" qualifier="@solvent/client" />
-      <CodeBlock code={quickstart(baseUrl)} copyLabel="copy TypeScript quickstart" testId="api-quickstart" />
+      <CodeBlock code={view.quickstart} copyLabel="copy TypeScript quickstart" testId="api-quickstart" />
 
       <SectionHead
         title="Endpoints"

@@ -191,6 +191,44 @@ test("a failed receipt: data-receipt failed, the warn header, the rejected pill,
   await expect(page.getByTestId("verification-live-status")).toHaveText("SERVING · WATERMARKED");
 });
 
+test("a rejected receipt names its fault in the page's words — a short weld by its engine's name, a short checked tally as its row reads — on the card, the Receipt chip, the strip and the drawer; never 'gated', never an engine's wire id", async ({
+  page,
+}) => {
+  const legacyShort = structuredClone(EVIDENCE_MANIFEST);
+  if (legacyShort.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  legacyShort.reconcile.welds = legacyShort.reconcile.welds.map((w) => (w.engine === "aave_v3_etherfi" ? { ...w, rows_exact: 13 } : w));
+  legacyShort.proof_subject = { ...legacyShort.proof_subject, status: "rejected" };
+  await mockAll(page, legacyShort);
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-receipt", "drift");
+  const fault = "Aave v3 market (legacy) · account comparisons 13/14 exact";
+  await expect(page.getByTestId("verification-subject-proof")).toContainText(`REJECTED · ${fault}`);
+  await expect(chip(page, "Receipt")).toHaveAttribute("title", fault);
+  await expect(page.getByTestId("verification-receipt")).toHaveText(`Reconcile receipt: 87 of 87 checked rows exact, 0 drifted — ${fault}, the proof badge refused`);
+  await expect(headline(page)).toHaveText("The last reconcile run did not match the chain exactly, Aave v3 market (legacy) matched 13 of 14 account comparisons.");
+  for (const id of ["verification-verdict", "verification-architecture", "verification-subject-proof"]) {
+    await expect(page.getByTestId(id)).not.toContainText("gated");
+    await expect(page.getByTestId(id)).not.toContainText("aave_v3_etherfi");
+  }
+  await page.getByRole("button", { name: "explain proof subject" }).click();
+  const evidence = page.getByTestId("verification-drawer-evidence");
+  await expect(evidence).toContainText(`RECEIPT REJECTED · ${fault}`);
+  await expect(evidence).not.toContainText("aave_v3_etherfi weld");
+  await page.keyboard.press("Escape");
+
+  // A checked row short, nothing drifted: the status row reads the checked tally in the words of the row beneath it.
+  const rowShort = structuredClone(EVIDENCE_MANIFEST);
+  if (rowShort.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  rowShort.reconcile.gated_exact = 86;
+  rowShort.proof_subject = { ...rowShort.proof_subject, status: "rejected" };
+  await page.route("**/v1/evidence*", (route) => json(route, rowShort));
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-receipt", "drift");
+  await expect(page.getByTestId("verification-subject-proof")).toContainText("REJECTED · checked rows 86/87 exact · 0 drifted");
+  await expect(chip(page, "Receipt")).toHaveAttribute("title", "checked rows 86/87 exact · 0 drifted");
+  for (const id of ["verification-verdict", "verification-architecture", "verification-subject-proof"]) await expect(page.getByTestId(id)).not.toContainText("gated");
+});
+
 test("a receipt that gated no rows proves nothing: data-receipt empty, the refused header, never 'All 0 checked rows matched', no PROOF · EXACT anywhere", async ({
   page,
 }) => {
@@ -239,6 +277,9 @@ test("nothing is green under a receipt of no rows: a weld of 0/0 exact is dim on
     await expect(weld.locator("[data-tone]")).toHaveText("0/0 exact");
     await expect(weld.locator("[data-tone]")).toHaveAttribute("data-tone", "dim");
   }
+  // The line beneath the welds states their counting rule, true of welds that compared nothing: no row is said to be advisory.
+  await expect(proof.getByTestId("verification-welds-note")).toContainText("count every compared row, checked or advisory; they are not a breakdown of the checked rows");
+  await expect(proof).not.toContainText("include advisory rows");
   // The fold's rows are in the DOM whether or not it is open, so the count covers the whole card.
   await expect(proof.locator("[data-tone='ok']")).toHaveCount(0);
   // The drawer prints the same chain under the same law.
@@ -564,7 +605,7 @@ test("the drawer: the doctrine from the header; a subject's explain puts its evi
   await expect(evidence).toContainText("gated_exact == gated_rows");
   // The wire's term is kept once, beside its gloss in the page's word.
   await expect(evidence).toContainText("checked rows — the rows that must match for the run to pass");
-  await expect(evidence).toContainText("include advisory rows; they are not a breakdown of the checked rows");
+  await expect(evidence).toContainText("count every compared row, checked or advisory; they are not a breakdown of the checked rows");
   await expect(body).toContainText("TWO SUBJECTS, NEVER ONE.");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -597,10 +638,10 @@ test("the proof card's answer layer stays visible; provenance folds counted and 
   await expect(proof.getByTestId("verification-weld-debt_manager")).toContainText("Cash · account comparisons");
   await expect(proof.getByTestId("verification-weld-aave_v3_etherfi")).toBeVisible();
   await expect(proof.getByTestId("verification-weld-aave_v3_etherfi")).toContainText("Aave v3 market (legacy) · account comparisons");
-  // The welds count advisory rows too, so they are no split of the checked tally: the card says so beneath them, dim.
+  // The welds count every compared row whatever its gate, so they are no split of the checked tally: the card states that rule beneath them, dim.
   const note = proof.getByTestId("verification-welds-note");
   await expect(note).toBeVisible();
-  await expect(note).toContainText("include advisory rows; they are not a breakdown of the checked rows");
+  await expect(note).toContainText("count every compared row, checked or advisory; they are not a breakdown of the checked rows");
   await expect(note.locator("[data-tone]")).toHaveAttribute("data-tone", "dim");
   await expect(proof.getByText("identical to service.registry_fingerprint, by construction")).toBeVisible();
   const fold = proof.getByTestId("verification-proof-forensics");

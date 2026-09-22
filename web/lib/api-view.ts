@@ -40,6 +40,36 @@ export interface ApiView {
   readonly errors: readonly { key: string; cells: { status: string; name: string; description: string } }[];
   /** The intro, the base-URL note and the provenance paragraph, verbatim — the drawer's doctrine. */
   readonly doctrine: readonly string[];
+  /** The TypeScript quickstart, against the stated base URL: every call in it is a method @solvent/client has. */
+  readonly quickstart: string;
+}
+
+/**
+ * The TypeScript quickstart: the client's own API, against the stated origin.
+ * Every call it prints is a method the client ships — the evidence manifest
+ * included (`client.evidence()`) — so a reader who copies it runs it.
+ */
+export function quickstartSample(baseUrl: string): string {
+  return `import { SolventClient } from "@solvent/client";
+
+const client = new SolventClient({ baseUrl: "${baseUrl}" });
+
+// Aggregates. Every money quantity is a DECIMAL STRING, exactly as the wire
+// carried it — nothing here converts, rounds, or floats.
+const book = await client.book();
+
+// Three-valued lookup: the wire's found true/false/null arrives as a sealed
+// outcome union — \`if (!result.found)\` does not compile, so a withheld
+// answer can never read as "no position".
+const result = await client.address("0xAAaA000000000000000000000000000000000001");
+switch (result.outcome) {
+  case "found":      /* result.response.positions */         break;
+  case "not-found":  /* definitive: no position in batch */  break;
+  case "unknowable": /* withheld engine — NOT "none" */      break;
+}
+
+// The deploy-bound evidence manifest: the proof subject and the live subject, split.
+const evidence = await client.evidence();`;
 }
 
 /** The page's intro, verbatim — drawer doctrine; its closing clause is the law the header's dek states as facts. */
@@ -130,12 +160,29 @@ export type InlinePart = { readonly kind: "text" | "strong" | "code"; readonly t
 const STRONG = "**";
 const TICK = "`";
 
+/** Where a bold marker opened before `from` closes: the first bold marker outside a code span, read as the scanner reads one; -1 when none does. */
+function strongClose(paragraph: string, from: number): number {
+  let at = from;
+  while (at < paragraph.length) {
+    if (paragraph.startsWith(TICK, at)) {
+      const tickClose = paragraph.indexOf(TICK, at + 1);
+      at = tickClose > at + 1 ? tickClose + 1 : at + 1;
+      continue;
+    }
+    if (paragraph.startsWith(STRONG, at)) return at;
+    at += 1;
+  }
+  return -1;
+}
+
 /**
  * The contract's two inline markers read as formatting, its words untouched.
  * The contract's prose is CommonMark and uses exactly two inline markers:
  * `**…**` for bold and a backtick pair for code. Read left to right, a marker
  * opens a part only when its partner closes it around at least one character;
- * a code span binds first, so a star inside one is literal. A bold part keeps
+ * a code span binds first, so a star inside one is literal — before a bold
+ * marker and inside one alike: a bold part closes at the first bold marker
+ * outside its own code spans. A bold part keeps
  * its inner text raw — its own backtick pairs are read by reading it again —
  * and a marker with no partner is the contract's character, printed as it
  * came. Every part carries text; the parts' texts, markers removed, are the
@@ -156,7 +203,7 @@ export function inlineParts(paragraph: string): readonly InlinePart[] {
       at += 1;
       continue;
     }
-    const close = paragraph.indexOf(marker, at + marker.length);
+    const close = marker === TICK ? paragraph.indexOf(TICK, at + 1) : strongClose(paragraph, at + STRONG.length);
     if (close > at + marker.length) {
       flush();
       parts.push({ kind: marker === TICK ? "code" : "strong", text: paragraph.slice(at + marker.length, close) });
@@ -197,5 +244,6 @@ export function deriveApiView(baseUrl: string): ApiView {
       cells: { status: String(e.status), name: e.name, description: e.description },
     })),
     doctrine: [API_INTRO, `Base URL ${baseUrl}: ${BASE_URL_NOTE}.`, API_PROVENANCE],
+    quickstart: quickstartSample(baseUrl),
   };
 }

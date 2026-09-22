@@ -562,7 +562,7 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
         id: `weld-${weld.engine}`,
       });
     }
-    // The welds are account comparisons counted whatever each row's gate, not a split of the checked tally: the card says so once, in the dim register, beneath them.
+    // The welds are account comparisons counted whatever each row's gate, not a split of the checked tally: the card states that counting rule once, in the dim register, beneath them.
     if (reconcile.welds.length > 0) rows.push({ label: WELDS_NOTE.label, value: WELDS_NOTE.value, tone: "dim", id: "welds-note" });
   }
   rows.push({
@@ -791,7 +791,7 @@ function receiptLine(manifest: EvidenceResponse, receipt: ReceiptState): string 
   const r = proof.reconcile;
   const exact = n(r.gated_exact);
   const rows = n(r.gated_rows);
-  // The status's own detail is the service's naming of the violated conjunct (proof_subject.detail), quoted in its words.
+  // The status's detail names the violated conjunct in the page's own words: the checked rows' tally, or a short weld by its engine's name.
   switch (receipt) {
     case "exact":
       return `Reconcile receipt: ${exact} checked rows exact, ${drifted(r.gated_drift)}`;

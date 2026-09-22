@@ -8,7 +8,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { apiDek, contractParagraphs, deriveApiView, errorStatuses, inlineParts, verbCensus, type InlinePart } from "../../lib/api-view";
+import { SolventClient } from "@solvent/client";
+import { apiDek, contractParagraphs, deriveApiView, errorStatuses, inlineParts, quickstartSample, verbCensus, type InlinePart } from "../../lib/api-view";
 import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS } from "../../lib/proof-contract.gen";
 
 const BASE = "http://x";
@@ -230,4 +231,34 @@ test("over every description the page prints, no word is lost or added: the part
   if (positions === undefined) throw new Error("contract invariant: getPositions exists");
   const bold = contractParagraphs(positions.description).flatMap((p) => inlineParts(p)).filter((part) => part.kind === "strong");
   expect(bold).toEqual([{ kind: "strong", text: "409 `batch_superseded`" }]);
+});
+
+test("a code span binds first inside a bold part too: the bold closes at the first bold marker outside its own code spans", () => {
+  expect(inlineParts("**see `a**b`** after")).toEqual([
+    { kind: "strong", text: "see `a**b`" },
+    { kind: "text", text: " after" },
+  ]);
+  // Read again, the strong part's span is code, its stars literal.
+  expect(inlineParts("see `a**b`")).toEqual([
+    { kind: "text", text: "see " },
+    { kind: "code", text: "a**b" },
+  ]);
+  // A bold marker whose only partner sits inside a code span has none: it stays the contract's character, and the span is code.
+  expect(inlineParts("**a `b** c`")).toEqual([
+    { kind: "text", text: "**a " },
+    { kind: "code", text: "b** c" },
+  ]);
+});
+
+test("the quickstart calls only what the client ships: every client.<method>() it prints is a method of SolventClient, the evidence manifest's included", () => {
+  const sample = deriveApiView(BASE).quickstart;
+  expect(sample).toBe(quickstartSample(BASE));
+  expect(sample).toContain(`new SolventClient({ baseUrl: "${BASE}" })`);
+  const calls = [...sample.matchAll(/\bclient\.(\w+)\(/g)].map((match) => match[1] ?? "");
+  expect(calls).toEqual(["book", "address", "evidence"]);
+  const prototype = SolventClient.prototype as unknown as Record<string, unknown>;
+  for (const method of calls) expect(typeof prototype[method], method).toBe("function");
+  // No call goes around the client, and nothing says the client lacks one.
+  expect(sample).toContain("const evidence = await client.evidence();");
+  expect(sample).not.toMatch(/fetch\(|no client method/);
 });
