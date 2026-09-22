@@ -185,6 +185,27 @@ test("a malformed Cash debt on the strip is a dash, never $0", async ({ page }) 
   await expect(strip).not.toContainText("$0");
 });
 
+test("over a Cash book the engine computed none of, the strip prints no debt or collateral figure and the Book entry says why — never '$0'", async ({ page }) => {
+  // Every account refused on its own while the engine is served: the aggregate's zeros sum no computed position.
+  const refusedOnly = POSITIONS_DM_PAGE_1.positions.filter((p) => p.status !== "computed");
+  expect(refusedOnly).toHaveLength(1);
+  const noneComputed = { positions: 1, computed_positions: 0, refused_positions: 1, liquidatable_positions: 0, total_debt: "0", total_collateral: "0" };
+  const book = { ...BOOK, engines: BOOK.engines.map((e) => (e.engine === "debt_manager" ? { ...e, ...noneComputed } : e)) };
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, book));
+  await page.route("**/v1/positions*", (route) => json(route, { ...POSITIONS_DM_PAGE_1, total_positions: 1, positions: refusedOnly }));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_MANIFEST));
+  await page.goto("/");
+  await expect(page.getByTestId("overview-live-headline")).toHaveText("No Cash account could be computed this batch.");
+  const strip = page.getByTestId("overview-live");
+  await expect(strip).toContainText("Cash debt outstanding");
+  await expect(strip).toContainText("—");
+  await expect(strip).not.toContainText("$0");
+  await expect(page.getByTestId("overview-entry-book")).toContainText("No account could be computed this batch");
+  await expect(page.getByTestId("overview-entry-book")).not.toContainText("within 10% of cap");
+});
+
 test("the address field refuses a non-address inline and routes a real one to the Inspector", async ({ page }) => {
   await mockAll(page);
   await page.route("**/v1/address/**", (route) => route.abort());

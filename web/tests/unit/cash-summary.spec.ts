@@ -12,8 +12,10 @@ import {
   bandsFinding,
   bandsSoFar,
   belowLineToggleLabel,
+  liquidatableTile,
   liquidatableTileLabel,
   liquidatableTileSub,
+  nearCapTile,
   nearCapToggleLabel,
   summarizeCash,
   tileBoundNote,
@@ -414,16 +416,25 @@ test("the liquidatable tile states no total over nothing computed, and no zero t
   const refusedRow = rows.find((r) => !r.computed);
   if (refusedRow === undefined) throw new Error("fixture invariant: the committed page serves a refused row");
   // A walk read whole over rows the engine refused one by one (every account SWEEP_NEVER on a fresh deploy): nothing
-  // was computed, the headline declines any verdict, and the tile states no total — zero or otherwise.
+  // was computed, the headline declines any verdict, and no walk-derived tile prints a figure or a count — a zero over
+  // nothing computed counts nothing. Each says what happened instead, in the refused register.
   const noneComputed = summarizeCash({ rows: [refusedRow], decimals: 6, refusedPositions: 1, ...settled });
   expect(noneComputed.whole).toBe(true);
   expect(noneComputed.computed).toBe(0);
   expect(noneComputed.headline.emphasis).toBe("No Cash account could be computed this batch.");
-  expect(liquidatableTileSub(noneComputed, tileBoundNote(noneComputed))).toBe("0 accounts · 0 more under $100");
-  // A book with nothing in it computed nothing either: no total is stated over it.
+  expect(liquidatableTileSub(noneComputed, tileBoundNote(noneComputed))).toBe("no account computed");
+  expect(liquidatableTile(noneComputed, "")).toEqual({ value: "—", sub: "no account computed", tone: "refused", pending: false });
+  expect(nearCapTile(noneComputed, "")).toEqual({ value: "—", sub: "no account computed", tone: "refused", pending: false });
+  expect(walkEntryLine(noneComputed)).toBe("No account could be computed this batch");
+  const said = [liquidatableTile(noneComputed, ""), nearCapTile(noneComputed, "")].flatMap((t) => [t.value, t.sub]);
+  for (const words of [...said, walkEntryLine(noneComputed)]) expect(words).not.toMatch(/\$0|\b0 accounts?\b|\b0 more\b/);
+  // A book with nothing in it computed nothing either: no total is stated over it — and, nothing refused, its zero is
+  // the book's own finding, as the headline says it.
   const empty = summarizeCash({ rows: [], decimals: 6, refusedPositions: 0, ...settled });
   expect(empty.whole).toBe(true);
   expect(liquidatableTileSub(empty, tileBoundNote(empty))).toBe("0 accounts · 0 more under $100");
+  expect(liquidatableTile(empty, "")).toEqual({ value: "$0", sub: "0 accounts · 0 more under $100", tone: "neutral", pending: false });
+  expect(walkEntryLine(empty)).toBe("$0 within 10% of cap");
   // Computed accounts, none liquidatable, beside refused ones: the headline scopes its negative to the computed
   // positions, and the tile claims no zero total the refused accounts would sit inside.
   const zeroBesideRefused = summarizeCash({ rows: [far, refusedRow], decimals: 6, refusedPositions: 1, ...settled });
@@ -436,6 +447,35 @@ test("the liquidatable tile states no total over nothing computed, and no zero t
   // A positive total beside refused accounts still stands: it counts the positions the engine computed liquidatable.
   const committed = summarizeCash({ rows, decimals: 6, refusedPositions: 1, ...settled });
   expect(liquidatableTileSub(committed, tileBoundNote(committed))).toBe("1 account · 0 more under $100 · 1 in all");
+});
+
+test("the Book's walk tiles are the lib's decision in every register — the figure, its sub, its tone and its busy mark", () => {
+  // Read whole: the positive in the crit register with the partition's total; a near-cap zero is a finding.
+  const committed = summarizeCash({ rows, decimals: 6, refusedPositions: 1, ...settled });
+  expect(liquidatableTile(committed, "")).toEqual({ value: "$4,200", sub: "1 account · 0 more under $100 · 1 in all", tone: "crit", pending: false });
+  expect(nearCapTile(committed, "")).toEqual({ value: "$0", sub: "0 accounts", tone: "neutral", pending: false });
+  // Walking: a positive read so far stands as a lower bound; a zero is not yet a figure, and the tile is busy.
+  const walking = summarizeCash({ rows, decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: null, walkStopKind: null, refusedWhole: null });
+  expect(liquidatableTile(walking, "")).toEqual({ value: "$4,200", sub: "1 account · 0 more under $100 · lower bound, walking", tone: "crit", pending: false });
+  expect(nearCapTile(walking, "")).toEqual({ value: "—", sub: "0 accounts · lower bound, walking", tone: "neutral", pending: true });
+  const nothingYet = summarizeCash({ rows: [], decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: null, walkStopKind: null, refusedWhole: null });
+  expect(liquidatableTile(nothingYet, "")).toEqual({ value: "—", sub: "0 accounts · 0 more under $100 · lower bound, walking", tone: "neutral", pending: true });
+  // Stopped over nothing material: a dash in the refused register, the stop named, never a zero.
+  const stopped = summarizeCash({ rows: [far], decimals: 6, refusedPositions: 0, walkComplete: false, walkStopped: "Failed to fetch", walkStopKind: "before-end", refusedWhole: null });
+  expect(liquidatableTile(stopped, "")).toEqual({ value: "—", sub: "0 accounts · 0 more under $100 · lower bound, walk stopped", tone: "refused", pending: false });
+  expect(nearCapTile(stopped, "")).toEqual({ value: "—", sub: "0 accounts · lower bound, walk stopped", tone: "refused", pending: false });
+  // No summary at all: the absence's own word, in the refused register.
+  expect(liquidatableTile(null, "not computed")).toEqual({ value: "—", sub: "not computed", tone: "refused", pending: false });
+  expect(nearCapTile(null, "loading…")).toEqual({ value: "—", sub: "loading…", tone: "refused", pending: false });
+  // One account near the cap is one account.
+  const near = readCashRow(refinePositionSummary({ ...firstRow, ...readable, account: "0xnear", liquidatable: false, health_factor: { ...readable.health_factor, num: "4804000000", den: "4620000000" }, total_debt: "4620000000" }));
+  const one = summarizeCash({ rows: [near], decimals: 6, refusedPositions: 0, ...settled });
+  expect(nearCapTile(one, "")).toEqual({ value: "$4,620", sub: "1 account", tone: "warn", pending: false });
+  // The demo walk, read whole: the tiles the Book prints.
+  const demo = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => readCashRow(refinePositionSummary(p)));
+  const read = summarizeCash({ rows: demo, decimals: 6, refusedPositions: 6, ...settled });
+  expect(liquidatableTile(read, "")).toEqual({ value: "$6,840", sub: "2 accounts · 47 more under $100 · 49 in all", tone: "crit", pending: false });
+  expect(nearCapTile(read, "")).toMatchObject({ sub: "27 accounts", tone: "warn", pending: false });
 });
 
 test("a walk served an account twice claims no bound anywhere, in its own words — never 'at least', never 'lower bound'", () => {
@@ -463,7 +503,7 @@ test("a walk served an account twice claims no bound anywhere, in its own words 
 });
 
 test("the entry card's line is framed by how the walk ended — 'before the last page' is said only of a walk that never read it", () => {
-  const base = { settled: false, unreadable: 0, nearCap: { sum: 0n, count: 0 }, decimals: 6 } as const;
+  const base = { settled: false, whole: false, unreadable: 0, computed: 1, notComputed: 0, nearCap: { sum: 0n, count: 0 }, decimals: 6 } as const;
   expect(walkEntryLine({ ...base, stopped: null, stopKind: null })).toBe("Walking the book…");
   expect(walkEntryLine({ ...base, stopped: "Failed to fetch", stopKind: "before-end" })).toBe("The walk stopped before the last page");
   expect(walkEntryLine({ ...base, stopped: "short", stopKind: "at-end" })).toBe("The walk reached its last page and its rows do not reconcile with the census");
@@ -471,7 +511,7 @@ test("the entry card's line is framed by how the walk ended — 'before the last
   for (const kind of ["at-end", "over", "duplicate"] as const) {
     expect(walkEntryLine({ ...base, stopped: "x", stopKind: kind })).not.toMatch(/before the (book was read|last page)/);
   }
-  expect(walkEntryLine({ ...base, settled: true, stopped: null, stopKind: null, nearCap: { sum: 4_620_000_000n, count: 1 } })).toBe("$4,620 within 10% of cap");
+  expect(walkEntryLine({ ...base, settled: true, whole: true, stopped: null, stopKind: null, nearCap: { sum: 4_620_000_000n, count: 1 } })).toBe("$4,620 within 10% of cap");
 });
 
 test("load failure headline", () => {

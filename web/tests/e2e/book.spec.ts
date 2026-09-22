@@ -197,29 +197,49 @@ test("the near-cap fold shows the rows the table hides: collapsed it is today's 
   expect(await ids()).toEqual([...material, ...near.slice(0, 6), ...refusedAccounts]);
 });
 
-test("a Cash book whose every account the engine refused one by one: no verdict, and the liquidatable tile states no total over nothing computed", async ({
+test("a Cash book whose every account the engine refused one by one: no verdict, and no tile states a figure or a count over nothing computed", async ({
   page,
 }) => {
   // Every Debt Manager account refused on its own (SWEEP_NEVER before any collateral sweep) while the engine is served,
-  // not withheld: the walk runs, completes and reads every row, and not one of them carries a verdict.
+  // not withheld: the walk runs, completes and reads every row, and not one of them carries a verdict. The aggregate
+  // adds debt and collateral over computed positions only, so the zeros it serves are no position's figures. The legacy
+  // market refuses its one position the same way.
   const refusedOnly = POSITIONS_DM_PAGE_1.positions.filter((p) => p.status !== "computed");
   expect(refusedOnly).toHaveLength(1);
+  const noneComputed = { positions: 1, computed_positions: 0, refused_positions: 1, liquidatable_positions: 0, total_debt: "0", total_collateral: "0" };
   const book = {
     ...BOOK,
-    engines: BOOK.engines.map((e) =>
-      e.engine === "debt_manager"
-        ? { ...e, positions: 1, computed_positions: 0, refused_positions: 1, liquidatable_positions: 0, total_debt: "0", total_collateral: "0" }
-        : e,
-    ),
+    engines: BOOK.engines.map((e) => ({ ...e, ...noneComputed })),
+    hf_histogram: { ...BOOK.hf_histogram, engines: BOOK.hf_histogram.engines.map((h) => ({ ...h, buckets: h.buckets.map((b) => ({ ...b, count: 0 })) })) },
   };
   await mockCommitted(page, book);
   // Registered last, so it answers ahead of the committed page: the walk's one page serves the refused row alone.
   await page.route("**/v1/positions*", (route) => json(route, { ...POSITIONS_DM_PAGE_1, total_positions: 1, positions: refusedOnly }));
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("No Cash account could be computed this batch.");
-  const tile = page.getByTestId("book-kpi-liquidatable");
-  await expect(tile).toContainText("0 accounts · 0 more under $100");
-  await expect(tile).not.toContainText("in all");
+  // The three tiles a sum over computed positions would fill: a dash in the refused register, and the words why.
+  for (const id of ["debt", "liquidatable", "near"]) {
+    const tile = page.getByTestId(`book-kpi-${id}`);
+    await expect(tile).toHaveAttribute("data-tone", "refused");
+    await expect(tile).toContainText("—");
+    await expect(tile).toContainText("no account computed");
+    await expect(tile).not.toContainText("$0");
+    await expect(tile).not.toContainText(/\b0 accounts?\b|\b0 more\b|in all/);
+  }
+  // The census stands as served: one account, counted where the engine refused it.
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("1");
+  // The legacy fold reads one decision: its line and its tiles say not computed, and no zero stands in for either.
+  const legacy = page.getByTestId("book-legacy");
+  await expect(legacy.locator("summary")).toHaveText("Legacy · Aave v3 market — 1 position · debt not computed · 1 refused");
+  await legacy.locator("summary").click();
+  for (const id of ["debt", "liquidatable"]) {
+    const tile = page.getByTestId(`book-legacy-kpi-${id}`);
+    await expect(tile).toBeVisible();
+    await expect(tile).toHaveAttribute("data-tone", "refused");
+    await expect(tile).toContainText("—");
+    await expect(tile).not.toContainText(/\$0|\b0\b/);
+  }
+  await expect(page.getByTestId("book-legacy-kpi-liquidatable")).toContainText("not computed");
 });
 
 test("the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero — the card's placeholder counts print nowhere", async ({ page }) => {

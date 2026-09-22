@@ -10,7 +10,9 @@ export interface BookLegacyProps {
 /**
  * The ether.fi Aave v3 market — shown for completeness, labeled legacy, never
  * added to Cash. A withheld engine names its cause and prints no population,
- * no debt and no histogram: a refusal is never a row of zeros.
+ * no debt and no histogram: a refusal is never a row of zeros. Where the
+ * engine computed no position and refused some, the view holds no debt and
+ * no liquidatable count, and those tiles say not computed as the line does.
  */
 export function BookLegacy({ view }: BookLegacyProps) {
   if (view === null) return null;
@@ -42,18 +44,24 @@ export function BookLegacy({ view }: BookLegacyProps) {
           sub={view.withheld !== null ? "not computed" : `${population(view.computed)} computed`}
           tone={view.withheld !== null ? "refused" : "neutral"}
         />
-        <KpiTile label="Debt" value={moneyText(view.debt)} tone={view.debt.kind === "value" ? "neutral" : "refused"} />
+        <KpiTile
+          label="Debt"
+          value={moneyText(view.debt)}
+          tone={view.debt.kind === "value" ? "neutral" : "refused"}
+          testId="book-legacy-kpi-debt"
+        />
         <KpiTile
           label="Liquidatable"
           value={population(view.liquidatable)}
           sub={
-            view.withheld !== null
+            view.liquidatable === null
               ? "not computed"
               : view.eligibleDebt.kind === "value"
                 ? `${view.eligibleDebt.text} eligible debt`
                 : "Σ withheld"
           }
-          tone={view.withheld !== null ? "refused" : view.liquidatable !== null && view.liquidatable > 0 ? "crit" : "neutral"}
+          tone={view.liquidatable === null ? "refused" : view.liquidatable > 0 ? "crit" : "neutral"}
+          testId="book-legacy-kpi-liquidatable"
         />
         <KpiTile label="Not computed" value={population(view.refused)} tone="refused" />
       </div>

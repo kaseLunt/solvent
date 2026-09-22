@@ -6,9 +6,8 @@ import kit from "@/components/kit/kit.module.css";
 import { useCashBook } from "@/lib/cash-book";
 import { BAD_DEBT_NOT_REPORTED } from "@/lib/cash-refusal";
 import { NEAR_CAP_BAND_IDS } from "@/lib/cash-rows";
-import { attentionFinding, bandsFinding, bandsSoFar, liquidatableTileLabel, liquidatableTileSub, tileBoundNote } from "@/lib/cash-summary";
+import { attentionFinding, bandsFinding, bandsSoFar, liquidatableTile, liquidatableTileLabel, nearCapTile } from "@/lib/cash-summary";
 import { deriveCashView, deriveLegacyView, malformedSub, moneyText } from "@/lib/cash-view";
-import { humanUsd } from "@/lib/human-usd";
 import { useMetaConstants } from "@/lib/meta";
 import { BookLegacy } from "./BookLegacy";
 import { BookMethodology } from "./BookMethodology";
@@ -48,13 +47,10 @@ export function BookSurface() {
     cash.walkFailure === null
       ? null
       : { message: cash.walkFailure.message, retryable: cash.walkFailure.register === "transport" };
-  // A walk-derived zero is a finding only over a book read whole — a complete
-  // walk, every row of it readable: until then the tile shows a dash, and a
-  // positive figure wears the walk's own note.
-  const boundNote = tileBoundNote(summary);
-  const whole = summary !== null && summary.whole;
-  // The figures are held short of a finding: the walk stopped, or it completed over a row this page could not read.
-  const held = walkStopped !== null || (summary !== null && summary.settled && !summary.whole);
+  // The Debt, Liquidatable and Near-cap tiles are the lib's decision — figure, sub line, register — printed as given.
+  const debtTile = view.debtTile;
+  const liquidatable = liquidatableTile(summary, absentWord);
+  const nearCap = nearCapTile(summary, absentWord);
 
   return (
     <div className={styles.page} aria-busy={walking ? "true" : undefined}>
@@ -87,61 +83,26 @@ export function BookSurface() {
         <KpiTile
           testId="book-kpi-debt"
           label="Debt outstanding"
-          value={moneyText(view.debt)}
-          sub={
-            refusedTiles
-              ? absentWord
-              : view.debt.kind === "malformed"
-                ? malformedSub(view.debt.field)
-                : view.collateral.kind === "malformed"
-                  ? `collateral unreadable: ${malformedSub(view.collateral.field)}`
-                  : `against ${moneyText(view.collateral)} collateral`
-          }
-          tone={refusedTiles || view.debt.kind !== "value" ? "refused" : "neutral"}
+          value={debtTile.value}
+          sub={debtTile.sub}
+          tone={debtTile.tone}
+          pending={debtTile.pending}
         />
         <KpiTile
           testId="book-kpi-liquidatable"
           label={liquidatableTileLabel}
-          value={
-            summary === null
-              ? "—"
-              : summary.material.count > 0 || whole
-                ? humanUsd(summary.material.sum, decimals)
-                : "—"
-          }
-          sub={summary === null ? absentWord : liquidatableTileSub(summary, boundNote)}
-          tone={
-            refusedTiles
-              ? "refused"
-              : summary !== null && summary.material.count > 0
-                ? "crit"
-                : held
-                  ? "refused"
-                  : "neutral"
-          }
-          pending={walking && (summary?.material.count ?? 0) === 0}
+          value={liquidatable.value}
+          sub={liquidatable.sub}
+          tone={liquidatable.tone}
+          pending={liquidatable.pending}
         />
         <KpiTile
           testId="book-kpi-near"
           label="Near cap · <10% room"
-          value={
-            summary === null
-              ? "—"
-              : summary.nearCap.count > 0 || whole
-                ? humanUsd(summary.nearCap.sum, decimals)
-                : "—"
-          }
-          sub={summary === null ? absentWord : `${String(summary.nearCap.count)} accounts${boundNote}`}
-          tone={
-            refusedTiles
-              ? "refused"
-              : summary !== null && summary.nearCap.count > 0
-                ? "warn"
-                : held
-                  ? "refused"
-                  : "neutral"
-          }
-          pending={walking}
+          value={nearCap.value}
+          sub={nearCap.sub}
+          tone={nearCap.tone}
+          pending={nearCap.pending}
         />
         <KpiTile
           testId="book-kpi-median"

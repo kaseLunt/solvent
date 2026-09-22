@@ -435,3 +435,72 @@ test("the legacy fold's line is the market's own finding over computed positions
   const demo = deriveLegacyView({ engine: DEMO_LEGACY, badDebt: null, histogram: null, refusedWhole: null });
   expect(demo?.summaryLine).toBe("Legacy · Aave v3 market — 46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
 });
+
+test("the Debt tile is the view's decision: the figure against its collateral, a malformed field named, an absence in its own word", () => {
+  expect(deriveCashView(reading({}), TIER_FALLBACK).debtTile).toEqual({ value: "$4,200", sub: "against $4,000 collateral", tone: "neutral", pending: false });
+  const withheld = deriveCashView(reading({ cash: { refusedWhole: { code: "FLAG_CUSTODY_UNPROVEN", detail: "" } } }), TIER_FALLBACK);
+  expect(withheld.debtTile).toEqual({ value: "—", sub: "not computed", tone: "refused", pending: false });
+  const loading = deriveCashView(reading({ phase: "loading", book: null, cash: { engine: null, rows: [] } }), TIER_FALLBACK);
+  expect(loading.debtTile).toEqual({ value: "—", sub: "loading…", tone: "refused", pending: false });
+  expect(deriveCashView(reading({ cash: { engine: { ...cashEngine, total_debt: "" } } }), TIER_FALLBACK).debtTile).toEqual({
+    value: "—",
+    sub: "engines[debt_manager].total_debt is not a wire decimal",
+    tone: "refused",
+    pending: false,
+  });
+  expect(deriveCashView(reading({ cash: { engine: { ...cashEngine, total_collateral: "" } } }), TIER_FALLBACK).debtTile).toEqual({
+    value: "$4,200",
+    sub: "collateral unreadable: engines[debt_manager].total_collateral is not a wire decimal",
+    tone: "neutral",
+    pending: false,
+  });
+  expect(deriveCashView(reading({ cash: { engine: { ...cashEngine, total_debt: null } } }), TIER_FALLBACK).debtTile).toEqual({
+    value: "—",
+    sub: "against $4,000 collateral",
+    tone: "refused",
+    pending: false,
+  });
+});
+
+test("over a census the engine computed none of, the aggregate's zeros sum no position: no debt, no collateral, no tile and no entry line states a zero", () => {
+  const refusedRow = rows.find((r) => !r.computed);
+  if (refusedRow === undefined) throw new Error("fixture invariant: the committed page serves a refused row");
+  // Every account refused on its own while the engine is served: the aggregate adds debt and collateral only over
+  // computed positions, so the "0" it serves is no position's figure.
+  const noneEngine = { ...cashEngine, positions: 1, computed_positions: 0, refused_positions: 1, liquidatable_positions: 0, total_debt: "0", total_collateral: "0" };
+  const v = deriveCashView(reading({ cash: { engine: noneEngine, rows: [refusedRow] } }), TIER_FALLBACK);
+  expect(v.headline.emphasis).toBe("No Cash account could be computed this batch.");
+  expect(v.debt).toEqual({ kind: "absent" });
+  expect(v.collateral).toEqual({ kind: "absent" });
+  expect(moneyText(v.debt)).toBe("—");
+  expect(moneyText(v.collateral)).toBe("—");
+  expect(v.debtTile).toEqual({ value: "—", sub: "no account computed", tone: "refused", pending: false });
+  expect(v.bookEntryLine).toBe("No account could be computed this batch");
+  // The census still stands as served: one account, refused, counted on its own.
+  expect(v.positions).toBe(1);
+  expect(v.notComputedTile.value).toBe("1");
+  // An empty book refused nothing: its zero is the book's own finding, as the server totals it.
+  const emptyEngine = { ...cashEngine, positions: 0, computed_positions: 0, refused_positions: 0, liquidatable_positions: 0, total_debt: "0", total_collateral: "0", refusals: [] };
+  const empty = deriveCashView(reading({ cash: { engine: emptyEngine, rows: [] } }), TIER_FALLBACK);
+  expect(empty.debt).toEqual({ kind: "value", value: 0n, text: "$0" });
+  expect(empty.debtTile).toEqual({ value: "$0", sub: "against $0 collateral", tone: "neutral", pending: false });
+  expect(empty.bookEntryLine).toBe("$0 within 10% of cap");
+});
+
+test("the legacy fold reads one decision over nothing computed — its line, its Debt tile and its Liquidatable tile print no zero; an empty market's zero is its own", () => {
+  // Every position refused: the wire's zero debt and zero liquidatable count are sums over nothing computed.
+  const none = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }));
+  expect(none?.summaryLine).toBe("Legacy · Aave v3 market — 3 positions · debt not computed · 3 refused");
+  expect(none?.debt).toEqual({ kind: "absent" });
+  expect(none?.liquidatable).toBeNull();
+  expect(none?.positions).toBe(3);
+  expect(none?.refused).toBe(3);
+  // A market with no positions refused nothing: "not computed" would name a failure that did not happen, so its zero
+  // debt is the market's own finding, as the server totals an empty book.
+  const empty = deriveLegacyView(legacyWith({ positions: 0, computed: 0, liquidatable: 0, refused: 0, debt: "0" }));
+  expect(empty?.summaryLine).toBe("Legacy · Aave v3 market — 0 positions · $0 debt · 0 refused");
+  expect(empty?.debt).toEqual({ kind: "value", value: 0n, text: "$0" });
+  expect(empty?.liquidatable).toBe(0);
+  // Computed positions: the count stands, zero included.
+  expect(deriveLegacyView(legacyWith({ positions: 2, computed: 1, liquidatable: 0, refused: 1 }))?.liquidatable).toBe(0);
+});

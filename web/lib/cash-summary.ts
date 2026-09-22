@@ -160,6 +160,18 @@ export function tileBoundNote(walk: WalkState | null): string {
   return register === "unreadable" ? ` · lower bound, ${rowsWord(walk.unreadable)} unreadable` : "";
 }
 
+/**
+ * The book was read whole and the engine computed none of its accounts: every one it served was refused on its own.
+ * A walk-derived zero over it sums nothing and counts nothing, so no tile or line prints it as a finding — neither a
+ * figure nor a count; each says that no account was computed. An empty book refused nothing, and its zero is its own.
+ */
+export function noneComputed(summary: Pick<CashSummary, "whole" | "computed" | "notComputed">): boolean {
+  return summary.whole && summary.computed === 0 && summary.notComputed > 0;
+}
+
+/** What a tile says in place of a figure over a book the engine computed none of. */
+export const NONE_COMPUTED_SUB = "no account computed";
+
 /** The liquidatable tile's label: the material line it headlines, from the one constant that places it. */
 export const liquidatableTileLabel = `Liquidatable · ≥ $${MATERIAL_LINE_USD.toString()}`;
 
@@ -168,17 +180,75 @@ export const liquidatableTileLabel = `Liquidatable · ≥ $${MATERIAL_LINE_USD.t
  * the partition's total, the same count as the batch aggregate's liquidatable_positions. Short of a whole read no total
  * is claimed: the bound note keeps its place and says in which register the two counts stand. A total is a finding only
  * over a computed population, and a zero total is said only where no refused account could sit inside it — the same
- * scope the headline gives its own negative.
+ * scope the headline gives its own negative. Over a book the engine computed none of, no count is said at all.
  */
 export function liquidatableTileSub(
   summary: Pick<CashSummary, "material" | "belowLine" | "whole" | "computed" | "notComputed">,
   boundNote: string,
 ): string {
+  if (noneComputed(summary)) return `${NONE_COMPUTED_SUB}${boundNote}`;
   const counts = `${plural(summary.material.count, "account")} · ${groupInt(summary.belowLine.count)} more under $${MATERIAL_LINE_USD.toString()}`;
   const inAll = summary.material.count + summary.belowLine.count;
   const stated = summary.whole && summary.computed > 0 && (inAll > 0 || summary.notComputed === 0);
   const total = stated ? ` · ${groupInt(inAll)} in all` : "";
   return `${counts}${total}${boundNote}`;
+}
+
+/** A tile's register, as the kit's tiles take it; kept out of the component layer. */
+export type TileTone = "neutral" | "crit" | "warn" | "refused";
+
+/** A tile as the Book prints it: decided here, printed by the component as given. */
+export interface TileView {
+  readonly value: string;
+  readonly sub: string;
+  readonly tone: TileTone;
+  /** The figure is still being read: the tile shows its busy mark in place of the value. */
+  readonly pending: boolean;
+}
+
+/** How a walk-derived tile is decided: the sum it prints, the register a counted sum wears, its sub line, and when it is busy. */
+interface WalkTileRule {
+  readonly figure: (s: CashSummary) => Sum;
+  readonly foundTone: TileTone;
+  readonly sub: (s: CashSummary, boundNote: string) => string;
+  /** While the walk runs: busy throughout, or only until the walk has counted something. */
+  readonly busy: "while-walking" | "until-counted";
+}
+
+/**
+ * A walk-derived tile over one of the summary's sums, in every register. No summary: the absence's own word, refused.
+ * A counted sum is printed in the tile's own register — a lower bound, with the bound note, until the book is read
+ * whole. A zero is a finding only over a book read whole, and never over one the engine computed none of: while the
+ * walk runs the tile is busy, a walk that ended short of whole prints a dash in the refused register, and a book the
+ * engine computed none of prints a dash and says that no account was computed.
+ */
+function walkTile(summary: CashSummary | null, absentWord: string, rule: WalkTileRule): TileView {
+  if (summary === null) return { value: "—", sub: absentWord, tone: "refused", pending: false };
+  const boundNote = tileBoundNote(summary);
+  if (noneComputed(summary)) return { value: "—", sub: `${NONE_COMPUTED_SUB}${boundNote}`, tone: "refused", pending: false };
+  const register = registerOf(summary);
+  const { sum, count } = rule.figure(summary);
+  return {
+    value: count > 0 || register === "whole" ? humanUsd(sum, summary.decimals) : "—",
+    sub: rule.sub(summary, boundNote),
+    tone: count > 0 ? rule.foundTone : register === "whole" || register === "running" ? "neutral" : "refused",
+    pending: register === "running" && (rule.busy === "while-walking" || count === 0),
+  };
+}
+
+/** The liquidatable tile: the material sum in the crit register, over the partition's counts. */
+export function liquidatableTile(summary: CashSummary | null, absentWord: string): TileView {
+  return walkTile(summary, absentWord, { figure: (s) => s.material, foundTone: "crit", sub: liquidatableTileSub, busy: "until-counted" });
+}
+
+/** The near-cap tile: the debt within 10% of the cap in the warn register, over its accounts. */
+export function nearCapTile(summary: CashSummary | null, absentWord: string): TileView {
+  return walkTile(summary, absentWord, {
+    figure: (s) => s.nearCap,
+    foundTone: "warn",
+    sub: (s, boundNote) => `${plural(s.nearCap.count, "account")}${boundNote}`,
+    busy: "while-walking",
+  });
 }
 
 /** The attention card's finding: the table's order, under the walk's own qualifier. */
@@ -318,12 +388,16 @@ export function belowLineToggleLabel(count: number, sum: bigint, decimals: numbe
  * The entry card's one line about the walk, from the summary alone. A
  * walk-derived figure is the card's micro-stat only over a book read whole;
  * short of that the card says what happened — a stop in its own frame, never
- * one frame for every ending.
+ * one frame for every ending — and over a book the engine computed none of,
+ * that no account could be computed.
  */
-export function walkEntryLine(summary: Pick<CashSummary, "settled" | "stopped" | "stopKind" | "unreadable" | "nearCap" | "decimals">): string {
+export function walkEntryLine(
+  summary: Pick<CashSummary, "settled" | "whole" | "stopped" | "stopKind" | "unreadable" | "computed" | "notComputed" | "nearCap" | "decimals">,
+): string {
   if (summary.stopped !== null) return stopWords(summary.stopKind);
   if (!summary.settled) return "Walking the book…";
   if (summary.unreadable > 0) return `${rowsWord(summary.unreadable)} of the book could not be read`;
+  if (noneComputed(summary)) return "No account could be computed this batch";
   return `${humanUsd(summary.nearCap.sum, summary.decimals)} within 10% of cap`;
 }
 

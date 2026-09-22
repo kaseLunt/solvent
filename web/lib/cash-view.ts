@@ -1,7 +1,15 @@
 import { bookHeadlineRefused, type Headline } from "./book-headline";
 import type { CashBookReading } from "./cash-book";
 import { CASH_ENGINE_MISSING } from "./cash-refusal";
-import { summarizeCash, unavailableHeadline, unreadableHeadline, walkEntryLine, type CashSummary } from "./cash-summary";
+import {
+  NONE_COMPUTED_SUB,
+  summarizeCash,
+  unavailableHeadline,
+  unreadableHeadline,
+  walkEntryLine,
+  type CashSummary,
+  type TileView,
+} from "./cash-summary";
 import { humanAge } from "./freshness";
 import { freshnessTier, type FreshnessTier, type TierConstants } from "./freshnessTiers";
 import { humanUsd } from "./human-usd";
@@ -134,8 +142,11 @@ export interface CashView {
   readonly ageSeconds: number | null;
   /** The stress preview — refused with the engine's cause when the engine is withheld. */
   readonly preview: StressPreview | null;
+  /** The aggregate's debt; absent under an absence, and over a census the engine computed none of (its zero sums nothing). */
   readonly debt: MoneyReading;
   readonly collateral: MoneyReading;
+  /** The Book's Debt tile: the figure against its collateral, a malformed field by name, or why there is no figure. */
+  readonly debtTile: TileView;
   /** Null when the book is unloaded, the engine withheld or absent, or the wire reports no bad-debt row. */
   readonly badDebt: BadDebtView | null;
   /**
@@ -264,9 +275,27 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
         ? null
         : stressPreview(reading.book.waterfall, "debt_manager", reading.book.coverage);
 
-  const debt = refusedTiles || engine === null ? ABSENT : readWireMoney(engine.total_debt, decimals, "engines[debt_manager].total_debt");
-  const collateral =
-    refusedTiles || engine === null ? ABSENT : readWireMoney(engine.total_collateral, decimals, "engines[debt_manager].total_collateral");
+  // The aggregate adds debt and collateral over computed positions only: over a census the engine computed none of,
+  // its zeros are no position's figures and neither is read as one. An empty book refused nothing, and totals zero.
+  const censusNoneComputed = computedPositions === 0 && refusedPositions !== null && refusedPositions > 0;
+  const unsummed = refusedTiles || engine === null || censusNoneComputed;
+  const debt = unsummed ? ABSENT : readWireMoney(engine.total_debt, decimals, "engines[debt_manager].total_debt");
+  const collateral = unsummed ? ABSENT : readWireMoney(engine.total_collateral, decimals, "engines[debt_manager].total_collateral");
+  const debtTile: TileView = refusedTiles
+    ? { value: "—", sub: absence?.word ?? "", tone: "refused", pending: false }
+    : censusNoneComputed
+      ? { value: "—", sub: NONE_COMPUTED_SUB, tone: "refused", pending: false }
+      : {
+          value: moneyText(debt),
+          sub:
+            debt.kind === "malformed"
+              ? malformedSub(debt.field)
+              : collateral.kind === "malformed"
+                ? `collateral unreadable: ${malformedSub(collateral.field)}`
+                : `against ${moneyText(collateral)} collateral`,
+          tone: debt.kind === "value" ? "neutral" : "refused",
+          pending: false,
+        };
   const badDebtWire = refusedTiles ? null : cash.badDebt;
   const badDebt: BadDebtView | null =
     badDebtWire === null
@@ -335,6 +364,7 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
     preview,
     debt,
     collateral,
+    debtTile,
     badDebt,
     notComputedTile,
     bookEntryLine,
@@ -355,8 +385,10 @@ export interface LegacyView {
   readonly decimals: number;
   readonly positions: number | null;
   readonly computed: number | null;
+  /** Null under a withheld engine, and where the engine computed no position and refused some: a count over nothing. */
   readonly liquidatable: number | null;
   readonly refused: number | null;
+  /** Absent under a withheld engine, and where the engine computed no position and refused some: a sum over nothing. */
   readonly debt: MoneyReading;
   readonly eligibleDebt: MoneyReading;
   /** Null when the wire serves no histogram for the engine, or withholds it. */
@@ -393,7 +425,11 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
   const computed = readWirePopulation(engine.computed_positions, "engines[legacy].computed_positions");
   const liquidatable = readWirePopulation(engine.liquidatable_positions, "engines[legacy].liquidatable_positions");
   const refused = readWirePopulation(engine.refused_positions, "engines[legacy].refused_positions");
-  const debt = readWireMoney(engine.total_debt, decimals, "engines[aave_v3_etherfi].total_debt");
+  // The aggregate sums debt, and counts liquidatable positions, over computed positions only: with none computed and
+  // some refused, its zeros are no position's figures. The line, the Debt tile and the Liquidatable tile read this one
+  // decision, and none prints them. A market with no positions refused nothing: its zero is its own.
+  const nothingComputed = computed === 0 && refused > 0;
+  const debt = nothingComputed ? ABSENT : readWireMoney(engine.total_debt, decimals, "engines[aave_v3_etherfi].total_debt");
   const badDebt = legacy.badDebt;
   const eligibleDebt =
     badDebt === null
@@ -414,10 +450,8 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
           label: b.label,
           count: readWirePopulation(b.count, `hf_histogram[aave_v3_etherfi].buckets[${String(i)}].count`),
         }));
-  // The aggregate sums debt over computed positions only: with none computed its figure is no position's debt, and the
-  // line names the debt as not computed rather than print that zero.
   const debtWord =
-    computed === 0
+    nothingComputed
       ? "debt not computed"
       : debt.kind === "value"
         ? `${debt.text} debt`
@@ -435,7 +469,7 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
     decimals,
     positions,
     computed,
-    liquidatable,
+    liquidatable: nothingComputed ? null : liquidatable,
     refused,
     debt,
     eligibleDebt,
