@@ -2,6 +2,7 @@
 import { expect, test } from "@playwright/test";
 import { ADDRESS_FOUND } from "../fixtures/inspector";
 import { EVIDENCE_MANIFEST, EVIDENCE_NO_BATCH, EVIDENCE_NO_RECEIPT, EVIDENCE_PROOF_FAILED } from "../fixtures/proof";
+import { RECEIPT_EMPTY_STATUS } from "../../lib/evidence";
 import { EVIDENCE_FAILED, EVIDENCE_PENDING, evidenceAnswered, evidenceReadAt, evidenceReadOf, type EvidenceRead } from "../../lib/inspector-evidence";
 import { trustChecklist, type TrustId, type TrustInput, type TrustItem } from "../../lib/trust";
 import { receiptState, type ReceiptState } from "../../lib/verification-view";
@@ -277,8 +278,12 @@ test("reconcile: a drifted weld, a nonzero exit or an empty weld is never ok", (
   // a passing receipt that still counts drift warns on the count alone, with no "did not pass" suffix
   expect(receipt({ ...reconcile, result: "pass", exit_code: 0, gated_drift: 2 })).toMatchObject({ state: "warn", detail: "2 drifted rows" });
   expect(receipt({ ...reconcile, welds: [], gated_exact: 86, gated_rows: 87 })).toMatchObject({ state: "warn", detail: "1 row drifted" });
-  // A run that gated no rows compared nothing: Verification's words for it, never a tally and never a tick.
-  expect(receipt({ ...reconcile, welds: [], gated_rows: 0, gated_exact: 0 })).toMatchObject({ state: "dim", detail: "the run gated no rows · nothing was compared" });
+  // A run that checked no rows compared nothing: Verification's words for it, never a tally and never a tick.
+  const empty = receipt({ ...reconcile, welds: [], gated_rows: 0, gated_exact: 0 });
+  expect(empty).toMatchObject({ state: "dim", detail: "the run checked no rows · nothing was compared" });
+  // One receipt state, one wording on both pages: the wire's `gated` rows are "checked rows" wherever a reader sees them.
+  expect(RECEIPT_EMPTY_STATUS).toContain(empty.detail.split(" · ")[0] ?? "");
+  expect(empty.detail).not.toContain("gated");
 });
 
 test("reconcile: the ticked label is about the WHOLE run — it is ticked only when the run passed whole, never on the Cash weld alone", () => {
@@ -288,7 +293,7 @@ test("reconcile: the ticked label is about the WHOLE run — it is ticked only w
   const notWhole: readonly [string, Manifest, Partial<TrustItem>][] = [
     ["a gated row short", manifestWith({ ...reconcile, gated_exact: 86, gated_rows: 87 }), { state: "warn", detail: "29/29 Cash rows · the run did not match whole" }],
     ["the legacy weld short", manifestWith(legacyShort), { state: "warn", detail: "29/29 Cash rows · the run did not match whole" }],
-    ["no gated rows beside a Cash weld", manifestWith({ ...reconcile, gated_exact: 0, gated_rows: 0 }), { state: "dim", detail: "the run gated no rows · nothing was compared" }],
+    ["no gated rows beside a Cash weld", manifestWith({ ...reconcile, gated_exact: 0, gated_rows: 0 }), { state: "dim", detail: "the run checked no rows · nothing was compared" }],
     [
       "the wire's own proof status refusing a receipt that passes on its numbers",
       manifestWith(reconcile, servedAt, { proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } }),

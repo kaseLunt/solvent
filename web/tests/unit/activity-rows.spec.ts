@@ -1,7 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { DEMO_EVENTS_NEAR } from "../fixtures/demo";
 import { EVENTS } from "../fixtures/inspector";
-import { actionLabel, activityEmptyText, activityFailureText, activityRows, activityTakeaway } from "../../lib/activity-rows";
+import {
+  ACTIVITY_CARD_QUALIFIER,
+  UNTIMED_WHEN_TITLE,
+  actionLabel,
+  activityEmptyText,
+  activityFailureText,
+  activityRows,
+  activityTakeaway,
+} from "../../lib/activity-rows";
 import { EVENT_DISPLAY_TYPES } from "../../lib/feed-data";
 import { RECORD_ONLY_TITLE, RECORD_ONLY_WORD, typeLabel } from "../../lib/feed-view";
 
@@ -12,7 +20,7 @@ test("activityEmptyText and activityFailureText: the load phase, the failure's o
   expect(activityEmptyText(true, null)).toBe("Loading activity…");
   expect(activityEmptyText(true, error)).toBe("Loading activity…");
   expect(activityEmptyText(false, error)).toBe(`Activity unavailable: ${error.message}`);
-  expect(activityEmptyText(false, null)).toBe("No custodied actions for this account.");
+  expect(activityEmptyText(false, null)).toBe("No chain actions for this account.");
   expect(activityFailureText(error)).toBe(`More activity could not be loaded: ${error.message}. The rows above stand; nothing beyond them was read.`);
 });
 
@@ -101,36 +109,53 @@ test("action labels are human, in the Activity page's own words for the same wir
 
 // ---------------------------------------------------------------------------
 // activityTakeaway: "newest first" may only be claimed over rows that carry a
-// custodied header time; the untimed tail's order is not chronology.
+// block time; the untimed tail's order is not chronology.
 // ---------------------------------------------------------------------------
 
 test.describe("activityTakeaway", () => {
   test("all rows timed: newest-first is honest, and hasMore blocks the totality reading", () => {
     expect(activityTakeaway(3, 0, false)).toBe(
-      "3 custodied actions loaded for this account, newest first.",
+      "3 chain actions loaded for this account, newest first.",
     );
     expect(activityTakeaway(3, 0, true)).toBe(
-      "3 custodied actions loaded for this account, newest first · more exist behind the cursor.",
+      "3 chain actions loaded for this account, newest first · more exist behind the cursor.",
     );
   });
 
   test("a mixed list splits the claim: timed rows newest first, the untimed tail disclaimed", () => {
     // Real plurals, never "(s)": one untimed row follows, one action is loaded.
     expect(activityTakeaway(5, 1, false)).toBe(
-      "6 custodied actions loaded for this account: 5 with custodied header time, newest first; 1 untimed row follows, " +
+      "6 chain actions loaded for this account: 5 with a block time, newest first; 1 untimed row follows, " +
         "in an order that is not chronology.",
     );
-    expect(activityTakeaway(1, 0, false)).toBe("1 custodied action loaded for this account, newest first.");
+    expect(activityTakeaway(1, 0, false)).toBe("1 chain action loaded for this account, newest first.");
     expect(activityTakeaway(4, 2, false)).toBe(
-      "6 custodied actions loaded for this account: 4 with custodied header time, newest " +
+      "6 chain actions loaded for this account: 4 with a block time, newest " +
         "first; 2 untimed rows follow, in an order that is not chronology.",
     );
+  });
+
+  // The card and the Activity page name the same rows alike: chain actions, ordered by block time. The builder's
+  // custody word never reaches a reader on any of the card's lines, the hover included.
+  test("the card speaks Activity's one vocabulary: chain actions and a block time on every line, never the custody word", () => {
+    expect(ACTIVITY_CARD_QUALIFIER).toBe("this account's chain actions · newest first, by block time");
+    expect(UNTIMED_WHEN_TITLE).toBe("no block time yet — the block number stands in");
+    const lines = [
+      ACTIVITY_CARD_QUALIFIER,
+      UNTIMED_WHEN_TITLE,
+      activityEmptyText(false, null),
+      activityTakeaway(3, 0, true),
+      activityTakeaway(5, 1, false),
+      activityTakeaway(0, 2, false),
+    ];
+    for (const line of lines) expect(line).not.toMatch(/custod/i);
+    for (const line of [ACTIVITY_CARD_QUALIFIER, activityEmptyText(false, null), activityTakeaway(5, 1, false)]) expect(line).toContain("chain action");
   });
 
   test("no timed rows: NO newest-first claim survives anywhere in the sentence", () => {
     const line = activityTakeaway(0, 2, false);
     expect(line).toBe(
-      "2 custodied actions loaded for this account, none with a custodied header time — " +
+      "2 chain actions loaded for this account, none with a block time yet — " +
         "their order is not chronology.",
     );
     expect(line).not.toContain("newest first");

@@ -2,7 +2,15 @@
 
 import { KitTable, SectionHead, StatusPill, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { activityEmptyText, activityFailureText, activityRows, activityTakeaway, type ActivityScale } from "@/lib/activity-rows";
+import {
+  ACTIVITY_CARD_QUALIFIER,
+  UNTIMED_WHEN_TITLE,
+  activityEmptyText,
+  activityFailureText,
+  activityRows,
+  activityTakeaway,
+  type ActivityScale,
+} from "@/lib/activity-rows";
 import { ACTIVITY_AMOUNT_HEADER } from "@/lib/activity-view";
 import { useAddressActivity } from "@/lib/address-lookup";
 import { RAW_UNITS_TAG } from "@/lib/feed-view";
@@ -26,7 +34,7 @@ export function ActivityTable({ addr, valid, scale }: { addr: string; valid: boo
     key: r.key,
     dim: !r.timed,
     cells: {
-      when: <span title={r.timed ? undefined : "no custodied header time yet — the block number stands in"}>{r.when}</span>,
+      when: <span title={r.timed ? undefined : UNTIMED_WHEN_TITLE}>{r.when}</span>,
       action: (
         <>
           <span title={r.actionTitle}>{r.action}</span>
@@ -65,7 +73,7 @@ export function ActivityTable({ addr, valid, scale }: { addr: string; valid: boo
   }));
   return (
     <section>
-      <SectionHead title="Activity" qualifier="this account's chain actions · custodied times, newest first" />
+      <SectionHead title="Activity" qualifier={ACTIVITY_CARD_QUALIFIER} />
       <KitTable testId="inspector-activity" columns={COLUMNS} rows={kitRows} emptyText={activityEmptyText(activity.loading, activity.error)} />
       {/* The table's empty words print only with no rows; a page failure beside loaded rows has its own line, so it is never lost. */}
       {activity.error !== null && rows.length > 0 && (

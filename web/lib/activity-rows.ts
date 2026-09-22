@@ -111,24 +111,34 @@ export function activityRows(events: readonly ChainEvent[], scale?: ActivityScal
 }
 
 /**
+ * The card's qualifier, in the Activity page's words for the same rows: they are chain actions, listed newest first
+ * by block time. The builder's custody vocabulary stays in the code; a reader sees the page's one vocabulary.
+ */
+export const ACTIVITY_CARD_QUALIFIER = "this account's chain actions · newest first, by block time";
+
+/** An untimed row's hover: its block has no block time yet, so the block number stands in — never an invented clock. */
+export const UNTIMED_WHEN_TITLE = "no block time yet — the block number stands in";
+
+/**
  * The activity section's takeaway: the feed orders CUSTODIED header
  * times newest-first, but null-time rows form a deterministic untimed TAIL
  * whose internal order is explicitly not chronology — so "newest first" may
  * only be claimed over the rows that carry a time. An untimed row read as
  * "older" is a wrong answer; this sentence refuses to license that reading.
+ * It speaks the Activity page's words: chain actions, and a block time.
  */
 export function activityTakeaway(timed: number, untimed: number, hasMore: boolean): string {
   const total = timed + untimed;
   const more = hasMore ? " · more exist behind the cursor" : "";
-  const loaded = `${plural(total, "custodied action")} loaded for this account`;
+  const loaded = `${plural(total, "chain action")} loaded for this account`;
   if (untimed === 0) {
     return `${loaded}, newest first${more}.`;
   }
   if (timed === 0) {
-    return `${loaded}, none with a custodied header time — their order is not chronology${more}.`;
+    return `${loaded}, none with a block time yet — their order is not chronology${more}.`;
   }
   return (
-    `${loaded}: ${groupInt(timed)} with custodied header time, newest first; ${plural(untimed, "untimed row")} ` +
+    `${loaded}: ${groupInt(timed)} with a block time, newest first; ${plural(untimed, "untimed row")} ` +
     `${untimed === 1 ? "follows" : "follow"}, in an order that is not chronology${more}.`
   );
 }
@@ -137,7 +147,7 @@ export function activityTakeaway(timed: number, untimed: number, hasMore: boolea
 export function activityEmptyText(loading: boolean, error: Error | null): string {
   if (loading) return "Loading activity…";
   if (error !== null) return `Activity unavailable: ${error.message}`;
-  return "No custodied actions for this account.";
+  return "No chain actions for this account.";
 }
 
 /**

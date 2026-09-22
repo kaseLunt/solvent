@@ -253,8 +253,13 @@ test("activity: six rows, a null block_time falls back to the block number, the 
   // The Debt Manager's own rows: borrows and a repay, and the supplier side's record-only supply and withdraw.
   await expect(table.locator("tbody tr td:nth-child(2)")).toHaveText(["Borrow", "Supply", "Withdraw", "Supply", "Borrow", "Repay"]);
   await expect(table.locator("tbody tr").last()).toContainText("block 155,315,000");
-  await expect(page.getByTestId("inspector-activity-takeaway")).toContainText("6 custodied actions loaded for this account: 5 with custodied header time, newest first; 1 untimed row follows");
+  // The card speaks Activity's words for the same rows: chain actions and a block time, never the builder's custody word.
+  await expect(table.locator("tbody tr").last().locator("td").first().locator("span[title]")).toHaveAttribute("title", "no block time yet — the block number stands in");
+  const card = page.locator("section", { has: table });
+  await expect(card.locator("h2")).toContainText("this account's chain actions · newest first, by block time");
+  await expect(page.getByTestId("inspector-activity-takeaway")).toContainText("6 chain actions loaded for this account: 5 with a block time, newest first; 1 untimed row follows");
   await expect(page.getByTestId("inspector-activity-takeaway")).not.toContainText("(s)");
+  await expect(card).not.toContainText("custodied");
   await expect(page.getByTestId("inspector-activity-more")).toHaveCount(0);
 });
 
@@ -598,8 +603,8 @@ test("trust: the ticked label is about the WHOLE run — a Cash weld that is who
     },
     // The wire's own proof status refuses a receipt that passes on its numbers.
     { manifest: { ...EVIDENCE_MANIFEST, proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } }, state: "warn", words: "29/29 Cash rows · the service does not vouch for this receipt" },
-    // No gated rows beside a whole Cash weld: nothing was compared.
-    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 0, gated_rows: 0 } }, state: "dim", words: "the run gated no rows · nothing was compared" },
+    // No gated rows beside a whole Cash weld: nothing was compared, in Verification's words for the same receipt.
+    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 0, gated_rows: 0 } }, state: "dim", words: "the run checked no rows · nothing was compared" },
   ];
   for (const body of bodies) {
     await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
@@ -610,6 +615,8 @@ test("trust: the ticked label is about the WHOLE run — a Cash weld that is who
     await expect(receipt).toHaveAttribute("data-state", body.state);
     await expect(receipt).toContainText("Pinned reconcile run");
     await expect(receipt).not.toContainText("matched the chain");
+    // The wire's gated rows are "checked rows" on the item's face, as on Verification; the builder word never shows.
+    await expect(receipt).not.toContainText("gated");
     await page.unrouteAll({ behavior: "ignoreErrors" });
   }
 });

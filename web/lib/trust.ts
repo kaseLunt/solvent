@@ -239,8 +239,11 @@ const RECEIPT_PENDING = "receipt pending";
 const RECEIPT_UNAVAILABLE = "receipt unavailable";
 /** A manifest that answered and carries no receipt: the wire's own absence, worded as one. */
 const RECEIPT_ABSENT = "no committed receipt";
-/** Verification's words for a run that gated no rows: it compared nothing, so it proves nothing. */
-const RECEIPT_EMPTY = "the run gated no rows · nothing was compared";
+/**
+ * Verification's words for a run whose receipt counts no gated rows: it compared nothing, so it proves nothing. The
+ * wire's `gated` rows are "checked rows" on every public string, so the two pages word one receipt state alike.
+ */
+const RECEIPT_EMPTY = "the run checked no rows · nothing was compared";
 
 /** The Cash weld's tally when the receipt carries one, else the gated totals — the figures the item's detail counts. */
 function countedRows(reconcile: ReconcileSummary): { readonly cash: string; readonly compared: number; readonly exact: number } {
