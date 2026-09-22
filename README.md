@@ -68,9 +68,11 @@ The web app has eight pages:
 ```
 
 - **Positions are derived state.** Raw chain logs are stored as the source of truth and positions
-  are derived from them, except Debt Manager collateral: it is the live token balance of each
-  borrower's Safe, which no event tracks, so the indexer reads it with periodic on-chain view
-  sweeps (`internal/snapshot`).
+  are derived from them, with two exceptions on the Debt Manager. Its collateral is the live
+  token balance of each borrower's Safe, which no event tracks, so the indexer reads it with
+  periodic on-chain view sweeps (`internal/snapshot`). And the debt its migration genesis seeded
+  is carried in each migration transaction's calldata (the log carries only the token and a
+  count), so the deriver reads that calldata (`internal/derive/debtmanager.go`).
 - **Refusals are rows, not errors.** A position that cannot be valued honestly is served as a
   refused row naming its reason and counted in every containing aggregate's refusal count
   (`api/openapi.yaml`, `cmd/api/handlers.go`).
@@ -86,11 +88,28 @@ adversarial reviewer (see [How the work is reviewed](#how-the-work-is-reviewed))
 | --- | --- | --- |
 | **Reorgs of any depth are recovered.** When a stored cursor's block hash no longer matches the chain, the walker walks its stored logs downward until one's block hash matches the live chain and rewinds there; forks are suffixes, so this is safe at any depth, unlike a fixed-distance rewind. | `internal/ingest/walker.go` (`rewindToVerifiedAncestor`), [D-003](roadmap/decisions/D-003-verified-ancestor-reorg-protocol.md), `TestDeepForkWalksBackToVerifiedAncestor` and the walker's rewind suite | `internal/ingest/**` approved at `7e58317` (Phase 2, round 18, session `019fa249-0fdf-7590-9e46-3b6109fbf604`); Phase 2 exit whole-branch review closed approved (session `019fa6bf-1916-7973-9f98-98af9dddd879`) — [ledger](.superpowers/sdd/progress-phase2.md) |
 | **The derived state matches the chain.** The committed reconcile receipt; figures [below](#the-reconcile-receipt). | `cmd/reconcile`, [drift-report.json](roadmap/evidence/artifacts/w1-reconcile/drift-report.json), [receipt](roadmap/evidence/receipts/E-w2-acceptance.md) | Phase 3 Task 6 closed approved (round 15, session `019fb5d3-6577-7de2-867c-fdf0d0c67a4a`); the pre-receipt review train closed approved at round 9 — [ledger](.superpowers/sdd/progress-phase3.md), [receipt](roadmap/evidence/receipts/E-w2-acceptance.md) |
-| **Money is exact integers.** The wire carries decimal strings; `internal/risk` contains no float type or float literal and performs no I/O; `@solvent/client` parses the strings to `bigint` and throws rather than rounds. | `TestNoFloatAnywhereInNonTestSources` (a go/types check), `TestPackageIsIOFree`, `packages/client-ts` | `internal/risk` (Phase 3 Task 4, session `019faf40-9500-7e83-aa31-be0e9fa11467`); `cmd/api` (Task 7, session `019fb272-25d7-7313-80dc-265dc1e4bc2f`); the client (Task 8, session `019fb431-48bd-7920-9a7e-2d95806d3ef1`) — [ledger](.superpowers/sdd/progress-phase3.md) |
+| **Money is exact integers.** The wire carries decimal strings; `internal/risk` contains no float type or float literal and performs no I/O; `@solvent/client` parses the strings to `bigint` and throws rather than rounds. | `TestNoFloatAnywhereInNonTestSources` (a go/types check), `TestPackageIsIOFree`, `packages/client-ts` | `internal/risk` (Phase 3 Task 4, session `019faf40-9500-7e83-aa31-be0e9fa11467`); `cmd/api` (Task 7, session `019fb272-25d7-7313-80dc-265dc1e4bc2f`); the client (Task 8, approved at `15becd9`, session `019fb431-48bd-7920-9a7e-2d95806d3ef1`) — [ledger](.superpowers/sdd/progress-phase3.md). Two later changes to the client's decimal module, `529642d` (a wider parameter type for `positionVerdict`) and `3b6bcf4` (`assertScale` also refuses negative zero), have no closing approval recorded |
 | **The API, the contract and the client agree.** `cmd/api`'s tests validate handler responses against `api/openapi.yaml` with kin-openapi and prove the validator can reject; the contract's run-book examples are bodies the production handlers serve; the client's types are generated from the contract and its fixtures are checked contract-valid. | `cmd/api/fixture_db_test.go` (`loadContract`), `TestContractValidatorCanReject`, `TestRunBookExampleIsAServedBody`, `packages/client-ts/test/fixtures.test.ts` | `cmd/api` (Task 7) and the client (Task 8) as above; the contract's examples (round 39) and contract 1.8.0 (round 67) each closed approved — [ledger](.superpowers/sdd/progress-phase3.md) |
-| **Each engine's verdict is computed by that engine's own rule.** The Aave health factor and the Debt Manager's strict boolean are separate code paths; every rounding direction is pinned in tests by on-chain integers read at hash-bound blocks. | `internal/risk` (see its package comment), `cmd/riskd`, `recon/p3-probes.md` | `internal/risk` (Task 4, above); `cmd/riskd` (Task 5, session `019fb0f0-3222-7b53-8ad1-411a4936121c`); the later risk waves each closed by an approving round — [ledger](.superpowers/sdd/progress-phase3.md) |
+| **Each engine's verdict is computed by that engine's own rule.** The Aave health factor and the Debt Manager's strict boolean are separate code paths; every rounding direction is pinned in tests by on-chain integers read at hash-bound blocks. | `internal/risk` (see its package comment), `cmd/riskd`, `recon/p3-probes.md` | `internal/risk` (Task 4, above; its later changes are listed under this table); `cmd/riskd` (Task 5, session `019fb0f0-3222-7b53-8ad1-411a4936121c`) — [ledger](.superpowers/sdd/progress-phase3.md) |
 | **riskd and the API make zero RPC calls; the API never writes.** Import-graph tests keep every chain client out of both binaries; a scan of the API's SQL finds no writing statement; the API never migrates. | `TestRiskdLinksNoChainClient`, `TestAPILinksNoChainClient`, `TestAPIIssuesNoWritingSQL`, `TestAPINeverMigrates` | `cmd/api` (Task 7) and `cmd/riskd` (Task 5), as above |
 | **Replays against forked mainnet (opt-in).** `make test-fork-replay` checks derived Debt Manager borrower state bit-exactly against direct view calls on a local anvil fork of OP at a hash-pinned block; `make test-pipeline-replay` drives the whole ingest, decode and derive pipeline over three legs on anvil forks of Ethereum, one of them a manufactured governance change that is reorged. | `internal/forkreplay`, `internal/pipelinereplay` | fork replay (Phase 2 Task 10, round 22, session `019fa60e-7d2c-7ae2-8aae-ebac9fbf8f0d`) — [ledger](.superpowers/sdd/progress-phase2.md); pipeline replay (Phase 3 Tasks 2+3, session `019fb007-f18d-7ef3-92f5-dd969dfbff33`) — [ledger](.superpowers/sdd/progress-phase3.md) |
+
+**Later changes to `internal/risk`.** `internal/risk` changed after its Task 4 approval. What
+the [ledger](.superpowers/sdd/progress-phase3.md) records for each change:
+
+- `559828c`, the Aave health factor's rounding (the debt leg rounds up, and the division follows
+  the pool's half-up `wadDiv`). Codex confirmed its arithmetic (session
+  `019fb1a6-ec65-7790-8df3-178d7113d424`) and returned documentation findings, fixed inside
+  `internal/risk` by `c680f78` and `d64c9cb`; no closing approval is recorded for the change.
+- `9b330c7`, the scenario matrices claim every asset the chain configures. Reviewed with the
+  reconcile proof surface, a review that closed approved at its round 3.
+- `9ee3207`, the Debt Manager's USD scale is a fixed constant, never inferred from prices.
+  Closed approved at round 7 of that same review train.
+- `e4d9b03`, the Aave verdict is set on every computed row, never left absent. Its train went to
+  Codex rounds 10 and 11, whose findings, all in the web, were fixed; no closing approval is
+  recorded for it.
+- `c780b2c` and `196356a`, the ETH price-shock scenarios at −40%, −50% and −60%. Closed approved
+  at round 42.
 
 **Built and tested, not listed above.** The web app has unit specs on its view models in
 `web/lib` and Playwright end-to-end specs, and it has been through adversarial review rounds, but
@@ -143,7 +162,7 @@ go run ./cmd/riskd          # writes a risk batch whenever the indexed state mov
 ```
 
 ```sh
-make run-api                # REST + SSE on :8080; needs only a database URL
+make run-api                # REST + SSE on :8080; reads the same .env
 ```
 
 ```sh
@@ -153,18 +172,23 @@ npm run dev                 # http://localhost:3000; reads the API at NEXT_PUBLI
                             # (default http://localhost:8080)
 ```
 
-riskd prefers `SOLVENT_RISKD_DATABASE_URL` (the `solvent_riskd` role migration 00013 creates:
-read-only on the indexer's tables) and the API prefers `SOLVENT_API_DATABASE_URL` (for a
-SELECT-only role); both fall back to `SOLVENT_DATABASE_URL`, and riskd logs a warning when it
-does. The served app has no demo mode: with no API running, the Book, Scenarios, History,
-Activity and Verification pages each say in their headline what they could not fetch. The demo
-dataset exists only as test fixtures, which the Playwright specs and the screenshot script route
-in place of the API.
+riskd and the API both load `config/contracts.json` at startup, so `SOLVENT_DATABASE_URL`,
+`SOLVENT_RPC_OP` and `SOLVENT_RPC_ETH` must be set for each of them, even though neither binary
+dials an RPC: each refuses to start without them, whatever its own database variable says. For
+the database connection itself, riskd prefers `SOLVENT_RISKD_DATABASE_URL` (the `solvent_riskd`
+role, which migration 00013 creates without a login: read-only on the indexer's tables) and the
+API prefers `SOLVENT_API_DATABASE_URL` (for a SELECT-only role). Either one unset, that binary
+connects with `SOLVENT_DATABASE_URL`, and each logs a warning when it does.
+
+The served app has no demo mode: with no API running, the Book, Scenarios, History, Activity and
+Verification pages each say in their headline what they could not fetch. The demo dataset exists
+only as test fixtures, which the Playwright specs and the screenshot script route in place of the
+API.
 
 ### Tests
 
 Two `cmd/reconcile` tests read ether.fi's cash-v3 contract source, which is not committed here.
-Clone it at the commit the tests were written against, then run the suites:
+Clone it at the commit these tests pass against, then run the suites:
 
 ```sh
 git clone https://github.com/etherfi-protocol/cash-v3 recon/cash-v3
@@ -183,8 +207,10 @@ make test                                  # Go; DB-backed tests use solvent_tes
   replay reads your backfilled `solvent` database; the pipeline replay derives its own scratch
   databases from `TEST_DATABASE_URL`.
 - `npm run test:e2e` runs the unit project (no browser) and the end-to-end project against a
-  production build on port 3111. The pixel pins in `web/tests/e2e/screenshots.spec.ts` skip when
-  `CI` is set (font rendering differs on CI runners).
+  production build on port 3111. The pixel pins in `web/tests/e2e/screenshots.spec.ts` compare
+  against baselines rendered on one development machine, so on any other machine they can fail
+  on font rendering alone. `CI=1 npm run test:e2e` skips them; with `CI` set, Playwright also
+  starts its own server on port 3111 and will not reuse one already running there.
 
 ## Screenshots
 
