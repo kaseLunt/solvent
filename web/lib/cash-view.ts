@@ -391,13 +391,22 @@ export interface LegacyView {
   /** Absent under a withheld engine, and where the engine computed no position and refused some: a sum over nothing. */
   readonly debt: MoneyReading;
   readonly eligibleDebt: MoneyReading;
-  /** Null when the wire serves no histogram for the engine, or withholds it. */
+  /**
+   * Null when the wire serves no histogram for the engine, or withholds it — and where the engine computed no position
+   * and refused some: the buckets count computed positions only, so each zero counts nothing.
+   */
   readonly bands: LegacyBand[] | null;
+  /** What the fold prints in place of a served histogram whose zeros count nothing; null wherever the bars stand. */
+  readonly bandsNote: string | null;
   /** The histogram alone is withheld, with this plain cause. */
   readonly histogramWithheld: string | null;
   /** The collapsed section's one line. */
   readonly summaryLine: string;
 }
+
+/** The legacy fold's line in place of the histogram, over a market the engine computed none of. */
+export const LEGACY_BANDS_NONE_COMPUTED =
+  "No position was computed this batch: the histogram counts computed positions only, so no bucket holds a count.";
 
 export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView | null {
   const engine = legacy.engine;
@@ -416,6 +425,7 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
       debt: ABSENT,
       eligibleDebt: ABSENT,
       bands: null,
+      bandsNote: null,
       histogramWithheld: null,
       summaryLine: `Legacy · Aave v3 market — withheld this batch: ${withheld}`,
     };
@@ -426,8 +436,8 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
   const liquidatable = readWirePopulation(engine.liquidatable_positions, "engines[legacy].liquidatable_positions");
   const refused = readWirePopulation(engine.refused_positions, "engines[legacy].refused_positions");
   // The aggregate sums debt, and counts liquidatable positions, over computed positions only: with none computed and
-  // some refused, its zeros are no position's figures. The line, the Debt tile and the Liquidatable tile read this one
-  // decision, and none prints them. A market with no positions refused nothing: its zero is its own.
+  // some refused, its zeros are no position's figures. The line, the Debt tile, the Liquidatable tile and the histogram
+  // read this one decision, and none prints them. A market with no positions refused nothing: its zero is its own.
   const nothingComputed = computed === 0 && refused > 0;
   const debt = nothingComputed ? ABSENT : readWireMoney(engine.total_debt, decimals, "engines[aave_v3_etherfi].total_debt");
   const badDebt = legacy.badDebt;
@@ -442,7 +452,8 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
   const histogram = legacy.histogram;
   const histogramWithheld =
     histogram !== null && histogram.refused ? plainCause(histogram.refusal?.code ?? "", histogram.refusal?.detail ?? "") : null;
-  const bands =
+  // Every bucket count is classified, whatever the market computed: a malformed count refuses by name.
+  const served =
     histogram === null || histogramWithheld !== null
       ? null
       : histogram.buckets.map((b, i) => ({
@@ -450,6 +461,10 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
           label: b.label,
           count: readWirePopulation(b.count, `hf_histogram[aave_v3_etherfi].buckets[${String(i)}].count`),
         }));
+  // The buckets count computed positions only (a refused one is counted apart from them): with none computed and some
+  // refused, every bucket's zero counts nothing, so no bar is drawn and the fold says why in its place.
+  const bands = nothingComputed ? null : served;
+  const bandsNote = nothingComputed && served !== null ? LEGACY_BANDS_NONE_COMPUTED : null;
   const debtWord =
     nothingComputed
       ? "debt not computed"
@@ -474,6 +489,7 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
     debt,
     eligibleDebt,
     bands,
+    bandsNote,
     histogramWithheld,
     summaryLine: `Legacy · Aave v3 market — ${finding} · ${debtWord} · ${n(refused)} refused`,
   };

@@ -8,7 +8,7 @@ import { expect, test } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
 import type { CashBookReading } from "../../lib/cash-book";
 import { readCashRow } from "../../lib/cash-rows";
-import { deriveCashView, deriveLegacyView, moneyText, readWireMoney } from "../../lib/cash-view";
+import { deriveCashView, deriveLegacyView, LEGACY_BANDS_NONE_COMPUTED, moneyText, readWireMoney } from "../../lib/cash-view";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { BOOK, BOOK_ENGINE_REFUSED, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { DEMO_BOOK } from "../fixtures/demo";
@@ -503,4 +503,36 @@ test("the legacy fold reads one decision over nothing computed — its line, its
   expect(empty?.liquidatable).toBe(0);
   // Computed positions: the count stands, zero included.
   expect(deriveLegacyView(legacyWith({ positions: 2, computed: 1, liquidatable: 0, refused: 1 }))?.liquidatable).toBe(0);
+});
+
+test("over nothing computed the legacy histogram draws no bar — its buckets count computed positions only, so each zero counts nothing — and the fold says why in the lib's words; an empty or a computed market keeps its bars", () => {
+  const servedHistogram = BOOK.hf_histogram.engines.find((e) => e.engine === "aave_v3_etherfi");
+  if (servedHistogram === undefined) throw new Error("fixture invariant: the committed book serves the legacy histogram");
+  // Every position refused while the engine is served: the wire serves the histogram whole, every bucket at zero,
+  // and counts the refused positions apart from the buckets.
+  const zeroed = { ...servedHistogram, refused_count: 3, buckets: servedHistogram.buckets.map((b) => ({ ...b, count: 0 })) };
+  const noneInput = { ...legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }), histogram: zeroed };
+  const none = deriveLegacyView(noneInput);
+  expect(none?.bands).toBeNull();
+  expect(none?.bandsNote).toBe(LEGACY_BANDS_NONE_COMPUTED);
+  expect(LEGACY_BANDS_NONE_COMPUTED).toBe(
+    "No position was computed this batch: the histogram counts computed positions only, so no bucket holds a count.",
+  );
+  expect(none?.bandsNote ?? "").not.toMatch(/\b0\b/);
+  // Its counts are still classified: a malformed bucket refuses by name whatever the market computed.
+  const fractional = { ...zeroed, buckets: zeroed.buckets.map((b, i) => (i === 0 ? { ...b, count: 1.5 } : b)) };
+  expect(() => deriveLegacyView({ ...noneInput, histogram: fractional })).toThrow(/buckets\[0\]\.count/);
+  // A histogram withheld on its own names its cause, and no second note stands beside it.
+  const withheldHistogram = { ...zeroed, refused: true, refusal: { engine: "aave_v3_etherfi", code: "SWEEP_FAILED", detail: "", note: "" } };
+  expect(deriveLegacyView({ ...noneInput, histogram: withheldHistogram })).toMatchObject({ bands: null, bandsNote: null, histogramWithheld: "collateral sweep failed" });
+  // No histogram served: no note stands in for one.
+  expect(deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }))?.bandsNote).toBeNull();
+  // An empty market refused nothing: its zero buckets are its own finding.
+  const empty = deriveLegacyView({ ...legacyWith({ positions: 0, computed: 0, liquidatable: 0, refused: 0, debt: "0" }), histogram: { ...zeroed, refused_count: 0 } });
+  expect(empty?.bands?.map((b) => b.count)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+  expect(empty?.bandsNote).toBeNull();
+  // A computed market keeps every bar, zeros included.
+  const computed = deriveLegacyView({ ...legacyWith({ positions: 2, computed: 1, liquidatable: 0, refused: 1 }), histogram: servedHistogram });
+  expect(computed?.bands?.map((b) => b.count)).toEqual([0, 0, 0, 1, 0, 0, 0, 0]);
+  expect(computed?.bandsNote).toBeNull();
 });

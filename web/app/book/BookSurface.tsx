@@ -6,7 +6,15 @@ import kit from "@/components/kit/kit.module.css";
 import { useCashBook } from "@/lib/cash-book";
 import { BAD_DEBT_NOT_REPORTED } from "@/lib/cash-refusal";
 import { NEAR_CAP_BAND_IDS } from "@/lib/cash-rows";
-import { attentionFinding, bandsFinding, bandsSoFar, liquidatableTile, liquidatableTileLabel, nearCapTile } from "@/lib/cash-summary";
+import {
+  attentionFinding,
+  bandsFinding,
+  bandsSoFar,
+  liquidatableTile,
+  liquidatableTileLabel,
+  medianRoomTile,
+  nearCapTile,
+} from "@/lib/cash-summary";
 import { deriveCashView, deriveLegacyView, malformedSub, moneyText } from "@/lib/cash-view";
 import { useMetaConstants } from "@/lib/meta";
 import { BookLegacy } from "./BookLegacy";
@@ -47,10 +55,11 @@ export function BookSurface() {
     cash.walkFailure === null
       ? null
       : { message: cash.walkFailure.message, retryable: cash.walkFailure.register === "transport" };
-  // The Debt, Liquidatable and Near-cap tiles are the lib's decision — figure, sub line, register — printed as given.
+  // The Debt, Liquidatable, Near-cap and Median tiles are the lib's decision — figure, sub, register — printed as given.
   const debtTile = view.debtTile;
   const liquidatable = liquidatableTile(summary, absentWord);
   const nearCap = nearCapTile(summary, absentWord);
+  const median = medianRoomTile(summary, absentWord);
 
   return (
     <div className={styles.page} aria-busy={walking ? "true" : undefined}>
@@ -107,18 +116,10 @@ export function BookSurface() {
         <KpiTile
           testId="book-kpi-median"
           label="Median room"
-          value={summary === null || walkStopped !== null ? "—" : (summary.percentiles.median ?? "—")}
-          sub={
-            summary === null
-              ? absentWord
-              : walkStopped !== null
-                ? "walk stopped"
-                : summary.percentiles.p10 === null
-                  ? "of borrow cap"
-                  : `of borrow cap · 10th pct ${summary.percentiles.p10}`
-          }
-          tone={refusedTiles || walkStopped !== null ? "refused" : "neutral"}
-          pending={walking}
+          value={median.value}
+          sub={median.sub}
+          tone={median.tone}
+          pending={median.pending}
         />
         <KpiTile
           testId="book-kpi-baddebt"

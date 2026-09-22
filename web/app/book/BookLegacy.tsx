@@ -11,8 +11,9 @@ export interface BookLegacyProps {
  * The ether.fi Aave v3 market — shown for completeness, labeled legacy, never
  * added to Cash. A withheld engine names its cause and prints no population,
  * no debt and no histogram: a refusal is never a row of zeros. Where the
- * engine computed no position and refused some, the view holds no debt and
- * no liquidatable count, and those tiles say not computed as the line does.
+ * engine computed no position and refused some, the view holds no debt, no
+ * liquidatable count and no bars: those tiles say not computed as the line
+ * does, and the view's note stands where the histogram would.
  */
 export function BookLegacy({ view }: BookLegacyProps) {
   if (view === null) return null;
@@ -68,6 +69,11 @@ export function BookLegacy({ view }: BookLegacyProps) {
       {view.histogramWithheld !== null && (
         <p className={styles.note} data-testid="book-legacy-histogram-withheld">
           Histogram withheld: {view.histogramWithheld}.
+        </p>
+      )}
+      {view.bandsNote !== null && (
+        <p className={styles.note} data-testid="book-legacy-bands-note">
+          {view.bandsNote}
         </p>
       )}
       {bands.length > 0 && (

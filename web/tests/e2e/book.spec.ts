@@ -5,6 +5,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
 import { readCashRow } from "../../lib/cash-rows";
 import {
+  bandsFinding,
   belowLineToggleLabel,
   liquidatableTileLabel,
   liquidatableTileSub,
@@ -12,6 +13,7 @@ import {
   summarizeCash,
   tileBoundNote,
 } from "../../lib/cash-summary";
+import { LEGACY_BANDS_NONE_COMPUTED } from "../../lib/cash-view";
 import { belowLineSentence } from "../../lib/materiality";
 import { BATCH_SUPERSEDED, BOOK, BOOK_ENGINE_REFUSED, BOOK_ERROR_UNAVAILABLE, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { DEMO_BOOK, DEMO_META, DEMO_POSITIONS_DM_PAGE_1, DEMO_POSITIONS_DM_PAGE_2 } from "../fixtures/demo";
@@ -207,10 +209,16 @@ test("a Cash book whose every account the engine refused one by one: no verdict,
   const refusedOnly = POSITIONS_DM_PAGE_1.positions.filter((p) => p.status !== "computed");
   expect(refusedOnly).toHaveLength(1);
   const noneComputed = { positions: 1, computed_positions: 0, refused_positions: 1, liquidatable_positions: 0, total_debt: "0", total_collateral: "0" };
+  // The histogram buckets computed positions only and counts a refused one apart; the bad-debt line is the waterfall's
+  // unshocked point, which holds a row only for an engine with a computed position — over nothing computed, none.
   const book = {
     ...BOOK,
     engines: BOOK.engines.map((e) => ({ ...e, ...noneComputed })),
-    hf_histogram: { ...BOOK.hf_histogram, engines: BOOK.hf_histogram.engines.map((h) => ({ ...h, buckets: h.buckets.map((b) => ({ ...b, count: 0 })) })) },
+    hf_histogram: {
+      ...BOOK.hf_histogram,
+      engines: BOOK.hf_histogram.engines.map((h) => ({ ...h, refused_count: 1, buckets: h.buckets.map((b) => ({ ...b, count: 0 })) })),
+    },
+    bad_debt: [],
   };
   await mockCommitted(page, book);
   // Registered last, so it answers ahead of the committed page: the walk's one page serves the refused row alone.
@@ -218,7 +226,8 @@ test("a Cash book whose every account the engine refused one by one: no verdict,
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("No Cash account could be computed this batch.");
   // The three tiles a sum over computed positions would fill: a dash in the refused register, and the words why.
-  for (const id of ["debt", "liquidatable", "near"]) {
+  // The median room reads the same decision: no room was read, and the tile says why rather than a neutral dash.
+  for (const id of ["debt", "liquidatable", "near", "median"]) {
     const tile = page.getByTestId(`book-kpi-${id}`);
     await expect(tile).toHaveAttribute("data-tone", "refused");
     await expect(tile).toContainText("—");
@@ -228,6 +237,28 @@ test("a Cash book whose every account the engine refused one by one: no verdict,
   }
   // The census stands as served: one account, counted where the engine refused it.
   await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("1");
+  // No bad-debt line is served for the engine: the tile names the absence, never a zero.
+  await expect(page.getByTestId("book-kpi-baddebt")).toContainText("—");
+  await expect(page.getByTestId("book-kpi-baddebt")).not.toContainText("$0");
+  // The distance chart reads it too: the finding says no account was computed, and no bar prints "$0 · 0".
+  const distance = bandsFinding(
+    summarizeCash({
+      rows: refusedOnly.map((p) => readCashRow(refinePositionSummary(p))),
+      decimals: 6,
+      refusedPositions: 1,
+      walkComplete: true,
+      walkStopped: null,
+      walkStopKind: null,
+      refusedWhole: null,
+    }),
+  );
+  const bandsCard = page.getByTestId("book-bands-card");
+  await expect(bandsCard).toContainText(`${distance.figure}${distance.rest}`);
+  await expect(bandsCard).toContainText("— within 10% of the cap: no account computed");
+  await expect(bandsCard).not.toContainText("$0");
+  await expect(page.getByTestId("book-bands").locator("[data-band]")).toHaveCount(7);
+  await expect(page.getByTestId("book-bands").locator("[data-count]")).toHaveCount(0);
+  await expect(page.getByTestId("book-bands-note")).toHaveText(distance.barsNote ?? "");
   // The legacy fold reads one decision: its line and its tiles say not computed, and no zero stands in for either.
   const legacy = page.getByTestId("book-legacy");
   await expect(legacy.locator("summary")).toHaveText("Legacy · Aave v3 market — 1 position · debt not computed · 1 refused");
@@ -240,6 +271,12 @@ test("a Cash book whose every account the engine refused one by one: no verdict,
     await expect(tile).not.toContainText(/\$0|\b0\b/);
   }
   await expect(page.getByTestId("book-legacy-kpi-liquidatable")).toContainText("not computed");
+  // Its histogram's zeros count nothing either: no bar is drawn, and the fold says why in the lib's words.
+  await expect(page.getByTestId("book-legacy-bands")).toHaveCount(0);
+  await expect(page.getByTestId("book-legacy-bands-note")).toHaveText(LEGACY_BANDS_NONE_COMPUTED);
+  await expect(page.getByTestId("book-legacy-bands-note")).toHaveText(
+    "No position was computed this batch: the histogram counts computed positions only, so no bucket holds a count.",
+  );
 });
 
 test("the Cash engine withheld whole: refused headline, refused tiles, nothing rendered as zero — the card's placeholder counts print nowhere", async ({ page }) => {

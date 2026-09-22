@@ -15,6 +15,7 @@ import {
   liquidatableTile,
   liquidatableTileLabel,
   liquidatableTileSub,
+  medianRoomTile,
   nearCapTile,
   nearCapToggleLabel,
   summarizeCash,
@@ -245,7 +246,7 @@ test("the distance chart's bars keep the card's own law: a band the walk has rea
   expect(pending).toHaveLength(7);
   for (const band of pending) expect(band).toMatchObject({ count: null, debt: null });
   // Accounts read with no debt between them: the count is a positive read, the dollars are still not a claimed zero.
-  const debtless = bandsSoFar({ whole: false, bands: [{ id: "50-plus", label: "≥50%", count: 3, debt: 0n }] });
+  const debtless = bandsSoFar({ whole: false, computed: 3, notComputed: 0, bands: [{ id: "50-plus", label: "≥50%", count: 3, debt: 0n }] });
   expect(debtless).toEqual([{ id: "50-plus", label: "≥50%", count: 3, debt: null }]);
 });
 
@@ -447,6 +448,59 @@ test("the liquidatable tile states no total over nothing computed, and no zero t
   // A positive total beside refused accounts still stands: it counts the positions the engine computed liquidatable.
   const committed = summarizeCash({ rows, decimals: 6, refusedPositions: 1, ...settled });
   expect(liquidatableTileSub(committed, tileBoundNote(committed))).toBe("1 account · 0 more under $100 · 1 in all");
+});
+
+test("over a book the engine computed none of, the distance chart claims no zero: the figure is a dash, the finding and the bars say no account was computed, and no bar prints '$0 · 0'", () => {
+  const refusedRow = rows.find((r) => !r.computed);
+  if (refusedRow === undefined) throw new Error("fixture invariant: the committed page serves a refused row");
+  const LEAD = "Cash debt grouped by room under the borrow cap · bars are dollars, counts printed · ";
+  // Read whole, every account refused on its own: the bands group computed accounts only, so each band's zero counts
+  // nothing — the tiles beside the chart already refuse that zero, and the chart says the same.
+  const noneComputed = summarizeCash({ rows: [refusedRow], decimals: 6, refusedPositions: 1, ...settled });
+  expect(noneComputed.whole).toBe(true);
+  const finding = bandsFinding(noneComputed);
+  expect(finding).toEqual({
+    lead: LEAD,
+    figure: "—",
+    rest: " within 10% of the cap: no account computed",
+    barsNote: "No account was computed this batch: the bands group computed accounts only, so no bar holds a figure or a count.",
+  });
+  expect(`${finding.lead}${finding.figure}${finding.rest}${finding.barsNote ?? ""}`).not.toMatch(/\$0|\b0 accounts?\b/);
+  const bars = bandsSoFar(noneComputed);
+  expect(bars.map((b) => b.id)).toEqual(["breached", "0-2", "2-5", "5-10", "10-25", "25-50", "50-plus"]);
+  for (const band of bars) expect(band).toMatchObject({ count: null, debt: null });
+  // An empty book refused nothing: its zeros are the book's own findings, bars and figure alike.
+  const empty = summarizeCash({ rows: [], decimals: 6, refusedPositions: 0, ...settled });
+  expect(bandsFinding(empty)).toEqual({ lead: LEAD, figure: "$0", rest: " sits within 10% of the cap", barsNote: null });
+  for (const band of bandsSoFar(empty)) expect(band).toMatchObject({ count: 0, debt: 0n });
+  // Computed accounts beside a refused one: every band is the book's, zeros included, and nothing is qualified.
+  const committed = summarizeCash({ rows, decimals: 6, refusedPositions: 1, ...settled });
+  expect(bandsFinding(committed)).toEqual({ lead: LEAD, figure: "$0", rest: " sits within 10% of the cap", barsNote: null });
+  expect(bandsSoFar(committed).slice(1).every((b) => b.count === 0 && b.debt === 0n)).toBe(true);
+});
+
+test("the median room tile is the lib's decision: over a book the engine computed none of it is refused in the tiles' word — never the neutral dash of an empty book", () => {
+  const refusedRow = rows.find((r) => !r.computed);
+  if (refusedRow === undefined) throw new Error("fixture invariant: the committed page serves a refused row");
+  const noneComputed = summarizeCash({ rows: [refusedRow], decimals: 6, refusedPositions: 1, ...settled });
+  expect(medianRoomTile(noneComputed, "")).toEqual({ value: "—", sub: "no account computed", tone: "refused", pending: false });
+  // An empty book read whole holds no room to take a median of, and refused nothing: the neutral dash is its own.
+  const empty = summarizeCash({ rows: [], decimals: 6, refusedPositions: 0, ...settled });
+  expect(medianRoomTile(empty, "")).toEqual({ value: "—", sub: "of borrow cap", tone: "neutral", pending: false });
+  // No summary: the absence's own word, refused.
+  expect(medianRoomTile(null, "not computed")).toEqual({ value: "—", sub: "not computed", tone: "refused", pending: false });
+  // Walking: the median so far, busy. Stopped: a dash, the stop said, refused.
+  const walking = summarizeCash({ rows, decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: null, walkStopKind: null, refusedWhole: null });
+  const { median, p10 } = walking.percentiles;
+  if (median === null || p10 === null) throw new Error("fixture invariant: the committed page serves a computed row");
+  expect(medianRoomTile(walking, "")).toEqual({ value: median, sub: `of borrow cap · 10th pct ${p10}`, tone: "neutral", pending: true });
+  const stopped = summarizeCash({ rows, decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: "Failed to fetch", walkStopKind: "before-end", refusedWhole: null });
+  expect(medianRoomTile(stopped, "")).toEqual({ value: "—", sub: "walk stopped", tone: "refused", pending: false });
+  // The demo walk, read whole: the tile the Book prints.
+  const demo = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => readCashRow(refinePositionSummary(p)));
+  const read = summarizeCash({ rows: demo, decimals: 6, refusedPositions: 6, ...settled });
+  expect(medianRoomTile(read, "")).toEqual({ value: read.percentiles.median, sub: `of borrow cap · 10th pct ${read.percentiles.p10 ?? ""}`, tone: "neutral", pending: false });
+  expect(medianRoomTile(read, "")).toMatchObject({ value: "53.9%", sub: "of borrow cap · 10th pct 19.2%" });
 });
 
 test("the Book's walk tiles are the lib's decision in every register — the figure, its sub, its tone and its busy mark", () => {

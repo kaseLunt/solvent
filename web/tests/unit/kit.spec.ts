@@ -18,6 +18,9 @@
 //      toggle and the drawer are derived from the table's rows, through the
 //      functions the Book itself calls.
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   SPECIMEN_BASE_ROWS,
   SPECIMEN_BELOW_LINE_ROWS,
@@ -33,11 +36,14 @@ import {
 } from "../../app/styleguide/specimen-book";
 import type { IdentityChip } from "../../components/kit/IdentityChips";
 import type { VerdictHeaderProps } from "../../components/kit/VerdictHeader";
+import { belowLineToggleLabel } from "../../lib/cash-summary";
 import { humanUsd } from "../../lib/human-usd";
 import type { LabHeadline } from "../../lib/lab-headline";
 import { CHIP_TONE_CLASS, exactAriaLabel, exactValueMode, headerIdentity, IDENTITY_MISSING_CHIP, refusedChipSegments } from "../../lib/kit";
 import { materialityTier } from "../../lib/materiality";
 import { plainCause } from "../../lib/refusal-phrasebook";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 test.describe("the page answer's identity (§4) — the header never renders without it", () => {
   test("the header NEVER renders without its identity — every empty or all-blank chip list is answered with the refusal chip", () => {
@@ -201,6 +207,12 @@ test.describe("the styleguide's Book specimen — one number in three places, by
     const below = SPECIMEN_BELOW_LINE_ROWS.reduce((sum, row) => sum + row.debt, 0n);
     expect(SPECIMEN_TOGGLE_LABEL).toBe(`Show ${String(SPECIMEN_BELOW_LINE_ROWS.length)} small & dust positions (${humanUsd(below, SPECIMEN_DECIMALS)})`);
     expect(SPECIMEN_TOGGLE_LABEL).toBe("Show 2 small & dust positions ($75.75)");
+    // The label is the Book's own fold label over the rows, and its words have one owner: the specimen composes none —
+    // read as text, so a label re-spelled beside the Book's function is caught even while the two agree.
+    expect(SPECIMEN_TOGGLE_LABEL).toBe(belowLineToggleLabel(SPECIMEN_BELOW_LINE_ROWS.length, below, SPECIMEN_DECIMALS));
+    const specimen = readFileSync(path.join(here, "..", "..", "app", "styleguide", "specimen-book.ts"), "utf8");
+    expect(specimen).toContain("belowLineToggleLabel(");
+    expect(specimen).not.toContain("small & dust position");
     expect(SPECIMEN_CRIT_HEADLINE.dek).toContain(`— ${humanUsd(below, SPECIMEN_DECIMALS)} together`);
     // The ok specimen is a HEALTH verdict in the Book's words — never a record, and never a sentence about holes.
     expect(SPECIMEN_OK_HEADLINE.tone).toBe("ok");

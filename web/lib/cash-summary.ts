@@ -217,10 +217,12 @@ interface WalkTileRule {
 
 /**
  * A walk-derived tile over one of the summary's sums, in every register. No summary: the absence's own word, refused.
- * A counted sum is printed in the tile's own register — a lower bound, with the bound note, until the book is read
- * whole. A zero is a finding only over a book read whole, and never over one the engine computed none of: while the
- * walk runs the tile is busy, a walk that ended short of whole prints a dash in the refused register, and a book the
- * engine computed none of prints a dash and says that no account was computed.
+ * A counted sum is printed in the tile's own register beside the bound note of the walk's register: a lower bound
+ * while the walk runs, after it stopped, or beside a row this page could not read; neither a total nor a bound after a
+ * walk ran past its census or was served an account twice; unqualified only over a book read whole. A zero is a
+ * finding only over a book read whole, and never over one the engine computed none of: while the walk runs the tile
+ * is busy, a walk that ended short of whole prints a dash in the refused register, and a book the engine computed none
+ * of prints a dash and says that no account was computed.
  */
 function walkTile(summary: CashSummary | null, absentWord: string, rule: WalkTileRule): TileView {
   if (summary === null) return { value: "—", sub: absentWord, tone: "refused", pending: false };
@@ -251,6 +253,25 @@ export function nearCapTile(summary: CashSummary | null, absentWord: string): Ti
   });
 }
 
+/**
+ * The median-room tile: the lower median of the room the walk read, beside its 10th percentile, busy while the walk
+ * runs. No summary: the absence's own word, refused. A stopped walk says so in place of a figure. Over a book the
+ * engine computed none of no room was read: a dash in the refused register, saying that no account was computed —
+ * never the neutral dash of a book with no account in it.
+ */
+export function medianRoomTile(summary: CashSummary | null, absentWord: string): TileView {
+  if (summary === null) return { value: "—", sub: absentWord, tone: "refused", pending: false };
+  if (summary.stopped !== null) return { value: "—", sub: "walk stopped", tone: "refused", pending: false };
+  if (noneComputed(summary)) return { value: "—", sub: NONE_COMPUTED_SUB, tone: "refused", pending: false };
+  const { median, p10 } = summary.percentiles;
+  return {
+    value: median ?? "—",
+    sub: p10 === null ? "of borrow cap" : `of borrow cap · 10th pct ${p10}`,
+    tone: "neutral",
+    pending: registerOf(summary) === "running",
+  };
+}
+
 /** The attention card's finding: the table's order, under the walk's own qualifier. */
 export function attentionFinding(walk: WalkState | null): string {
   return `Material first, then by room${walkQualifier(walk)}`;
@@ -261,9 +282,16 @@ export interface BandsFinding {
   readonly lead: string;
   readonly figure: string;
   readonly rest: string;
-  /** The bars' own qualifier while the walk is incomplete; null once every bar is the book's. */
+  /**
+   * The bars' own note wherever a bar is not the book's figure — a walk short of whole, or a book the engine computed
+   * none of; null once every bar is the book's.
+   */
   readonly barsNote: string | null;
 }
+
+/** What the distance chart's bars say of themselves over a book the engine computed none of. */
+const BARS_NONE_COMPUTED =
+  "No account was computed this batch: the bands group computed accounts only, so no bar holds a figure or a count.";
 
 /** What the distance chart's bars say of themselves in each register short of a book read whole. */
 function barsNoteOf(register: Exclude<WalkRegister, "whole">, unreadable: number): string {
@@ -298,12 +326,21 @@ function zeroStateOf(register: Exclude<WalkRegister, "whole">, unreadable: numbe
  * the walk landed — never "at least" — and the bars say they bound nothing. A
  * walk-derived zero is a finding only over a book read whole: before that it
  * is a dash, never "$0", and the clause after the dash names the state
- * without qualifying a figure the sentence has just declined to print.
+ * without qualifying a figure the sentence has just declined to print. Over
+ * a book read whole that the engine computed none of, the bands hold no
+ * computed account, so their zero is no finding either: the figure is a dash,
+ * the clause says that no account was computed, and the bars say the same.
  */
 export function bandsFinding(
-  summary: Pick<CashSummary, "bands" | "decimals" | "settled" | "stopped" | "stopKind" | "unreadable">,
+  summary: Pick<
+    CashSummary,
+    "bands" | "decimals" | "settled" | "whole" | "stopped" | "stopKind" | "unreadable" | "computed" | "notComputed"
+  >,
 ): BandsFinding {
   const lead = "Cash debt grouped by room under the borrow cap · bars are dollars, counts printed · ";
+  if (noneComputed(summary)) {
+    return { lead, figure: "—", rest: ` within 10% of the cap: ${NONE_COMPUTED_SUB}`, barsNote: BARS_NONE_COMPUTED };
+  }
   const near = summary.bands.filter((b) => NEAR_CAP_BAND_IDS.has(b.id));
   const sum = near.reduce((s, b) => s + b.debt, 0n);
   const count = near.reduce((c, b) => c + b.count, 0);
@@ -339,14 +376,17 @@ export interface BandSoFar {
  * "$0 · 0" — and a band the walk has read in prints what it read, which the
  * chart's note names a lower bound. An unreadable row sits in no band, and may
  * belong in any: only once the book is read whole is every band the book's,
- * zeros included.
+ * zeros included — unless the engine computed none of it. The bands group
+ * computed accounts only, so over such a book every band's zero counts
+ * nothing, and no bar prints one.
  */
-export function bandsSoFar(summary: Pick<CashSummary, "bands" | "whole">): BandSoFar[] {
+export function bandsSoFar(summary: Pick<CashSummary, "bands" | "whole" | "computed" | "notComputed">): BandSoFar[] {
+  const zerosAreFindings = summary.whole && !noneComputed(summary);
   return summary.bands.map((b) => ({
     id: b.id,
     label: b.label,
-    count: summary.whole || b.count > 0 ? b.count : null,
-    debt: summary.whole || b.debt > 0n ? b.debt : null,
+    count: zerosAreFindings || b.count > 0 ? b.count : null,
+    debt: zerosAreFindings || b.debt > 0n ? b.debt : null,
   }));
 }
 

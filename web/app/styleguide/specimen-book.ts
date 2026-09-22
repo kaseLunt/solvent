@@ -10,6 +10,7 @@ import { formatUnits } from "@solvent/client";
 import { groupDecimalString } from "../../lib/book-format";
 import { bookHeadline, type Headline } from "../../lib/book-headline";
 import { notComputedCause, type CashRow } from "../../lib/cash-rows";
+import { belowLineToggleLabel } from "../../lib/cash-summary";
 import { humanUsd } from "../../lib/human-usd";
 import { materialityTier, partitionByMateriality } from "../../lib/materiality";
 import { plainCause } from "../../lib/refusal-phrasebook";
@@ -105,8 +106,8 @@ export const SPECIMEN_BASE_ROWS: readonly SpecimenRow[] = [...partition.material
 export const SPECIMEN_BELOW_LINE_ROWS: readonly SizedSpecimenRow[] = [...partition.small, ...partition.dust];
 export const SPECIMEN_ROW_COUNT = SPECIMEN_BASE_ROWS.length + SPECIMEN_BELOW_LINE_ROWS.length;
 
-/** The fold toggle's label: one engine's count and one engine's sum, both the rows' own. */
-export const SPECIMEN_TOGGLE_LABEL = `Show ${String(partition.counts.belowLine)} small & dust positions (${humanUsd(partition.sums.belowLine, SPECIMEN_DECIMALS)})`;
+/** The fold toggle's label, from the Book's own label function: one engine's count and one engine's sum, both the rows' own. */
+export const SPECIMEN_TOGGLE_LABEL = belowLineToggleLabel(partition.counts.belowLine, partition.sums.belowLine, SPECIMEN_DECIMALS);
 
 /** The book the six rows are a specimen of: its position census, of which the refused row is the one not computed. */
 const SPECIMEN_POSITIONS = 552;
