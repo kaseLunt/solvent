@@ -11,14 +11,22 @@
 import { UnavailableError, type components } from "@solvent/client";
 import { CASH_ENGINE_MISSING, wholeRefusal } from "./cash-refusal";
 import {
+  CHECKED_ROWS_LABEL,
+  checkedRowsTally,
   deriveProofSubjectStatus,
   liveSubjectStatus,
   proofPin,
   proofSubjectStatus,
   proofTakeawayArms,
+  RECEIPT_ACCEPTED_STATUS,
   RECEIPT_EMPTY_PILL,
   RECEIPT_EMPTY_STATUS,
   receiptComparedNothing,
+  REGISTRY_LABEL,
+  REGISTRY_MATCH,
+  REGISTRY_MISMATCH,
+  weldLabel,
+  WELDS_NOTE,
   type EvidenceDescriptor,
 } from "./evidence";
 import { EM_DASH } from "./format";
@@ -27,7 +35,7 @@ import { CASH, LEGACY } from "./inspector-position";
 import { refused, sentence, terminated, type LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
 import { publishable, type EvidenceResponse } from "./proof-data";
-import { groupInt } from "./prose";
+import { groupInt, plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import { isWirePopulation, readWirePopulation } from "./wireGuard";
 
@@ -168,6 +176,8 @@ const UNAVAILABLE = "unavailable";
 const PENDING = "pending";
 const n = (value: number | null | undefined): string =>
   typeof value === "number" ? value.toLocaleString("en-US") : UNAVAILABLE;
+/** The receipt's drift in its counted register — "0 drifted"; a tally that is no number is unavailable, never a zero. */
+const drifted = (value: number | null | undefined): string => (typeof value === "number" ? `${n(value)} drifted` : `drift ${UNAVAILABLE}`);
 
 /** A manifest string, publishability-checked: a leaking value prints as its named refusal. */
 function pub(text: string): string {
@@ -184,6 +194,10 @@ function retryWords(seconds: number | null): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * The receipt's gated rows are the page's "checked rows" — the rows that must
+ * match for the run to pass (the headline's word); "gated" stays the wire's
+ * term and the drawer's, glossed there once.
+ *
  * exact — the committed receipt passed unqualified, over at least one gated
  * row; empty — it passed over no gated rows at all: nothing was compared, so
  * nothing is proven, and the page refuses the finding rather than word a
@@ -271,7 +285,8 @@ export function stepTileLabel(step: Pick<PipelineStep, "ordinal" | "label">): st
   return `${step.ordinal.slice(0, step.ordinal.indexOf(" · "))} · ${step.label}`;
 }
 
-const INDEX_SENTENCE = "Chain heights indexed per engine, ahead of every batch.";
+/** Each engine's indexer cursor is its `last_block` on `/v1/meta` (the watermark vector). */
+const INDEX_SENTENCE = "Latest block indexed for each engine, ahead of every batch.";
 // Three states of one read, never folded: in flight (it has not failed), failed (it could not be read), and the absence the wire itself stated.
 const COMPUTE_PENDING = "Reading the batch…";
 const COMPUTE_UNREAD = "The batch could not be read.";
@@ -279,7 +294,11 @@ const COMPUTE_ABSENT = "No batch is servable; nothing is computed.";
 const VERIFY_PENDING = "Reading the receipt…";
 const VERIFY_UNREAD = "The receipt could not be read.";
 const VERIFY_ABSENT = "No reconcile receipt is committed; nothing is verified against the chain.";
-const VERIFY_EMPTY = "The pinned reconcile run gated no rows: nothing was compared, so nothing is verified against the chain.";
+const VERIFY_EMPTY = "The pinned reconcile run checked no rows: nothing was compared, so nothing is verified against the chain.";
+/** Said only under an accepted receipt over at least one row, where the conjunction holds gated_exact == gated_rows and gated_drift == 0. */
+const VERIFY_EXACT = "Every checked row of the pinned run matched the chain exactly; none drifted.";
+/** The risk engine's arithmetic is exact: integers and exact rationals, and no float type anywhere in its computation paths (internal/risk/types.go, enforced by its float check). */
+const COMPUTE_EXACT = "every position's health from exact integers, never floats";
 /** Where the account count would print, a refused census says which refusal it is. */
 const CENSUS_REFUSED = { withheld: "Cash accounts withheld", missing: "Cash engine not in this batch" } as const;
 
@@ -308,7 +327,7 @@ const rowsWord = (count: number): string => (count === 1 ? "row" : "rows");
  * failed.
  */
 function shortReceiptSentence(receipt: ManifestReconcile): string {
-  const tally = `${n(receipt.gated_exact)} of ${n(receipt.gated_rows)} gated rows reconciled exact against the chain`;
+  const tally = `${n(receipt.gated_exact)} of ${n(receipt.gated_rows)} checked rows matched the chain exactly`;
   if (receipt.gated_drift === 0) return `${tally}, and the receipt still did not pass clean; the proof subject names the conjunct that failed.`;
   const artifact = publishable(receipt.artifact_path);
   const where = artifact.ok ? `the committed drift report, ${artifact.text}` : "the committed drift report";
@@ -317,7 +336,7 @@ function shortReceiptSentence(receipt: ManifestReconcile): string {
 
 /**
  * The Overview's four numbers, unchanged in law: the OP block, the batch, the
- * gated tally, the endpoint count. The compute step reads its census from the
+ * checked-row tally, the endpoint count. The compute step reads its census from the
  * book reading itself, so no page can hand it another count. A step whose
  * read is in flight is pending — the pending word, the reading sentence, no
  * refused tone — and "could not be read" is said only once a read has failed.
@@ -399,7 +418,7 @@ export function pipelineSteps(
             sub: `batch · ${n(census.accounts)} Cash accounts`,
             tone: "neutral",
             pending: false,
-            sentence: `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; every position's health from the wire's own integers.`,
+            sentence: `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; ${COMPUTE_EXACT}.`,
             line: { before: "batch ", figure: n(book.batch.id), after: ` · ${n(census.accounts)} Cash accounts` },
           };
 
@@ -418,35 +437,35 @@ export function pipelineSteps(
           tone: evidencePending ? "neutral" : "refused",
           pending: evidencePending,
           sentence: evidencePending ? VERIFY_PENDING : evidence === null ? VERIFY_UNREAD : VERIFY_ABSENT,
-          line: { before: "", figure: UNAVAILABLE, after: " gated rows exact" },
+          line: { before: "", figure: UNAVAILABLE, after: " checked rows exact" },
         }
       : receipt === "empty"
         ? {
-            // A run that gated no rows compared nothing. Its "0/0" is the wire's own count, printed under the refused register with its cause — never as a tally of exact rows.
+            // A run that checked no rows compared nothing. Its "0/0" is the wire's own count, printed under the refused register with its cause — never as a tally of exact rows.
             key: "verify",
             label: "Verify",
             ordinal: ORDINAL.verify,
             value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
-            sub: "gated (must-match) rows · none compared",
+            sub: "checked rows · none compared",
             tone: "refused",
             pending: false,
             sentence: VERIFY_EMPTY,
-            line: { before: "", figure: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`, after: " gated rows · none compared" },
+            line: { before: "", figure: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`, after: " checked rows · none compared" },
           }
         : {
             key: "verify",
             label: "Verify",
             ordinal: ORDINAL.verify,
             value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
-            // The tile glosses "gated" once — the rows that must match for a pass — so the headline's "checked rows" and this tally read as one number. The Overview's `line` keeps its own words.
-            sub: `gated (must-match) rows exact · drift ${n(recon.gated_drift)}`,
+            // One word on both pages: the tile, the Overview's line and the headline all count "checked rows", and a drift is counted, never named.
+            sub: `checked rows exact · ${drifted(recon.gated_drift)}`,
             tone: receipt === "exact" ? "ok" : "warn",
             pending: false,
-            sentence: receipt === "exact" ? `${n(recon.gated_exact)} gated rows reconciled exact against the chain; ${n(recon.gated_drift)} drift named.` : shortReceiptSentence(recon),
+            sentence: receipt === "exact" ? VERIFY_EXACT : shortReceiptSentence(recon),
             line: {
               before: "",
               figure: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
-              after: ` gated rows exact · drift ${n(recon.gated_drift)}`,
+              after: ` checked rows exact · ${drifted(recon.gated_drift)}`,
             },
           };
 
@@ -504,16 +523,16 @@ export interface SubjectCard {
 
 function foldOf(sections: readonly CardSection[]): SubjectCard["fold"] {
   const count = sections.reduce((sum, section) => sum + section.rows.length, 0);
-  return count === 0 ? null : { summary: `${String(count)} provenance row(s)`, sections };
+  return count === 0 ? null : { summary: plural(count, "provenance row"), sections };
 }
 
 function proofCard(manifest: EvidenceResponse): SubjectCard {
   const status = proofSubjectStatus(manifest);
   const service = manifest.service;
   const feeds = manifest.feeds_registry;
-  const welded = feeds.registry_fingerprint === service.registry_fingerprint;
+  const matched = feeds.registry_fingerprint === service.registry_fingerprint;
   const reconcile = status.kind === "unavailable" ? null : status.reconcile;
-  // A pass over no gated rows compared nothing: the card refuses the finding in the same words the drawer does, and no row of it wears a pass's colour — not the gated tally, not a weld of "0/0 exact", not the registry's identity, which is a record and prints in ink. A hazard stays loud.
+  // A pass over no gated rows compared nothing: the card refuses the finding in the same words the drawer does, and no row of it wears a pass's colour — not the checked tally, not a weld of "0/0 exact", not the registry's identity, which is a record and prints in ink. A hazard stays loud.
   const vacuous = status.kind === "accepted" && receiptComparedNothing(status.reconcile);
   // Every artifact-derived string destined for the fold is checked here; a refused one is a hazard and hoists out.
   const artifact = reconcile === null ? null : publishable(reconcile.artifact_path);
@@ -524,32 +543,32 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
     status.kind === "accepted"
       ? vacuous
         ? { label: "status", value: RECEIPT_EMPTY_STATUS, tone: "warn" }
-        : { label: "status", value: "ACCEPTED · every gated row welded exact", tone: "ok" }
+        : { label: "status", value: RECEIPT_ACCEPTED_STATUS, tone: "ok" }
       : status.kind === "rejected"
         ? { label: "status", value: `REJECTED · ${status.detail}`, tone: "crit" }
         : { label: "status", value: `UNAVAILABLE · ${pub(status.reason)}`, tone: "crit" },
   ];
   if (reconcile !== null) {
     rows.push({
-      label: "gated rows",
-      value: `${String(reconcile.gated_exact)}/${String(reconcile.gated_rows)} exact · drift ${String(reconcile.gated_drift)}`,
+      label: CHECKED_ROWS_LABEL,
+      value: checkedRowsTally(reconcile.gated_exact, reconcile.gated_rows, reconcile.gated_drift),
       tone: vacuous ? "dim" : reconcile.gated_drift === 0 ? "ok" : "crit",
     });
     for (const weld of reconcile.welds) {
       rows.push({
-        label: `weld · ${weld.engine}`,
+        label: weldLabel(weld.engine),
         value: `${String(weld.rows_exact)}/${String(weld.rows_compared)} exact`,
         tone: vacuous ? "dim" : weld.rows_exact === weld.rows_compared ? "ok" : "crit",
         id: `weld-${weld.engine}`,
       });
     }
+    // The welds are account comparisons counted whatever each row's gate, not a split of the checked tally: the card says so once, in the dim register, beneath them.
+    if (reconcile.welds.length > 0) rows.push({ label: WELDS_NOTE.label, value: WELDS_NOTE.value, tone: "dim", id: "welds-note" });
   }
   rows.push({
-    label: "fingerprint weld",
-    value: welded
-      ? "identical to service fingerprint, by construction"
-      : "MISMATCH against service fingerprint, which the contract says are identical by construction",
-    tone: welded ? (vacuous ? "default" : "ok") : "crit",
+    label: REGISTRY_LABEL,
+    value: matched ? REGISTRY_MATCH : REGISTRY_MISMATCH,
+    tone: matched ? (vacuous ? "default" : "ok") : "crit",
   });
   if (artifact !== null && !artifact.ok) rows.push({ label: "artifact", value: artifact.refusal, tone: "warn", id: "proof-artifact-refused" });
   if (receiptNote !== null && !receiptNote.ok) rows.push({ label: "receipt note", value: receiptNote.refusal, tone: "warn", id: "proof-note-refused" });
@@ -674,10 +693,10 @@ export const PROBE_COLUMNS = [
 export const PROBES_EMPTY =
   "none named by this deployment's manifest — a statement about the deployment, not an absence to hide.";
 
-/** The count is the takeaway: "{n} committed probe record(s)" and, when any, "· {m} manifest note(s)". */
+/** The count is the takeaway: "{n} committed probe records" and, when any, "· {m} manifest notes" — each noun in its own number. */
 export function probesSummary(manifest: EvidenceResponse): string {
-  const notes = manifest.notes.length > 0 ? ` · ${String(manifest.notes.length)} manifest note(s)` : "";
-  return `${String(manifest.probe_records.length)} committed probe record(s)${notes}`;
+  const notes = manifest.notes.length > 0 ? ` · ${plural(manifest.notes.length, "manifest note")}` : "";
+  return `${plural(manifest.probe_records.length, "committed probe record")}${notes}`;
 }
 
 function probeRows(manifest: EvidenceResponse): readonly ProbeRow[] {
@@ -713,7 +732,7 @@ const RECEIPT_CHIP_TONE: Record<ReceiptState, NonNullable<LabChip["tone"]>> = {
   none: "refused",
 };
 
-const RECEIPT_EMPTY_TITLE = "the run gated no rows, so nothing was compared and nothing is proven";
+const RECEIPT_EMPTY_TITLE = "the run checked no rows, so nothing was compared and nothing is proven";
 
 /** A 64-hex key at chip width: its first eight and last six characters; the whole key is the chip's title. */
 function shortKey(key: string): string {
@@ -772,19 +791,19 @@ function receiptLine(manifest: EvidenceResponse, receipt: ReceiptState): string 
   const r = proof.reconcile;
   const exact = n(r.gated_exact);
   const rows = n(r.gated_rows);
-  const drift = n(r.gated_drift);
+  // The status's own detail is the service's naming of the violated conjunct (proof_subject.detail), quoted in its words.
   switch (receipt) {
     case "exact":
-      return `Reconcile receipt: ${exact} gated rows exact, ${drift} drift`;
+      return `Reconcile receipt: ${exact} checked rows exact, ${drifted(r.gated_drift)}`;
     case "empty":
-      return "Reconcile receipt: the run gated no rows — nothing was compared, the proof badge refused";
+      return "Reconcile receipt: the run checked no rows — nothing was compared, the proof badge refused";
     case "drift":
-      // A weld short with no gated drift names its fault; otherwise the drift is the fault — counted, never "named": the manifest carries no row to name.
+      // A weld short with no drift names its fault; otherwise the drift is the fault — counted, never "named": the manifest carries no row to name.
       return r.gated_drift === 0 && proof.kind === "rejected"
-        ? `Reconcile receipt: ${exact} of ${rows} gated rows exact, ${drift} drift — ${proof.detail}, the proof badge refused`
-        : `Reconcile receipt: ${exact} of ${rows} gated rows exact, ${drift} ${rowsWord(r.gated_drift)} drifted — the proof badge refused`;
+        ? `Reconcile receipt: ${exact} of ${rows} checked rows exact, ${drifted(r.gated_drift)} — ${proof.detail}, the proof badge refused`
+        : `Reconcile receipt: ${exact} of ${rows} checked rows exact, ${n(r.gated_drift)} ${rowsWord(r.gated_drift)} drifted — the proof badge refused`;
     case "failed":
-      return `Reconcile receipt failed: ${proof.kind === "rejected" ? proof.detail : "the receipt did not pass"} — ${exact} of ${rows} gated rows exact, ${drift} drift`;
+      return `Reconcile receipt failed: ${proof.kind === "rejected" ? proof.detail : "the receipt did not pass"} — ${exact} of ${rows} checked rows exact, ${drifted(r.gated_drift)}`;
     case "none":
       return `No reconcile receipt: ${pub(manifest.reconcile_unavailable_reason ?? "no reason served")}`;
   }
@@ -826,7 +845,7 @@ export interface VerificationView {
   /** Proof pin · Live batch · Receipt · Batch key. */
   readonly chips: LabChip[];
   readonly steps: readonly PipelineStep[];
-  /** "Reconcile receipt: N gated rows exact, M drift", or the failing / absent / pending words. Null when the record could not be fetched: the header says so once, and no strip says it again. */
+  /** "Reconcile receipt: N checked rows exact, M drifted", or the failing / absent / pending words. Null when the record could not be fetched: the header says so once, and no strip says it again. */
   readonly receiptLine: string | null;
   readonly probes: readonly ProbeRow[];
   /** The intro, the split, both subjects' captions and the identity line, verbatim — the drawer's doctrine. */
@@ -856,7 +875,7 @@ export function verificationDek(manifest: EvidenceResponse): string {
     proof.kind === "accepted"
       ? proven
         ? `That run is a fixed, reproducible check, finished ${humanUtc(proof.reconcile.finished_at, manifest.served_at)}; its result covers that run and nothing else.`
-        : "That run gated no rows, so no exactness is claimed for this deployment until a run compares rows and passes."
+        : "That run checked no rows, so no exactness is claimed for this deployment until a run compares rows and passes."
       : proof.kind === "unavailable"
         ? sentence(pub(proof.reason))
         : deriveProofSubjectStatus(manifest).kind === "rejected"

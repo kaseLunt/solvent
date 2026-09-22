@@ -121,7 +121,7 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
       reorgPostureRow(stamp),
       {
         label: "materialization key",
-        value: "not served on this surface · published by /v1/evidence (Proof Center)",
+        value: "not served on this surface · published by /v1/evidence (Verification)",
         tone: "dim",
       },
     ],
@@ -555,7 +555,10 @@ export type ProofSubjectStatus =
  * into a proof.
  *
  * Kept as the CROSS-CHECK against the wire's `proof_subject.status` —
- * `proofSubjectStatus` below is the consumer entry point.
+ * `proofSubjectStatus` below is the consumer entry point. The `detail` names
+ * the violated conjunct in the service's own words for it
+ * (`proof_subject.detail`, cmd/api/p5_evidence.go proofSubjectFrom), so a page
+ * that quotes it quotes the wire's register, not its own.
  */
 export function deriveProofSubjectStatus(manifest: EvidenceManifest): ProofSubjectStatus {
   const reconcile = manifest.reconcile;
@@ -858,6 +861,50 @@ function buildIdentitySection(manifest: EvidenceManifest): EvidenceSection {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The receipt's words, shared by the proof card and its drawer. The receipt's
+// gated rows are "checked rows" on every public string — the rows that must
+// match for the run to pass; the drawer keeps the wire's term once, glossed.
+// ---------------------------------------------------------------------------
+
+/** The status row of a receipt accepted over at least one checked row. */
+export const RECEIPT_ACCEPTED_STATUS = "ACCEPTED · every checked row matched the chain exactly";
+
+/** The receipt's tally row: its label, and its value — exact of rows, and the drift counted. */
+export const CHECKED_ROWS_LABEL = "checked rows";
+export function checkedRowsTally(exact: number, rows: number, drift: number): string {
+  return `${String(exact)}/${String(rows)} exact · ${String(drift)} drifted`;
+}
+
+/** The wire's term, kept once in the drawer beside its gloss. */
+export const GATED_GLOSS: EvidenceRow = { label: "gated", value: "checked rows — the rows that must match for the run to pass", tone: "dim" };
+
+/** A weld's row label: the engine by its name, then what the weld's rows are — one comparison per account row. */
+export function weldLabel(engine: string): string {
+  return `${engineName(engine)} · account comparisons`;
+}
+
+/**
+ * The line that follows the welds. The service builds each weld from its
+ * engine's per-account rows counted by verdict with the gate ignored — it
+ * decodes a row's verdict alone (cmd/api/p5_evidence.go:302-303) and sets
+ * rows_compared = len(aave_rows) / len(dm_rows), rows_exact = the rows whose
+ * verdict is exact (:332-352) — while the reconcile counts an Aave row that
+ * is not gated as advisory (cmd/reconcile/main.go:1372-1373). So the welds
+ * include advisory rows and are no subset of the checked rows: nothing on the
+ * page may add them up against the checked tally.
+ */
+export const WELDS_NOTE: EvidenceRow = {
+  label: "account comparisons",
+  value: "include advisory rows; they are not a breakdown of the checked rows",
+  tone: "dim",
+};
+
+/** The feeds registry's identity row: its label, and its value when the registry's fingerprint is the service's, or when it is not. */
+export const REGISTRY_LABEL = "feeds registry";
+export const REGISTRY_MATCH = "identical to service.registry_fingerprint, by construction";
+export const REGISTRY_MISMATCH = "MISMATCH against service.registry_fingerprint, which the contract says are identical by construction";
+
 /**
  * The feeds registry's rows. The registry matching the service's fingerprint
  * is a record, true whatever the receipt proved: beside a receipt that
@@ -866,26 +913,22 @@ function buildIdentitySection(manifest: EvidenceManifest): EvidenceSection {
  */
 function feedsRegistrySection(manifest: EvidenceManifest, vacuous: boolean): EvidenceSection {
   const feeds = manifest.feeds_registry;
-  const welded = feeds.registry_fingerprint === manifest.service.registry_fingerprint;
+  const matched = feeds.registry_fingerprint === manifest.service.registry_fingerprint;
   return {
     title: "FEEDS REGISTRY",
     rows: [
       { label: "path", value: feeds.path },
       { label: "registry fingerprint", value: feeds.registry_fingerprint },
       { label: "file sha256", value: feeds.file_sha256 },
-      welded
-        ? { label: "fingerprint weld", value: "identical to service.registry_fingerprint, by construction", tone: vacuous ? "default" : "ok" }
-        : {
-            label: "fingerprint weld",
-            value: "MISMATCH against service.registry_fingerprint, which the contract says are identical by construction",
-            tone: "crit",
-          },
+      matched
+        ? { label: REGISTRY_LABEL, value: REGISTRY_MATCH, tone: vacuous ? "default" : "ok" }
+        : { label: REGISTRY_LABEL, value: REGISTRY_MISMATCH, tone: "crit" },
     ],
   };
 }
 
 /** The status row's words for a receipt that passed over no gated rows: the pass is vacuous, so the row refuses the finding and says why. */
-export const RECEIPT_EMPTY_STATUS = "NOTHING PROVEN · the run gated no rows, so nothing was compared";
+export const RECEIPT_EMPTY_STATUS = "NOTHING PROVEN · the run checked no rows, so nothing was compared";
 /** The pill's words for the same receipt. */
 export const RECEIPT_EMPTY_PILL = "RECEIPT COMPARED NO ROWS";
 
@@ -899,7 +942,7 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
     status.kind === "accepted"
       ? vacuous
         ? { label: "status", value: RECEIPT_EMPTY_STATUS, tone: "warn" }
-        : { label: "status", value: "ACCEPTED · every gated row welded exact", tone: "ok" }
+        : { label: "status", value: RECEIPT_ACCEPTED_STATUS, tone: "ok" }
       : status.kind === "rejected"
         ? { label: "status", value: `REJECTED · ${status.detail}`, tone: "crit" }
         : { label: "status", value: `UNAVAILABLE · ${status.reason}`, tone: "crit" };
@@ -919,13 +962,16 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
         },
         { label: "finished_at", value: reconcile.finished_at },
         {
-          label: "gated rows",
-          value: `${String(readWirePopulation(reconcile.gated_exact, "gated_exact"))}/${String(
+          label: CHECKED_ROWS_LABEL,
+          value: checkedRowsTally(
+            readWirePopulation(reconcile.gated_exact, "gated_exact"),
             readWirePopulation(reconcile.gated_rows, "gated_rows"),
-          )} exact · drift ${String(readWirePopulation(reconcile.gated_drift, "gated_drift"))}`,
+            readWirePopulation(reconcile.gated_drift, "gated_drift"),
+          ),
           // A tally of no rows is not a clean tally: it wears no verdict's colour.
           tone: vacuous ? "dim" : readWirePopulation(reconcile.gated_drift, "gated_drift") === 0 ? "ok" : "crit",
         },
+        { ...GATED_GLOSS },
         {
           label: "advisory rows",
           value: String(readWirePopulation(reconcile.advisory_rows, "advisory_rows")),
@@ -933,7 +979,7 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
         },
         ...reconcile.welds.map(
           (weld): EvidenceRow => ({
-            label: `weld · ${weld.engine}`,
+            label: weldLabel(weld.engine),
             value: `${String(readWirePopulation(weld.rows_exact, "rows_exact"))}/${String(
               readWirePopulation(weld.rows_compared, "rows_compared"),
             )} exact`,
@@ -946,6 +992,7 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
                 : "crit",
           }),
         ),
+        ...(reconcile.welds.length > 0 ? [{ ...WELDS_NOTE }] : []),
         { label: "comparison sha256", value: reconcile.comparison_sha256 },
         { label: "artifact", value: reconcile.artifact_path },
         { label: "receipt note", value: reconcile.note, tone: "dim" },

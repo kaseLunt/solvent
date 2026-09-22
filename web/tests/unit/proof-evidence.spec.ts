@@ -113,6 +113,23 @@ test("the proof descriptor is PROVEN only on an unqualified pass", () => {
   expect(proofSubjectEvidence(EVIDENCE_NO_RECEIPT).marker).toBe("operational");
 });
 
+test("the proof drawer speaks the page's word — checked rows — and keeps the receipt's term once, glossed; the welds are account comparisons named by engine, not a breakdown", () => {
+  const drawer = proofSubjectEvidence(EVIDENCE_MANIFEST);
+  const rows = drawer.sections.flatMap((section) => section.rows);
+  const said = rows.map((row) => `${row.label} | ${row.value}`);
+  expect(drawer.sections[0]?.rows[0]).toEqual({ label: "status", value: "ACCEPTED · every checked row matched the chain exactly", tone: "ok" });
+  expect(said).toContain("checked rows | 87/87 exact · 0 drifted");
+  expect(said).toContain("Cash · account comparisons | 29/29 exact");
+  expect(said).toContain("Aave v3 market (legacy) · account comparisons | 14/14 exact");
+  expect(said).toContain("account comparisons | include advisory rows; they are not a breakdown of the checked rows");
+  expect(said).toContain("feeds registry | identical to service.registry_fingerprint, by construction");
+  // The receipt's own term survives in one row, its gloss beside it; the verbatim comparator keeps the wire's field names.
+  const gated = rows.filter((row) => /gated/.test(`${row.label} ${row.value}`));
+  expect(gated).toEqual([{ label: "gated", value: "checked rows — the rows that must match for the run to pass", tone: "dim" }]);
+  expect(drawer.comparator).toContain("gated_exact == gated_rows");
+  expect(JSON.stringify(rows)).not.toMatch(/weld ·|fingerprint weld|drift \d/);
+});
+
 test("the live descriptor is OPERATIONAL unconditionally — even beside an accepted proof", () => {
   const live = liveSubjectEvidence(EVIDENCE_MANIFEST);
   expect(live.marker).toBe("operational");
@@ -349,9 +366,9 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
     });
     expect(proofSubjectStatus(zeroWelds).kind).toBe("accepted");
     const receipt = proofSubjectEvidence(zeroWelds).sections.find((section) => section.title === "RECEIPT · COMMITTED ARTIFACT");
-    expect(receipt?.rows.filter((row) => row.label.startsWith("weld · ")).map((row) => [row.label, row.value, row.tone])).toEqual([
-      ["weld · debt_manager", "0/0 exact", "dim"],
-      ["weld · aave_v3_etherfi", "0/0 exact", "dim"],
+    expect(receipt?.rows.filter((row) => row.label.endsWith(" · account comparisons")).map((row) => [row.label, row.value, row.tone])).toEqual([
+      ["Cash · account comparisons", "0/0 exact", "dim"],
+      ["Aave v3 market (legacy) · account comparisons", "0/0 exact", "dim"],
     ]);
     expect(tones(zeroWelds)).not.toContain("ok");
     expect(tones(NO_ROWS_GATED)).not.toContain("ok");
@@ -359,7 +376,7 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
     expect(tones(EVIDENCE_MANIFEST).filter((tone) => tone === "ok")).toHaveLength(5);
     // A registry that does not match is a hazard, and no receipt dims it.
     const mismatched: EvidenceManifest = { ...structuredClone(zeroWelds), feeds_registry: { ...zeroWelds.feeds_registry, registry_fingerprint: "0".repeat(64) } };
-    expect(proofSubjectEvidence(mismatched).sections.at(-1)?.rows.at(-1)).toMatchObject({ label: "fingerprint weld", tone: "crit" });
+    expect(proofSubjectEvidence(mismatched).sections.at(-1)?.rows.at(-1)).toMatchObject({ label: "feeds registry", tone: "crit" });
   });
 
   test("a missing receipt says NOTHING IS PROVEN in the head — an absence named as an absence", () => {

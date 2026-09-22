@@ -40,6 +40,8 @@ test("the materialization key is stated as not-served — never invented", () =>
   const keyRow = batchSection?.rows.find((row) => row.label === "materialization key");
   expect(keyRow?.value).toContain("not served on this surface");
   expect(keyRow?.value).toContain("/v1/evidence");
+  // The page that prints it is named as the nav names it.
+  expect(keyRow?.value).toBe("not served on this surface · published by /v1/evidence (Verification)");
 });
 
 test("a stale price input travels through the chain with a visible (non-default) tone", () => {
