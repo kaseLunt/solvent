@@ -13,6 +13,7 @@
 
 import { SolventHttpError, type components } from "@solvent/client";
 import { solventClientFor } from "./api";
+import { plural } from "./prose";
 
 export type EvidenceResponse = components["schemas"]["EvidenceResponse"];
 export type SubstrateRef = components["schemas"]["SubstrateRef"];
@@ -106,12 +107,14 @@ export function findEndpointLeaks(text: string): string[] {
  * A manifest string, publishability-checked: leaking content renders as a
  * named refusal instead of the content. The check runs at render time so a
  * server regression can never route an endpoint URL through this surface.
+ * The refusal is a public string, so it counts in a real plural — "1
+ * fragment", "2 fragments" — never "fragment(s)".
  */
 export function publishable(text: string): { ok: true; text: string } | { ok: false; refusal: string } {
   const leaks = findEndpointLeaks(text);
   if (leaks.length === 0) return { ok: true, text };
   return {
     ok: false,
-    refusal: `WITHHELD · ${String(leaks.length)} endpoint/DSN-shaped fragment(s) refused at render (this surface publishes env-var names only)`,
+    refusal: `WITHHELD · ${plural(leaks.length, "endpoint/DSN-shaped fragment")} refused at render (this surface publishes env-var names only)`,
   };
 }

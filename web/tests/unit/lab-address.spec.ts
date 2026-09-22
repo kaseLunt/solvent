@@ -2,7 +2,7 @@
 // its decimals, its Cash position as "today". Every state has a sentence; the
 // before/after tiles print the Inspector's registers.
 import { expect, test } from "@playwright/test";
-import { lookup } from "@solvent/client";
+import { lookup, type components } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
 import { rowVerdict, sideRoomWords, stressVerdictWords, type StressRow } from "../../lib/address-stress";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
@@ -42,6 +42,12 @@ const projected = (index: number, becomes: boolean | null): StressBody =>
   withResult("dm_rate_horizon_plus_200bps", (r) =>
     !r.projection ? r : { ...r, projection: { ...r.projection, horizons: r.projection.horizons.map((h, i) => (i === index ? { ...h, becomes_liquidatable: becomes } : h)) } },
   );
+type Position = components["schemas"]["Position"];
+/** A demo lookup with its Cash row rewritten; every other row is served as it was. */
+const cashRowEdited = (body: typeof DEMO_ADDRESS_NEAR, edit: (p: Position) => Position): typeof DEMO_ADDRESS_NEAR => ({
+  ...body,
+  positions: body.positions.map((p) => (p.engine === "debt_manager" ? edit(p) : p)),
+});
 const PROJECTION_LABEL = "Debt Manager borrow APY +200bps (PROJECTION)";
 const PROJECTION_DEK = "Room today $190.50; 30d: +$7.92 interest; 90d: +$23.77 interest.";
 const REFUSED = { value: "—", tone: "refused" };
@@ -175,6 +181,41 @@ test("a refused Cash position prints no before figure; a negative wire figure pr
     tone: "refused",
     dek: "Room today $190.50; after the shock, not computed. The shocked figures are not a position.",
   });
+});
+
+test("a refused or verdictless Cash row that still carries a debt prints no before figure: the status decides, never the debt's presence", () => {
+  // A refused row may keep a persisted debt on the wire (a failed sweep does); the before tiles refuse it all the same.
+  const refusedWithDebt = cashRowEdited(DEMO_ADDRESS_REFUSED, (p) => ({
+    ...p,
+    refusal: { code: "SWEEP_FAILED", detail: "the sweep failed", note: "" },
+    total_debt_base: "4100000000",
+    borrowings: "4100000000",
+  }));
+  const refusedView = view({ address: DEMO_REFUSED_ADDR, lookup: { phase: "ready", value: lookup(refusedWithDebt) }, stress: { phase: "ready", value: lookup(DEMO_STRESS_NEAR) } });
+  expect(refusedView.refusedTiles).toBe(true);
+  expect(refusedView.cash?.debt).toBe(4_100_000_000n);
+  const r = addressWorkspace({ address: DEMO_REFUSED_ADDR, view: refusedView, selectedId: null });
+  expect(r.state).toBe("rows");
+  if (r.tiles === null) throw new Error("a refused position beside rows still has tiles");
+  expect(r.tiles.debtBefore).toEqual(REFUSED);
+  expect(r.tiles.capBefore).toEqual(REFUSED);
+  expect(r.tiles.roomBefore).toEqual(REFUSED);
+  expect(r.tiles.statusBefore).toEqual(NOT_COMPUTED);
+  for (const tile of Object.values(r.tiles)) expect(tile.value).not.toContain("$");
+  // A computed row with no verdict carries a readable debt and cap; beside "Not computed" neither prints.
+  const verdictless = cashRowEdited(DEMO_ADDRESS_NEAR, (p) => ({ ...p, liquidatable: null }));
+  const verdictlessView = view({ lookup: { phase: "ready", value: lookup(verdictless) }, stress: { phase: "ready", value: lookup(DEMO_STRESS_NEAR) } });
+  expect(verdictlessView.refusedTiles).toBe(true);
+  expect(verdictlessView.cash?.debt).not.toBeNull();
+  expect(verdictlessView.cash?.cap).not.toBeNull();
+  const u = addressWorkspace({ address: DEMO_NEAR_ADDR, view: verdictlessView, selectedId: "eth_minus_30" });
+  expect(u.state).toBe("rows");
+  if (u.tiles === null) throw new Error("a verdictless position beside rows still has tiles");
+  expect(u.tiles.debtBefore).toEqual(REFUSED);
+  expect(u.tiles.capBefore).toEqual(REFUSED);
+  expect(u.tiles.roomBefore).toEqual(REFUSED);
+  expect(u.tiles.statusBefore).toEqual(NOT_COMPUTED);
+  for (const tile of [u.tiles.debtBefore, u.tiles.capBefore, u.tiles.roomBefore, u.tiles.statusBefore]) expect(tile.value).not.toContain("$");
 });
 
 test("an unknowable after verdict refuses its figures beside Not computed, and the headline is a cannot-say", () => {

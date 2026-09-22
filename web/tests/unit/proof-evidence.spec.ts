@@ -206,6 +206,19 @@ test("findEndpointLeaks: URIs and DSNs are leaks; env-var NAMES are the sanction
   if (!refused.ok) expect(refused.refusal).toContain("WITHHELD");
 });
 
+test("a publishability refusal counts its fragments in a real plural: one fragment, two fragments, never \"(s)\"", () => {
+  const refusalOf = (text: string): string => {
+    const checked = publishable(text);
+    if (checked.ok) throw new Error(`expected a refusal for ${text}`);
+    return checked.refusal;
+  };
+  const one = refusalOf("dsn postgres://u:p@h/db");
+  const two = refusalOf("see https://a.example and wss://b.example");
+  expect(one).toBe("WITHHELD · 1 endpoint/DSN-shaped fragment refused at render (this surface publishes env-var names only)");
+  expect(two).toBe("WITHHELD · 2 endpoint/DSN-shaped fragments refused at render (this surface publishes env-var names only)");
+  for (const refusal of [one, two]) expect(refusal).not.toContain("(s)");
+});
+
 test("every evidence fixture is publishable — no endpoint URL, no DSN", () => {
   for (const manifest of [
     EVIDENCE_MANIFEST,

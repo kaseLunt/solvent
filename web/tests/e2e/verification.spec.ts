@@ -694,7 +694,8 @@ test("hazards never fold: a predates-custody digest gap, a pub() refusal, a fing
   await page.reload();
   const refused = page.getByTestId("verification-proof-artifact-refused");
   await expect(refused).toBeVisible();
-  await expect(refused).toContainText("WITHHELD");
+  await expect(refused).toContainText("WITHHELD · 1 endpoint/DSN-shaped fragment refused at render");
+  await expect(refused).not.toContainText("(s)");
   const proofFold = page.getByTestId("verification-proof-forensics");
   await expect(proofFold.getByTestId("verification-proof-artifact-refused")).toHaveCount(0);
   await expect(proofFold.locator("summary")).toHaveText("14 provenance rows");
@@ -731,7 +732,9 @@ test("probe records: the kit table with the card's columns and words; the count 
   await mockAll(page, leaking);
   await page.reload();
   await expect(table.locator("tbody tr").first()).toHaveClass(/dim/);
-  await expect(table).toContainText("WITHHELD");
+  // The refusal counts its fragments in a real plural: one fragment is "1 … fragment", never "fragment(s)".
+  await expect(table).toContainText("WITHHELD · 1 endpoint/DSN-shaped fragment refused at render");
+  await expect(table).not.toContainText("(s)");
   await expect(table).not.toContainText("db-host");
 
   // The empty arm: a statement, never a hidden zero.
