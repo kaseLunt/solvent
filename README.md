@@ -14,10 +14,11 @@ wallet and has no user accounts. A portfolio project, not affiliated with ether.
 *The Overview, rendered from the demo dataset (test fixtures, not chain data). The other seven
 pages are under [Screenshots](#screenshots).*
 
-**Status (2026-09-22).** Built and tested on a development machine. Not publicly deployed; the
+**Status (2026-09-24).** Built and tested on a development machine. Not publicly deployed; the
 deploy target is not yet decided. `@solvent/client` is not published to npm. Alerts are planned
-(roadmap phase P4), not built. Remote CI (`.github/workflows/ci.yml`) has not passed since
-2026-07-30. The pixel-screenshot pins are a local gate: they skip when `CI` is set.
+(roadmap phase P4), not built. CI (`.github/workflows/ci.yml`) runs gofmt and vet, the Go suite
+against Postgres with and without the race detector, and the web app's typecheck, lint, build and
+Playwright suite. The pixel-screenshot pins are a local gate: they skip when `CI` is set.
 
 ## What it is
 
@@ -274,7 +275,7 @@ API.
 ### Tests
 
 Two `cmd/reconcile` tests read ether.fi's cash-v3 contract source, which is not committed here.
-Clone it at the commit these tests pass against, then run the suites:
+Clone it at the commit these tests pass against (CI fetches the same commit), then run the suites:
 
 ```sh
 git clone https://github.com/etherfi-protocol/cash-v3 recon/cash-v3
@@ -285,8 +286,9 @@ make test                                  # Go; DB-backed tests use solvent_tes
 (cd web && npm ci && npm run build && npx playwright install chromium && npm run test:e2e)
 ```
 
-- `make test` includes one read-only smoke of the live `solvent` database, which passes only
-  after the indexer has migrated it.
+- `make test` includes one read-only smoke of the live `solvent` database: it checks that the
+  API's schema gate refuses a database that was never migrated or is at another version, and
+  passes one at this build's version.
 - `make test-acceptance` fails on any skipped test. `make test-fork-replay` and
   `make test-pipeline-replay` are opt-in: they need `ANVIL_BIN` and an archive-capable RPC
   (`ANVIL_FORK_RPC` for OP, `ANVIL_FORK_RPC_ETH` for Ethereum), and skip without them. The fork
