@@ -19,9 +19,10 @@ import {
   proofSubjectStatus,
   proofTakeawayArms,
   RECEIPT_ACCEPTED_STATUS,
+  RECEIPT_CHECKED_NONE,
   RECEIPT_EMPTY_PILL,
   RECEIPT_EMPTY_STATUS,
-  receiptComparedNothing,
+  receiptCheckedNothing,
   REGISTRY_LABEL,
   REGISTRY_MATCH,
   REGISTRY_MISMATCH,
@@ -146,7 +147,7 @@ export const VERIFICATION_SPLIT =
 const PROOF_CAPTION =
   "Proof subject — the pinned, exactly-reproducible acceptance evidence: the committed reconcile receipt and the build it speaks for. Never the live batch.";
 const LIVE_CAPTION =
-  "Live subject — the currently-serving batch's identity: watermarked, operational, and NOT reconcile-welded. Exactness lives on the proof subject, at its pin.";
+  "Live subject — the currently-serving batch's identity: watermarked, operational, and NOT covered by the reconcile run. Exactness lives on the proof subject, at its pin.";
 const NO_SUBSTITUTE = "Nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.";
 
 /** The page's chrome, every word of it: what the components print between the view's figures. */
@@ -199,10 +200,11 @@ function retryWords(seconds: number | null): string {
  * term and the drawer's, glossed there once.
  *
  * exact — the committed receipt passed unqualified, over at least one gated
- * row; empty — it passed over no gated rows at all: nothing was compared, so
- * nothing is proven, and the page refuses the finding rather than word a
- * vacuous pass as a match; drift — its verdict passed but its own tallies
- * disagree (drift counted, a row short, a weld short); failed — the verdict
+ * row; empty — it passed over no gated rows at all: it checked none, so
+ * nothing is proven (its welds may still count account comparisons), and the
+ * page refuses the finding rather than word a vacuous pass as a match; drift
+ * — its verdict passed but its own tallies disagree (drift counted, a row
+ * short, a weld short); failed — the verdict
  * itself failed, or the wire contradicts its receipt; none — no committed
  * receipt.
  */
@@ -211,7 +213,7 @@ export type ReceiptState = "exact" | "empty" | "drift" | "failed" | "none";
 export function receiptState(manifest: EvidenceResponse): ReceiptState {
   const status = proofSubjectStatus(manifest);
   if (status.kind === "unavailable") return "none";
-  if (status.kind === "accepted") return receiptComparedNothing(status.reconcile) ? "empty" : "exact";
+  if (status.kind === "accepted") return receiptCheckedNothing(status.reconcile) ? "empty" : "exact";
   // A wire that contradicts a receipt which passes on its own numbers has not passed: the disagreement is a failure, not drift.
   if (deriveProofSubjectStatus(manifest).kind !== "rejected") return "failed";
   const receipt = status.reconcile;
@@ -294,7 +296,7 @@ const COMPUTE_ABSENT = "No batch is servable; nothing is computed.";
 const VERIFY_PENDING = "Reading the receipt…";
 const VERIFY_UNREAD = "The receipt could not be read.";
 const VERIFY_ABSENT = "No reconcile receipt is committed; nothing is verified against the chain.";
-const VERIFY_EMPTY = "The pinned reconcile run checked no rows: nothing was compared, so nothing is verified against the chain.";
+const VERIFY_EMPTY = "The pinned reconcile run checked no rows, so nothing is proven.";
 /** Said only under an accepted receipt over at least one row, where the conjunction holds gated_exact == gated_rows and gated_drift == 0. */
 const VERIFY_EXACT = "Every checked row of the pinned run matched the chain exactly; none drifted.";
 /** The risk engine's arithmetic is exact: integers and exact rationals, and no float type anywhere in its computation paths (internal/risk/types.go, enforced by its float check). */
@@ -441,16 +443,16 @@ export function pipelineSteps(
         }
       : receipt === "empty"
         ? {
-            // A run that checked no rows compared nothing. Its "0/0" is the wire's own count, printed under the refused register with its cause — never as a tally of exact rows.
+            // A run that checked no rows proves nothing. Its "0/0" is the wire's own count, printed under the refused register with its cause — never as a tally of exact rows.
             key: "verify",
             label: "Verify",
             ordinal: ORDINAL.verify,
             value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
-            sub: "checked rows · none compared",
+            sub: "checked rows · nothing proven",
             tone: "refused",
             pending: false,
             sentence: VERIFY_EMPTY,
-            line: { before: "", figure: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`, after: " checked rows · none compared" },
+            line: { before: "", figure: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`, after: " checked rows · nothing proven" },
           }
         : {
             key: "verify",
@@ -532,8 +534,8 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
   const feeds = manifest.feeds_registry;
   const matched = feeds.registry_fingerprint === service.registry_fingerprint;
   const reconcile = status.kind === "unavailable" ? null : status.reconcile;
-  // A pass over no gated rows compared nothing: the card refuses the finding in the same words the drawer does, and no row of it wears a pass's colour — not the checked tally, not a weld of "0/0 exact", not the registry's identity, which is a record and prints in ink. A hazard stays loud.
-  const vacuous = status.kind === "accepted" && receiptComparedNothing(status.reconcile);
+  // A pass over no gated rows proves nothing: the card refuses the finding in the same words the drawer does, and no row of it wears a pass's colour — not the checked tally, not a weld of "0/0 exact", not the registry's identity, which is a record and prints in ink. A hazard stays loud.
+  const vacuous = status.kind === "accepted" && receiptCheckedNothing(status.reconcile);
   // Every artifact-derived string destined for the fold is checked here; a refused one is a hazard and hoists out.
   const artifact = reconcile === null ? null : publishable(reconcile.artifact_path);
   const receiptNote = reconcile === null ? null : publishable(reconcile.note);
@@ -732,7 +734,7 @@ const RECEIPT_CHIP_TONE: Record<ReceiptState, NonNullable<LabChip["tone"]>> = {
   none: "refused",
 };
 
-const RECEIPT_EMPTY_TITLE = "the run checked no rows, so nothing was compared and nothing is proven";
+const RECEIPT_EMPTY_TITLE = `${RECEIPT_CHECKED_NONE}, so nothing is proven`;
 
 /** A 64-hex key at chip width: its first eight and last six characters; the whole key is the chip's title. */
 function shortKey(key: string): string {
@@ -796,7 +798,7 @@ function receiptLine(manifest: EvidenceResponse, receipt: ReceiptState): string 
     case "exact":
       return `Reconcile receipt: ${exact} checked rows exact, ${drifted(r.gated_drift)}`;
     case "empty":
-      return "Reconcile receipt: the run checked no rows — nothing was compared, the proof badge refused";
+      return `Reconcile receipt: ${RECEIPT_CHECKED_NONE} — nothing proven, the proof badge refused`;
     case "drift":
       // A weld short with no drift names its fault; otherwise the drift is the fault — counted, never "named": the manifest carries no row to name.
       return r.gated_drift === 0 && proof.kind === "rejected"
@@ -870,12 +872,12 @@ export function verificationDek(manifest: EvidenceResponse): string {
   const proof = proofSubjectStatus(manifest);
   const live = liveSubjectStatus(manifest);
   // A pass over no gated rows proves nothing: it claims no exactness and lends the live batch nothing to not inherit.
-  const proven = proof.kind === "accepted" && !receiptComparedNothing(proof.reconcile);
+  const proven = proof.kind === "accepted" && !receiptCheckedNothing(proof.reconcile);
   const first =
     proof.kind === "accepted"
       ? proven
         ? `That run is a fixed, reproducible check, finished ${humanUtc(proof.reconcile.finished_at, manifest.served_at)}; its result covers that run and nothing else.`
-        : "That run checked no rows, so no exactness is claimed for this deployment until a run compares rows and passes."
+        : "That run checked no rows, so no exactness is claimed for this deployment until a run checks rows and passes."
       : proof.kind === "unavailable"
         ? sentence(pub(proof.reason))
         : deriveProofSubjectStatus(manifest).kind === "rejected"
@@ -931,7 +933,7 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
     state: "ok",
     receipt,
     kicker: VERIFICATION_KICKER,
-    // The proof's finding is the only verdict on the page, so it alone wears a tone, and only the receipt's: ok for an unqualified pass, warn for a receipt that fell short or is absent, the refused register for one that compared nothing — a finding withheld, not a finding. The scope is ink, and the live batch — named in the dek — never wears the proof's colour, present or absent.
+    // The proof's finding is the only verdict on the page, so it alone wears a tone, and only the receipt's: ok for an unqualified pass, warn for a receipt that fell short or is absent, the refused register for one that checked no rows — a finding withheld, not a finding. The scope is ink, and the live batch — named in the dek — never wears the proof's colour, present or absent.
     headline: { emphasis: arms.proof, rest: arms.scope, tone: receipt === "exact" ? "ok" : receipt === "empty" ? "refused" : "warn", dek: verificationDek(manifest) },
     chips: chips(manifest, receipt),
     steps,

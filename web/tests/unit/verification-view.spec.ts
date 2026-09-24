@@ -177,8 +177,8 @@ test("one word for the receipt's rows: checked rows; the welds are account compa
   expect(rows).toContain("checked rows | 87/87 exact · 0 drifted");
   expect(rows).toContain("Cash · account comparisons | 29/29 exact");
   expect(rows).toContain("Aave v3 market (legacy) · account comparisons | 14/14 exact");
-  expect(rows).toContain("account comparisons | count every compared row, checked or advisory; they are not a breakdown of the checked rows");
-  expect(rows).toContain("feeds registry | identical to service.registry_fingerprint, by construction");
+  expect(rows).toContain("account comparisons | count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
+  expect(rows).toContain("feeds registry | identical to the service's registry fingerprint, by construction");
   // The disclosure follows the last weld and wears no verdict's colour: it is a statement about what the tallies are, not a tally.
   const labels = proof.rows.map((r) => r.label);
   expect(labels.indexOf("account comparisons")).toBe(labels.indexOf("Aave v3 market (legacy) · account comparisons") + 1);
@@ -239,7 +239,7 @@ test("a rejected receipt names its fault in the page's words — the checked row
 
 test("the line beneath the welds states their counting rule, true of every receipt: beside welds that compared no row it claims nothing about what the rows hold", () => {
   const note = (manifest: EvidenceResponse) => subjectCards(manifest).proof.rows.find((r) => r.id === "welds-note");
-  const RULE = "count every compared row, checked or advisory; they are not a breakdown of the checked rows";
+  const RULE = "count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows";
   expect(note(EVIDENCE_MANIFEST)).toEqual({ label: "account comparisons", value: RULE, tone: "dim", id: "welds-note" });
   // Welds of 0/0: the rule still holds, and no row is said to be advisory.
   const vacuous = structuredClone(EVIDENCE_MANIFEST);
@@ -529,28 +529,28 @@ test("a receipt that gated NO rows proves nothing: never 'All 0 checked rows mat
   expect(v.receipt).toBe("empty");
   expect(v.headline.tone).toBe("refused");
   expect(v.headline.emphasis).toBe("Nothing is proven for this deployment:");
-  expect(v.headline.rest).toBe("the pinned reconcile run compared no rows.");
+  expect(v.headline.rest).toBe("the pinned reconcile run checked no rows.");
   expect(`${v.headline.emphasis} ${v.headline.rest}`).toBe(proofTakeaway(empty));
   expect(v.headline.dek).toBe(
-    "That run checked no rows, so no exactness is claimed for this deployment until a run compares rows and passes. Batch 1, served now, is live data; no check covers it.",
+    "That run checked no rows, so no exactness is claimed for this deployment until a run checks rows and passes. Batch 1, served now, is live data; no check covers it.",
   );
-  expect(v.chips[2]).toEqual({ label: "Receipt", value: "empty · 0/0", tone: "refused", title: "the run checked no rows, so nothing was compared and nothing is proven" });
+  expect(v.chips[2]).toEqual({ label: "Receipt", value: "empty · 0/0", tone: "refused", title: "the run checked no rows, so nothing is proven" });
   expect(byKey(v.steps, "verify")).toMatchObject({
     value: "0/0",
-    sub: "checked rows · none compared",
+    sub: "checked rows · nothing proven",
     tone: "refused",
-    sentence: "The pinned reconcile run checked no rows: nothing was compared, so nothing is verified against the chain.",
-    line: { before: "", figure: "0/0", after: " checked rows · none compared" },
+    sentence: "The pinned reconcile run checked no rows, so nothing is proven.",
+    line: { before: "", figure: "0/0", after: " checked rows · nothing proven" },
   });
-  expect(v.receiptLine).toBe("Reconcile receipt: the run checked no rows — nothing was compared, the proof badge refused");
+  expect(v.receiptLine).toBe("Reconcile receipt: the run checked no rows — nothing proven, the proof badge refused");
   const { proof } = subjectCards(empty);
-  expect(proof.status).toEqual({ text: "RECEIPT COMPARED NO ROWS", tone: "refused" });
-  expect(proof.rows[0]).toEqual({ label: "status", value: "NOTHING PROVEN · the run checked no rows, so nothing was compared", tone: "warn" });
+  expect(proof.status).toEqual({ text: "RECEIPT CHECKED NO ROWS", tone: "refused" });
+  expect(proof.rows[0]).toEqual({ label: "status", value: "NOTHING PROVEN · the run checked no rows", tone: "warn" });
   expect(proof.rows[1]).toMatchObject({ label: "checked rows", value: "0/0 exact · 0 drifted", tone: "dim" });
   const drawer = proofSubjectEvidence(empty);
-  expect(drawer.subject).toBe("RECEIPT COMPARED NO ROWS");
+  expect(drawer.subject).toBe("RECEIPT CHECKED NO ROWS");
   expect(drawer.marker).toBe("operational");
-  expect(drawer.sections[0]?.rows[0]).toEqual({ label: "status", value: "NOTHING PROVEN · the run checked no rows, so nothing was compared", tone: "warn" });
+  expect(drawer.sections[0]?.rows[0]).toEqual({ label: "status", value: "NOTHING PROVEN · the run checked no rows", tone: "warn" });
   // Nowhere a match, a pass or the badge.
   const printed = JSON.stringify([v.headline, v.chips, v.steps, v.receiptLine, subjectCards(empty), drawer.subject, drawer.sections[0]]);
   for (const claim of ["All 0", "matched the chain", "PROOF · EXACT", "ACCEPTED"]) expect(printed).not.toContain(claim);
@@ -558,7 +558,7 @@ test("a receipt that gated NO rows proves nothing: never 'All 0 checked rows mat
   const emptyNoBatch = structuredClone(EVIDENCE_NO_BATCH);
   if (emptyNoBatch.reconcile === null) throw new Error("fixture invariant: reconcile expected");
   Object.assign(emptyNoBatch.reconcile, { gated_rows: 0, gated_exact: 0, gated_drift: 0, welds: [] });
-  expect(proofTakeawayArms(emptyNoBatch).scope).toBe("the pinned reconcile run compared no rows. No batch can be served right now either.");
+  expect(proofTakeawayArms(emptyNoBatch).scope).toBe("the pinned reconcile run checked no rows. No batch can be served right now either.");
   expect(verificationDek(emptyNoBatch)).not.toContain("The proof still stands");
   // One gated row that matched is a finding — the empty arm begins and ends at zero.
   const single = structuredClone(empty);
@@ -730,13 +730,13 @@ test("nothing is green under a receipt of no rows: a weld of 0/0 exact proves no
   expect(receiptState(empty)).toBe("empty");
   const { proof } = subjectCards(empty);
   expect(proof.rows.map((r) => [r.label, r.value, r.tone])).toEqual([
-    ["status", "NOTHING PROVEN · the run checked no rows, so nothing was compared", "warn"],
+    ["status", "NOTHING PROVEN · the run checked no rows", "warn"],
     ["checked rows", "0/0 exact · 0 drifted", "dim"],
     ["Cash · account comparisons", "0/0 exact", "dim"],
     ["Aave v3 market (legacy) · account comparisons", "0/0 exact", "dim"],
-    ["account comparisons", "count every compared row, checked or advisory; they are not a breakdown of the checked rows", "dim"],
+    ["account comparisons", "count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows", "dim"],
     // The registry's identity is a record, true whatever the receipt proved: it prints in ink and lends the card no pass's colour.
-    ["feeds registry", "identical to service.registry_fingerprint, by construction", "default"],
+    ["feeds registry", "identical to the service's registry fingerprint, by construction", "default"],
   ]);
   expect(tonesOf(empty)).not.toContain("ok");
   // The same holds when the welds still carry the rows a gate of zero never judged.
@@ -769,8 +769,8 @@ test("the proof card: the pin pill, the answer rows, the hazards hoisted, fiftee
     ["checked rows", "87/87 exact · 0 drifted", "ok", null],
     ["Cash · account comparisons", "29/29 exact", "ok", "weld-debt_manager"],
     ["Aave v3 market (legacy) · account comparisons", "14/14 exact", "ok", "weld-aave_v3_etherfi"],
-    ["account comparisons", "count every compared row, checked or advisory; they are not a breakdown of the checked rows", "dim", "welds-note"],
-    ["feeds registry", "identical to service.registry_fingerprint, by construction", "ok", null],
+    ["account comparisons", "count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows", "dim", "welds-note"],
+    ["feeds registry", "identical to the service's registry fingerprint, by construction", "ok", null],
   ]);
   if (proof.fold === null) throw new Error("the committed example folds its provenance");
   expect(proof.fold.summary).toBe("15 provenance rows");
@@ -819,7 +819,7 @@ test("the proof card's hazards never fold: a pub() refusal hoists and the count 
   const mismatch = subjectCards(flipped).proof.rows.find((r) => r.label === "feeds registry");
   expect(mismatch).toEqual({
     label: "feeds registry",
-    value: "MISMATCH against service.registry_fingerprint, which the contract says are identical by construction",
+    value: "MISMATCH against the service's registry fingerprint, which the contract says are identical by construction",
     tone: "crit",
   });
 });
@@ -895,7 +895,7 @@ test("the doctrine is the intro, the split, both subjects' captions and the iden
     "TWO SUBJECTS, NEVER ONE. The proof speaks for its pinned run; the live batch serves under its watermark vector. A green receipt does not make the live batch exact, and a serving batch does not refresh the proof.",
   );
   expect(v.doctrine[2]).toContain("the committed reconcile receipt and the build it speaks for. Never the live batch.");
-  expect(v.doctrine[3]).toContain("watermarked, operational, and NOT reconcile-welded. Exactness lives on the proof subject, at its pin.");
+  expect(v.doctrine[3]).toContain("watermarked, operational, and NOT covered by the reconcile run. Exactness lives on the proof subject, at its pin.");
   expect(v.doctrine.at(-1)).toBe(`Batch #1 · key ${REAL_KEY} · commit 748c09d1e2f3 · receipt pass · 87/87`);
   expect(v.doctrine).toHaveLength(5);
   const absent = view(ok(EVIDENCE_NO_RECEIPT));

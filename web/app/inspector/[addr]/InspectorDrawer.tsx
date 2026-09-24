@@ -5,7 +5,7 @@ import { Drawer } from "@/components/Drawer";
 import type { AddressReading } from "@/lib/address-lookup";
 import { formatBlock, renderBlockTime } from "@/lib/format";
 import { isComputedCash, sourceDisplay, symbolFor } from "@/lib/inspector-position";
-import { drawerEmptyText, type InspectorView } from "@/lib/inspector-view";
+import { drawerEmptyText, drawerSweepBlock, type InspectorView } from "@/lib/inspector-view";
 import { plainCause } from "@/lib/refusal-phrasebook";
 import styles from "../inspector.module.css";
 import { wireExact, wirePrice } from "./money";
@@ -63,7 +63,7 @@ export function InspectorDrawer({ open, onClose, view, reading }: { open: boolea
             </ul>
             <p>
               As of: balances block {formatBlock(p.as_of.balances_block)} · params block {formatBlock(p.as_of.params_block)} · sweep block{" "}
-              {p.as_of.sweep_block === 0 ? "none (never swept)" : formatBlock(p.as_of.sweep_block)}
+              {drawerSweepBlock(p)}
             </p>
             <h3>Provenance</h3>
             {batch !== null && (

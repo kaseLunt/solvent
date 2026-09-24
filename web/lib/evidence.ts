@@ -182,7 +182,7 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
 
 const OPERATIONAL_NOTE =
   "LIVE · WATERMARKED, served from the newest servable batch under its per-input watermark " +
-  "vector. PROOF · EXACT @ PIN (reconcile-welded) is published by /v1/evidence, not asserted here.";
+  "vector. PROOF · EXACT @ PIN (numbers covered by the pinned reconcile run) is published by /v1/evidence, not asserted here.";
 
 /** Assemble a full descriptor: the number's own rows + the shared position chain. */
 export function positionNumberEvidence(
@@ -692,11 +692,13 @@ export function liveSubjectStatus(manifest: EvidenceManifest): LiveSubjectStatus
 
 /**
  * A receipt whose run gated no rows at all. It passes its own conjunction
- * vacuously — no drift, none short, because nothing was compared — so it is
- * neither a failed run nor a proof. Every surface refuses the finding and
- * says why; "all 0 rows matched" is never worded.
+ * vacuously — no drift, no checked row short — so it is neither a failed run
+ * nor a proof. It may still carry account comparisons: a weld counts every
+ * compared account row whatever its gate, so no surface may say nothing was
+ * compared. Every surface refuses the finding and says why; "all 0 rows
+ * matched" is never worded.
  */
-export function receiptComparedNothing(reconcile: ManifestReconcile): boolean {
+export function receiptCheckedNothing(reconcile: ManifestReconcile): boolean {
   return readWirePopulation(reconcile.gated_rows, "gated_rows") === 0;
 }
 
@@ -719,7 +721,7 @@ export interface ProofTakeawayArms {
 }
 
 const DID_NOT_MATCH = "The last reconcile run did not match the chain exactly,";
-/** The finding withheld: no receipt is committed, or the committed one compared nothing. */
+/** The finding withheld: no receipt is committed, or the committed one checked no rows. */
 const NOTHING_PROVEN = "Nothing is proven for this deployment:";
 
 const rowsWord = (count: number): string => (count === 1 ? "row" : "rows");
@@ -773,7 +775,7 @@ function rejectedArms(manifest: EvidenceManifest, reconcile: ManifestReconcile):
   if (short !== undefined) {
     return {
       proof: DID_NOT_MATCH,
-      scope: `${engineName(short.engine)} matched ${groupInt(short.rows_exact)} of ${plural(short.rows_compared, "account comparison")}.`,
+      scope: `${engineName(short.engine)} matched ${groupInt(short.rows_exact)} of ${plural(short.rows_compared, ACCOUNT_COMPARISON)}.`,
     };
   }
   return {
@@ -786,13 +788,13 @@ function rejectedArms(manifest: EvidenceManifest, reconcile: ManifestReconcile):
  * Both arms, from the same status derivations the two cards render (one
  * source), so the head and the cards cannot disagree — including under wire
  * contradictions, which those derivations already demote. A failed or absent
- * receipt is never worded as a match, nor is one that compared no rows, and
+ * receipt is never worded as a match, nor is one that checked no rows, and
  * an absent batch is named in every proof arm.
  */
 export function proofTakeawayArms(manifest: EvidenceManifest): ProofTakeawayArms {
   const proof = proofSubjectStatus(manifest);
   const absence = liveAbsence(manifest);
-  if (proof.kind === "accepted" && !receiptComparedNothing(proof.reconcile)) {
+  if (proof.kind === "accepted" && !receiptCheckedNothing(proof.reconcile)) {
     const rows = readWirePopulation(proof.reconcile.gated_rows, "gated_rows");
     return {
       proof: rows === 1 ? "The 1 checked row matched the chain exactly," : `All ${groupInt(rows)} checked rows matched the chain exactly,`,
@@ -803,7 +805,7 @@ export function proofTakeawayArms(manifest: EvidenceManifest): ProofTakeawayArms
     proof.kind === "rejected"
       ? rejectedArms(manifest, proof.reconcile)
       : proof.kind === "accepted"
-        ? { proof: NOTHING_PROVEN, scope: "the pinned reconcile run compared no rows." }
+        ? { proof: NOTHING_PROVEN, scope: "the pinned reconcile run checked no rows." }
         : { proof: NOTHING_PROVEN, scope: "no reconcile receipt is committed." };
   return absence === null ? failing : { proof: failing.proof, scope: `${failing.scope} ${LIVE_ABSENCE[absence].also}` };
 }
@@ -832,13 +834,13 @@ const LIVE_COMPARATOR =
   "against the proof; exactness claims live ONLY on the proof subject, at its pin.";
 
 const PROVEN_NOTE =
-  "PROOF · EXACT @ PIN: reconcile-welded numbers at the receipt's pinned run. The proof " +
+  "PROOF · EXACT @ PIN: numbers covered by the reconcile at the receipt's pinned run. The proof " +
   "speaks for its pin and ONLY its pin: the currently-serving batch is the LIVE subject " +
   "and does not inherit this exactness.";
 
 const LIVE_NOTE =
   "LIVE · WATERMARKED: the currently-serving batch under its per-input watermark vector. " +
-  "It does NOT inherit the proof subject's exactness: reconcile welds bind the receipt's " +
+  "It does NOT inherit the proof subject's exactness: the reconcile covers the receipt's " +
   "pinned run, not this batch.";
 
 function buildIdentitySection(manifest: EvidenceManifest): EvidenceSection {
@@ -872,8 +874,9 @@ function buildIdentitySection(manifest: EvidenceManifest): EvidenceSection {
 /** The status row of a receipt accepted over at least one checked row. */
 export const RECEIPT_ACCEPTED_STATUS = "ACCEPTED · every checked row matched the chain exactly";
 
-/** The receipt's tally row: its label, and its value — exact of rows, and the drift counted. */
-export const CHECKED_ROWS_LABEL = "checked rows";
+/** The receipt's tally row: its noun, its label, and its value — exact of rows, and the drift counted. */
+export const CHECKED_ROW = "checked row";
+export const CHECKED_ROWS_LABEL = `${CHECKED_ROW}s`;
 export function checkedRowsTally(exact: number, rows: number, drift: number): string {
   return `${String(exact)}/${String(rows)} exact · ${String(drift)} drifted`;
 }
@@ -881,9 +884,13 @@ export function checkedRowsTally(exact: number, rows: number, drift: number): st
 /** The wire's term, kept once in the drawer beside its gloss. */
 export const GATED_GLOSS: EvidenceRow = { label: "gated", value: "checked rows — the rows that must match for the run to pass", tone: "dim" };
 
-/** A weld's row label: the engine by its name, then what the weld's rows are — one comparison per account row. */
+/** What a weld counts — one comparison per account row — in the noun every page prints beside a weld's tally. */
+export const ACCOUNT_COMPARISON = "account comparison";
+export const ACCOUNT_COMPARISONS = `${ACCOUNT_COMPARISON}s`;
+
+/** A weld's row label: the engine by its name, then what the weld's rows are. */
 export function weldLabel(engine: string): string {
-  return `${engineName(engine)} · account comparisons`;
+  return `${engineName(engine)} · ${ACCOUNT_COMPARISONS}`;
 }
 
 /**
@@ -897,23 +904,28 @@ export function weldLabel(engine: string): string {
  * against the checked tally. The line words that counting rule, which holds
  * of every receipt — one whose compared rows are all checked, and one that
  * compared none — and never what this receipt's rows happen to hold: the
- * manifest carries no row's gate.
+ * manifest carries no row's gate. It glosses "advisory" as the reconcile
+ * defines it: a row whose gate is off is tallied as advisory (main.go:1359-1361)
+ * and never reaches the exit code, which counts gated failures only
+ * (computeResult; aave.go aaveWeldGatedFailures, p3_registry.go tallyP3, the
+ * phase2.go supplementary rows "labeled, never gated").
  */
 export const WELDS_NOTE: EvidenceRow = {
-  label: "account comparisons",
-  value: "count every compared row, checked or advisory; they are not a breakdown of the checked rows",
+  label: ACCOUNT_COMPARISONS,
+  value:
+    "count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows",
   tone: "dim",
 };
 
 /** The feeds registry's identity row: its label, and its value when the registry's fingerprint is the service's, or when it is not. */
 export const REGISTRY_LABEL = "feeds registry";
-export const REGISTRY_MATCH = "identical to service.registry_fingerprint, by construction";
-export const REGISTRY_MISMATCH = "MISMATCH against service.registry_fingerprint, which the contract says are identical by construction";
+export const REGISTRY_MATCH = "identical to the service's registry fingerprint, by construction";
+export const REGISTRY_MISMATCH = "MISMATCH against the service's registry fingerprint, which the contract says are identical by construction";
 
 /**
  * The feeds registry's rows. The registry matching the service's fingerprint
  * is a record, true whatever the receipt proved: beside a receipt that
- * compared nothing it prints in ink, so that no row of that chain wears a
+ * checked no rows it prints in ink, so that no row of that chain wears a
  * pass's colour. A mismatch is a hazard, and is loud under every receipt.
  */
 function feedsRegistrySection(manifest: EvidenceManifest, vacuous: boolean): EvidenceSection {
@@ -932,15 +944,20 @@ function feedsRegistrySection(manifest: EvidenceManifest, vacuous: boolean): Evi
   };
 }
 
-/** The status row's words for a receipt that passed over no gated rows: the pass is vacuous, so the row refuses the finding and says why. */
-export const RECEIPT_EMPTY_STATUS = "NOTHING PROVEN · the run checked no rows, so nothing was compared";
+/**
+ * What is known of a receipt that passed over no gated rows: its run checked none. Never that nothing was compared —
+ * its welds may still count account comparisons, which no gate judged.
+ */
+export const RECEIPT_CHECKED_NONE = "the run checked no rows";
+/** The status row's words for that receipt: the pass is vacuous, so the row refuses the finding and says why. */
+export const RECEIPT_EMPTY_STATUS = `NOTHING PROVEN · ${RECEIPT_CHECKED_NONE}`;
 /** The pill's words for the same receipt. */
-export const RECEIPT_EMPTY_PILL = "RECEIPT COMPARED NO ROWS";
+export const RECEIPT_EMPTY_PILL = "RECEIPT CHECKED NO ROWS";
 
 /** The proof subject's full chain, drawer-ready. Marker "proven" ONLY on an unqualified pass over at least one gated row. */
 export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescriptor {
   const status = proofSubjectStatus(manifest);
-  const vacuous = status.kind === "accepted" && receiptComparedNothing(status.reconcile);
+  const vacuous = status.kind === "accepted" && receiptCheckedNothing(status.reconcile);
   const proven = status.kind === "accepted" && !vacuous;
 
   const statusRow: EvidenceRow =

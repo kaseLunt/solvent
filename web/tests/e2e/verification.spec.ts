@@ -240,23 +240,26 @@ test("a receipt that gated no rows proves nothing: data-receipt empty, the refus
   await expect(surface(page)).toHaveAttribute("data-state", "ok");
   await expect(surface(page)).toHaveAttribute("data-receipt", "empty");
   await expect(verdict(page)).toHaveAttribute("data-variant", "refused");
-  await expect(headline(page)).toHaveText("Nothing is proven for this deployment: the pinned reconcile run compared no rows.");
+  await expect(headline(page)).toHaveText("Nothing is proven for this deployment: the pinned reconcile run checked no rows.");
   await expect(page.getByTestId("verification-verdict-dek")).toHaveText(
-    "That run checked no rows, so no exactness is claimed for this deployment until a run compares rows and passes. Batch 1, served now, is live data; no check covers it.",
+    "That run checked no rows, so no exactness is claimed for this deployment until a run checks rows and passes. Batch 1, served now, is live data; no check covers it.",
   );
   await expect(chip(page, "Receipt")).toContainText("empty · 0/0");
   await expect(chip(page, "Receipt")).toHaveClass(/chipRefused/);
   const verify = page.getByTestId("verification-kpi-verify");
   await expect(verify).toHaveAttribute("data-tone", "refused");
-  await expect(verify).toContainText("checked rows · none compared");
+  await expect(verify).toContainText("checked rows · nothing proven");
   await expect(page.getByTestId("verification-step-verify")).toHaveText(
-    "The pinned reconcile run checked no rows: nothing was compared, so nothing is verified against the chain.",
+    "The pinned reconcile run checked no rows, so nothing is proven.",
   );
-  await expect(page.getByTestId("verification-receipt")).toHaveText("Reconcile receipt: the run checked no rows — nothing was compared, the proof badge refused");
+  await expect(page.getByTestId("verification-receipt")).toHaveText("Reconcile receipt: the run checked no rows — nothing proven, the proof badge refused");
   await expect(page.getByTestId("verification-receipt")).toHaveAttribute("data-tone", "refused");
-  await expect(page.getByTestId("verification-proof-status")).toHaveText("RECEIPT COMPARED NO ROWS");
-  await expect(page.getByTestId("verification-subject-proof")).toContainText("NOTHING PROVEN · the run checked no rows, so nothing was compared");
-  for (const claim of ["All 0", "matched the chain", "PROOF · EXACT @", "ACCEPTED"]) await expect(page.locator("body")).not.toContainText(claim);
+  await expect(page.getByTestId("verification-proof-status")).toHaveText("RECEIPT CHECKED NO ROWS");
+  await expect(page.getByTestId("verification-subject-proof")).toContainText("NOTHING PROVEN · the run checked no rows");
+  // A run with no checked rows may still carry account comparisons: nothing on the page says no comparison happened.
+  for (const claim of ["All 0", "matched the chain", "PROOF · EXACT @", "ACCEPTED", "nothing was compared", "compared no rows", "none compared", "COMPARED NO ROWS"]) {
+    await expect(page.locator("body")).not.toContainText(claim);
+  }
 });
 
 test("nothing is green under a receipt of no rows: a weld of 0/0 exact is dim on the proof card and in its drawer, and no element of either wears the ok tone", async ({
@@ -270,22 +273,22 @@ test("nothing is green under a receipt of no rows: a weld of 0/0 exact is dim on
   await page.goto("/proof");
   await expect(surface(page)).toHaveAttribute("data-receipt", "empty");
   const proof = page.getByTestId("verification-subject-proof");
-  await expect(proof.getByTestId("verification-proof-status")).toHaveText("RECEIPT COMPARED NO ROWS");
+  await expect(proof.getByTestId("verification-proof-status")).toHaveText("RECEIPT CHECKED NO ROWS");
   for (const engine of ["debt_manager", "aave_v3_etherfi"]) {
     const weld = proof.getByTestId(`verification-weld-${engine}`);
     await expect(weld).toBeVisible();
     await expect(weld.locator("[data-tone]")).toHaveText("0/0 exact");
     await expect(weld.locator("[data-tone]")).toHaveAttribute("data-tone", "dim");
   }
-  // The line beneath the welds states their counting rule, true of welds that compared nothing: no row is said to be advisory.
-  await expect(proof.getByTestId("verification-welds-note")).toContainText("count every compared row, checked or advisory; they are not a breakdown of the checked rows");
+  // The line beneath the welds states their counting rule and what "advisory" means, true of welds of 0/0: no row is said to be advisory.
+  await expect(proof.getByTestId("verification-welds-note")).toContainText("count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
   await expect(proof).not.toContainText("include advisory rows");
   // The fold's rows are in the DOM whether or not it is open, so the count covers the whole card.
   await expect(proof.locator("[data-tone='ok']")).toHaveCount(0);
   // The drawer prints the same chain under the same law.
   await page.getByRole("button", { name: "explain proof subject" }).click();
   const evidence = page.getByTestId("verification-drawer-evidence");
-  await expect(evidence).toContainText("NOTHING PROVEN · the run checked no rows, so nothing was compared");
+  await expect(evidence).toContainText("NOTHING PROVEN · the run checked no rows");
   await expect(evidence).toContainText("0/0 exact");
   await expect(evidence.locator("[data-tone='ok']")).toHaveCount(0);
   await expect(evidence.locator("[data-tone='dim']").filter({ hasText: /^0\/0 exact$/ })).toHaveCount(2);
@@ -605,7 +608,7 @@ test("the drawer: the doctrine from the header; a subject's explain puts its evi
   await expect(evidence).toContainText("gated_exact == gated_rows");
   // The wire's term is kept once, beside its gloss in the page's word.
   await expect(evidence).toContainText("checked rows — the rows that must match for the run to pass");
-  await expect(evidence).toContainText("count every compared row, checked or advisory; they are not a breakdown of the checked rows");
+  await expect(evidence).toContainText("count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
   await expect(body).toContainText("TWO SUBJECTS, NEVER ONE.");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -641,13 +644,13 @@ test("the proof card's answer layer stays visible; provenance folds counted and 
   // The welds count every compared row whatever its gate, so they are no split of the checked tally: the card states that rule beneath them, dim.
   const note = proof.getByTestId("verification-welds-note");
   await expect(note).toBeVisible();
-  await expect(note).toContainText("count every compared row, checked or advisory; they are not a breakdown of the checked rows");
+  await expect(note).toContainText("count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
   await expect(note.locator("[data-tone]")).toHaveAttribute("data-tone", "dim");
-  await expect(proof.getByText("identical to service.registry_fingerprint, by construction")).toBeVisible();
+  await expect(proof.getByText("identical to the service's registry fingerprint, by construction")).toBeVisible();
   const fold = proof.getByTestId("verification-proof-forensics");
   await expect(fold.getByTestId("verification-weld-debt_manager")).toHaveCount(0);
   await expect(fold.getByTestId("verification-welds-note")).toHaveCount(0);
-  await expect(fold.getByText("identical to service.registry_fingerprint, by construction")).toHaveCount(0);
+  await expect(fold.getByText("identical to the service's registry fingerprint, by construction")).toHaveCount(0);
   // The counted summary: 6 receipt rows + 6 identity rows + 3 feeds rows.
   await expect(fold.locator("summary")).toHaveText("15 provenance rows");
   // Forensic facts render only once the fold opens.
@@ -706,9 +709,9 @@ test("hazards never fold: a predates-custody digest gap, a pub() refusal, a fing
   flipped.service.registry_fingerprint = "0".repeat(64);
   await mockAll(page, flipped);
   await page.reload();
-  const mismatch = page.getByTestId("verification-subject-proof").getByText("MISMATCH against service.registry_fingerprint", { exact: false });
+  const mismatch = page.getByTestId("verification-subject-proof").getByText("MISMATCH against the service's registry fingerprint", { exact: false });
   await expect(mismatch.first()).toBeVisible();
-  await expect(page.getByTestId("verification-proof-forensics").getByText("MISMATCH against service.registry_fingerprint")).toHaveCount(0);
+  await expect(page.getByTestId("verification-proof-forensics").getByText("MISMATCH against the service's registry fingerprint")).toHaveCount(0);
 });
 
 test("probe records: the kit table with the card's columns and words; the count is the section's qualifier; the empty arm is a statement", async ({

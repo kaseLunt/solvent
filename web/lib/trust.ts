@@ -24,10 +24,19 @@
 //     receipt item is pending, and "unavailable" is said only of a read that
 //     failed. A manifest that answered with no receipt states an absence.
 import type { PriceInput, RefinedPosition, components } from "@solvent/client";
-import { proofSubjectStatus, type EvidenceManifest } from "./evidence";
+import {
+  ACCOUNT_COMPARISON,
+  ACCOUNT_COMPARISONS,
+  CHECKED_ROW,
+  CHECKED_ROWS_LABEL,
+  proofSubjectStatus,
+  RECEIPT_CHECKED_NONE,
+  type EvidenceManifest,
+} from "./evidence";
 import { humanAge } from "./freshness";
 import { humanUtc } from "./human-utc";
 import type { EvidenceRead } from "./inspector-evidence";
+import { engineName } from "./inspector-headline";
 import { CASH, symbolFor } from "./inspector-position";
 import { groupInt, joinAnd } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
@@ -67,6 +76,17 @@ const plural = (count: number, noun: string): string => (count === 1 ? noun : `$
 
 /** The engine's flag on a position whose own latest collateral sweep failed (internal/riskfeed/prices.go FlagSweepStale). */
 const SWEEP_STALE_FLAG = "collateral_sweep_stale";
+/** The engine's refusal of an account no sweep ever read (internal/riskfeed/assemble.go GateSweepNever). */
+const SWEEP_NEVER = "SWEEP_NEVER";
+
+/**
+ * Why an account carries no collateral clock, in the phrasebook's words — only when the engine said why. SWEEP_NEVER
+ * covers a sweep never attempted AND one attempted that never succeeded, so its words are never "never swept". A row the
+ * engine refused for another cause before it consulted the sweep also carries sweep block 0, and names no sweep cause.
+ */
+export function sweepAbsenceCause(position: RefinedPosition): string | null {
+  return position.refusal?.code === SWEEP_NEVER ? plainCause(SWEEP_NEVER) : null;
+}
 
 /** Plain words for the verdicts that refuse a price; the wire word itself goes in `title`. Total over the enum. */
 const BROKEN_WORDS: Readonly<Record<BrokenVerdict, string>> = {
@@ -155,9 +175,10 @@ function pricesItem(position: RefinedPosition): TrustItem {
 
 function sweepItem(position: RefinedPosition, sweep: SweepStamp | null): TrustItem {
   const label = "Collateral sweep";
-  // The account's own clock outranks the batch's stamp: never swept is a refusal whether or not a stamp exists.
+  // The account's own clock outranks the batch's stamp: an absent clock is a refusal whether or not a stamp exists.
   if (position.as_of.sweep_block === 0) {
-    return { id: "sweep", label, detail: "never swept · collateral clock absent", state: "refused", title: "sweep_block: 0" };
+    const cause = sweepAbsenceCause(position);
+    return { id: "sweep", label, detail: `${cause === null ? "" : `${cause} · `}collateral clock absent`, state: "refused", title: "sweep_block: 0" };
   }
   if (sweep === null) return { id: "sweep", label, detail: "no sweep stamp on this batch", state: "dim" };
   const rows = readWirePopulation(sweep.rows, "sweep.rows");
@@ -168,8 +189,7 @@ function sweepItem(position: RefinedPosition, sweep: SweepStamp | null): TrustIt
   if (failed > rows) return { id: "sweep", label, detail: `${groupInt(failed)} failed of ${groupInt(rows)} attempted accounts · contradictory stamp`, state: "warn" };
   // What the engine-wide stamp means for THIS account, from the account's own evidence: the engine flags a position
   // whose own latest sweep failed and keeps its collateral at its last successful sweep (as_of.sweep_block) — kept and
-  // flagged stale, never excluded. Without the flag this account's own sweep succeeded, so a failed account in the
-  // tally is another one. Both come from the batch's own compute: the stamp is the batch's persisted watermark
+  // flagged stale, never excluded. Both come from the batch's own compute: the stamp is the batch's persisted watermark
   // vector, never a live read.
   const block = groupInt(readWirePopulation(position.as_of.sweep_block, "as_of.sweep_block"));
   const stale = position.flags.includes(SWEEP_STALE_FLAG);
@@ -179,7 +199,23 @@ function sweepItem(position: RefinedPosition, sweep: SweepStamp | null): TrustIt
   // The tally counts accounts with a sweep row by their latest attempt: a failed one may never have succeeded, so the
   // accounts are "attempted", never "swept". A flagged account is never green, whatever the tally.
   if (failed > 0) {
-    return { id: "sweep", label, detail: `${groupInt(failed)} of ${groupInt(rows)} attempted accounts failed`, state: "warn", title: `engine-wide sweep tally, gen ${groupInt(generation)} · ${own}` };
+    // This account's own evidence leads, so a reader of an engine-wide failure still learns whether its collateral is
+    // current. The flag's absence proves a successful latest sweep only on a computed row: the engine sets the flag when
+    // the sweep row's last status is not "success" (internal/riskfeed/assemble.go assembleDM) and attaches flags to a
+    // computed position alone, so a refused row claims only the block of its last successful sweep.
+    const computed = position.status === "computed" && position.refusal === null;
+    const lead = stale
+      ? `this account's last sweep failed — its collateral is from block ${block}`
+      : computed
+        ? "this account's latest sweep succeeded"
+        : `this account's last successful sweep was at block ${block}`;
+    return {
+      id: "sweep",
+      label,
+      detail: `${lead} · engine-wide, ${groupInt(failed)} of ${groupInt(rows)} attempted accounts failed`,
+      state: "warn",
+      title: `engine-wide sweep tally, gen ${groupInt(generation)}`,
+    };
   }
   const title = `engine-wide sweep stamp · ${own}`;
   if (sweep.generation_open) return { id: "sweep", label, detail: `gen ${groupInt(generation)} open · sweep in progress`, state: "warn", title };
@@ -240,21 +276,41 @@ const RECEIPT_UNAVAILABLE = "receipt unavailable";
 /** A manifest that answered and carries no receipt: the wire's own absence, worded as one. */
 const RECEIPT_ABSENT = "no committed receipt";
 /**
- * Verification's words for a run whose receipt counts no gated rows: it compared nothing, so it proves nothing. The
- * wire's `gated` rows are "checked rows" on every public string, so the two pages word one receipt state alike.
+ * Verification's words for a run whose receipt counts no gated rows: it checked none, so it proves nothing. Never that
+ * nothing was compared — its welds may still count account comparisons. The wire's `gated` rows are "checked rows" on
+ * every public string, so the two pages word one receipt state alike.
  */
-const RECEIPT_EMPTY = "the run checked no rows · nothing was compared";
+const RECEIPT_EMPTY = `${RECEIPT_CHECKED_NONE} · nothing proven`;
 
-/** The Cash weld's tally when the receipt carries one, else the gated totals — the figures the item's detail counts. */
-function countedRows(reconcile: ReconcileSummary): { readonly cash: string; readonly compared: number; readonly exact: number } {
+/**
+ * The figures the item's detail counts, in Verification's own nouns: the Cash weld's account comparisons when the
+ * receipt carries one, else its checked rows. The two are different populations — a weld counts every compared
+ * account row, checked or advisory — so each tally wears its own noun, never the bare "rows".
+ */
+interface CountedRows {
+  readonly one: string;
+  readonly many: string;
+  readonly compared: number;
+  readonly exact: number;
+}
+
+function countedRows(reconcile: ReconcileSummary): CountedRows {
   const weld = reconcile.welds.find((w) => w.engine === CASH);
-  return weld === undefined
-    ? { cash: "", compared: readWirePopulation(reconcile.gated_rows, "reconcile.gated_rows"), exact: readWirePopulation(reconcile.gated_exact, "reconcile.gated_exact") }
-    : {
-        cash: "Cash ",
-        compared: readWirePopulation(weld.rows_compared, "reconcile.welds[debt_manager].rows_compared"),
-        exact: readWirePopulation(weld.rows_exact, "reconcile.welds[debt_manager].rows_exact"),
-      };
+  if (weld === undefined) {
+    return {
+      one: CHECKED_ROW,
+      many: CHECKED_ROWS_LABEL,
+      compared: readWirePopulation(reconcile.gated_rows, "reconcile.gated_rows"),
+      exact: readWirePopulation(reconcile.gated_exact, "reconcile.gated_exact"),
+    };
+  }
+  const cash = engineName(CASH);
+  return {
+    one: `${cash} ${ACCOUNT_COMPARISON}`,
+    many: `${cash} ${ACCOUNT_COMPARISONS}`,
+    compared: readWirePopulation(weld.rows_compared, "reconcile.welds[debt_manager].rows_compared"),
+    exact: readWirePopulation(weld.rows_exact, "reconcile.welds[debt_manager].rows_exact"),
+  };
 }
 
 /**
@@ -272,21 +328,24 @@ function answeredItem(manifest: EvidenceManifest): TrustItem {
   const exitCode = readWirePopulation(reconcile.exit_code, "reconcile.exit_code");
   const passed = reconcile.result === "pass" && exitCode === 0;
   if (!passed || drift > 0) {
-    const detail = `${groupInt(drift)} drifted ${plural(drift, "row")}${passed ? "" : " · did not pass"}`;
+    // "drifted" is the receipt's own count, and it counts checked rows alone.
+    const detail = `${groupInt(drift)} ${plural(drift, CHECKED_ROW)} drifted${passed ? "" : " · did not pass"}`;
     return { id: "reconcile", label, detail, state: "warn", title: `result: ${reconcile.result} · exit ${String(exitCode)}` };
   }
   if (arm === "empty") return { id: "reconcile", label, detail: RECEIPT_EMPTY, state: "dim" };
 
   // Book-level: the Cash weld when the receipt carries one, else the gated totals.
-  const { cash, compared, exact } = countedRows(reconcile);
+  const { one, many, compared, exact } = countedRows(reconcile);
   const title = reconcile.artifact_path;
-  if (compared === 0) return { id: "reconcile", label, detail: `no ${cash}rows in the receipt`, state: "dim" };
-  if (exact > compared) return { id: "reconcile", label, detail: `${groupInt(exact)} exact of ${groupInt(compared)} ${cash}rows · contradictory receipt`, state: "warn", title };
+  if (compared === 0) return { id: "reconcile", label, detail: `no ${many} in the receipt`, state: "dim" };
+  if (exact > compared) return { id: "reconcile", label, detail: `${groupInt(exact)} exact of ${groupInt(compared)} ${many} · contradictory receipt`, state: "warn", title };
   if (exact !== compared) {
-    const drifted = compared - exact;
-    return { id: "reconcile", label, detail: `${groupInt(drifted)} ${cash}${plural(drifted, "row")} drifted`, state: "warn", title };
+    // Short of exact with no drift counted: a weld comparison is not a checked row, and a checked row the receipt does
+    // not count as drifted is not said to have drifted — both are counted as not exact.
+    const short = compared - exact;
+    return { id: "reconcile", label, detail: `${groupInt(short)} of ${groupInt(compared)} ${compared === 1 ? one : many} not exact`, state: "warn", title };
   }
-  const tally = `${groupInt(exact)}/${groupInt(compared)} ${cash}rows`;
+  const tally = `${groupInt(exact)}/${groupInt(compared)} ${many} exact`;
   if (arm !== "exact") {
     // The rows this card counts are whole and the run is not: a gated row short, another engine's weld short, or the
     // wire's own proof status refusing a receipt that passes on its numbers. The tally stays true; the tick does not

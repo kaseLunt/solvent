@@ -11,7 +11,7 @@ import type { RefinedPosition } from "@solvent/client";
 import type { AddressReading, Phase } from "./address-lookup";
 import { stressReading, type ScaleAbsence, type StressReading } from "./address-stress";
 import type { ViewChip } from "./cash-view";
-import { truncateAddress } from "./format";
+import { formatBlock, truncateAddress } from "./format";
 import { humanAge } from "./freshness";
 import { freshnessTier, type FreshnessTier, type TierConstants } from "./freshnessTiers";
 import { buildHistorySeries, engineNeverPresent, knownBatchAxis, type HistorySeries } from "./history-series";
@@ -44,7 +44,7 @@ import {
 import { groupInt, joinAnd } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import { nearCapStreak, roomSeries, type RoomPointKind, type RoomSeries, type Streak } from "./room-history";
-import { trustChecklist, type TrustItem } from "./trust";
+import { sweepAbsenceCause, trustChecklist, type TrustItem } from "./trust";
 import { isWireDecimal, isWireScale, readWirePopulation } from "./wireGuard";
 
 export type InspectorState =
@@ -469,4 +469,15 @@ export function drawerEmptyText(view: InspectorView): string {
       // unavailable, invalid, and (unreachably) a Cash state whose wire row is missing: the headline's own sentence, no calculation.
       return `${view.headline.emphasis} There is no calculation to show.`;
   }
+}
+
+/**
+ * The drawer's sweep block: the account's own collateral clock, or its absence with the engine's own cause. Block 0 is
+ * an absent sweep, never a block; a cause is named only when the engine gave one (SWEEP_NEVER), in the phrasebook's
+ * words, since that code also covers a sweep attempted that never succeeded.
+ */
+export function drawerSweepBlock(position: RefinedPosition): string {
+  if (position.as_of.sweep_block !== 0) return formatBlock(position.as_of.sweep_block);
+  const cause = sweepAbsenceCause(position);
+  return cause === null ? "absent (not stated on this row)" : `none (${cause})`;
 }

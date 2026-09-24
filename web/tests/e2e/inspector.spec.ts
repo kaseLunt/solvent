@@ -87,19 +87,16 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   await expect(page.getByTestId("inspector-trust-computed")).toHaveAttribute("data-state", "ok");
   await expect(page.getByTestId("inspector-trust-prices")).toContainText("35s · within 180s");
   await expect(page.getByTestId("inspector-trust-sweep")).toHaveAttribute("data-state", "warn");
-  // The engine-wide tally in one line; what it means for THIS account rides the title, from its own sweep block.
-  await expect(page.getByTestId("inspector-trust-sweep")).toContainText("1 of 3 attempted accounts failed");
-  await expect(page.getByTestId("inspector-trust-sweep")).toHaveAttribute(
-    "title",
-    "engine-wide sweep tally, gen 4 · this account's collateral is from its sweep at block 155,323,390",
-  );
+  // One line: what THIS account's own evidence says first, then the engine-wide tally; the stamp rides the title.
+  await expect(page.getByTestId("inspector-trust-sweep")).toContainText("this account's latest sweep succeeded · engine-wide, 1 of 3 attempted accounts failed");
+  await expect(page.getByTestId("inspector-trust-sweep")).toHaveAttribute("title", "engine-wide sweep tally, gen 4");
   await expect(page.getByTestId("inspector-trust-sweep")).not.toContainText("rows failed");
   // The receipt item says what the receipt IS — a pinned, dated run that matched the chain — and nothing about this
   // batch or this account: the live batch does not inherit the run's result.
   const receipt = page.getByTestId("inspector-trust-reconcile");
   await expect(receipt).toHaveAttribute("data-state", "ok");
   await expect(receipt).toContainText("Pinned reconcile run matched the chain");
-  await expect(receipt).toContainText("29/29 Cash rows · Jul 29, 02:14 UTC");
+  await expect(receipt).toContainText("29/29 Cash account comparisons exact · Jul 29, 02:14 UTC");
   await expect(receipt).not.toContainText("reconciles");
   await expect(receipt).not.toContainText("Book");
   await expect(page.getByTestId("inspector-room-spark").locator("svg")).toBeVisible();
@@ -602,17 +599,17 @@ test("trust: the ticked label is about the WHOLE run — a Cash weld that is who
   if (receiptOf === null) throw new Error("fixture invariant: the manifest carries a receipt");
   const bodies = [
     // A gated row short, with zero drift and the Cash weld 29/29.
-    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 86, gated_rows: 87 } }, state: "warn", words: "29/29 Cash rows · the run did not match whole" },
+    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 86, gated_rows: 87 } }, state: "warn", words: "29/29 Cash account comparisons exact · the run did not match whole" },
     // The legacy weld short.
     {
       manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, welds: receiptOf.welds.map((w) => (w.engine === "aave_v3_etherfi" ? { ...w, rows_exact: 13 } : w)) } },
       state: "warn",
-      words: "29/29 Cash rows · the run did not match whole",
+      words: "29/29 Cash account comparisons exact · the run did not match whole",
     },
     // The wire's own proof status refuses a receipt that passes on its numbers.
-    { manifest: { ...EVIDENCE_MANIFEST, proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } }, state: "warn", words: "29/29 Cash rows · the service does not vouch for this receipt" },
-    // No gated rows beside a whole Cash weld: nothing was compared, in Verification's words for the same receipt.
-    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 0, gated_rows: 0 } }, state: "dim", words: "the run checked no rows · nothing was compared" },
+    { manifest: { ...EVIDENCE_MANIFEST, proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } }, state: "warn", words: "29/29 Cash account comparisons exact · the service does not vouch for this receipt" },
+    // No gated rows beside a whole Cash weld: the run checked no rows and proves nothing, in Verification's words for the same receipt.
+    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 0, gated_rows: 0 } }, state: "dim", words: "the run checked no rows · nothing proven" },
   ];
   for (const body of bodies) {
     await mockInspector(page, { address: DEMO_ADDRESS_NEAR });

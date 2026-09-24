@@ -1,7 +1,7 @@
 // The proof/live SPLIT laws (lib/evidence.ts's manifest builders +
 // lib/proof-data), pinned:
 //   - the "proven" marker is granted ONLY by an unqualified pass receipt over
-//     at least one gated row — a pass that compared nothing proves nothing;
+//     at least one gated row — a pass that checked no rows proves nothing;
 //     the live subject is OPERATIONAL unconditionally — even beside an
 //     accepted proof (the split is the product);
 //   - any internal inconsistency in a receipt DEMOTES it to rejected with the
@@ -26,7 +26,7 @@ import {
   proofSubjectStatus,
   proofTakeaway,
   proofTakeawayArms,
-  receiptComparedNothing,
+  receiptCheckedNothing,
   type EvidenceManifest,
 } from "../../lib/evidence";
 import { findEndpointLeaks, publishable } from "../../lib/proof-data";
@@ -129,8 +129,8 @@ test("the proof drawer speaks the page's word — checked rows — and keeps the
   expect(said).toContain("checked rows | 87/87 exact · 0 drifted");
   expect(said).toContain("Cash · account comparisons | 29/29 exact");
   expect(said).toContain("Aave v3 market (legacy) · account comparisons | 14/14 exact");
-  expect(said).toContain("account comparisons | count every compared row, checked or advisory; they are not a breakdown of the checked rows");
-  expect(said).toContain("feeds registry | identical to service.registry_fingerprint, by construction");
+  expect(said).toContain("account comparisons | count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
+  expect(said).toContain("feeds registry | identical to the service's registry fingerprint, by construction");
   // The receipt's own term survives in one row, its gloss beside it; the verbatim comparator keeps the wire's field names.
   const gated = rows.filter((row) => /gated/.test(`${row.label} ${row.value}`));
   expect(gated).toEqual([{ label: "gated", value: "checked rows — the rows that must match for the run to pass", tone: "dim" }]);
@@ -365,20 +365,20 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
   });
 
   test("a receipt that gated no rows proves nothing: the head never words a vacuous pass as a match — 'All 0 checked rows matched' is never said — and the drawer grants it no PROVEN marker", () => {
-    // The receipt's own conjunction accepts it — nothing drifted because nothing was compared — so no contradiction is there to demote it.
+    // The receipt's own conjunction accepts it — nothing drifted because no row was checked — so no contradiction is there to demote it.
     expect(proofSubjectStatus(NO_ROWS_GATED).kind).toBe("accepted");
     if (NO_ROWS_GATED.reconcile === null || EVIDENCE_MANIFEST.reconcile === null) throw new Error("fixture invariant: receipt expected");
-    expect(receiptComparedNothing(NO_ROWS_GATED.reconcile)).toBe(true);
-    expect(receiptComparedNothing(EVIDENCE_MANIFEST.reconcile)).toBe(false);
-    expect(proofTakeawayArms(NO_ROWS_GATED)).toEqual({ proof: "Nothing is proven for this deployment:", scope: "the pinned reconcile run compared no rows." });
+    expect(receiptCheckedNothing(NO_ROWS_GATED.reconcile)).toBe(true);
+    expect(receiptCheckedNothing(EVIDENCE_MANIFEST.reconcile)).toBe(false);
+    expect(proofTakeawayArms(NO_ROWS_GATED)).toEqual({ proof: "Nothing is proven for this deployment:", scope: "the pinned reconcile run checked no rows." });
     for (const claim of ["All 0", "matched", "exactly"]) expect(proofTakeaway(NO_ROWS_GATED)).not.toContain(claim);
     const drawer = proofSubjectEvidence(NO_ROWS_GATED);
     expect(drawer.marker).toBe("operational");
-    expect(drawer.subject).toBe("RECEIPT COMPARED NO ROWS");
+    expect(drawer.subject).toBe("RECEIPT CHECKED NO ROWS");
     expect(drawer.subject).not.toContain("PROOF · EXACT");
     expect(drawer.markerNote).toContain("NOT PROVEN");
     // A count the population guard refuses is refused by name before it is judged empty.
-    expect(() => receiptComparedNothing({ ...NO_ROWS_GATED.reconcile, gated_rows: -0 } as NonNullable<EvidenceManifest["reconcile"]>)).toThrow(/gated_rows/);
+    expect(() => receiptCheckedNothing({ ...NO_ROWS_GATED.reconcile, gated_rows: -0 } as NonNullable<EvidenceManifest["reconcile"]>)).toThrow(/gated_rows/);
   });
 
   test("the drawer of a receipt that gated no rows wears no pass's colour: a weld of 0/0 exact is dim, the registry's identity is ink — and a weld that compared rows and matched is green again", () => {

@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
-import { deriveInspectorView, drawerEmptyText, historyFinding, historyHead, stressBatchNote, stressEmptyText } from "../../lib/inspector-view";
+import { deriveInspectorView, drawerEmptyText, drawerSweepBlock, historyFinding, historyHead, stressBatchNote, stressEmptyText } from "../../lib/inspector-view";
+import { plainCause } from "../../lib/refusal-phrasebook";
 import { DEMO_ADDRESS_REFUSED, DEMO_REFUSED_ADDR } from "../fixtures/demo";
 import { ADDRESS_FOUND, ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, FOUND_ADDR, HISTORY } from "../fixtures/inspector";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
@@ -117,7 +118,7 @@ test("the evidence read's PHASE reaches the Trust card THROUGH the view: a recei
   expect(receipt({ evidence: null, evidencePhase: "pending" })?.detail).not.toContain("unavailable");
   // Answered: the whole manifest is judged, and the run that passed whole is ticked with its own date.
   expect(receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered" })).toMatchObject({ label: "Pinned reconcile run matched the chain", state: "ok" });
-  expect(receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered" })?.detail).toContain("29/29 Cash rows · Jul");
+  expect(receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered" })?.detail).toContain("29/29 Cash account comparisons exact · Jul");
   // The whole manifest rides through — the wire's own proof status included: a Cash weld alone is not the run.
   const refusedByWire = { ...EVIDENCE_MANIFEST, proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" as const } };
   expect(receipt({ evidence: refusedByWire, evidencePhase: "answered" })).toMatchObject({ label: "Pinned reconcile run", state: "warn" });
@@ -609,6 +610,20 @@ test("drawerEmptyText speaks the view's state: a withheld book in the headline's
     "The lookup could not be completed. There is no calculation to show.",
   );
   expect(drawerEmptyText(deriveInspectorView(reading({}), TIER_FALLBACK))).toBe("Looking up this address… nothing to calculate yet.");
+});
+
+test("drawerSweepBlock: the account's own sweep block, or its absence with the engine's own cause — never block 0, and never 'never swept' (SWEEP_NEVER also covers a sweep attempted that never succeeded)", () => {
+  const at0 = { ...near().as_of, sweep_block: 0 };
+  expect(drawerSweepBlock(near({ as_of: { ...near().as_of, sweep_block: 155323390 } }))).toBe("155,323,390");
+  const never = near({ status: "refused", refusal: { code: "SWEEP_NEVER", detail: "account has no snapshot_sweeps row", note: "" }, as_of: at0 });
+  expect(drawerSweepBlock(never)).toBe(`none (${plainCause("SWEEP_NEVER")})`);
+  expect(drawerSweepBlock(never)).toBe("none (collateral never read)");
+  // A row refused for another cause before its sweep was consulted carries block 0 too: absent, with no sweep cause invented.
+  const early = near({ status: "refused", refusal: { code: "G3", detail: "borrow token carries normalized debt but no positive interest index", note: "" }, as_of: at0 });
+  expect(drawerSweepBlock(early)).toBe("absent (not stated on this row)");
+  for (const p of [never, early]) expect(drawerSweepBlock(p)).not.toMatch(/never swept|^0$/);
+  // A block the population guard refuses is said to be unreadable, never printed.
+  expect(drawerSweepBlock(near({ as_of: { ...near().as_of, sweep_block: -5 } }))).toBe("unreadable");
 });
 
 test("historyFinding speaks from the streak and the newest point's own kind: a one-batch near-cap run says so, a lone zero cap is a refusal — neither is 'above the line'", () => {
