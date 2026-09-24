@@ -268,9 +268,10 @@ test.describe("the feed page", () => {
         const value = BigInt(r.amount!);
         const magnitude = value < 0n ? -value : value;
         const whole = (magnitude / 10n ** BigInt(card("debt_manager").value_decimals)).toString();
-        const display = rendered.display.replace(/^-/, "").replace(/,/g, "");
+        const display = rendered.display.replace(/^−/, "").replace(/,/g, "");
         expect(display === whole || display.startsWith(`${whole}.`), `${rendered.display} places ${r.amount!}`).toBe(true);
-        expect(rendered.display.startsWith("-")).toBe(value < 0n);
+        // A negative figure prints the typographic minus, never the hyphen.
+        expect(rendered.display.startsWith("−")).toBe(value < 0n);
       } else {
         // Ray-scaled units: the engine's base-currency decimals are a different unit and are NOT applied.
         expect(r.amount_unit).toBe("aave_scaled");

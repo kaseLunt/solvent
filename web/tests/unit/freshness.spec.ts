@@ -55,10 +55,10 @@ test("humanAge degrades honestly — seconds, minutes, then hours+minutes", () =
   expect(humanAge(0)).toBe("0s");
   expect(humanAge(5)).toBe("5s");
   expect(humanAge(59)).toBe("59s");
-  expect(humanAge(60)).toBe("1m");
-  expect(humanAge(3599)).toBe("59m");
-  expect(humanAge(3600)).toBe("1h 0m");
-  expect(humanAge(87902)).toBe("24h 25m");
+  expect(humanAge(60)).toBe("1\u00a0min");
+  expect(humanAge(3599)).toBe("59\u00a0min");
+  expect(humanAge(3600)).toBe("1\u00a0h 0\u00a0min");
+  expect(humanAge(87902)).toBe("24\u00a0h 25\u00a0min");
 });
 
 test("a negative age floors at zero rather than rendering a future batch", () => {
@@ -68,7 +68,7 @@ test("a negative age floors at zero rather than rendering a future batch", () =>
 test("the freshness line carries the batch id, the VERBATIM computed_at, and the wire age", () => {
   const batch = { id: 5, computed_at: "2026-08-01T19:23:59.612187Z", age_seconds: 87902 };
   expect(batchFreshnessLine(batch)).toBe(
-    "batch #5 · computed 2026-08-01T19:23:59.612187Z · 24h 25m ago",
+    "batch #5 · computed 2026-08-01T19:23:59.612187Z · 24\u00a0h 25\u00a0min ago",
   );
   // The stampline form is the SAME sentence minus the word its label supplies.
   expect(batchFreshnessLine(batch)).toBe(`batch ${batchFreshnessStamp(batch)}`);
@@ -138,20 +138,20 @@ test("the MINUTE boundary is crossed while the page is open", () => {
     const anchor = anchorWireAge(59);
     expect(humanAge(anchoredAgeSeconds(anchor))).toBe("59s");
     advance(AGE_TICK_MS);
-    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("1m");
+    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("1\u00a0min");
     advance(AGE_TICK_MS);
-    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("2m");
+    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("2\u00a0min");
   });
 });
 
 test("the HOUR boundary is crossed while the page is open", () => {
   withFakeClock((advance) => {
     const anchor = anchorWireAge(3599);
-    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("59m");
+    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("59\u00a0min");
     advance(AGE_TICK_MS);
-    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("1h 0m");
+    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("1\u00a0h 0\u00a0min");
     advance(59 * AGE_TICK_MS);
-    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("1h 59m");
+    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("1\u00a0h 59\u00a0min");
   });
 });
 
@@ -171,15 +171,15 @@ test("the rendered stamp carries the ANCHORED age, and computed_at stays verbati
     const anchor = anchorWireAge(batch.age_seconds);
     // At receipt the sentence is exactly the one the wire licenses.
     expect(batchFreshnessLine(batch, anchoredAgeSeconds(anchor))).toBe(
-      "batch #5 · computed 2026-08-01T19:23:59.612187Z · 24h 25m ago",
+      "batch #5 · computed 2026-08-01T19:23:59.612187Z · 24\u00a0h 25\u00a0min ago",
     );
     // Ten minutes on a desk, and the sentence has MOVED.
     advance(10 * AGE_TICK_MS);
     expect(batchFreshnessLine(batch, anchoredAgeSeconds(anchor))).toBe(
-      "batch #5 · computed 2026-08-01T19:23:59.612187Z · 24h 35m ago",
+      "batch #5 · computed 2026-08-01T19:23:59.612187Z · 24\u00a0h 35\u00a0min ago",
     );
     expect(batchFreshnessStamp(batch, anchoredAgeSeconds(anchor))).toBe(
-      "#5 · computed 2026-08-01T19:23:59.612187Z · 24h 35m ago",
+      "#5 · computed 2026-08-01T19:23:59.612187Z · 24\u00a0h 35\u00a0min ago",
     );
     // The timestamp itself never moves — only the elapsed statement does.
     expect(batchFreshnessLine(batch, anchoredAgeSeconds(anchor))).toContain(
@@ -191,9 +191,9 @@ test("the rendered stamp carries the ANCHORED age, and computed_at stays verbati
 test("omitting the anchored age falls back to the WIRE age — the old callers stay honest", () => {
   const batch = { id: 5, computed_at: "2026-08-01T19:23:59.612187Z", age_seconds: 87902 };
   expect(batchFreshnessLine(batch)).toBe(
-    "batch #5 · computed 2026-08-01T19:23:59.612187Z · 24h 25m ago",
+    "batch #5 · computed 2026-08-01T19:23:59.612187Z · 24\u00a0h 25\u00a0min ago",
   );
   expect(batchFreshnessStamp(batch)).toBe(
-    "#5 · computed 2026-08-01T19:23:59.612187Z · 24h 25m ago",
+    "#5 · computed 2026-08-01T19:23:59.612187Z · 24\u00a0h 25\u00a0min ago",
   );
 });

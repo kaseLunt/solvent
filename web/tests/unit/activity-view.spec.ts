@@ -92,7 +92,9 @@ test("rows: 50 from the demo page; the last two are the untimed tail — dim, th
   expect(v.rows.slice(0, 48).every((r) => !r.dim)).toBe(true);
   expect(v.rows[48]).toMatchObject({ dim: true, when: "block 155,318,218", engine: "Cash", type: "repay" });
   expect(v.rows[49]).toMatchObject({ dim: true, when: "block 25,713,780", engine: "Aave v3 market (legacy)", type: "borrow" });
-  expect(v.rows[0]?.when).toBe(ROWS[0]?.block_time);
+  // The When column is the exact instant typeset: every wire field, date and time joined by U+00A0, no zone word.
+  expect(ROWS[0]?.block_time).toBe("2026-08-08T20:21:05Z");
+  expect(v.rows[0]?.when).toBe("2026-08-08\u00a020:21:05");
   expect(v.rows[0]?.dim).toBe(false);
   // The key is the row's own chain coordinates; the test id hangs on it.
   expect(v.rows[0]?.key).toBe(`10·${ROWS[0]?.tx_hash ?? ""}·38·0`);
@@ -357,7 +359,7 @@ test("rows: the tx link is the chain's explorer or null, its label the short has
 
 test("engine-scoped: a null time is a per-row block fallback, never a tail — nothing dims; cross-engine drift is named, otherwise null", () => {
   const scoped = deriveActivityView(base({ rows: FEED_ENGINE_AAVE_PAGE_1.events, mode: "engine-scoped", engine: "aave_v3_etherfi", hasMore: false }));
-  expect(scoped.rows.map((r) => r.when)).toEqual(["2026-07-29T09:57:11Z", "block 25,635,580"]);
+  expect(scoped.rows.map((r) => r.when)).toEqual(["2026-07-29\u00a009:57:11", "block 25,635,580"]);
   expect(scoped.rows.every((r) => !r.dim)).toBe(true);
   expect(scoped.drift).toBeNull();
   expect(deriveActivityView(base()).drift).toBeNull();

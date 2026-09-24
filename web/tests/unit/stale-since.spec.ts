@@ -63,8 +63,8 @@ test.describe("staleSinceReading — the NO SERVABLE BATCH duration", () => {
     });
     // The whole point of anchoring it: the number is no longer frozen at the
     // wire integer, so it has to keep reading well as it grows.
-    expect(staleSinceReading(162, false, false)?.value).toBe("2m");
-    expect(staleSinceReading(3 * 3600 + 130, false, false)?.value).toBe("3h 2m");
+    expect(staleSinceReading(162, false, false)?.value).toBe("2\u00a0min");
+    expect(staleSinceReading(3 * 3600 + 130, false, false)?.value).toBe("3\u00a0h 2\u00a0min");
     expect(staleSinceReading(7200, false, false)?.value).toBe(humanAge(7200));
   });
 

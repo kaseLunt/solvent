@@ -22,9 +22,11 @@ import type { FreshnessTier } from "./freshnessTiers";
 import { isWirePopulation } from "./wireGuard";
 
 /**
- * A wire age in seconds as `{X}h {Y}m` — the coarse human form the stampline
- * and the head line carry. Under an hour it degrades to `{Y}m`, and under a
- * minute to `{S}s`, so a fresh batch never reads as "0h 0m".
+ * A wire age in seconds as `{X} h {Y} min` — the coarse human form the
+ * stampline and the head line carry. Under an hour it degrades to `{Y} min`,
+ * and under a minute to `{S}s`, so a fresh batch never reads as "0 h 0 min".
+ * The units are spelled apart from the digits so an age never reads as a
+ * magnitude: "6m" beside "$1.2M" is a count of millions.
  *
  * Negative input (a clock the service should never publish) floors at zero
  * rather than rendering a negative age.
@@ -33,9 +35,10 @@ export function humanAge(ageSeconds: number): string {
   const total = Math.max(0, Math.floor(ageSeconds));
   if (total < 60) return `${String(total)}s`;
   const minutes = Math.floor(total / 60);
-  if (minutes < 60) return `${String(minutes)}m`;
+  // A number and its unit never break apart across a line (U+00A0), as an instant's date and time never do.
+  if (minutes < 60) return `${String(minutes)} min`;
   const hours = Math.floor(minutes / 60);
-  return `${String(hours)}h ${String(minutes % 60)}m`;
+  return `${String(hours)} h ${String(minutes % 60)} min`;
 }
 
 /** The batch envelope fields this module reads — nothing else is needed. */
@@ -609,7 +612,7 @@ export function resumeRetryDelayMs(retriesMade: number): number | null {
 /**
  * The one freshness line every surface renders:
  *
- *   batch #5 · computed 2026-08-01T19:23:59.612187Z · 24h 25m ago
+ *   batch #5 · computed 2026-08-01T19:23:59.612187Z · 24 h 25 min ago
  *
  * `ageSeconds` is the ANCHORED age (see above). Omitted, it falls back to the
  * wire's own frozen number — correct at receipt, and the honest floor for any
@@ -622,7 +625,7 @@ export function batchFreshnessLine(batch: FreshnessBatch, ageSeconds?: number): 
 /**
  * The same line MINUS its leading `batch ` — for the Stampline, whose own
  * `batch` label supplies that word. Rendered, the stamp reads the identical
- * sentence: `batch #5 · computed … · 24h 25m ago`.
+ * sentence: `batch #5 · computed … · 24 h 25 min ago`.
  */
 export function batchFreshnessStamp(batch: FreshnessBatch, ageSeconds?: number): string {
   // p1b-14: the WIRE fallback age is a population — `humanAge`'s zero floor
@@ -744,11 +747,11 @@ export function batchFreshnessLineUnknown(batch: FreshnessBatch, refreshFailed: 
 // subject.
 //
 // Rendered: `SNAPSHOT 42s` (fresh — measured ink, NO tier word, no green) ·
-// `SNAPSHOT 4m 12s · AGING` · `SNAPSHOT 22m · STALE` · `SNAPSHOT 18h 12m ·
+// `SNAPSHOT 5 min · AGING` · `SNAPSHOT 22 min · STALE` · `SNAPSHOT 18 h 12 min ·
 // CRITICAL` — and, under a blind resume, the unknown register's EXACT
 // existing sentence: `SNAPSHOT age UNKNOWN since resume · refreshing`.
 //
-// PRECISION IS HOUSE LAW: the age is `humanAge` output (`18h 12m`), not the
+// PRECISION IS HOUSE LAW: the age is `humanAge` output (`18 h 12 min`), not the
 // canon specimens' compact `18h` — a cosmetic divergence, recorded in the
 // ledger (§p1a-4). The tier vocabulary deliberately contains neither "old"
 // (the unknown register's negative pins) nor "UNKNOWN" (the known register's).

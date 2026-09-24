@@ -7,7 +7,7 @@
 //
 // Relative imports, so the unit project can load this module and pin it.
 import { formatUnits } from "@solvent/client";
-import { groupDecimalString } from "../../lib/book-format";
+import { groupExactDecimal } from "../../lib/book-format";
 import { bookHeadline, type Headline } from "../../lib/book-headline";
 import { notComputedCause, type CashRow } from "../../lib/cash-rows";
 import { belowLineToggleLabel } from "../../lib/cash-summary";
@@ -150,5 +150,5 @@ export const SPECIMEN_OK_COVERAGE = `${groupInt(SPECIMEN_POSITIONS)} / ${groupIn
 /** The drawer's exact row: the crit header's human figure, and the exact wire value it truncates — grouped, at full scale. */
 export const SPECIMEN_EXACT = {
   human: humanUsd(partition.sums.material, SPECIMEN_DECIMALS),
-  exact: groupDecimalString(formatUnits(partition.sums.material.toString(), SPECIMEN_DECIMALS, { trim: false })),
+  exact: groupExactDecimal(formatUnits(partition.sums.material.toString(), SPECIMEN_DECIMALS, { trim: false })),
 } as const;

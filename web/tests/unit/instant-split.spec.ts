@@ -40,6 +40,25 @@ test.describe("splitInstants — a sentence cut at its UTC instants, the text un
     ]);
   });
 
+  test("the typeset exact form is an instant too — with or without its zone word, with a fraction the wire carried", () => {
+    const at = "2026-08-08\u00a020:21:05\u00a0UTC";
+    expect(splitInstants(`Newest ${at}; 2 untimed rows follow.`)).toEqual([
+      { text: "Newest ", instant: false },
+      { text: at, instant: true },
+      { text: "; 2 untimed rows follow.", instant: false },
+    ]);
+    expect(splitInstants("from 2026-08-08\u00a020:21:05.612187 on")).toEqual([
+      { text: "from ", instant: false },
+      { text: "2026-08-08\u00a020:21:05.612187", instant: true },
+      { text: " on", instant: false },
+    ]);
+    expect(splitInstants("2026-07-29\u00a002:14\u00a0UTC")).toEqual([{ text: "2026-07-29\u00a002:14\u00a0UTC", instant: true }]);
+    expect(splitInstants("finished 2026-08-01T19:23:59.612187Z")).toEqual([
+      { text: "finished ", instant: false },
+      { text: "2026-08-01T19:23:59.612187Z", instant: true },
+    ]);
+  });
+
   test("only the wire's own form is marked — a date alone, an offset and a zoneless time stay prose", () => {
     for (const text of ["on 2026-08-08 at 20:00", "2026-08-08T20:00:00+00:00", "2026-08-08T20:00:00", "batch 18,251 · 87/87"]) {
       expect(splitInstants(text), text).toEqual([{ text, instant: false }]);
@@ -52,7 +71,8 @@ test.describe("splitInstants — a sentence cut at its UTC instants, the text un
       " leading space kept; trailing kept ",
       "Debt $1,900,000 across 8,552 accounts as of bucket 2026-08-08T20:00:00Z; 1 withheld.",
       "2026-08-01T21:00Z → 2026-08-08T20:00:00Z",
-      "2026-08-08T20:00:00.123Z carries a fraction, is not the marked form, and is still returned whole",
+      "2026-08-08T20:00:00.123Z carries a fraction and is still returned whole",
+      "2026-08-08\u00a020:00:00\u00a0UTC is typeset and is still returned whole",
     ]) {
       expect(join(text), JSON.stringify(text)).toBe(text);
     }

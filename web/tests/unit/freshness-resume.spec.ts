@@ -117,7 +117,7 @@ test("THE DEFECT: a sleep freezes performance.now — the WALL carries the age",
     // The OLD behaviour was 120 — under-stating by six hours. The wall-clock
     // fallback carries it.
     expect(anchoredAgeSeconds(anchor)).toBe(120 + 6 * 3600);
-    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("6h 2m");
+    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("6\u00a0h 2\u00a0min");
   });
 });
 
@@ -191,12 +191,12 @@ test("THE TIER ENGAGES AFTER SLEEP: severity escalates on a clock the tick never
   });
 });
 
-test("a sleep across the hour boundary crosses it — the age is not frozen at 59m", () => {
+test("a sleep across the hour boundary crosses it — the age is not frozen at 59\u00a0min", () => {
   withSplitClock((clock) => {
     const anchor = anchorWireAge(3550);
-    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("59m");
+    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("59\u00a0min");
     clock.sleep(20 * 60_000);
-    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("1h 19m");
+    expect(humanAge(anchoredAgeSeconds(anchor))).toBe("1\u00a0h 19\u00a0min");
   });
 });
 

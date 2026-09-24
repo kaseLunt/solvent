@@ -8,9 +8,10 @@
 // does not — never silently rounded.
 //
 // tests/unit/factor.spec.ts pins the law.
+import { MINUS } from "./format";
 
 /** U+2212, the typographic minus the mockup uses ("ETH −25%"). */
-export const MINUS_SIGN = "−";
+export const MINUS_SIGN = MINUS;
 
 export interface FactorDisplay {
   /** The wire's rational, verbatim: "70/100". */

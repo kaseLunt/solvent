@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Drawer } from "@/components/Drawer";
 import type { AddressReading } from "@/lib/address-lookup";
-import { formatBlock, renderBlockTime } from "@/lib/format";
+import { blockTimeTitle, formatBlock } from "@/lib/format";
 import { isComputedCash, sourceDisplay, symbolFor } from "@/lib/inspector-position";
 import { drawerEmptyText, drawerSweepBlock, type InspectorView } from "@/lib/inspector-view";
 import { plainCause } from "@/lib/refusal-phrasebook";
@@ -79,7 +79,7 @@ export function InspectorDrawer({ open, onClose, view, reading }: { open: boolea
                   {reading.params.value.map((change) => (
                     <li key={`${change.tx_hash}:${String(change.effective_log_index)}`}>
                       {change.fields.map((f) => `${f.name} ${f.value ?? "—"}${f.prior === null ? "" : ` (was ${f.prior})`} ${f.unit}`).join("; ")} · effective{" "}
-                      {renderBlockTime(change.effective_block, change.block_time)} · <code>{change.source_event}</code>
+                      {blockTimeTitle(change.effective_block, change.block_time)} · <code>{change.source_event}</code>
                     </li>
                   ))}
                 </ul>

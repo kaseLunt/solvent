@@ -595,7 +595,7 @@ export default function StyleguidePage() {
           chips={[
             { label: "Reconcile", value: "12/12 exact", tone: "ok" },
             { label: "Coverage", value: "1/2 · DM withheld", tone: "warn" },
-            { label: "Snapshot", value: "18h 12m · critical", tone: "crit" },
+            { label: "Snapshot", value: "18 h 12 min · critical", tone: "crit" },
             {
               label: "Refused",
               value: SPECIMEN_REFUSAL_CAUSE,

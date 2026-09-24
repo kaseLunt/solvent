@@ -155,7 +155,7 @@ test("sweep: the tally is engine-wide ATTEMPTED accounts (a failed count include
   const cleanStamp = { ...sweep, failed: 0, age_seconds: 1205 };
   expect(item(staleOwn, cleanStamp)).toMatchObject({
     state: "warn",
-    detail: "gen 4 · 20m ago",
+    detail: "gen 4 · 20\u00a0min ago",
     title: "engine-wide sweep stamp · this account's last sweep failed — its collateral is from its last successful sweep at block 155,323,390",
   });
   expect(item(own, cleanStamp)).toMatchObject({
@@ -180,7 +180,7 @@ const neverRead = (): TrustInput["position"] =>
 test("sweep: a collateral never read refuses; a clean stamp is ok with its generation and age; no stamp is dim", () => {
   expect(byId(trustChecklist({ position: neverRead(), batchId: 1, sweep, evidence })).sweep).toMatchObject({ state: "refused", detail: "collateral never read · collateral clock absent" });
   const clean = { ...sweep, failed: 0, age_seconds: 1205 };
-  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep: clean, evidence })).sweep).toMatchObject({ state: "ok", detail: "gen 4 · 20m ago" });
+  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep: clean, evidence })).sweep).toMatchObject({ state: "ok", detail: "gen 4 · 20\u00a0min ago" });
   expect(byId(trustChecklist({ position: near(), batchId: 1, sweep: null, evidence })).sweep).toMatchObject({ state: "dim", detail: "no sweep stamp on this batch" });
 });
 

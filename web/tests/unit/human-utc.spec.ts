@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { humanUtc } from "../../lib/human-utc";
+import { exactUtc, humanUtc } from "../../lib/human-utc";
 
 // The tokens are joined with U+00A0, so every expectation is written through `nb` — a pin with an ordinary space
 // would be a pin on a string the function never returns.
@@ -80,6 +80,63 @@ test.describe("humanUtc — an instant in prose, from the wire's own UTC fields"
         process.env.TZ = zone;
         expect(humanUtc("2026-01-01T00:30:00Z", "2026-01-01T00:31:00Z"), zone).toBe(nb("Jan 1, 00:30 UTC"));
         expect(humanUtc("2025-12-31T23:30:00Z", "2026-01-01T00:31:00Z"), zone).toBe(nb("Dec 31, 2025, 23:30 UTC"));
+      }
+    } finally {
+      if (before === undefined) delete process.env.TZ;
+      else process.env.TZ = before;
+    }
+  });
+});
+
+test.describe("exactUtc — a column's instant: every wire field kept, only the T and Z typeset", () => {
+  test("seconds are kept, date and time joined by U+00A0, the zone spelled UTC", () => {
+    expect(exactUtc("2026-08-08T20:21:05Z")).toBe(nb("2026-08-08 20:21:05 UTC"));
+    expect(exactUtc("2026-08-08T00:00:00Z")).toBe(nb("2026-08-08 00:00:00 UTC"));
+    expect(exactUtc("2026-08-08T20:21:05Z")).not.toContain(" ");
+  });
+
+  test("zone: false drops the zone word for a column whose header names it — nothing else moves", () => {
+    expect(exactUtc("2026-08-08T20:21:05Z", { zone: false })).toBe(nb("2026-08-08 20:21:05"));
+    expect(exactUtc("2026-08-08T20:21:05Z", { zone: true })).toBe(nb("2026-08-08 20:21:05 UTC"));
+  });
+
+  test("no field is dropped: a fraction of a second the wire carries prints after the seconds", () => {
+    expect(exactUtc("2026-08-01T19:23:59.612187Z")).toBe(nb("2026-08-01 19:23:59.612187 UTC"));
+    expect(exactUtc("2026-12-31T23:59:59.9Z", { zone: false })).toBe(nb("2026-12-31 23:59:59.9"));
+  });
+
+  test("no field is invented: an instant the wire stated to the minute prints to the minute", () => {
+    expect(exactUtc("2026-07-29T02:14Z")).toBe(nb("2026-07-29 02:14 UTC"));
+    expect(exactUtc("2026-07-29T02:14Z", { zone: false })).toBe(nb("2026-07-29 02:14"));
+  });
+
+  test("Z is required and every malformed or offset string is returned verbatim", () => {
+    for (const text of [
+      "",
+      "not a time",
+      "2026-08-08",
+      "2026-08-08T20:21:05",
+      "2026-08-08 20:21:05Z",
+      "2026-08-08t20:21:05z",
+      "2026-08-08T20:21:05+00:00",
+      "2026-08-08T20:21:05-05:00",
+      "2026-02-30T00:00:00Z",
+      "2026-08-08T24:00:00Z",
+      "2026-08-08T20:21:60Z",
+      "2026-08-08T20:21:05.Z",
+      " 2026-08-08T20:21:05Z",
+    ]) {
+      expect(exactUtc(text), JSON.stringify(text)).toBe(text);
+      expect(exactUtc(text, { zone: false }), JSON.stringify(text)).toBe(text);
+    }
+  });
+
+  test("the zone of the machine is never read", () => {
+    const before = process.env.TZ;
+    try {
+      for (const zone of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+        process.env.TZ = zone;
+        expect(exactUtc("2026-01-01T00:30:07Z"), zone).toBe(nb("2026-01-01 00:30:07 UTC"));
       }
     } finally {
       if (before === undefined) delete process.env.TZ;

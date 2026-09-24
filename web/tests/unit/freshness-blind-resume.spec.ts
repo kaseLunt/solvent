@@ -298,7 +298,7 @@ test("the unknown register never renders a number, a zero, or a staleness verdic
   // NOT A ZERO and NOT A SMALL NUMBER: the understated age is 130s, and the
   // whole finding is that rendering it reads as fresh. No age token survives.
   expect(refreshing).not.toContain("130");
-  expect(refreshing).not.toContain("2m");
+  expect(refreshing).not.toContain("2\u00a0min");
   expect(refreshing).not.toContain("0s");
   expect(refreshing).not.toContain(" ago");
   // NOT A STALENESS CLAIM EITHER: "I cannot say" is a refusal to state, not a
@@ -350,7 +350,7 @@ test("the unknown stamp mirrors the known stamp — same shape, refusal in the a
   const known = batchFreshnessStamp(BATCH, 130).split(" · ");
   const unknown = batchFreshnessStampUnknown(BATCH, false).split(" · ");
   expect(unknown.slice(0, 2)).toEqual(known.slice(0, 2));
-  expect(known[2]).toBe("2m ago");
+  expect(known[2]).toBe("2\u00a0min ago");
   expect(unknown[2]).toBe("age UNKNOWN since resume");
 });
 

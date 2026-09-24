@@ -188,7 +188,7 @@ test("legacy only, not computed, no position, cannot compute — each is its own
   expect(legacyOnly.state).toBe("legacy-only");
   expect(legacyOnly.headline.emphasis).toBe("No Cash position in batch 1; a legacy Aave v3 position exists.");
   expect(legacyOnly.kicker).toBe("Account 0xAAaA…0001");
-  expect(legacyOnly.chips.find((c) => c.label === "Prices")?.value).toBe("Aave oracle · 3m");
+  expect(legacyOnly.chips.find((c) => c.label === "Prices")?.value).toBe("Aave oracle · 3\u00a0min");
   const refused = deriveInspectorView(
     reading({
       lookup: {
@@ -498,7 +498,7 @@ test("the headline's streak is the lookup's batch's own: a history whose vantage
   expect(historyFinding(stale)).toBe("Within 10% of its cap for the last 3 batches · history as of batch 2, position as of batch 4 · dashed line: 10% of cap");
   // The same history at the lookup's own vantage: the run is this batch's, and the headline says it.
   const current = nearAt(2, dmHistory(FOUND_ADDR, 2));
-  expect(current.headline.dek).toContain("It has been within 10% of its cap for the last 3 batches (≈2m).");
+  expect(current.headline.dek).toContain("It has been within 10% of its cap for the last 3 batches (≈2\u00a0min).");
   expect(historyFinding(current)).toBe("Within 10% of its cap for the last 3 batches · dashed line: 10% of cap");
 });
 

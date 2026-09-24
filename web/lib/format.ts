@@ -13,10 +13,17 @@
 // tests/unit/honest-render.spec.ts pins both laws.
 
 import { formatUnits, type LookupOutcome } from "@solvent/client";
+import { exactUtc } from "./human-utc";
 import { isWirePopulation } from "./wireGuard";
 
 /** The one glyph for "this quantity is not applicable / not established". */
 export const EM_DASH = "—";
+
+/**
+ * The typographic minus, U+2212 — a hyphen is not a sign. DISPLAY only: an exact string (a title, a copied value,
+ * the drawer's record) keeps the wire's ASCII "-", because a spreadsheet or a parser must read what it copies.
+ */
+export const MINUS = "−";
 
 /** The three lookup outcomes, rendered. `unknowable` is NEVER "no position". */
 export const LOOKUP_PHRASES: Record<LookupOutcome, string> = {
@@ -91,18 +98,34 @@ export function formatBlock(block: number): string {
  *
  * `block_time` is chain-asserted custody (spec §7.1) and is null until the
  * header is captured. A null block time renders as the block number alone —
- * a real fact — never an invented or interpolated timestamp.
+ * a real fact — never an invented or interpolated timestamp. A custodied time
+ * is a column's instant: every wire field, the `T` typeset (`exactUtc`), and
+ * no zone word — a time column states its zone once, in its header, not in
+ * every row. Only a column whose header names the zone may print it; prose and
+ * the evidence drawer have no such header, so they take `blockTimeTitle`.
  */
 export function renderBlockTime(block: number, blockTimeIso: string | null): string {
   if (blockTimeIso === null) return `block ${formatBlock(block)}`;
-  return blockTimeIso;
+  return exactUtc(blockTimeIso, { zone: false });
 }
 
-/** `0x3c19…88af` — 0x + first 4 + ellipsis + last 4. Full value stays in `title`/copy. */
-export function truncateAddress(address: string): string {
-  if (address.length <= 12) return address;
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+/** A block time on the exact layer (a cell's title, the evidence drawer): the wire's own ISO string, or the block number when no time is custodied. */
+export function blockTimeTitle(block: number, blockTimeIso: string | null): string {
+  return blockTimeIso ?? `block ${formatBlock(block)}`;
 }
+
+/**
+ * One shortener for every hex value: `0x3c19…88af` for a 0x value (0x + first 4), `9a4a7c…a2b9` for a bare hash
+ * (first 6), then U+2026 and the last 4 — never three ASCII dots. Twelve characters or fewer stay whole. The full
+ * value stays in `title` and in the copy action.
+ */
+export function shortHex(value: string): string {
+  if (value.length <= 12) return value;
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+/** An address shortened — the same shortener every hex value uses. */
+export const truncateAddress: (address: string) => string = shortHex;
 
 /** The contract's strict address shape — `^0x` + 40 hex digits, verbatim. */
 export const ADDRESS_PATTERN = /^0[xX][0-9a-fA-F]{40}$/;

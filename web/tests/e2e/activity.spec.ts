@@ -186,7 +186,9 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   if (first === undefined) throw new Error("fixture: the demo page has rows");
   const head = page.getByTestId(`activity-row-10·${first.tx_hash}·38·0`);
   await expect(head).toBeVisible();
-  await expect(head.locator("td").first()).toHaveText(first.block_time ?? "");
+  // The When cell is the exact instant typeset: every wire field, the T a no-break space, no zone word.
+  expect(first.block_time).toBe("2026-08-08T20:21:05Z");
+  await expect(head.locator("td").first()).toHaveText(nb("2026-08-08 20:21:05"));
   // The account link opens the Inspector; the tx link is the chain's explorer — two 0x… links, each its own id.
   await expect(head.getByTestId("activity-account")).toHaveAttribute("href", `/inspector/${first.account}`);
   await expect(head.getByTestId("activity-tx")).toHaveAttribute("href", `https://optimistic.etherscan.io/tx/${first.tx_hash}`);
@@ -740,7 +742,7 @@ test("cross-engine order is header time — heights are visibly NOT the order, a
 
   await expect(rows(page)).toHaveCount(3);
   // Wire order = time DESC; the middle row's HEIGHT (154M, OP) dwarfs its neighbours (25.6M, ETH) — rendered as served, never re-sorted.
-  await expect(rows(page).locator("td:first-child")).toHaveText(["2026-07-29T09:57:11Z", "2026-07-29T09:56:40Z", "2026-07-29T09:55:02Z"]);
+  await expect(rows(page).locator("td:first-child")).toHaveText([nb("2026-07-29 09:57:11"), nb("2026-07-29 09:56:40"), nb("2026-07-29 09:55:02")]);
   await expect(page.locator('[data-testid^="activity-row-"][class*="dim"]')).toHaveCount(0);
 });
 

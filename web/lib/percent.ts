@@ -1,7 +1,9 @@
 // Percent strings from two wire integers: exact in tenths, truncating toward
 // zero, never through a float. The Book's headroom helpers own the room
-// arithmetic; this module owns the plain "share of" and "fall from" cases.
-import { MINUS } from "./human-usd";
+// arithmetic; this module owns the plain "share of" and "fall from" cases, and
+// `formatTenths` builds the percent string: the cut (truncate, floor) stays the
+// caller's, the glyphs, the tenth and the sign are decided here once.
+import { MINUS } from "./format";
 
 /** ⌊1000 · num / den⌋ toward zero, as tenths of a percent. Null when den ≤ 0. */
 export function percentTenths(num: bigint, den: bigint): bigint | null {
@@ -9,12 +11,25 @@ export function percentTenths(num: bigint, den: bigint): bigint | null {
   return (1000n * num) / den;
 }
 
-export function formatTenths(tenths: bigint): string {
+export interface TenthsOptions {
+  /** Keep a zero tenth ("12.0%"). A table cell or a tile value sets it, so a column aligns on the decimal; prose may drop it ("12%"). */
+  readonly fixed?: boolean;
+  /** "always" marks a rise with "+"; a fall always carries U+2212, and a zero carries no sign. */
+  readonly sign?: "auto" | "always";
+}
+
+/**
+ * Tenths of a percent as a string: "96.2%", "−3.8%", "0%". The tenths arrive already cut by the caller's own rule
+ * (truncation toward zero here, a floor for headroom); this only prints them.
+ */
+export function formatTenths(tenths: bigint, options: TenthsOptions = {}): string {
   const negative = tenths < 0n;
   const abs = negative ? -tenths : tenths;
   const whole = abs / 10n;
   const tenth = abs % 10n;
-  return `${negative ? MINUS : ""}${whole.toString()}${tenth === 0n ? "" : `.${tenth.toString()}`}%`;
+  const sign = negative ? MINUS : tenths > 0n && options.sign === "always" ? "+" : "";
+  const fraction = tenth === 0n && options.fixed !== true ? "" : `.${tenth.toString()}`;
+  return `${sign}${whole.toString()}${fraction}%`;
 }
 
 /** The share `num` is of `den`, e.g. "96.2%". */

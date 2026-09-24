@@ -13,10 +13,14 @@
 import { expect, test } from "@playwright/test";
 import { lookup } from "@solvent/client";
 import {
+  blockTimeTitle,
   EM_DASH,
+  MINUS,
   renderBlockTime,
   renderLookupOutcome,
   renderNullableDecimal,
+  shortHex,
+  truncateAddress,
 } from "../../lib/format";
 import { hfSeverity, WARN_HF_RATIO } from "../../lib/severity";
 
@@ -102,7 +106,33 @@ test.describe("severity", () => {
 test.describe("block time", () => {
   test("null block_time renders the block number, never an invented time", () => {
     expect(renderBlockTime(25641730, null)).toBe("block 25,641,730");
-    expect(renderBlockTime(25641730, "2026-07-30T18:56:31Z")).toBe("2026-07-30T18:56:31Z");
+  });
+
+  test("a custodied block time renders as the column's exact instant: every field, the T typeset, no zone word", () => {
+    // Date and time are joined by U+00A0, so the instant never breaks across a line in its cell.
+    expect(renderBlockTime(25641730, "2026-07-30T18:56:31Z")).toBe("2026-07-30\u00a018:56:31");
+    expect(renderBlockTime(25641730, "2026-07-30T18:56:31Z")).not.toContain(" ");
+    // A string that is no UTC instant is the wire's own, printed verbatim — never repaired into a time.
+    expect(renderBlockTime(25641730, "2026-07-30T18:56:31+02:00")).toBe("2026-07-30T18:56:31+02:00");
+  });
+
+  test("the cell's title carries the wire's ISO string, or the block number the cell already names", () => {
+    expect(blockTimeTitle(25641730, "2026-07-30T18:56:31Z")).toBe("2026-07-30T18:56:31Z");
+    expect(blockTimeTitle(25641730, null)).toBe("block 25,641,730");
+  });
+});
+
+test.describe("one minus, one hex shortener", () => {
+  test("MINUS is U+2212 — a hyphen is not a sign", () => {
+    expect(MINUS).toBe("−");
+  });
+
+  test("shortHex keeps the head and the last four around U+2026; a short value stays whole", () => {
+    expect(shortHex("0x7a3f000000000000000000000000000000c21e")).toBe("0x7a3f…c21e");
+    expect(shortHex("9a4a7c1d2e3f4a5b6c7d8e9ff5a2b9")).toBe("9a4a7c…a2b9");
+    expect(shortHex("0x1234567890")).toBe("0x1234567890");
+    expect(shortHex("0x7a3f000000000000000000000000000000c21e")).not.toContain("...");
+    expect(truncateAddress).toBe(shortHex);
   });
 });
 

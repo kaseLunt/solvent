@@ -3,10 +3,13 @@
  *
  * Pure text in, pure text out: the parts concatenate back to the input exactly, so what a reader copies and what a
  * pin compares is the sentence the lib wrote — only the break opportunity inside an instant is the renderer's to
- * remove. An instant is the wire's own form, `YYYY-MM-DDTHH:MM[:SS]Z`; nothing else is marked.
+ * remove. An instant is the wire's own form, `YYYY-MM-DDTHH:MM[:SS[.fraction]]Z`, or the typeset exact form a
+ * column prints (`exactUtc`), `YYYY-MM-DD HH:MM[:SS[.fraction]][ UTC]` joined by U+00A0 — the date's hyphens are
+ * break opportunities in either; nothing else is marked.
  */
 
-const INSTANT = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z)/;
+const INSTANT =
+  /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z|\d{4}-\d{2}-\d{2}\u00a0\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\u00a0UTC)?)/;
 
 export interface InstantPart {
   readonly text: string;

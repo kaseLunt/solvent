@@ -61,7 +61,7 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   await expect(surface(page)).toHaveAttribute("data-state", "near");
   await expect(headline(page)).toHaveText("Within $190.50 of its borrow cap. Not liquidatable yet.");
   await expect(dek(page)).toContainText("Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, brings this account to its cap.");
-  await expect(dek(page)).toContainText("within 10% of its cap for the last 14 batches (≈6m).");
+  await expect(dek(page)).toContainText("within 10% of its cap for the last 14 batches (≈6 min).");
   await expect(page.getByTestId("inspector-verdict-identity")).toContainText("Batch 18,251");
   await expect(chip(page, "Lookup")).toContainText("complete · both engines");
   await expect(chip(page, "Prices")).toContainText("PriceProvider v2 · 35s");
@@ -198,7 +198,7 @@ test("a stale Cash price input turns the Prices chip and the Trust item amber", 
   };
   await mockInspector(page, { address: stale });
   await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
-  await expect(chip(page, "Prices")).toContainText("3m");
+  await expect(chip(page, "Prices")).toContainText("3 min");
   await expect(chip(page, "Prices")).toHaveClass(/chipWarn/);
   await expect(page.getByTestId("inspector-trust-prices")).toHaveAttribute("data-state", "warn");
   await expect(page.getByTestId("inspector-trust-prices")).toContainText("weETH 210s old · budget 180s");
@@ -278,7 +278,7 @@ test("activity amounts: the Activity page's caveat heads the column; a normalize
   const amount = (row: number) => table.locator("tbody tr").nth(row).locator("td").nth(3);
   await expect(amount(0)).toHaveText("622 · normalized debt · USDC");
   await expect(amount(0).getByTestId("inspector-activity-unit")).toHaveText("· normalized debt · USDC");
-  await expect(amount(5)).toHaveText("-150 · normalized debt · USDC");
+  await expect(amount(5)).toHaveText("−150 · normalized debt · USDC");
   await expect(amount(1)).toHaveText("— record-only");
   await expect(amount(1).getByTestId("inspector-activity-unit")).toHaveAttribute("title", "record only: this event carries no amount");
   await expect(table).not.toContainText("622 USDC");
@@ -327,6 +327,9 @@ test("history: a differing vantage is stated; the drawer opens with the formula 
   await expect(body).toContainText("Room = cap − debt = 5,012.500000 − 4,822.000000 = 190.500000");
   await expect(body).toContainText("PriceProvider v2 (priceproviderv2)");
   await expect(body).toContainText("borrow_apy");
+  // The evidence drawer states the parameter change's instant as the wire's own ISO: no column header names its zone here.
+  expect(DEMO_PARAMS_DM.params[0]?.block_time).toBe("2026-08-08T17:22:50Z");
+  await expect(body).toContainText("effective 2026-08-08T17:22:50Z · borrow_apy_set");
   await expect(body).toContainText("4,822.000000");
   await page.keyboard.press("Escape");
   await expect(body).toBeHidden();

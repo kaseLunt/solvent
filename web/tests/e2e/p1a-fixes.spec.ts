@@ -303,21 +303,21 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
 
     // AGING: amber text + border.
     const aging = page.getByTestId("sg-tier-aging");
-    await expect(aging).toHaveText("SNAPSHOT 5m · AGING");
+    await expect(aging).toHaveText("SNAPSHOT 5 min · AGING");
     expect((await readChipRegister(aging)).color).toBe(
       await resolveAppbarToken(page, "--warn-text"),
     );
 
     // STALE: coral text, NO fill — outline only.
     const stale = page.getByTestId("sg-tier-stale");
-    await expect(stale).toHaveText("SNAPSHOT 22m · STALE");
+    await expect(stale).toHaveText("SNAPSHOT 22 min · STALE");
     const staleRegister = await readChipRegister(stale);
     expect(staleRegister.color).toBe(await resolveAppbarToken(page, "--crit-text"));
     expect(staleRegister.bg).toBe("rgba(0, 0, 0, 0)");
 
     // CRITICAL: coral WITH fill — the one escalation fill.
     const critical = page.getByTestId("sg-tier-critical");
-    await expect(critical).toHaveText("SNAPSHOT 18h 12m · CRITICAL");
+    await expect(critical).toHaveText("SNAPSHOT 18 h 12 min · CRITICAL");
     const criticalRegister = await readChipRegister(critical);
     expect(criticalRegister.color).toBe(await resolveAppbarToken(page, "--crit-text"));
     expect(criticalRegister.bg).toBe(await resolveAppbarToken(page, "--crit-bg", "background"));
@@ -359,7 +359,7 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     );
     await expect(composition.getByText("DUST · <$0.01")).toBeVisible();
     await expect(composition.getByText("COMPUTED", { exact: true })).toBeVisible();
-    await expect(composition.getByText("SNAPSHOT 18h 12m · CRITICAL")).toBeVisible();
+    await expect(composition.getByText("SNAPSHOT 18 h 12 min · CRITICAL")).toBeVisible();
 
     await expect(page.getByTestId("sg-comp-2")).toBeVisible();
     await expect(page.getByTestId("sg-comp-3")).toBeVisible();

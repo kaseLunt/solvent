@@ -63,7 +63,7 @@ test("a normalized figure is never followed by a bare symbol: the value alone, t
   expect(rows[0]).toMatchObject({ action: "Borrow", asset: "USDC", amount: "622", unit: "· normalized debt · USDC", amountTag: null });
   expect(rows.map((r) => r.amount)).not.toContain("622 USDC");
   // The signed repay keeps its sign; no amount cell carries a symbol.
-  expect(rows.find((r) => r.action === "Repay")).toMatchObject({ amount: "-150", unit: "· normalized debt · USDC" });
+  expect(rows.find((r) => r.action === "Repay")).toMatchObject({ amount: "−150", unit: "· normalized debt · USDC" });
   for (const row of rows) expect(row.amount).not.toMatch(/[A-Za-z]/);
   // No licensed scale: the raw integer with the raw word beside it in the Amount cell, and the same unit words — said
   // once: the unit words never repeat the raw word, and the symbol never touches the digits.

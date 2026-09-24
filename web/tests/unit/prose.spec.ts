@@ -4,7 +4,17 @@ import { FEED_ENGINES } from "../../lib/feed-data";
 import { engineName } from "../../lib/inspector-headline";
 import { CASH, LEGACY } from "../../lib/inspector-position";
 import { OBSERVATORY_ENGINES } from "../../lib/observatory-data";
-import { engineInProse, groupInt, joinAnd, plural } from "../../lib/prose";
+import {
+  CASH_PRICE_SOURCE,
+  CASH_PRICE_SOURCE_CHIP,
+  engineInProse,
+  engineList,
+  groupInt,
+  joinAnd,
+  LEGACY_FOLD_TITLE,
+  PIPELINE_STEPS,
+  plural,
+} from "../../lib/prose";
 
 test("joinAnd: one name stands alone, two take 'and', three take a comma and 'and', none is empty", () => {
   expect(joinAnd(["Cash"])).toBe("Cash");
@@ -47,4 +57,34 @@ test("engineInProse: ONE phrasing for an engine inside a sentence — Cash by na
   expect(engineName(LEGACY)).toBe("Aave v3 market (legacy)");
   expect(engineInProse(LEGACY)).not.toContain("(");
   expect(engineInProse("some_new_engine")).toBe("some_new_engine");
+});
+
+test("engineList: a list of engine labels, Cash first and the legacy market after it, whatever the wire's order — a list, never a sum", () => {
+  expect(engineList([LEGACY, CASH])).toBe("Cash and Aave v3 market (legacy)");
+  expect(engineList([CASH, LEGACY])).toBe("Cash and Aave v3 market (legacy)");
+  expect(engineList([CASH])).toBe("Cash");
+  expect(engineList([LEGACY])).toBe("Aave v3 market (legacy)");
+  expect(engineList([])).toBe("");
+  // Each engine is named once; an engine the product does not name keeps its wire id, after the two it does.
+  expect(engineList([LEGACY, CASH, LEGACY])).toBe("Cash and Aave v3 market (legacy)");
+  expect(engineList(["some_new_engine", LEGACY, CASH])).toBe("Cash, Aave v3 market (legacy) and some_new_engine");
+  // Welded to the label form the chips and kickers already print.
+  for (const engine of [CASH, LEGACY]) expect(engineList([engine])).toBe(engineName(engine));
+});
+
+test("LEGACY_FOLD_TITLE: one title for the legacy market's fold", () => {
+  expect(LEGACY_FOLD_TITLE).toBe("Legacy · Aave v3 market");
+});
+
+test("the Cash price source has one true name: the Debt Manager's own price contract, never a feed network it does not read", () => {
+  expect(CASH_PRICE_SOURCE).toBe("Cash's own price contract, PriceProvider v2 on OP Mainnet");
+  expect(CASH_PRICE_SOURCE_CHIP).toBe("PriceProvider v2");
+  expect(CASH_PRICE_SOURCE).toContain(CASH_PRICE_SOURCE_CHIP);
+  for (const text of [CASH_PRICE_SOURCE, CASH_PRICE_SOURCE_CHIP]) expect(text).not.toMatch(/redstone/i);
+});
+
+test("PIPELINE_STEPS: four names and ordinals, in order; each heading is its ordinal and its name", () => {
+  expect(Object.keys(PIPELINE_STEPS)).toEqual(["index", "compute", "verify", "serve"]);
+  expect(Object.values(PIPELINE_STEPS).map((step) => step.heading)).toEqual(["01 · Index", "02 · Compute", "03 · Verify", "04 · Serve"]);
+  for (const step of Object.values(PIPELINE_STEPS)) expect(step.heading).toBe(`${step.ordinal} · ${step.name}`);
 });

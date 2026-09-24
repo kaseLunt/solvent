@@ -29,8 +29,24 @@ import {
   HEADROOM_BREACHED_BAND,
   WARN_HEADROOM_PCT,
 } from "../../lib/headroom";
+import { formatTenths } from "../../lib/percent";
 
 const WAD = 10n ** 18n;
+
+test("the display percent is the one percent builder's string over the floored tenths — no second builder", () => {
+  for (const [num, den] of [
+    [1080000000000000000n, WAD],
+    [3200000000n, 4200000000n],
+    [10000n, 9801n],
+    [100n, 90n],
+    [100n, 100n],
+    [100n, 0n],
+  ] as const) {
+    const tenths = headroomTenths(num, den);
+    expect(tenths).not.toBeNull();
+    expect(headroomPercent(num, den)).toBe(formatTenths(tenths ?? 0n));
+  }
+});
 
 test.describe("the formula, per engine, on the committed fixture numbers", () => {
   test("aave_v3_etherfi: (hf − 1e18) / hf over the wad", () => {

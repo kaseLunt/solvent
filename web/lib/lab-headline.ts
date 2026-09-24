@@ -44,7 +44,7 @@ export function signedCount(n: number): string {
 }
 
 /** The page's word for a figure whose scale the wire guard refused: a figure prints at no other scale than its own. */
-export const UNREADABLE_SCALE = "unreadable scale";
+export { UNREADABLE_SCALE } from "./money";
 
 export interface ResultFigures {
   readonly label: string;

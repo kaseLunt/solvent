@@ -31,7 +31,7 @@ test("near cap — spec §3.5, with the fall, the extra debt, and the streak sen
   const h = cashHeadline(computed(), { streak: { batches: 14, spanSeconds: 390, newestKind: "computed" }, floor: null });
   expect(h).toMatchObject({ variant: "near", tone: "warn", emphasis: "Within $190.50 of its borrow cap.", rest: "Not liquidatable yet." });
   expect(h.dek).toBe(
-    "Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, brings this account to its cap. It has been within 10% of its cap for the last 14 batches (≈6m).",
+    "Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, brings this account to its cap. It has been within 10% of its cap for the last 14 batches (≈6\u00a0min).",
   );
   // room is floored to tenths and the rule is strict: the sentence reaches the cap and never claims liquidation at it
   expect(h.dek).not.toContain("liquidatable");

@@ -17,21 +17,21 @@ test("the chip states the human age at every age — and FRESH carries no tier w
   expect(snapshotChipParts(18251, 300, "aging")).toEqual({
     label: "SNAPSHOT",
     batchId: 18251,
-    age: "5m",
+    age: "5\u00a0min",
     tierWord: "AGING",
   });
   expect(snapshotChipParts(18251, 3_550, "stale")).toEqual({
     label: "SNAPSHOT",
     batchId: 18251,
-    age: "59m",
+    age: "59\u00a0min",
     tierWord: "STALE",
   });
-  // humanAge precision is house law: `18h 12m`, never the canon specimens'
+  // humanAge precision is house law: `18\u00a0h 12\u00a0min`, never the canon specimens'
   // compact `18h` (cosmetic divergence, ledgered §p1a-4).
   expect(snapshotChipParts(18251, 65_532, "critical")).toEqual({
     label: "SNAPSHOT",
     batchId: 18251,
-    age: "18h 12m",
+    age: "18\u00a0h 12\u00a0min",
     tierWord: "CRITICAL",
   });
 });

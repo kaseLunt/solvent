@@ -38,9 +38,10 @@
 //     negative (breached) headroom, floor keeps the same direction — −31.25%
 //     renders "−31.3%", never the flattering "−31.2%".
 //
-// Relative imports are not needed here (no local deps), but this module is
-// exercised by the unit specs under Playwright's transpiler as well as by
-// Next, so it stays dependency-free and pure.
+// This module is exercised by the unit specs under Playwright's transpiler as
+// well as by Next, so it stays pure and imports only by relative path.
+
+import { formatTenths } from "./percent";
 
 /**
  * The warn edge, in headroom percent. Any warn styling or warn disclosure on
@@ -166,13 +167,7 @@ export function headroomTenths(num: bigint, den: bigint): bigint | null {
  */
 export function headroomPercent(num: bigint, den: bigint): string | null {
   const tenths = headroomTenths(num, den);
-  if (tenths === null) return null;
-  const negative = tenths < 0n;
-  const abs = negative ? -tenths : tenths;
-  const whole = abs / 10n;
-  const tenth = abs % 10n;
-  const body = tenth === 0n ? whole.toString() : `${whole.toString()}.${tenth.toString()}`;
-  return `${negative ? "−" : ""}${body}%`;
+  return tenths === null ? null : formatTenths(tenths);
 }
 
 /**

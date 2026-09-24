@@ -10,6 +10,7 @@ import { expect, test } from "@playwright/test";
 import { UnavailableError } from "@solvent/client";
 import { proofSubjectEvidence, proofTakeaway, proofTakeawayArms } from "../../lib/evidence";
 import { OPERATIONS } from "../../lib/proof-contract.gen";
+import { PIPELINE_STEPS } from "../../lib/prose";
 import type { EvidenceResponse } from "../../lib/proof-data";
 import {
   BOOK_LOADING,
@@ -286,6 +287,8 @@ test("the Serve step's route list is the contract's own, member for member and i
 test("a step is headed once: Verification's tile label folds the step's number into its name, read from the ordinal the Overview still heads its steps with", () => {
   const steps = pipelineSteps(META, EVIDENCE_MANIFEST, read(BOOK));
   expect(steps.map(stepTileLabel)).toEqual(["01 · Index", "02 · Compute", "03 · Verify", "04 · Serve"]);
+  // The shared vocabulary is the one this page already heads its steps with, key for key.
+  expect(steps.map((step) => PIPELINE_STEPS[step.key].heading)).toEqual(steps.map(stepTileLabel));
   // The number is the ordinal's own — the two pages cannot count the steps differently — and the Overview's fields do not move.
   for (const step of steps) expect(step.ordinal.startsWith(stepTileLabel(step).slice(0, 2))).toBe(true);
   expect(steps.map((s) => s.ordinal)).toEqual(["01 · INDEX", "02 · COMPUTE", "03 · VERIFY", "04 · SERVE"]);

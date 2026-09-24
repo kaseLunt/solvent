@@ -16,6 +16,25 @@ test("formatTenths prints one decimal only when it is non-zero, and the true min
   expect(formatTenths(0n)).toBe("0%");
 });
 
+test("formatTenths fixed: a table cell or tile keeps its tenth, so a column aligns on the decimal", () => {
+  expect(formatTenths(120n, { fixed: true })).toBe("12.0%");
+  expect(formatTenths(141n, { fixed: true })).toBe("14.1%");
+  expect(formatTenths(0n, { fixed: true })).toBe("0.0%");
+  expect(formatTenths(-38n, { fixed: true })).toBe("−3.8%");
+  expect(formatTenths(-5n, { fixed: true })).toBe("−0.5%");
+  expect(formatTenths(120n, { fixed: false })).toBe("12%");
+});
+
+test("formatTenths sign: 'always' marks a rise with '+', a fall with U+2212 — and a zero carries no sign", () => {
+  expect(formatTenths(125n, { sign: "always" })).toBe("+12.5%");
+  expect(formatTenths(-125n, { sign: "always" })).toBe("−12.5%");
+  expect(formatTenths(0n, { sign: "always" })).toBe("0%");
+  expect(formatTenths(120n, { sign: "always", fixed: true })).toBe("+12.0%");
+  expect(formatTenths(0n, { sign: "always", fixed: true })).toBe("0.0%");
+  expect(formatTenths(125n, { sign: "auto" })).toBe("12.5%");
+  expect(formatTenths(-125n)).not.toContain("-");
+});
+
 test("percentOf and fallPercent compose the two", () => {
   expect(percentOf(4200000000n, 8400000000n)).toBe("50%");
   expect(percentOf(1n, 0n)).toBeNull();

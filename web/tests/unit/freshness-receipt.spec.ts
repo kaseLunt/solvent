@@ -79,21 +79,21 @@ test("A NEW RECEIPT MAY LEGITIMATELY SHOW A SMALLER AGE — the floor is per-rec
   Date.now = () => wall;
   try {
     // Receipt #6: two minutes old, then an hour of held-open tab. The rendered
-    // age climbs to 1h 2m, and inside this receipt it may never come down.
+    // age climbs to 1\u00a0h 2\u00a0min, and inside this receipt it may never come down.
     const sixth = anchorWireAge(120);
     mono += 3_600_000;
     wall += 3_600_000;
     const climbed = anchoredAgeSeconds(sixth, performance.now(), Date.now(), 120);
     expect(climbed).toBe(3720);
-    expect(humanAge(climbed)).toBe("1h 2m");
+    expect(humanAge(climbed)).toBe("1\u00a0h 2\u00a0min");
     expect(anchoredAgeSeconds(sixth, performance.now(), Date.now(), climbed)).toBe(climbed);
 
     // Receipt #7 lands, carrying the SAME integer age. It is a different
     // statement about a different batch, so it takes its own anchor and its own
-    // floor — 2m, not 1h 2m. Refusing this is what the round-12 finding is.
+    // floor — 2\u00a0min, not 1\u00a0h 2\u00a0min. Refusing this is what the round-12 finding is.
     const seventh = anchorWireAge(120);
     expect(anchoredAgeSeconds(seventh, performance.now(), Date.now(), 120)).toBe(120);
-    expect(humanAge(anchoredAgeSeconds(seventh, performance.now(), Date.now(), 120))).toBe("2m");
+    expect(humanAge(anchoredAgeSeconds(seventh, performance.now(), Date.now(), 120))).toBe("2\u00a0min");
 
     // And the new receipt's own floor is nondecreasing from there — the R4 law
     // survives the correction it made room for.

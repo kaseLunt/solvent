@@ -18,7 +18,7 @@ test("age tone follows the ratified tiers; an unknown age is dim, never a tier c
   expect(livePillWords({ ...base, ageSeconds: 200, tier: "aging" }).ageTone).toBe("warn");
   expect(livePillWords({ ...base, ageSeconds: 4000, tier: "stale" }).ageTone).toBe("crit");
   expect(livePillWords({ ...base, ageSeconds: 9000, tier: "critical" }).ageTone).toBe("crit");
-  expect(livePillWords({ ...base, ageSeconds: 9000, tier: "critical" }).age).toBe("2h 30m ago");
+  expect(livePillWords({ ...base, ageSeconds: 9000, tier: "critical" }).age).toBe("2\u00a0h 30\u00a0min ago");
   expect(livePillWords({ ...base, ageSeconds: null, tier: null })).toMatchObject({ age: null, ageTone: "dim", batch: "batch 7" });
 });
 

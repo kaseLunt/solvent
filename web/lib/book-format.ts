@@ -7,14 +7,25 @@
 // affordances upstream. Pinned by tests/unit/book-format.spec.ts.
 
 import { formatUnits, parseDecimal } from "@solvent/client";
-import { EM_DASH, renderNullableDecimal } from "./format";
+import { EM_DASH, MINUS, renderNullableDecimal } from "./format";
 
 /**
  * Insert thousands separators into a plain decimal string ("4200000.5" →
- * "4,200,000.5"). String surgery only; the digits are untouched.
+ * "4,200,000.5") for DISPLAY: a leading hyphen is typeset as the minus
+ * ("-150" → "−150"). String surgery only; the digits are untouched.
  */
 export function groupDecimalString(value: string): string {
-  const negative = value.startsWith("-") || value.startsWith("−");
+  const grouped = groupExactDecimal(value);
+  return grouped.startsWith("-") ? `${MINUS}${grouped.slice(1)}` : grouped;
+}
+
+/**
+ * The exact layer's grouping: the same separators, the sign exactly as the
+ * wire wrote it ("-1234.5" → "-1,234.5"). A title, a drawer record or a copied
+ * value keeps the ASCII "-" so a spreadsheet or a parser reads it back.
+ */
+export function groupExactDecimal(value: string): string {
+  const negative = value.startsWith("-") || value.startsWith(MINUS);
   const unsigned = negative ? value.slice(1) : value;
   const [whole = "", fraction] = unsigned.split(".");
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -52,11 +63,12 @@ export function renderEngineAmount(value: string | null, decimals: number): stri
  */
 export function renderUsdAmount(value: string | null, decimals: number): string {
   if (value === null) return EM_DASH;
-  return `$${groupDecimalString(formatUnits(value, decimals, { trim: true }))}`;
+  // The exact register: its sign stays the wire's, so a title or a copied figure parses.
+  return `$${groupExactDecimal(formatUnits(value, decimals, { trim: true }))}`;
 }
 
 /** The typographic minus (U+2212) — a hyphen is not a sign. */
-export const MINUS_SIGN = "−";
+export const MINUS_SIGN = MINUS;
 
 /**
  * CX-8 — AN EXPLICIT SIGN ON EVERY DELTA.
@@ -133,7 +145,7 @@ export function truncateToDisplay(value: bigint, decimals: number): string {
   const whole = abs / 1000n;
   const frac = (abs % 1000n).toString().padStart(3, "0").replace(/0+$/, "");
   const body = frac.length === 0 ? whole.toString() : `${whole.toString()}.${frac}`;
-  return negative ? `−${body}` : body;
+  return negative ? `${MINUS_SIGN}${body}` : body;
 }
 
 /** Display HF from an Aave wad (18-dec), truncated to 3 fraction digits. */
@@ -165,5 +177,5 @@ export function factorDistancePercent(num: bigint, den: bigint): string | null {
   const whole = abs / 10n;
   const tenth = abs % 10n;
   const body = tenth === 0n ? whole.toString() : `${whole.toString()}.${tenth.toString()}`;
-  return `${negative ? "−" : "+"}${body}%`;
+  return `${negative ? MINUS_SIGN : "+"}${body}%`;
 }

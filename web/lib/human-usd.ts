@@ -4,10 +4,11 @@
  * rounded up. Exact strings stay on the exact layer (ExactValue); this is
  * layer 1 only.
  */
+import { MINUS } from "./format";
 import { isWireScale, WireIntegerError } from "./wireGuard";
 
+export { MINUS };
 export const DUST_DISPLAY = "<$0.01";
-export const MINUS = "−";
 
 function groupThousands(whole: bigint): string {
   return whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");

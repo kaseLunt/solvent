@@ -1,40 +1,4 @@
-import { formatUnits } from "@solvent/client";
-import { groupDecimalString } from "@/lib/book-format";
-import { humanPrice, humanUsdFull } from "@/lib/human-price";
-import { isWireDecimal, isWireScale } from "@/lib/wireGuard";
-
-/** The word for a figure whose scale the wire did not license (never a thrown render). */
-const UNREADABLE_SCALE = "unreadable scale";
-
-/**
- * A money formatter for one wire scale: "—" for an absent value, and for every value when the scale itself is absent
- * (the view nulls an unreadable scale, so nothing prints at any scale); `unreadable scale` for a raw scale that fails the wire guard.
- */
-export function moneyFor(decimals: number | null): (value: bigint | null | undefined) => string {
-  if (decimals === null) return () => "—";
-  if (!isWireScale(decimals)) return (value) => (value == null ? "—" : UNREADABLE_SCALE);
-  return (value) => (value == null ? "—" : humanUsdFull(value, decimals));
-}
-
-/** A wire decimal string as money, through both guards. */
-export function wireMoney(value: string | null | undefined, decimals: number): string {
-  if (value == null) return "—";
-  if (!isWireDecimal(value)) return "unreadable";
-  return moneyFor(decimals)(BigInt(value));
-}
-
-/** A wire decimal string as a unit price, through both guards. */
-export function wirePrice(value: string | null | undefined, decimals: number | null): string {
-  if (value == null) return "—";
-  if (!isWireDecimal(value)) return "unreadable";
-  if (decimals === null || !isWireScale(decimals)) return UNREADABLE_SCALE;
-  return humanPrice(BigInt(value), decimals);
-}
-
-/** The exact wire figure, grouped, at its own scale — the drawer's and the tile's "exact" register. */
-export function wireExact(value: string | null | undefined, decimals: number): string {
-  if (value == null) return "—";
-  if (!isWireDecimal(value)) return "unreadable";
-  if (!isWireScale(decimals)) return UNREADABLE_SCALE;
-  return groupDecimalString(formatUnits(value, decimals, { trim: false }));
-}
+// The Inspector's money names. The registers are lib/money's; `moneyFor` is the account register, which every
+// per-account figure on this page prints in.
+export * from "@/lib/money";
+export { accountMoney as moneyFor } from "@/lib/money";

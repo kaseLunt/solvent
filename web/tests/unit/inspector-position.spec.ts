@@ -164,8 +164,8 @@ test("boundaryOf: absent, breached, no-price-path and unreadable arms", () => {
 test("pricesChip: source display, oldest age, worst verdict", () => {
   expect(pricesChip(near().price_inputs)).toEqual({ label: "Prices", value: "PriceProvider v2 · 35s", tone: "ok" });
   const stale = near().price_inputs.map((i, k) => (k === 0 ? { ...i, age_seconds: 210, verdict: "stale" as const, fresh: false } : i));
-  expect(pricesChip(stale)).toEqual({ label: "Prices", value: "PriceProvider v2 · 3m", tone: "warn" });
-  expect(pricesChip([...near().price_inputs, ...AAVE.price_inputs]).value).toBe("PriceProvider v2 + Aave oracle · 3m");
+  expect(pricesChip(stale)).toEqual({ label: "Prices", value: "PriceProvider v2 · 3\u00a0min", tone: "warn" });
+  expect(pricesChip([...near().price_inputs, ...AAVE.price_inputs]).value).toBe("PriceProvider v2 + Aave oracle · 3\u00a0min");
   expect(pricesChip([{ ...near().price_inputs[0]!, verdict: "missing", value: null, age_seconds: null }]).tone).toBe("crit");
   expect(pricesChip([])).toEqual({ label: "Prices", value: "no inputs", tone: "refused" });
   expect(sourceDisplay("priceproviderv2")).toBe("PriceProvider v2");

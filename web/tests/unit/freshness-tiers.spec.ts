@@ -279,7 +279,7 @@ test("the PENDING snapshot chip states the age with NO tier word — the judgmen
   expect(snapshotChipPending(18251, 300)).toEqual({
     label: "SNAPSHOT",
     batchId: 18251,
-    age: "5m",
+    age: "5\u00a0min",
     tierWord: null,
   });
 });
