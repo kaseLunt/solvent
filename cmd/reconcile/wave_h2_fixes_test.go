@@ -242,7 +242,7 @@ func TestSelectMaskedBalancePairsPerAccountReserve(t *testing.T) {
 		},
 	}
 	folded := map[string]map[common.Address]bool{
-		hexLower(borrower.Hex()):     {rsvOn: true},               // rsvOff never-enabled => OFF
+		hexLower(borrower.Hex()):     {rsvOn: true},                // rsvOff never-enabled => OFF
 		hexLower(mixedZero.Hex()):    {rsvOn: true, rsvOff: false}, // explicit disable
 		hexLower(cleanAcct.Hex()):    {rsvOn: true},
 		hexLower(pinnedMasked.Hex()): {rsvOn: true},

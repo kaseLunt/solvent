@@ -296,6 +296,7 @@ func exampleAgeSeconds(t *testing.T, now time.Time, stamp any) float64 {
 //     statement about the server rather than about the document.
 //   - against the CONTRACT EXAMPLE it proves the document's is, and it fails
 //     naming the arithmetic rather than as an anonymous byte diff.
+//
 // exampleStatesAge reports whether a body's stated age IS the derived one. It is
 // total over any decoded JSON value: an age of the wrong TYPE — a string, a
 // null, an array — is a stated age the body does not support, never a panic.

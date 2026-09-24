@@ -20,6 +20,7 @@
 //     there are no holes for a walked address. The valid domain is exactly
 //     [first AnswerUpdated >= startBlock, min(ingest cursor, pin)], stated per
 //     feed; anything outside it is `unscannable`, never extrapolated.
+//
 //  2. AGGREGATOR PHASE CHANGE — the trap that MIMICS a violation. We walk RAW
 //     aggregators; a Chainlink proxy re-points aggregator() on a phase change,
 //     which makes our aggregator go permanently quiet while the feed lives on
@@ -38,6 +39,7 @@
 //     reads per run are negligible; the unconditional read is cheaper AND
 //     stronger than a conditional-source ledger kind, which the ruling
 //     explicitly refused to add.
+//
 //  3. Only the residual is the feed's own behaviour.
 //
 // Gap arithmetic runs on `source_as_of` — the round's own `updatedAt`, chain

@@ -813,9 +813,9 @@ var justifiedForeignFuncValueTypes = map[string]bool{
 // the structural belt: an entry point that acquires its own connection has
 // no Querier to take.
 var auditedStoreEntryPoints = map[string]bool{
-	"AaveIntervalEventCount":             true,
-	"AsOfEventSums":                      true,
-	"AssetNetSums":                       true,
+	"AaveIntervalEventCount": true,
+	"AsOfEventSums":          true,
+	"AssetNetSums":           true,
 	// CollateralFlagsAsOf (Wave H, the one-law census fix): a read-only
 	// DISTINCT ON fold over position_events through the Querier it is handed —
 	// no dial, no retry, no second connection. It is the census predicate's

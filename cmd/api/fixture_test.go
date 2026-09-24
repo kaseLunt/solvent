@@ -125,16 +125,16 @@ const (
 	// sweep that observed EMPTY collateral, no price witnesses at all. $1,000
 	// at USD-6 — the figure the pre-fix scale-0 label inflated to $1B.
 	fxDMDebtOnlyBorrowings = "1000000000"
-	fxDMBadDebtAtPar  = "239603961"
-	fxDMAtRiskAtPar   = "4000000000"
-	fxAaveDebtAt90    = "600000000000"
-	fxAaveAtRiskAt90  = "630000000000"
-	fxDMBadDebtAt90   = "635643565"
-	fxDMAtRiskAt90    = "3600000000"
-	fxAaveLTBps       = "8100"
-	fxAaveBonusBps    = "10500"
-	fxDMLiqThreshold  = "80000000000000000000" // 80e18 over HUNDRED_PERCENT = 100e18
-	fxDMLiqBonus      = "1000000000000000000"  // 1e18 additive => 1%
+	fxDMBadDebtAtPar       = "239603961"
+	fxDMAtRiskAtPar        = "4000000000"
+	fxAaveDebtAt90         = "600000000000"
+	fxAaveAtRiskAt90       = "630000000000"
+	fxDMBadDebtAt90        = "635643565"
+	fxDMAtRiskAt90         = "3600000000"
+	fxAaveLTBps            = "8100"
+	fxAaveBonusBps         = "10500"
+	fxDMLiqThreshold       = "80000000000000000000" // 80e18 over HUNDRED_PERCENT = 100e18
+	fxDMLiqBonus           = "1000000000000000000"  // 1e18 additive => 1%
 	// The merged-leg fixture (borrow token held as collateral, both sides on
 	// ONE row — the live book's normal shape). Hand-derived:
 	//	USDC value_usd     = floor(7240549 × 1000000 / 1e6)  = 7240549
@@ -182,14 +182,14 @@ func timep(t time.Time) *time.Time { return &t }
 // 10% ETH step down, and FLAGGED because its weETH input is past its budget.
 func fxAavePosition() *positionRow {
 	return &positionRow{
-		Engine:              risk.AaveEngine,
-		Account:             fxAcctAave.Bytes(),
-		Status:              store.RiskPositionComputed,
-		Flags:               []string{riskfeed.FlagStalePrice},
-		ValueDecimals:       8,
-		HFNum:               bi(fxAaveHFNum),
-		HFDen:               bi(fxAaveHFDen),
-		HFWad:               bi(fxAaveHFWad),
+		Engine:        risk.AaveEngine,
+		Account:       fxAcctAave.Bytes(),
+		Status:        store.RiskPositionComputed,
+		Flags:         []string{riskfeed.FlagStalePrice},
+		ValueDecimals: 8,
+		HFNum:         bi(fxAaveHFNum),
+		HFDen:         bi(fxAaveHFDen),
+		HFWad:         bi(fxAaveHFWad),
 		// THE DERIVED VERDICT, WRITTEN (Wave R2 Finding A). HFWad is 1.08e18,
 		// above the bar, so the verdict is FALSE — a real boolean, not the NULL
 		// every pre-revision-6 batch carried. Omitting it here is what made this
@@ -549,15 +549,15 @@ const (
 
 // Hand-derived, every one of them, from the block comment above.
 const (
-	fxMDAWeETHAmount  = "2000000000000000000"
-	fxMDACollBase     = "800000000000"
-	fxMDAWeightedLT   = "6480000000000000"
-	fxMDAUSDCDebt     = "5400000000"
-	fxMDADebtBase     = "540000000000"
-	fxMDAHFWad        = "1200000000000000000"
-	fxMDAHFDen        = "5400000000000000"
-	fxMDAHFWadAfter   = "840000000000000000"
-	fxMDADropWad      = "360000000000000000"
+	fxMDAWeETHAmount = "2000000000000000000"
+	fxMDACollBase    = "800000000000"
+	fxMDAWeightedLT  = "6480000000000000"
+	fxMDAUSDCDebt    = "5400000000"
+	fxMDADebtBase    = "540000000000"
+	fxMDAHFWad       = "1200000000000000000"
+	fxMDAHFDen       = "5400000000000000"
+	fxMDAHFWadAfter  = "840000000000000000"
+	fxMDADropWad     = "360000000000000000"
 
 	fxMDBWeETHAmount = "1000000000000000000"
 	fxMDBCollBase    = "400000000000"
@@ -569,14 +569,14 @@ const (
 	fxMDBHFWadAfter  = "756000000000000000"
 	fxMDBDropWad     = "324000000000000000"
 
-	fxMDCUSDCAmount   = "7000000000"
-	fxMDCCollBase     = "700000000000"
-	fxMDCWeightedLT   = "5950000000000000"
-	fxMDCWeETHDebt    = "2000000000000000000"
-	fxMDCDebtBase     = "800000000000"
-	fxMDCHFWad        = "743750000000000000"
-	fxMDCHFDen        = "8000000000000000"
-	fxMDCHFWadAfter   = "1062500000000000000"
+	fxMDCUSDCAmount = "7000000000"
+	fxMDCCollBase   = "700000000000"
+	fxMDCWeightedLT = "5950000000000000"
+	fxMDCWeETHDebt  = "2000000000000000000"
+	fxMDCDebtBase   = "800000000000"
+	fxMDCHFWad      = "743750000000000000"
+	fxMDCHFDen      = "8000000000000000"
+	fxMDCHFWadAfter = "1062500000000000000"
 )
 
 // The Aave engine's persisted rollups over A + B + C:

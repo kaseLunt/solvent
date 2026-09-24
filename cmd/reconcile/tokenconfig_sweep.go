@@ -67,7 +67,7 @@ type scenarioPropagation struct {
 	// chain's own StableTokenCannotHaveBaseAsset, agreement with responds_to on
 	// base_stable_snap rows); this loader re-checks the ones that would corrupt
 	// the weld's EXPECTED side, because a conflicted expectation welds nothing.
-	BaseAsset string `json:"base_asset,omitempty"`
+	BaseAsset  string `json:"base_asset,omitempty"`
 	RespondsTo []struct {
 		Axis  string `json:"axis"`
 		Asset string `json:"asset"`
