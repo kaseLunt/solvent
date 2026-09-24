@@ -10,7 +10,7 @@ export interface WaterfallStep {
   label: string;
   /**
    * The step's magnitude, pre-scaled by the caller — GEOMETRY only. Exact
-   * values belong in `display` (rendered as the mono value label) so no money
+   * values belong in `display` (rendered as the value label) so no money
    * math ever happens inside a chart.
    */
   value: number;
@@ -33,12 +33,11 @@ export interface WaterfallStepsProps {
 }
 
 /**
- * Every label and value renders at 12px `var(--mono)`. 7.4px per glyph is
+ * Every label and value renders at 12px in the sans face. 7.4px per glyph is
  * the same deliberately GENEROUS advance as `MONO_CH_FALLBACK` (restated
- * here so this primitive stays server-renderable): wider than every mono in
- * the stack at 12px, so a gutter sized with it errs toward slack, never
- * toward the left-clipping this constant exists to end. "×", "·" and "−"
- * are single-advance glyphs in every face of the stack.
+ * here so this primitive stays server-renderable): wider than the sans
+ * stack's mean advance at 12px, so a gutter sized with it errs toward slack,
+ * never toward the left-clipping this constant exists to end.
  */
 const LABEL_CH_PX = 7.4;
 /** Gap between the label's end and the axis baseline. */

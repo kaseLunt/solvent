@@ -11,8 +11,12 @@
 //     CONTAINS the drawn domain — rendered through the existing register
 //     formatter, no new one;
 //   - the newest-value label's placement is a pure rule with a deterministic
-//     collision law: within 12px of the reference label's baseline it
-//     displaces a full row to the far side, so flat-at-1.0 shows two labels;
+//     collision law: it never strikes a line drawn across the plot, never
+//     overprints a line's own label, and keeps its point's side of every
+//     line while that side has room;
+//   - History's series chart places its peak label over the peak, at the
+//     plot's edge, or on a row of its own — never on the newest figure — and
+//     prints compact axis ends when the full ones would run together;
 //   - the direct label the sparkline prints is composed PURE in
 //     lib/history-series (newestPlottedLabel): the meta line's exact display
 //     string, qualified with "(batch {id})" whenever the newest witnessed
@@ -22,7 +26,22 @@ import { expect, test } from "@playwright/test";
 import {
   hfAxisMaxLabel,
   hfAxisMinLabel,
+  LABEL_ASCENT_PX,
+  LABEL_DESCENT_PX,
+  LABEL_GLYPH_BOUND_PX,
+  LINE_LABEL_GAP_PX,
+  lineInDomain,
+  lineLabelBaseline,
+  NEWEST_LABEL_COLLISION_PX,
+  NEWEST_LABEL_LINE_CLEAR_PX,
+  NEWEST_LABEL_OFFSET_PX,
+  NEWEST_LABEL_ROW_PX,
   paddedSparklineDomain,
+  SERIES_EDGE_INSET_PX,
+  SERIES_PEAK_RAISE_PX,
+  seriesAxisEnds,
+  seriesPeakLabelPlacement,
+  seriesSpansAcross,
   SPARKLINE_FLAT_PAD_FLOOR,
   SPARKLINE_PAD_RATIO,
   sparklineNewestLabelPlacement,
@@ -174,10 +193,17 @@ test("r63 rule 5: drawn bounds always land on thousandths, both sides, across sh
 });
 
 // ---------------------------------------------------------------------------
-// W-OBS-B — the newest-value label's placement rule (fix 4b), pure.
+// The newest-value label's placement: a value label never strikes a line
+// drawn across the plot, never overprints a line's own label, and stays on
+// its point's side of every line while that side has room.
 // ---------------------------------------------------------------------------
 
-test("placement: without a reference label the historical rule is unchanged", () => {
+/** The obstacles a Sparkline passes for one reference line and its label (named above the line, as it draws it). */
+function referenceAt(lineY: number, height: number) {
+  return { lineYs: [lineY], labelYs: [lineLabelBaseline(lineY, height, "above")] };
+}
+
+test("placement: without a reference the historical rule is unchanged", () => {
   // Above the point with headroom.
   expect(sparklineNewestLabelPlacement({ pointX: 100, pointY: 40, midX: 80, height: 72 })).toEqual(
     { y: 34, anchorEnd: true },
@@ -189,103 +215,366 @@ test("placement: without a reference label the historical rule is unchanged", ()
   });
 });
 
-test("placement: flat-at-1.0 displaces the label a full row past the reference label", () => {
-  // The flat-at-1.0 geometry at the inspector's height (72): the point rides
-  // the reference line mid-frame (36), the reference label sits at 33, and
-  // the candidate (30) lands inside the 12px collision band. The label
-  // crosses to the FAR side: 33 + 16 = 49. This kills the no-displacement
-  // mutant (the historical rule alone), which parks the label at 30 — 3px
-  // from the reference label's baseline.
-  expect(
-    sparklineNewestLabelPlacement({
-      pointX: 137,
-      pointY: 36,
-      midX: 80,
-      height: 72,
-      referenceLabelY: 33,
-    }),
-  ).toEqual({ y: 49, anchorEnd: true });
+test("line label: a line's own label sits just above it, or just below it when the frame has no room above", () => {
+  // Above: the ink's lowest descender keeps LINE_LABEL_GAP_PX from the line.
+  expect(lineLabelBaseline(40, 72, "above")).toBe(40 - LINE_LABEL_GAP_PX - LABEL_DESCENT_PX);
+  expect(lineLabelBaseline(40, 72, "above")).toBe(35);
+  // A line 10px from the top leaves no room for 11px of ink above it: the label is set below the line, never
+  // clipped by the frame and never struck by the line it names.
+  expect(lineLabelBaseline(10, 72, "above")).toBe(10 + LINE_LABEL_GAP_PX + LABEL_ASCENT_PX);
+  expect(lineLabelBaseline(10, 72, "above")).toBe(23);
+  // The mirror: a boundary label prefers the side past the boundary, and takes the other side near the floor.
+  expect(lineLabelBaseline(40, 72, "below")).toBe(53);
+  expect(lineLabelBaseline(65, 72, "below")).toBe(60);
+  // A frame too short for either side keeps the preferred side rather than inventing a third place.
+  expect(lineLabelBaseline(8, 14, "above")).toBe(3);
 });
 
-test("placement: a candidate BELOW the reference label crosses to the far side ABOVE it", () => {
-  // Candidate 40 sits below the reference label (33): the far side is above,
-  // 33 - 16 = 17 — which also clears the point (46) the candidate tracks.
-  // This kills an always-displace-below mutant (49 would crowd the point).
+test("line: a boundary line is drawn only where the drawn domain reaches it, and never widens the domain", () => {
+  expect(lineInDomain(0, { min: -2.5, max: 30 })).toBe(true);
+  // Inclusive at both bounds: a series that touches the boundary shows it.
+  expect(lineInDomain(0, { min: 0, max: 30 })).toBe(true);
+  expect(lineInDomain(30, { min: 0, max: 30 })).toBe(true);
+  // A domain that stays above the boundary draws no boundary: nothing is cropped, nothing is manufactured.
+  expect(lineInDomain(0, { min: 3.8, max: 30 })).toBe(false);
+  expect(lineInDomain(Number.NaN, { min: 0, max: 30 })).toBe(false);
+});
+
+test("placement: clear of every line and label, the candidate stays where it was", () => {
+  // The point sits 25px under the line: the candidate's ink box (113–127) keeps 8px from it.
   expect(
-    sparklineNewestLabelPlacement({
-      pointX: 137,
-      pointY: 46,
-      midX: 80,
-      height: 72,
-      referenceLabelY: 33,
-    }),
+    sparklineNewestLabelPlacement({ pointX: 500, pointY: 130, midX: 250, height: 140, lineYs: [105] }),
+  ).toEqual({ y: 124, anchorEnd: true });
+});
+
+test("placement: a point just under the line keeps its label under the line — never across the threshold", () => {
+  // The inspector's shape: the newest room (9%) sits just under the 10% line. The candidate (104) would strike
+  // the line (105). Above the line is nearer (98) but reads as a value above the threshold; the label keeps the
+  // point's side: 105 + 4 + 11 = 120. Kills a nearest-regardless-of-side mutant.
+  expect(
+    sparklineNewestLabelPlacement({ pointX: 500, pointY: 110, midX: 250, height: 140, lineYs: [105] }),
+  ).toEqual({ y: 120, anchorEnd: true });
+});
+
+test("placement: a point just over the line keeps its label over the line", () => {
+  // The candidate (98.5) would graze the line (105) by half a pixel of clearance; over the line is the point's side.
+  expect(
+    sparklineNewestLabelPlacement({ pointX: 500, pointY: 104.5, midX: 250, height: 140, lineYs: [105] }),
+  ).toEqual({ y: 98, anchorEnd: true });
+});
+
+test("placement: the label crosses a line only when its own side has no room", () => {
+  // Under the line (60) the frame ends at 66: a label clear of the line needs a baseline of 75. It takes the far
+  // side (53) rather than striking the line.
+  expect(
+    sparklineNewestLabelPlacement({ pointX: 137, pointY: 64, midX: 80, height: 72, lineYs: [60] }),
+  ).toEqual({ y: 53, anchorEnd: true });
+});
+
+test("placement: flat on the line, the label rises a full row past the line's own label", () => {
+  // The flat-at-1.0 geometry at the inspector's height (72): the point rides the line mid-frame (36), the line's
+  // label sits at 31, and the candidate (30) strikes both. A point ON the line counts as over it, so the label
+  // takes that side, one row past the line's label: 31 - 16 = 15. Kills the no-displacement mutant (30).
+  expect(
+    sparklineNewestLabelPlacement({ pointX: 137, pointY: 36, midX: 80, height: 72, ...referenceAt(36, 72) }),
+  ).toEqual({ y: 15, anchorEnd: true });
+});
+
+test("placement: a point under the line and its label goes under the line, not over its label", () => {
+  // Candidate 40 strikes the line (36). Over the line's label (15) would put the figure across the threshold from
+  // its point (46); under the line (36 + 15 = 51) is the point's side. Kills an always-displace-up mutant.
+  expect(
+    sparklineNewestLabelPlacement({ pointX: 137, pointY: 46, midX: 80, height: 72, ...referenceAt(36, 72) }),
+  ).toEqual({ y: 51, anchorEnd: true });
+});
+
+test("placement: with no room under the line, a point on it takes the row over the line's label", () => {
+  // Line at 63 in a 72px frame (label at 58): under the line needs 78, outside the frame; the label lands a row
+  // over the line's label, 58 - 16 = 42. Kills a mutant that skips straight to the last-resort anchor flip.
+  expect(
+    sparklineNewestLabelPlacement({ pointX: 137, pointY: 63, midX: 80, height: 72, ...referenceAt(63, 72) }),
+  ).toEqual({ y: 42, anchorEnd: true });
+});
+
+test("placement: when no place is clear, the label leaves the right-edge column", () => {
+  // A short frame (36): every clear baseline falls outside [12, 30], so the baseline keeps the candidate (17) and
+  // the anchor is FORCED to end — the label extends left of its point, out from under the line label's right-edge
+  // x span. Kills a mutant that drops the horizontal fallback (anchorEnd would stay false for this left-half point).
+  expect(
+    sparklineNewestLabelPlacement({ pointX: 10, pointY: 23, midX: 50, height: 36, ...referenceAt(23, 36) }),
   ).toEqual({ y: 17, anchorEnd: true });
 });
 
-test("placement: when the far side leaves the frame, the near side takes the label", () => {
-  // Reference label at 60 in a 72px frame: the far side (76) is outside, so
-  // the label lands a full row on the NEAR side instead (44). This kills a
-  // mutant that skips straight to the last-resort anchor flip.
+test("placement: 12px between baselines is INSIDE the label collision band", () => {
+  // Clear of the line (36) but 12px over its label (31): a 12px label's ink box is 14px tall, so the boxes still
+  // overlap. The label moves a row past it: 31 - 16 = 15. Kills a `< 12` band.
   expect(
-    sparklineNewestLabelPlacement({
-      pointX: 137,
-      pointY: 63,
-      midX: 80,
-      height: 72,
-      referenceLabelY: 60,
-    }),
-  ).toEqual({ y: 44, anchorEnd: true });
+    sparklineNewestLabelPlacement({ pointX: 137, pointY: 25, midX: 80, height: 72, ...referenceAt(36, 72) }),
+  ).toEqual({ y: 15, anchorEnd: true });
 });
 
-test("placement: when neither side fits, the label leaves the right-edge column", () => {
-  // A short frame (36): both displacement rows fall outside [12, 30], so the
-  // baseline keeps the candidate (17) and the anchor is FORCED to end — the
-  // label extends left of its point, out from under the reference label's
-  // right-edge x span. This kills a mutant that drops the horizontal
-  // fallback (anchorEnd would stay false for this left-half point).
+test("placement: exactly 15px between baselines is OUTSIDE the band — the boundary is pinned", () => {
+  // |16 - 31| = 15 does not displace (strict < 15): two baselines 15px apart hold 1px of clear space between their
+  // 14px ink boxes. A `<= 15` band would move the label to 15.
+  expect(NEWEST_LABEL_COLLISION_PX).toBe(LABEL_ASCENT_PX + LABEL_DESCENT_PX + 1);
   expect(
-    sparklineNewestLabelPlacement({
-      pointX: 10,
-      pointY: 23,
-      midX: 50,
-      height: 36,
-      referenceLabelY: 20,
-    }),
-  ).toEqual({ y: 17, anchorEnd: true });
+    sparklineNewestLabelPlacement({ pointX: 137, pointY: 22, midX: 80, height: 72, ...referenceAt(36, 72) }),
+  ).toEqual({ y: 16, anchorEnd: true });
 });
 
-test("placement: 12px of separation is INSIDE the collision band (Codex r63)", () => {
-  // r62's band was a strict `< 12`, but a 12px mono glyph renders ~14px of
-  // ink: baselines 12-14px apart still overlapped their boxes (Codex r63's
-  // honest scenario: values 0.90/1.10 with newest 0.9509 land the two
-  // baselines ~12.003px apart). The band is now < NEWEST_LABEL_COLLISION_PX
-  // (15): a 12px candidate displaces across the reference to 33 - 16 = 17.
-  // Kills the r62 band width outright.
+test("placement: past a boundary line, the label stays past it and clear of the boundary's own label", () => {
+  // Room over cap: the near-cap line at 60 (its label over it, 55), the over-cap boundary at 100 (its label under
+  // it, 113), the newest point just past the boundary (104). The candidate (98) strikes the boundary. Nearest clear
+  // is 93 — back across the boundary. Under both lines and a row under the boundary's label is 129.
   expect(
     sparklineNewestLabelPlacement({
-      pointX: 137,
-      pointY: 51,
-      midX: 80,
-      height: 72,
-      referenceLabelY: 33,
+      pointX: 500,
+      pointY: 104,
+      midX: 250,
+      height: 140,
+      lineYs: [60, 100],
+      labelYs: [lineLabelBaseline(60, 140, "above"), lineLabelBaseline(100, 140, "below")],
     }),
-  ).toEqual({ y: 17, anchorEnd: true });
+  ).toEqual({ y: 129, anchorEnd: true });
 });
 
-test("placement: exactly 15px of separation is OUTSIDE the band — the boundary is pinned", () => {
-  // |candidate - referenceLabelY| = 15 does not displace (strict < 15): two
-  // baselines a full 15px apart hold ~1px of clear space between their
-  // ~14px ink boxes. Pins the boundary so the band cannot silently move in
-  // either direction.
+test("series span: the height a plotted run covers across a label's span, its ends interpolated", () => {
+  const run = [
+    { x: 0, y: 100 },
+    { x: 20, y: 120 },
+    { x: 40, y: 100 },
+  ];
+  // Across [10, 30] both ends interpolate to 110 and the vertex at 20 reaches 120.
+  expect(seriesSpansAcross([run], 10, 30)).toEqual([{ top: 110, bottom: 120 }]);
+  // Each run is its own span (a gap breaks the line), and a run that never enters the span adds nothing.
+  const away = [
+    { x: 50, y: 10 },
+    { x: 60, y: 20 },
+  ];
+  expect(seriesSpansAcross([run, away], 10, 30)).toEqual([{ top: 110, bottom: 120 }]);
+  expect(seriesSpansAcross([run], 41, 60)).toEqual([]);
+  // An isolated point (a run of one) counts where it falls.
+  expect(seriesSpansAcross([[{ x: 15, y: 70 }]], 10, 30)).toEqual([{ top: 70, bottom: 70 }]);
+});
+
+/**
+ * The Inspector demo's room chart (the History card): 140 tall, 100 batches on a [3.8, 38.3] domain, the 10% line
+ * at 112.92, the newest room (3.8%) in the bottom-right corner — the series falls into its point from the upper
+ * left, crossing under the line. The Sparkline's own scale, over the last eight batches; the frame is 1190px at
+ * 1440 and 320px at 390.
+ */
+function demoRoomChart(width: number) {
+  const height = 140;
+  const pad = 3;
+  const count = 100;
+  const min = 3.8;
+  const span = 38.3 - min;
+  const x = (i: number) => pad + (i * (width - 2 * pad)) / (count - 1);
+  const y = (v: number) => height - pad - ((v - min) / span) * (height - 2 * pad);
+  const tail = [7.1, 6.6, 6.1, 5.7, 5.2, 4.7, 4.2, 3.8];
+  const run = tail.map((v, k) => ({ x: x(count - tail.length + k), y: y(v) }));
+  const point = run.at(-1);
+  if (point === undefined) throw new Error("fixture invariant: the demo run has a newest point");
+  const labelWidth = "3.8%".length * LABEL_GLYPH_BOUND_PX;
+  const placement = sparklineNewestLabelPlacement({
+    pointX: point.x,
+    pointY: point.y,
+    midX: width / 2,
+    height,
+    lineYs: [y(10)],
+    series: [run],
+    labelWidth,
+  });
+  const [across] = seriesSpansAcross([run], point.x - NEWEST_LABEL_OFFSET_PX - labelWidth, point.x - NEWEST_LABEL_OFFSET_PX);
+  if (across === undefined) throw new Error("fixture invariant: the series runs under the label");
+  return { lineY: y(10), point, placement, across };
+}
+
+test("placement: the demo's 3.8% clears the series it names and the 10% line, and stays under the line", () => {
+  const { lineY, point, placement, across } = demoRoomChart(1190);
+  // Where it printed while only the lines were obstacles — 6px over its point — the falling series runs through
+  // the figure's ink.
+  expect(point.y - 6 + LABEL_DESCENT_PX).toBeGreaterThan(across.top);
+  // Under the line there is no place 4px clear of it; at the named-line gap from both, the figure fits between the
+  // line and the series. Kills a series-blind mutant (131), a 4px-only mutant (131, over the series) and a
+  // cross-before-tightening mutant (105.92, over the line).
+  expect(placement.anchorEnd).toBe(true);
+  expect(placement.y).toBeCloseTo(126.22, 2);
+  expect(placement.y - LABEL_ASCENT_PX - lineY).toBeGreaterThanOrEqual(LINE_LABEL_GAP_PX);
+  expect(across.top - (placement.y + LABEL_DESCENT_PX)).toBeCloseTo(LINE_LABEL_GAP_PX, 9);
+});
+
+test("placement: where its own series fills the room under the line, the figure keeps its side over the series", () => {
+  // The same chart at 390: the series covers everything between the line and the frame's floor across the label's
+  // span. Over the line is clear, but a 3.8% printed there reads as above the 10% threshold; the figure keeps its
+  // place 6px over its point, 4px clear of the line, and its halo knocks the series out beneath it. Kills a mutant
+  // that crosses the threshold before it overprints its own series (105.92).
+  const { lineY, point, placement, across } = demoRoomChart(320);
+  expect(across.top - lineY).toBeLessThan(LINE_LABEL_GAP_PX + LABEL_ASCENT_PX + LABEL_DESCENT_PX + LINE_LABEL_GAP_PX);
+  expect(placement).toEqual({ y: point.y - 6, anchorEnd: true });
+  expect(placement.y - LABEL_ASCENT_PX - lineY).toBeGreaterThanOrEqual(NEWEST_LABEL_LINE_CLEAR_PX);
+});
+
+test("placement: a flat series keeps the historical place — 6px over its point is clear of the line it names", () => {
+  // The ink box ends 3px over the flat line: the named-line gap (2), not the 4px a value keeps from a line it does
+  // not name. Kills a 4px-from-the-series mutant (73).
+  const flat = [
+    { x: 400, y: 80 },
+    { x: 450, y: 80 },
+    { x: 500, y: 80 },
+  ];
   expect(
-    sparklineNewestLabelPlacement({
-      pointX: 137,
-      pointY: 54,
-      midX: 80,
-      height: 72,
-      referenceLabelY: 33,
-    }),
-  ).toEqual({ y: 48, anchorEnd: true });
+    sparklineNewestLabelPlacement({ pointX: 500, pointY: 80, midX: 250, height: 140, series: [flat], labelWidth: 32 }),
+  ).toEqual({ y: 74, anchorEnd: true });
+});
+
+test("placement: a series falling steeply into its point tucks the figure under the line it names", () => {
+  // Leftward of (500, 100) the series climbs 1px per px: across the label's span [462, 494] it covers 62–94. The
+  // candidate (94) sits on it; over it (57) is further than under it (94 + 2 + 11 = 107).
+  const steep = [
+    { x: 400, y: 0 },
+    { x: 500, y: 100 },
+  ];
+  expect(
+    sparklineNewestLabelPlacement({ pointX: 500, pointY: 100, midX: 250, height: 140, series: [steep], labelWidth: 32 }),
+  ).toEqual({ y: 107, anchorEnd: true });
+});
+
+test("placement: a rightward label checks the series to the RIGHT of its point", () => {
+  // A left-half point labels rightward, across [106, 138], where the series climbs from 44 to 12. The candidate (44)
+  // sits on it and over it has no headroom, so the figure goes under: 44 + 2 + 11 = 57. Kills a mutant that reads
+  // the series left of the point (nothing there: the candidate would stand).
+  const rising = [
+    { x: 100, y: 50 },
+    { x: 200, y: -50 },
+  ];
+  expect(
+    sparklineNewestLabelPlacement({ pointX: 100, pointY: 50, midX: 250, height: 140, series: [rising], labelWidth: 32 }),
+  ).toEqual({ y: 57, anchorEnd: false });
+});
+
+// ---------------------------------------------------------------------------
+// History's series chart: the peak label never overprints the newest figure,
+// and the axis ends fit the plot or print their compact forms.
+// ---------------------------------------------------------------------------
+
+/** A wide plot: the peak at x 300, the newest figure at the right end, both labels in the top strip. */
+const WIDE = { width: 800, padX: 6, glyphPx: 8, labelChars: 10, peakBaselineY: 16 } as const;
+const NEWEST_RIGHT = { left: 700, right: 790, baselineY: 14 } as const;
+
+test("peak label: centred over the peak when it clears the newest figure", () => {
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: 300, newest: NEWEST_RIGHT })).toEqual({
+    place: "peak",
+    x: 300,
+    anchor: "middle",
+  });
+  // Clamped into the frame: half the label's width plus a pixel from either end.
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: 10, newest: NEWEST_RIGHT })).toEqual({
+    place: "peak",
+    x: 41,
+    anchor: "middle",
+  });
+  // No newest figure: nothing to clear.
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: 750, newest: null }).place).toBe("peak");
+});
+
+test("peak label: the plot's left edge when over the peak it would touch the newest figure", () => {
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: 690, newest: NEWEST_RIGHT })).toEqual({
+    place: "edge",
+    x: WIDE.padX + SERIES_EDGE_INSET_PX,
+    anchor: "start",
+  });
+  // No index named: the edge, where the label's word still says what it is.
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: null, newest: NEWEST_RIGHT }).place).toBe("edge");
+  // A label wider than the plot is never centred.
+  expect(seriesPeakLabelPlacement({ ...WIDE, labelChars: 120, peakX: 300, newest: null }).place).toBe("edge");
+});
+
+test("peak label: its own row when neither over the peak nor at the edge clears the newest figure", () => {
+  // A phone-width plot: the newest figure's label spans most of it. The peak label is raised, centred over the
+  // peak. Kills the old two-placement rule, which parked it at the edge on top of the newest figure.
+  const narrow = { ...WIDE, width: 300 };
+  const newest = { left: 60, right: 294, baselineY: 14 };
+  expect(seriesPeakLabelPlacement({ ...narrow, peakX: 200, newest })).toEqual({
+    place: "raised",
+    x: 200,
+    anchor: "middle",
+  });
+  // Raised with no index: at the edge inset, on its own row.
+  expect(seriesPeakLabelPlacement({ ...narrow, peakX: null, newest })).toEqual({
+    place: "raised",
+    x: narrow.padX + SERIES_EDGE_INSET_PX,
+    anchor: "start",
+  });
+  expect(SERIES_PEAK_RAISE_PX).toBe(NEWEST_LABEL_ROW_PX);
+});
+
+test("peak label: two labels a full band apart vertically never collide, whatever their x", () => {
+  // The newest figure prints 44px under the peak's: centred over the peak is clear. Kills a horizontal-only rule.
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: 740, newest: { ...NEWEST_RIGHT, baselineY: 60 } }).place).toBe(
+    "peak",
+  );
+  // Exactly 15px apart: clear (strict < 15); 14px apart: the band holds.
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: 740, newest: { ...NEWEST_RIGHT, baselineY: 31 } }).place).toBe(
+    "peak",
+  );
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: 740, newest: { ...NEWEST_RIGHT, baselineY: 30 } }).place).toBe(
+    "edge",
+  );
+});
+
+test("peak label: a glyph of air is kept between the two labels", () => {
+  // Centred at 300 the label spans 260–340; the newest figure starting 8px (one glyph) past it collides, 9px clears.
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: 300, newest: { ...NEWEST_RIGHT, left: 348 } }).place).toBe("edge");
+  expect(seriesPeakLabelPlacement({ ...WIDE, peakX: 300, newest: { ...NEWEST_RIGHT, left: 349 } }).place).toBe("peak");
+});
+
+const ENDS = { start: "Aug 1, 21:00 UTC", end: "Aug 8, 20:00 UTC", startCompact: "Aug 1, 21:00", endCompact: "Aug 8, 20:00" };
+
+test("axis ends: the full strings while both fit the plot with two glyphs between them", () => {
+  // (16 + 16 + 2) × 7.9 = 268.6 ≤ 400 − 12.
+  expect(seriesAxisEnds({ ...ENDS, width: 400, padX: 6, glyphPx: 7.9 })).toEqual({
+    start: ENDS.start,
+    end: ENDS.end,
+    compact: false,
+  });
+  // Exactly equal still fits (strict >).
+  expect(seriesAxisEnds({ ...ENDS, width: 34 * 8 + 12, padX: 6, glyphPx: 8 }).compact).toBe(false);
+});
+
+test("axis ends: the compact forms when the full strings would run together", () => {
+  // 268.6 > 280 − 12: the ends would run into each other at a phone's width.
+  expect(seriesAxisEnds({ ...ENDS, width: 280, padX: 6, glyphPx: 7.9 })).toEqual({
+    start: ENDS.startCompact,
+    end: ENDS.endCompact,
+    compact: true,
+  });
+  expect(seriesAxisEnds({ ...ENDS, width: 34 * 8 + 11, padX: 6, glyphPx: 8 }).compact).toBe(true);
+});
+
+test("axis ends: without compact forms the full strings print as before", () => {
+  expect(seriesAxisEnds({ start: ENDS.start, end: ENDS.end, width: 120, padX: 6, glyphPx: 8 })).toEqual({
+    start: ENDS.start,
+    end: ENDS.end,
+    compact: false,
+  });
+  // One compact form: that end shortens, the other keeps its full string.
+  expect(seriesAxisEnds({ start: ENDS.start, end: ENDS.end, endCompact: ENDS.endCompact, width: 120, padX: 6, glyphPx: 8 })).toEqual({
+    start: ENDS.start,
+    end: ENDS.endCompact,
+    compact: true,
+  });
+  // A one-entry axis has only a start; its own length decides.
+  expect(seriesAxisEnds({ start: ENDS.start, startCompact: ENDS.startCompact, width: 160, padX: 6, glyphPx: 8 })).toEqual({
+    start: ENDS.start,
+    end: undefined,
+    compact: false,
+  });
+  expect(seriesAxisEnds({ start: ENDS.start, startCompact: ENDS.startCompact, width: 150, padX: 6, glyphPx: 8 })).toEqual({
+    start: ENDS.startCompact,
+    end: undefined,
+    compact: true,
+  });
 });
 
 // ---------------------------------------------------------------------------

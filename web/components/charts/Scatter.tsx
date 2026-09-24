@@ -16,7 +16,7 @@ export interface ScatterProps {
   points: readonly ScatterPoint[];
   width?: number;
   height?: number;
-  /** Mono axis captions, e.g. "debt (usd, log)" / "liq. distance %". */
+  /** Axis captions, e.g. "debt (usd, log)" / "liq. distance %". */
   xLabel: string;
   yLabel: string;
   /** Tick label formatters for the four edge values. */
@@ -35,20 +35,33 @@ export interface ScatterProps {
   xTicks?: readonly { value: number; label: string }[];
   /**
    * Optional horizontal reference line (e.g. y = 0 — the liquidation
-   * boundary). The value is FORCED into the y-domain so the boundary is
-   * always on the chart, even when every point sits on one side of it: an
-   * auto-fit domain that clips the floor fabricates proximity drama.
-   * Drawn as a dashed crit-toned hairline with a direct mono label, matching
-   * the Sparkline's reference treatment.
+   * boundary). The value is FORCED into the y-domain so the line is always
+   * on the chart, even when every point sits on one side of it: an auto-fit
+   * domain that clips the floor fabricates proximity drama. Drawn as the
+   * Sparkline's reference is: a dashed hairline with its label at the right
+   * end, in the tables' tone — "warn" (the default) for a near-cap line,
+   * "crit" for the liquidation boundary.
    */
-  yReference?: { value: number; label: string };
+  yReference?: { value: number; label: string; tone?: "warn" | "crit" };
   label: string;
 }
 
 /**
+ * Half a tick label's generous advance at 12px sans (the 7.4px bound
+ * `WaterfallSteps` restates, halved), for centring a label clear of the edge.
+ */
+const TICK_HALF_GLYPH_PX = 3.7;
+
+/** The reference line's stroke and its label's fill, per tone (the Sparkline's pairing). */
+const REFERENCE_TONE = {
+  warn: { line: styles.refLineWarn, label: styles.refLabelWarn },
+  crit: { line: styles.refLineCrit, label: styles.refLabelCrit },
+} as const;
+
+/**
  * The risk-map scatter (debt size vs liquidation distance — the whale-vs-dust
- * picture). Square 2px-radius marks in severity colors on a hairline
- * mono-grid, per the mockup's chart-panel aesthetic. Scale transforms (log
+ * picture). Square 2px-radius marks in severity colors on a hairline grid,
+ * per the mockup's chart-panel aesthetic. Scale transforms (log
  * etc.) belong to the CALLER: x/y arrive ready to plot, and the axis label
  * must say so ("usd, log").
  */
@@ -92,6 +105,7 @@ export function Scatter({
           : styles.dotDim;
 
   const ticks = Array.from({ length: gridLines + 1 }, (_, i) => i / gridLines);
+  const referenceTone = yReference?.tone ?? "warn";
 
   // Labeled x ticks, in-domain only (TASTE 12). When present they carry the
   // vertical grid AND the x value labels; the raw-extreme edge labels drop.
@@ -141,9 +155,8 @@ export function Scatter({
             <text
               className={styles.axisLabel}
               // Clamp so the rightmost label's glyphs never shave past the
-              // chart edge (design pass: a clipped glyph reads as an
-              // instrument defect). 10px mono ≈ 6px/char; half-width 3.
-              x={Math.min(px(tick.value), width - 2 - tick.label.length * 3)}
+              // chart edge (a clipped glyph reads as an instrument defect).
+              x={Math.min(px(tick.value), width - 2 - tick.label.length * TICK_HALF_GLYPH_PX)}
               y={height - 16}
               textAnchor="middle"
             >
@@ -192,16 +205,16 @@ export function Scatter({
       </text>
 
       {yReference !== undefined && (
-        <g data-testid="scatter-reference">
+        <g data-testid="scatter-reference" data-tone={referenceTone}>
           <line
-            className={styles.refLine}
+            className={`${styles.refLine} ${REFERENCE_TONE[referenceTone].line}`}
             x1={margin.left}
             x2={margin.left + plotW}
             y1={py(yReference.value)}
             y2={py(yReference.value)}
           />
           <text
-            className={styles.refLabel}
+            className={`${styles.refLabel} ${REFERENCE_TONE[referenceTone].label}`}
             x={margin.left + plotW}
             y={Math.max(margin.top + 8, py(yReference.value) - 4)}
             textAnchor="end"

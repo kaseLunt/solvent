@@ -53,9 +53,10 @@ export function DotPlot({
   testId,
   rowTestIdPrefix,
 }: DotPlotProps) {
-  // LF-8: the columns are sized from ONE MEASURED mono glyph, never a per-character guess.
-  // The probe is the kit's own; until its first layout pass the hook's generous fallback
-  // holds, so a pre-measurement render errs toward a column too wide, never one that clips.
+  // The columns are sized from ONE MEASURED glyph, never a per-character guess: the probe's
+  // tracked mono advance, a generous bound on the sans text the columns hold. Until its first
+  // layout pass the hook's generous fallback holds, so a pre-measurement render errs toward a
+  // column too wide, never one that clips.
   const { ref: probeRef, chPx } = useMonoCharWidth<HTMLSpanElement>();
   // The value column fits its longest text — its header included — never narrower than its
   // floor. When the columns outgrow the width asked for, the chart is wider than asked and its
@@ -78,7 +79,10 @@ export function DotPlot({
   const rowsH = rows.length * ROW_H;
   const height = headerH + rowsH + AXIS_H + captionH;
   const axisY = headerH + rowsH + AXIS_H - 6;
-  const edge = formatTenths(scale.maxAbsTenths);
+  const edges = {
+    left: formatTenths(-scale.maxAbsTenths),
+    right: formatTenths(scale.maxAbsTenths, { sign: "always" }),
+  };
   const px = (x: number) => labelW + x;
   return (
     // The 1:1 chart's frame: it scrolls where the chart is wider than the budget it was given.
@@ -117,7 +121,6 @@ export function DotPlot({
           return (
             <g
               key={row.key}
-              className={styles.dotPlotRow}
               data-testid={id}
               data-kind={row.tenths === null ? "refused" : "point"}
             >
@@ -152,7 +155,8 @@ export function DotPlot({
                   </circle>
                 </>
               )}
-              <text className={styles.valueLabel} x={px(plotW) + 8} y={y + 4}>
+              {/* A figure is ink; a row's state word (a refused share) is the refused register's. */}
+              <text className={row.note === null ? styles.valueLabel : styles.stateLabel} x={px(plotW) + 8} y={y + 4}>
                 {row.note ?? row.valueText}
               </text>
             </g>
@@ -166,7 +170,7 @@ export function DotPlot({
               y={axisY}
               textAnchor="start"
             >
-              −{edge}
+              {edges.left}
             </text>
             <text
               className={styles.axisLabel}
@@ -182,7 +186,7 @@ export function DotPlot({
               y={axisY}
               textAnchor="end"
             >
-              +{edge}
+              {edges.right}
             </text>
             {axisCaption !== undefined && (
               <text

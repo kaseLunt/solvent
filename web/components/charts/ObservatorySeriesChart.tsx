@@ -18,19 +18,30 @@
 //     names (the peak above the line, the newest figure above its point, the
 //     0 on top of the floor rule), is painted after the line and the points,
 //     and wears a halo in the panel's ground;
-//   - the panel answers WITHOUT a click — the drawn y-max wears its exact
-//     display string and the word that says what it is, the x-axis states its
-//     extent buckets (and the selected bucket's time), and the newest captured
-//     point prints that hour's exact figure. No number lives only in a hover,
-//     and every displayed number is the caller's string: floats only place it.
+//   - no direct label overprints another: the peak's label sits over the
+//     peak, else at the plot's left edge, else on a row of its own above the
+//     plot — the only case in which the top strip grows;
+//   - the panel answers WITHOUT a click — the drawn y-max wears its figure
+//     and the word that says what it is, the x-axis states its extent buckets
+//     (compact forms where the full ones would run together, the full strings
+//     in their titles) and the selected bucket's time, and the newest captured
+//     point prints its figure. No number lives only in a hover, and every
+//     displayed string is the caller's: floats only place it.
 //
-// Values are GEOMETRY only — exact decimal strings live in adjacent mono
-// text and in the point-detail panel. Styling: shared chart atoms are
-// imported read-only from charts.module.css; everything new is inline.
+// Values are GEOMETRY only — the exact figures live in each point's title and
+// in the point-detail panel. Styling: shared chart atoms are imported
+// read-only from charts.module.css; everything new is inline.
 
 import type { KeyboardEvent } from "react";
+import {
+  NEWEST_LABEL_ROW_PX,
+  SERIES_PEAK_RAISE_PX,
+  seriesAxisEnds,
+  seriesPeakLabelPlacement,
+} from "@/lib/sparkline-scale";
 import { MONO_CH_FALLBACK } from "@/lib/useMeasuredWidth";
 import styles from "./charts.module.css";
+import { LABEL_HALO } from "./label-halo";
 
 export interface ObservatorySeriesChartProps {
   /** The series, oldest first. Null is a GAP — an uncaptured/withheld bucket. */
@@ -51,21 +62,30 @@ export interface ObservatorySeriesChartProps {
   onSelect?: (index: number) => void;
   /**
    * The drawn y-max's label: `seriesMaxPoint(...).directLabel` — the word that
-   * says what it is ("peak") and the SAME formatter output that hour's record
-   * prints, derived from the drawn domain, never invented. Omit when nothing
-   * plots above the zero floor (the floor's own "0" label already states the max).
+   * says what it is ("peak") and that hour's figure, derived from the drawn
+   * domain, never invented. Printed verbatim. Omit when nothing plots above
+   * the zero floor (the floor's own "0" label already states the max).
    */
   yMaxLabel?: string;
   /**
    * The axis index the y-max belongs to. With it the label sits over the peak
    * itself; without it — or where it would run into the newest figure's label —
-   * the label keeps the plot's left edge, where its word still says what it is.
+   * the label keeps the plot's left edge, where its word still says what it is;
+   * where the edge would run into it too, the label takes a row of its own.
    */
   yMaxIndex?: number;
   /** The oldest axis entry's bucket hour (the head's own UTC format). */
   xStartLabel?: string;
   /** The newest axis entry's bucket hour (the head's own UTC format). */
   xEndLabel?: string;
+  /**
+   * The oldest bucket hour's compact form, printed instead of `xStartLabel`
+   * when the two full ends would run together; the full string moves to the
+   * label's title.
+   */
+  xStartCompact?: string;
+  /** The newest bucket hour's compact form (see `xStartCompact`). */
+  xEndCompact?: string;
   /**
    * The SELECTED bucket's hour, drawn on its own axis row at the selected
    * x position. Pass only while a selection exists.
@@ -78,11 +98,10 @@ export interface ObservatorySeriesChartProps {
    */
   charPx?: number;
   /**
-   * Direct value at the NEWEST captured point: the same `displayMetric`
-   * string that hour's record prints — one source, never retyped.
-   * When the last plotted point is NOT the newest axis entry (the newest
-   * bucket is withheld, or carries this metric as null or unreadable), the
-   * caller's pure layer (`seriesNewestPoint(...).directLabel`) appends a
+   * Direct value at the NEWEST captured point, the caller's string, printed
+   * verbatim. When the last plotted point is NOT the newest axis entry (the
+   * newest bucket is withheld, or carries this metric as null or unreadable),
+   * the caller's pure layer (`seriesNewestPoint(...).directLabel`) appends a
    * "(last captured {bucket})" qualifier to that string BEFORE it arrives
    * here; this component never re-derives it.
    */
@@ -140,18 +159,10 @@ const X_LABEL_STRIP = 14;
 /** A plotted point's pointer radius (rendered px) — held whatever radius the visible dot is drawn at. */
 const POINT_HIT_RADIUS = 2.4;
 
-/**
- * The halo a direct label wears: its own glyphs stroked in the panel's ground and painted under the fill, so a
- * residual overlap can never strike a figure, in either theme. Inline, because the shared label atoms serve other
- * charts. A label is not a target: the points beneath it keep their hover and their click.
- */
-const LABEL_HALO = {
-  paintOrder: "stroke",
-  stroke: "var(--panel)",
-  strokeWidth: 3,
-  strokeLinejoin: "round",
-  pointerEvents: "none",
-} as const;
+/** The indexes that plot a point: every finite value, oldest first. */
+function pointIndexes(values: ReadonlyArray<number | null>): number[] {
+  return values.flatMap((value, index) => (value !== null && Number.isFinite(value) ? [index] : []));
+}
 
 export function ObservatorySeriesChart({
   values,
@@ -167,6 +178,8 @@ export function ObservatorySeriesChart({
   yMaxIndex,
   xStartLabel,
   xEndLabel,
+  xStartCompact,
+  xEndCompact,
   selectedTimeLabel,
   charPx,
   newestValueLabel,
@@ -184,11 +197,65 @@ export function ObservatorySeriesChart({
   const step = values.length > 1 ? (width - padX * 2) / (values.length - 1) : 0;
 
   const x = (index: number) => padX + index * step;
-  const y = (value: number) => height - padBottom - ((value - min) / span) * (height - padTop - padBottom);
+  // A value's y with the plot shifted down by `raise` (the peak label's own row, when it takes one).
+  const yAt = (value: number, raise: number) =>
+    raise + height - padBottom - ((value - min) / span) * (height - padTop - padBottom);
+
+  // The newest captured point (last finite value) — where the direct value
+  // label prints. The STRING is the caller's; only its pixel position floats.
+  const plotted = pointIndexes(values);
+  const newestIndex = plotted.length > 0 ? plotted[plotted.length - 1] : undefined;
+  const newestValue = newestIndex !== undefined ? values[newestIndex] : undefined;
+  const newest =
+    newestValueLabel !== undefined && newestIndex !== undefined && newestValue !== null && newestValue !== undefined
+      ? { index: newestIndex, value: newestValue, label: newestValueLabel, onRight: x(newestIndex) > width / 2 }
+      : null;
+  const newestBaseline = (point: { value: number }, raise: number) => Math.max(12, yAt(point.value, raise) - 8);
+
+  // Label widths come from the MEASURED glyph (the generous probe travels down from the caller), never a guess.
+  const glyphPx = charPx ?? MONO_CH_FALLBACK;
+
+  // Where the newest figure's label starts and ends: the peak's label never runs into it.
+  const newestSpan = (() => {
+    if (newest === null) return null;
+    const length = newest.label.length * glyphPx;
+    const start = newest.onRight ? x(newest.index) - 6 - length : x(newest.index) + 6;
+    return { left: start, right: start + length, baselineY: newestBaseline(newest, 0) };
+  })();
+  // The peak's label: over the peak, else at the plot's left edge, else on a row of its own (lib/sparkline-scale).
+  const peak =
+    yMaxLabel === undefined
+      ? null
+      : seriesPeakLabelPlacement({
+          width,
+          padX,
+          glyphPx,
+          labelChars: yMaxLabel.length,
+          peakX: yMaxIndex !== undefined && yMaxIndex >= 0 && yMaxIndex < values.length ? x(yMaxIndex) : null,
+          peakBaselineY: yAt(max, 0) - 6,
+          newest: newestSpan,
+        });
+  // The top strip grows only when the peak label takes its own row; the plot keeps its size.
+  const raise = peak?.place === "raised" ? SERIES_PEAK_RAISE_PX : 0;
+  const y = (value: number) => yAt(value, raise);
+  // Raised, the peak's label sits a full row above the newest figure's, and never below the peak's own row.
+  const peakY =
+    peak?.place === "raised" && newest !== null
+      ? Math.min(y(max) - 6, newestBaseline(newest, raise) - NEWEST_LABEL_ROW_PX)
+      : y(max) - 6;
 
   // The axis strips are ADDED below the `height` plot budget, so the plot
   // keeps its size whether or not a strip is drawn.
-  const hasExtents = xStartLabel !== undefined || xEndLabel !== undefined;
+  const ends = seriesAxisEnds({
+    start: xStartLabel,
+    end: xEndLabel,
+    startCompact: xStartCompact,
+    endCompact: xEndCompact,
+    width,
+    padX,
+    glyphPx,
+  });
+  const hasExtents = ends.start !== undefined || ends.end !== undefined;
   const extentsStrip = hasExtents ? X_LABEL_STRIP : 0;
   const selectedStrip =
     selectedTimeLabel !== undefined &&
@@ -197,13 +264,13 @@ export function ObservatorySeriesChart({
     selectedIndex < values.length
       ? X_LABEL_STRIP
       : 0;
-  const totalHeight = height + extentsStrip + selectedStrip;
+  const plotBottom = raise + height;
+  const totalHeight = plotBottom + extentsStrip + selectedStrip;
 
   // Segments between gaps; each renders as its own path (never bridged).
   const segments: string[] = [];
   let current: string[] = [];
   const gapIndexes: number[] = [];
-  const pointIndexes: number[] = [];
   values.forEach((value, index) => {
     if (value === null || !Number.isFinite(value)) {
       if (current.length > 0) segments.push(current.join(" "));
@@ -211,7 +278,6 @@ export function ObservatorySeriesChart({
       gapIndexes.push(index);
       return;
     }
-    pointIndexes.push(index);
     current.push(`${current.length === 0 ? "M" : "L"}${x(index).toFixed(2)},${y(value).toFixed(2)}`);
   });
   if (current.length > 0) segments.push(current.join(" "));
@@ -233,39 +299,12 @@ export function ObservatorySeriesChart({
     }
   };
 
-  // The newest captured point (last finite value) — where the direct value
-  // label prints. The STRING is the caller's; only its pixel position floats.
-  const newestIndex = pointIndexes.length > 0 ? pointIndexes[pointIndexes.length - 1] : undefined;
-  const newestValue = newestIndex !== undefined ? values[newestIndex] : undefined;
-
-  // Clamp the selected-time label into the frame using MEASURED glyph width
-  // (the corrected mono probe travels down from the caller), never a guess.
-  const glyphPx = charPx ?? MONO_CH_FALLBACK;
+  // Clamp the selected-time label into the frame using the measured glyph width.
   const selectedLabelX = (() => {
     if (selectedStrip === 0 || selectedIndex === null || selectedTimeLabel === undefined) return 0;
     const half = (selectedTimeLabel.length * glyphPx) / 2;
     if (half * 2 >= width) return width / 2;
     return Math.min(Math.max(x(selectedIndex), half + 1), width - half - 1);
-  })();
-
-  // Where the newest figure's label starts and ends (measured glyphs): the peak's label never runs into it.
-  const newestOnRight = newestIndex !== undefined && x(newestIndex) > width / 2;
-  const newestSpan = (() => {
-    if (newestValueLabel === undefined || newestIndex === undefined) return null;
-    const length = newestValueLabel.length * glyphPx;
-    const start = newestOnRight ? x(newestIndex) - 6 - length : x(newestIndex) + 6;
-    return { left: start, right: start + length };
-  })();
-  // The peak's label sits over the peak, centred and clamped into the frame. Where that would touch the newest
-  // figure's label — or where the caller names no index — it keeps the plot's left edge, PAST the first point's dot
-  // (a label at x = padX would sit on that dot when the peak IS the first captured bucket).
-  const yMaxCentre = (() => {
-    if (yMaxLabel === undefined || yMaxIndex === undefined || yMaxIndex < 0 || yMaxIndex >= values.length) return null;
-    const half = (yMaxLabel.length * glyphPx) / 2;
-    if (half * 2 >= width) return null;
-    const centre = Math.min(Math.max(x(yMaxIndex), half + 1), width - half - 1);
-    const clear = newestSpan === null || centre + half + glyphPx < newestSpan.left || centre - half - glyphPx > newestSpan.right;
-    return clear ? centre : null;
   })();
 
   return (
@@ -291,26 +330,36 @@ export function ObservatorySeriesChart({
 
       {hasExtents && (
         <g>
-          {xStartLabel !== undefined && (
-            <text
-              className={styles.axisLabel}
-              data-testid="obs-x-start"
-              x={padX}
-              y={height + extentsStrip - 3}
-            >
-              {xStartLabel}
-            </text>
+          {ends.start !== undefined && (
+            // A compact end keeps its full string one hover away, on its own group so the label's text stays the
+            // printed string.
+            <g>
+              {ends.start !== xStartLabel && <title>{xStartLabel}</title>}
+              <text
+                className={styles.axisLabel}
+                data-testid="obs-x-start"
+                data-compact={ends.start !== xStartLabel ? "true" : undefined}
+                x={padX}
+                y={plotBottom + extentsStrip - 3}
+              >
+                {ends.start}
+              </text>
+            </g>
           )}
-          {xEndLabel !== undefined && (
-            <text
-              className={styles.axisLabel}
-              data-testid="obs-x-end"
-              x={width - padX}
-              y={height + extentsStrip - 3}
-              textAnchor="end"
-            >
-              {xEndLabel}
-            </text>
+          {ends.end !== undefined && (
+            <g>
+              {ends.end !== xEndLabel && <title>{xEndLabel}</title>}
+              <text
+                className={styles.axisLabel}
+                data-testid="obs-x-end"
+                data-compact={ends.end !== xEndLabel ? "true" : undefined}
+                x={width - padX}
+                y={plotBottom + extentsStrip - 3}
+                textAnchor="end"
+              >
+                {ends.end}
+              </text>
+            </g>
           )}
         </g>
       )}
@@ -340,14 +389,14 @@ export function ObservatorySeriesChart({
               data-kind={kind}
               x1={x(index)}
               x2={x(index)}
-              y1={padTop}
-              y2={height - padBottom}
+              y1={raise + padTop}
+              y2={plotBottom - padBottom}
             >
               {title !== undefined && <title>{title}</title>}
             </line>
             {/* The form-marks (color and form): a withheld bucket's outlined square, an unreadable figure's cross. */}
-            {kind === "withheld" && <GapWarnSquare cx={x(index)} top={padTop} testId="obs-gap-warn" title={title} />}
-            {kind === "unreadable" && <GapUnreadableCross cx={x(index)} top={padTop} testId="obs-gap-unreadable" title={title} />}
+            {kind === "withheld" && <GapWarnSquare cx={x(index)} top={raise + padTop} testId="obs-gap-warn" title={title} />}
+            {kind === "unreadable" && <GapUnreadableCross cx={x(index)} top={raise + padTop} testId="obs-gap-unreadable" title={title} />}
             {selectable && (
               <rect
                 data-testid="obs-gap-hit"
@@ -355,7 +404,7 @@ export function ObservatorySeriesChart({
                 x={x(index) - hitHalf}
                 y={0}
                 width={hitHalf * 2}
-                height={height}
+                height={plotBottom}
                 style={{ fill: "transparent", cursor: "pointer" }}
                 role="button"
                 aria-label={title ?? `bucket ${String(index)}`}
@@ -374,7 +423,7 @@ export function ObservatorySeriesChart({
         <path key={`seg-${String(index)}`} className={styles.line} d={d} />
       ))}
 
-      {pointIndexes.map((index) => {
+      {plotted.map((index) => {
         const value = values[index];
         if (value === null || value === undefined) return null;
         const title = titles[index];
@@ -413,7 +462,7 @@ export function ObservatorySeriesChart({
               const v = values[selectedIndex];
               return v !== null && v !== undefined && Number.isFinite(v)
                 ? y(v)
-                : height / 2;
+                : raise + height / 2;
             })()}
             r={5}
             style={{ fill: "transparent", stroke: "var(--accent)", strokeWidth: 1.5 }}
@@ -428,42 +477,35 @@ export function ObservatorySeriesChart({
         </text>
       )}
 
-      {yMaxLabel !== undefined && (
-        // The drawn y-max, labelled in the panel's own exact register — the
-        // domain is [0, max of finite values], so this string IS that point's
-        // exact display, derived, never retyped, behind the word that says
-        // what it is.
+      {yMaxLabel !== undefined && peak !== null && (
+        // The drawn y-max: the domain is [0, max of finite values], so this is that point's figure, derived, never
+        // retyped, behind the word that says what it is.
         <text
-          className={styles.axisLabel}
+          className={styles.valueLabel}
           data-testid="obs-ymax-label"
-          data-place={yMaxCentre === null ? "edge" : "peak"}
-          x={yMaxCentre ?? padX + 10}
-          y={y(max) - 6}
-          textAnchor={yMaxCentre === null ? undefined : "middle"}
+          data-place={peak.place}
+          x={peak.x}
+          y={peakY}
+          textAnchor={peak.anchor === "middle" ? "middle" : undefined}
           style={LABEL_HALO}
         >
           {yMaxLabel}
         </text>
       )}
 
-      {newestValueLabel !== undefined &&
-        newestIndex !== undefined &&
-        newestValue !== null &&
-        newestValue !== undefined && (
-          // The newest captured point's figure, printed at the point — the
-          // exact string that hour's record prints (one source), so the
-          // picture answers without a click.
-          <text
-            className={styles.valueLabel}
-            data-testid="obs-newest-value"
-            x={newestOnRight ? x(newestIndex) - 6 : x(newestIndex) + 6}
-            y={Math.max(12, y(newestValue) - 8)}
-            textAnchor={newestOnRight ? "end" : "start"}
-            style={LABEL_HALO}
-          >
-            {newestValueLabel}
-          </text>
-        )}
+      {newest !== null && (
+        // The newest captured point's figure, printed at the point, so the picture answers without a click.
+        <text
+          className={styles.valueLabel}
+          data-testid="obs-newest-value"
+          x={newest.onRight ? x(newest.index) - 6 : x(newest.index) + 6}
+          y={newestBaseline(newest, raise)}
+          textAnchor={newest.onRight ? "end" : "start"}
+          style={LABEL_HALO}
+        >
+          {newest.label}
+        </text>
+      )}
     </svg>
   );
 }

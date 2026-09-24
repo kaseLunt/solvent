@@ -1,5 +1,12 @@
-import { sparklineNewestLabelPlacement } from "@/lib/sparkline-scale";
+import {
+  LABEL_GLYPH_BOUND_PX,
+  lineInDomain,
+  lineLabelBaseline,
+  NEWEST_LABEL_OFFSET_PX,
+  sparklineNewestLabelPlacement,
+} from "@/lib/sparkline-scale";
 import styles from "./charts.module.css";
+import { LABEL_HALO } from "./label-halo";
 
 export interface SparklineProps {
   /**
@@ -15,13 +22,32 @@ export interface SparklineProps {
   /** Accessible description, e.g. "HF across the last 60 batches". */
   label: string;
   /**
-   * Optional horizontal reference line (e.g. HF = 1.0 — the liquidation
-   * boundary). The value is INCLUDED in the y-domain, so the line stays
+   * Optional horizontal reference line (e.g. room = 10% of the cap, the
+   * near-cap line). The value is INCLUDED in the y-domain, so the line stays
    * visible even when every point sits on one side of it.
    */
   referenceValue?: number;
-  /** Mono label for the reference line (e.g. "1.0"). Rendered only with `referenceValue`. */
+  /**
+   * The reference line's name, printed at its right end just above it (below
+   * it where the frame has no room above) — the caller's string, e.g.
+   * "10% of cap". Rendered only with `referenceValue`.
+   */
   referenceLabel?: string;
+  /**
+   * The reference line's tone, in the tables' vocabulary: "warn" (the
+   * default) for a near-cap line, "crit" for a line that IS the liquidation
+   * boundary (a health factor of 1.0).
+   */
+  referenceTone?: "warn" | "crit";
+  /**
+   * Optional crit boundary line (e.g. room = 0%, where debt passes the cap).
+   * Unlike the reference it never widens the y-domain: it is drawn only
+   * where the drawn domain reaches it, so a series that never approaches the
+   * boundary shows none.
+   */
+  boundaryValue?: number;
+  /** The boundary's name, printed at its right end just below it — the side past the boundary. */
+  boundaryLabel?: string;
   /**
    * Per-point hover text (SVG `<title>`), aligned index-for-index with
    * `values`. Rendered on GAP ticks — the reason a point could not be
@@ -65,9 +91,15 @@ export interface SparklineProps {
 /** The x-label strip's height in rendered px (added BELOW the plot budget). */
 const X_LABEL_STRIP = 14;
 
+/** A line's stroke and its label's fill, per tone: the stroke in the tone's fill grade, the label in its text grade. */
+const REFERENCE_TONE = {
+  warn: { line: styles.refLineWarn, label: styles.refLabelWarn },
+  crit: { line: styles.refLineCrit, label: styles.refLabelCrit },
+} as const;
+
 /**
  * A dense inline sparkline (SVG, no chart lib). Values are used for GEOMETRY
- * only — exact numbers belong in adjacent mono text, not in this path.
+ * only — every printed string is the caller's; this component places it.
  */
 export function Sparkline({
   values,
@@ -77,6 +109,9 @@ export function Sparkline({
   label,
   referenceValue,
   referenceLabel,
+  referenceTone = "warn",
+  boundaryValue,
+  boundaryLabel,
   pointTitles,
   domain,
   yLabels,
@@ -134,27 +169,35 @@ export function Sparkline({
   }
   const lastValue = lastIndex >= 0 ? values[lastIndex] : null;
 
-  // Where the newest-value label prints: the PURE placement rule
-  // (lib/sparkline-scale) — the historical above-else-below baseline, plus
-  // the Wave W-OBS-B collision law: within 12px of the reference label's
-  // baseline the newest label displaces a full row to the far side, so a
-  // flat-at-1.0 series shows two readable labels instead of one smudge.
-  // `referenceLabelY` mirrors the reference label's own y expression below.
+  // The lines drawn across the plot, and the labels naming them at its right end: the reference always (it is in the
+  // domain), the boundary only where the drawn domain reaches it.
+  const referenceY =
+    referenceValue !== undefined && Number.isFinite(referenceValue) ? y(referenceValue) : undefined;
+  const boundaryY =
+    boundaryValue !== undefined && lineInDomain(boundaryValue, { min, max }) ? y(boundaryValue) : undefined;
+  const referenceLabelY =
+    referenceY !== undefined && referenceLabel !== undefined ? lineLabelBaseline(referenceY, height, "above") : undefined;
+  const boundaryLabelY =
+    boundaryY !== undefined && boundaryLabel !== undefined ? lineLabelBaseline(boundaryY, height, "below") : undefined;
+  const present = (ys: ReadonlyArray<number | undefined>) => ys.filter((v): v is number => v !== undefined);
+
+  // Where the newest-value label prints: the PURE placement rule (lib/sparkline-scale) — above its point, never on a
+  // line or a line's label, clear of the series it names across its own span; displaced, it keeps its point's side of
+  // every line while that side has room.
   const newestPlacement =
-    lastIndex >= 0 && lastValue !== null && lastValue !== undefined
+    newestLabel !== undefined && lastIndex >= 0 && lastValue !== null && lastValue !== undefined
       ? sparklineNewestLabelPlacement({
           pointX: x(lastIndex),
           pointY: y(lastValue),
           midX: plotLeft + (width - plotLeft - pad) / 2,
           height,
-          referenceLabelY:
-            referenceValue !== undefined &&
-            Number.isFinite(referenceValue) &&
-            referenceLabel !== undefined
-              ? Math.max(8, y(referenceValue) - 3)
-              : undefined,
+          lineYs: present([referenceY, boundaryY]),
+          labelYs: present([referenceLabelY, boundaryLabelY]),
+          series: segments.map((segment) => segment.map((p) => ({ x: p.cx, y: p.cy }))),
+          labelWidth: newestLabel.length * LABEL_GLYPH_BOUND_PX,
         })
       : undefined;
+  const tone = REFERENCE_TONE[referenceTone];
 
   return (
     <svg
@@ -165,26 +208,27 @@ export function Sparkline({
       role="img"
       aria-label={label}
     >
-      {referenceValue !== undefined && Number.isFinite(referenceValue) && (
-        <g data-testid="sparkline-reference">
-          <line
-            className={styles.refLine}
-            x1={plotLeft}
-            x2={width - pad}
-            y1={y(referenceValue)}
-            y2={y(referenceValue)}
-          />
-          {referenceLabel !== undefined && (
-            <text
-              className={styles.refLabel}
-              x={width - pad}
-              y={Math.max(8, y(referenceValue) - 3)}
-              textAnchor="end"
-            >
-              {referenceLabel}
-            </text>
-          )}
-        </g>
+      {referenceY !== undefined && (
+        <line
+          className={`${styles.refLine} ${tone.line}`}
+          data-testid="sparkline-reference"
+          data-tone={referenceTone}
+          x1={plotLeft}
+          x2={width - pad}
+          y1={referenceY}
+          y2={referenceY}
+        />
+      )}
+      {boundaryY !== undefined && (
+        <line
+          className={`${styles.refLine} ${REFERENCE_TONE.crit.line}`}
+          data-testid="sparkline-boundary"
+          data-tone="crit"
+          x1={plotLeft}
+          x2={width - pad}
+          y1={boundaryY}
+          y2={boundaryY}
+        />
       )}
       {yLabels !== undefined && (
         <g>
@@ -268,6 +312,34 @@ export function Sparkline({
       {endDot && lastValue !== null && lastValue !== undefined && lastIndex >= 0 && (
         <circle className={styles.endDot} cx={x(lastIndex)} cy={y(lastValue)} r={2.2} />
       )}
+      {/* The direct labels are painted after the lines and the series, haloed in the panel's ground: where a label
+          has to sit on its own series, the halo knocks the line out beneath the figure instead of striking it. */}
+      {referenceLabelY !== undefined && (
+        <text
+          className={`${styles.refLabel} ${tone.label}`}
+          data-testid="sparkline-reference-label"
+          data-tone={referenceTone}
+          x={width - pad}
+          y={referenceLabelY}
+          textAnchor="end"
+          style={LABEL_HALO}
+        >
+          {referenceLabel}
+        </text>
+      )}
+      {boundaryLabelY !== undefined && (
+        <text
+          className={`${styles.refLabel} ${REFERENCE_TONE.crit.label}`}
+          data-testid="sparkline-boundary-label"
+          data-tone="crit"
+          x={width - pad}
+          y={boundaryLabelY}
+          textAnchor="end"
+          style={LABEL_HALO}
+        >
+          {boundaryLabel}
+        </text>
+      )}
       {newestLabel !== undefined && newestPlacement !== undefined && (
         // The newest plotted value, printed AT its point — the caller's
         // computed string, qualifier included when the caller composed one
@@ -276,9 +348,10 @@ export function Sparkline({
         <text
           className={styles.valueLabel}
           data-testid="sparkline-newest-value"
-          x={newestPlacement.anchorEnd ? x(lastIndex) - 6 : x(lastIndex) + 6}
+          x={newestPlacement.anchorEnd ? x(lastIndex) - NEWEST_LABEL_OFFSET_PX : x(lastIndex) + NEWEST_LABEL_OFFSET_PX}
           y={newestPlacement.y}
           textAnchor={newestPlacement.anchorEnd ? "end" : "start"}
+          style={LABEL_HALO}
         >
           {newestLabel}
         </text>
