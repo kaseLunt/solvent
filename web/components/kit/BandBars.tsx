@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+import { BAND_BARS_LABEL } from "@/lib/chrome";
 import { humanUsd } from "@/lib/human-usd";
 import { readWirePopulation } from "@/lib/wireGuard";
 import styles from "./kit.module.css";
@@ -9,6 +11,7 @@ export interface Band {
   count: number | null;
   /** Money in base units at `decimals`; null when the band's value is not known (counts-only histograms). */
   value: bigint | null;
+  /** A row of the one tone grammar (lib/kit.ts TONE_VOCABULARIES.bandBars); `dim` is a band of record, drawn quiet. */
   tone?: "neutral" | "crit" | "warn" | "dim";
 }
 
@@ -44,12 +47,15 @@ export function BandBars({ bands, decimals, weightedBy, testId }: BandBarsProps)
       style={{ gridTemplateColumns: `repeat(${String(bands.length)}, 1fr)` }}
       data-testid={testId}
       role="img"
-      aria-label="distribution by band"
+      aria-label={BAND_BARS_LABEL}
     >
       {bands.map((band) => {
         const count = countOf(band);
         const w = weight(band, weightedBy);
         const px = max === 0n || w === 0n ? 0 : Math.max(MIN_PX, Number((w * BigInt(MAX_PX)) / max));
+        // The same weight as a share of the largest band, for the phone's horizontal bars; a weightless band draws nothing.
+        const ratio = max === 0n || w === 0n ? 0 : Number((w * 10_000n) / max) / 10_000;
+        const bar = { "--bar-h": `${String(px)}px`, "--bar": String(ratio), "--bar-min": px === 0 ? "0px" : `${String(MIN_PX)}px` } as CSSProperties;
         const printed =
           weightedBy === "count"
             ? (count?.toLocaleString("en-US") ?? "—")
@@ -67,7 +73,7 @@ export function BandBars({ bands, decimals, weightedBy, testId }: BandBarsProps)
               {printed}
               {weightedBy === "value" && count !== null && <small> · {count.toLocaleString("en-US")}</small>}
             </span>
-            <i style={{ height: `${String(px)}px` }} aria-hidden="true" />
+            <i style={bar} aria-hidden="true" />
             <span className={styles.barLab}>{band.label}</span>
           </div>
         );

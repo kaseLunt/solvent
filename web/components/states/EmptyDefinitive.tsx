@@ -18,7 +18,7 @@ export interface EmptyDefinitiveProps {
  */
 export function EmptyDefinitive({
   head = "No position — definitively.",
-  body = "Both engines cover this address and both report no balances at batch #18251. This absence is computed, not assumed.",
+  body = "Both engines cover this address and both report no balances at batch 18,251. This absence is computed, not assumed.",
   chips,
   testId,
 }: EmptyDefinitiveProps) {
@@ -30,10 +30,10 @@ export function EmptyDefinitive({
         {chips ?? (
           <>
             <StatusChip tone="quiet" val="2/2">
-              COVERAGE
+              Coverage
             </StatusChip>
             <StatusChip tone="quiet" val="48s">
-              SNAPSHOT
+              Snapshot
             </StatusChip>
           </>
         )}

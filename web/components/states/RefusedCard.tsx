@@ -30,7 +30,7 @@ export function RefusedCard({
   testId,
 }: RefusedCardProps) {
   return (
-    <section className={`${styles.card} ${styles.cardWarn}`} data-testid={testId}>
+    <section className={`${styles.card} ${styles.cardRefused}`} data-testid={testId}>
       <p className={styles.head}>{head}</p>
       <p className={styles.body}>{body}</p>
       <div className={styles.chips}>

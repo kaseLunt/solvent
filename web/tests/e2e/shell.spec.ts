@@ -8,6 +8,7 @@
 // keep their old H1s until their convergence plan lands.
 
 import { expect, test } from "@playwright/test";
+import { GITHUB_LABEL, themeLabel } from "../../lib/chrome";
 
 const SURFACES = [
   { path: "/", label: "Overview", h1: /^People borrow against crypto to spend on a Visa card\./ },
@@ -56,21 +57,30 @@ for (const surface of SURFACES) {
     // API behind it.
     const pill = header.getByTestId("live-pill");
     await expect(pill).toHaveAttribute("data-word", /Reconnecting|Not connected/);
+
+    // The two quiet controls are named for what they do; no control is a word in capitals.
+    await expect(header.getByRole("link", { name: GITHUB_LABEL })).toBeVisible();
+    await expect(header.getByRole("button", { name: /^Theme: / })).toBeVisible();
+    await expect(header).not.toContainText("THEME");
   });
 }
 
-test("theme override wins in both directions and returns to system", async ({ page }) => {
+test("theme override wins in both directions and returns to system — the control names the theme in force and its next step", async ({ page }) => {
   await page.goto("/book");
   const html = page.locator("html");
-  const toggle = page.getByRole("button", { name: /theme:/ });
+  const toggle = page.getByRole("banner").getByRole("button", { name: /^Theme: / });
 
   await expect(html).not.toHaveAttribute("data-theme", /.+/);
+  await expect(toggle).toHaveAttribute("aria-label", themeLabel("system"));
   await toggle.click(); // system -> light
   await expect(html).toHaveAttribute("data-theme", "light");
+  await expect(toggle).toHaveAttribute("aria-label", themeLabel("light"));
   await toggle.click(); // light -> dark
   await expect(html).toHaveAttribute("data-theme", "dark");
+  await expect(toggle).toHaveAttribute("aria-label", themeLabel("dark"));
   await toggle.click(); // dark -> system
   await expect(html).not.toHaveAttribute("data-theme", /.+/);
+  await expect(toggle).toHaveAttribute("title", themeLabel("system"));
 });
 
 test("styleguide renders every specimen section (when built in)", async ({ page }) => {
@@ -103,6 +113,12 @@ test("styleguide renders every specimen section (when built in)", async ({ page 
     "sg-interaction",
     "sg-kpi",
     "sg-pills",
+    "sg-live",
+    "sg-controls",
+    "sg-strips",
+    "sg-steps",
+    "sg-fold",
+    "sg-heads",
     "sg-truth",
   ]) {
     await expect(page.getByTestId(section)).toBeVisible();

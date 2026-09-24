@@ -15,6 +15,20 @@
  *      out-specify the bare :root inside the media query.
  * Palette amendments apply in EVERY block that defines the token; the type
  * and layout tokens are theme-invariant and live in the light :root only.
+ *
+ * ONE type scale: --type-* (spec 2026-09-15 §3.4). The retired --t-* set and
+ * the --fs-* aliases resolve onto it by role, so a straggler renders in the
+ * scale the pages use; new code references --type-* only (stylelint-enforced).
+ *
+ * THE BREAKPOINT SET — every module steps at these widths and no others:
+ *   640   phone: the type step, the 16px gutter, horizontal band bars, stacked
+ *         rows (actions under chips, a check's detail under its label)
+ *   900   grids stack (KPI rows to two columns, card pairs to one)
+ *   1180  the header takes two rows: brand and status, then the nav strip
+ *         (queried as max-width: 1179px)
+ *   1280  the brand tag hides (queried as max-width: 1279px)
+ * The width steps below (1440 / 1920 / 2560) are the §02 width contract, not
+ * layout breakpoints: they widen the shell and the breakout only.
  */
 
 :root {
@@ -49,33 +63,16 @@
   --term-ok: #63b98a;
   --term-accent: #5ab3c4;
   --shadow: 0 1px 2px rgba(16, 24, 27, 0.06), 0 8px 24px rgba(16, 24, 27, 0.07);
+  --scrim: rgba(16, 24, 27, 0.35); /* the ground behind a modal drawer */
 
   /* ---- type stacks (mockup, verbatim) ---- */
   --mono: "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
   --sans: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
-  /* ---- the closed type set (canon §03) ----
-   * Exactly these fourteen tokens exist. The floor is structural: no token
-   * below 12px exists, so a sub-12px label is impossible, not merely
-   * forbidden. Theme-invariant. New code uses --t-* only. */
-  --t-display: 32px; /* page H1 — the page's one finding */
-  --t-chapter: 24px; /* chapter title (H2) */
-  --t-section: 18px; /* section head (H3) / dek */
-  --t-fighead: 17px; /* chart finding-headline */
-  --t-body: 16px; /* reading prose */
-  --t-ui: 14px; /* metadata, table body, captions with content */
-  --t-meta: 13px; /* dense metadata floor */
-  --t-floor: 12px; /* labels, chips, axis ticks, chart text — ABSOLUTE floor */
-  --t-mono-lg: 14px; /* exact values, featured */
-  --t-mono: 13px; /* addresses, table numerals, formulas */
-  --t-mono-sm: 12.5px; /* terminal body, ledgers, identity lines */
-  --t-mono-floor: 12px; /* smallest mono — chips' embedded values */
-  --t-stat-lg: 28px; /* engine-panel / KPI hero value */
-  --t-stat: 21px; /* KPI value */
-
-  /* ---- product-register type scale (spec 2026-09-15 §3.4) ----
-   * Replaces --t-* for new code; --t-* / --fs-* stay lawful only until the
-   * pages that use them are rebuilt. Floor is 12px; nothing below exists. */
+  /* ---- the product type scale (spec 2026-09-15 §3.4) — THE scale ----
+   * Exactly these twelve tokens exist. The floor is structural: no token
+   * below 12px exists (the phone step included), so a sub-12px label is
+   * impossible, not merely forbidden. Theme-invariant. */
   --type-hero: 44px; /* Overview H1 only */
   --type-h1: 30px; /* page verdict headline */
   --type-kpi: 26px; /* KPI tile value */
@@ -91,26 +88,33 @@
   --w-semibold: 600;
   --w-medium: 500;
 
+  /* ---- the retired closed set (canon §03), re-pointed BY ROLE onto the
+   * product scale: the names stay resolvable for any straggler, and every one
+   * of them renders in the scale the pages use. ---- */
+  --t-display: var(--type-h1); /* page H1 */
+  --t-chapter: var(--type-h1); /* chapter title — one headline size */
+  --t-section: var(--type-h2); /* section head */
+  --t-fighead: var(--type-h2); /* chart finding-headline — a section head's size */
+  --t-body: var(--type-dek); /* reading prose */
+  --t-ui: var(--type-body); /* metadata, table body, captions with content */
+  --t-meta: var(--type-label); /* dense metadata */
+  --t-floor: var(--type-floor); /* labels, chips, axis ticks — the floor */
+  --t-mono-lg: var(--type-mono); /* exact values */
+  --t-mono: var(--type-mono); /* addresses, table numerals, formulas */
+  --t-mono-sm: var(--type-mono-sm); /* ledgers, identity lines */
+  --t-mono-floor: var(--type-mono-sm); /* chips' embedded values */
+  --t-stat-lg: var(--type-kpi); /* KPI value */
+  --t-stat: var(--type-kpi); /* KPI value */
+
   /* ---- LEGACY ALIASES — retired as pages are rebuilt; new code uses --type-*
-   * (stylelint-enforced) ----
+   * (stylelint-enforced). Each resolves through its --t-* name onto the
+   * product scale. ----
    *
-   * Every --fs-* re-points onto the closed set, mapped BY ROLE per the canon
-   * §03 role table — not by nearest value. Where a judgment call existed the
-   * canon's role wording governs; the full ledger with rationale is in
-   * .superpowers/sdd/progress-ui-overhaul.md §p1a-1:
-   *   --fs-h1        30px → --t-display    32px  page h1 = "page H1 — the page's one finding"
-   *   --fs-h2        20px → --t-chapter    24px  surface-head h2 is an H2 = "chapter title (H2)" — it maps UP, never sideways to --t-section
-   *   --fs-lede    15.5px → --t-body       16px  lede paragraph = "reading prose"
-   *   --fs-body    14.5px → --t-ui         14px  surface-head p is supporting copy under a head — the register the canon itself sets at --t-ui (.v-qual); the lede is the page's reading prose
-   *   --fs-note    13.5px → --t-ui         14px  note blocks are read, not scanned: "captions with content", not dense metadata
-   *   --fs-table     13px → --t-meta       13px  kv rows / feed items = "dense metadata floor"; the §08 table pattern's 14px body is Phase 3 per-surface work, not an alias lift
-   *   --fs-mono      12px → --t-mono-floor 12px  value-preserving; the canon's terminal body is --t-mono-sm 12.5 — that uplift is Phase 3 per-surface work
-   *   --fs-mono-sm 11.5px → --t-mono-floor 12px  FLOOR LIFT
-   *   --fs-caption   11px → --t-floor      12px  FLOOR LIFT
-   *   --fs-label   10.5px → --t-floor      12px  FLOOR LIFT
-   *   --fs-badge     10px → --t-floor      12px  FLOOR LIFT
-   *   --fs-stat      21px → --t-stat       21px  exact
-   *   --fs-hf      12.5px → --t-mono-sm    12.5px mono numeral on an identity line — exact
+   * Every --fs-* re-points onto a --t-* name BY ROLE (the canon §03 role
+   * table; ledger with rationale in .superpowers/sdd/progress-ui-overhaul.md
+   * §p1a-1), and every --t-* name onto the product scale above, so an alias
+   * renders as: h1, h2 → h1 · lede → dek · body, note → body · table → label
+   * · mono, mono-sm, hf → mono-sm · caption, label, badge → floor · stat → kpi.
    */
   --fs-h1: var(--t-display); /* page h1 */
   --fs-h2: var(--t-chapter); /* surface-head h2 */
@@ -154,6 +158,11 @@
   --shell-max: 1280px; /* core shell — 1366 holds 1280 with no primary horizontal scroll */
   --breakout-max: 1280px; /* analytical breakout — steps AHEAD of the shell at 1440 */
   --table-min: 860px; /* mockup table min-width */
+  /* ---- the one page frame: the shell's side gutter, which the header aligns
+   * its brand and status to, and the one top offset a page's first element
+   * sits at. Both step once, at the phone breakpoint. ---- */
+  --gutter: 24px;
+  --frame-top: 28px;
 
   color-scheme: light;
 }
@@ -187,6 +196,7 @@
     --chip-bg: #1b262b;
     --term-bg: #0a0f12;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
+    --scrim: rgba(0, 0, 0, 0.55);
     color-scheme: dark;
   }
 }
@@ -216,6 +226,7 @@
   --chip-bg: #e6ecee;
   --term-bg: #10181b;
   --shadow: 0 1px 2px rgba(16, 24, 27, 0.06), 0 8px 24px rgba(16, 24, 27, 0.07);
+  --scrim: rgba(16, 24, 27, 0.35);
   color-scheme: light;
 }
 
@@ -243,6 +254,7 @@
   --chip-bg: #1b262b;
   --term-bg: #0a0f12;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --scrim: rgba(0, 0, 0, 0.55);
   color-scheme: dark;
 }
 
@@ -273,5 +285,19 @@
   :root {
     --shell-max: 1680px;
     --breakout-max: 1680px;
+  }
+}
+
+/* ---- the phone step (≤640, the breakpoint set above) ----------------------
+ * The gutter and the frame tighten, and the three display sizes step down so a
+ * headline holds a phone's width in a few lines. Nothing steps below the 12px
+ * floor. */
+@media (max-width: 640px) {
+  :root {
+    --gutter: 16px;
+    --frame-top: 20px;
+    --type-hero: 32px;
+    --type-h1: 24px;
+    --type-kpi: 22px;
   }
 }

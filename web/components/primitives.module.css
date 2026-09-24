@@ -1,61 +1,63 @@
-/* The route boundary's refusal (components/RouteRefusal.tsx) — this module's one consumer. The refused
- * register at ROUTE scale: a dashed --ink-3 border and muted inks, sized as a block — a view that threw is refused
- * by name, never blank and never a zero. Existing tokens only. */
+/* The route boundary's state (components/RouteRefusal.tsx) — this module's one consumer. The unreadable register at
+ * route scale, drawn as the kit's state card: a dashed --ink-3 frame on the panel, a sentence-case head in ink, the
+ * cause in ink-2, the error's words behind a disclosure, and one ghost button. A view that threw is named, never blank
+ * and never a zero. */
 .routeRefusal {
-  margin: var(--sp-4) auto;
-  padding: 16px 18px;
+  margin: var(--frame-top) auto;
+  padding: 18px 20px;
   max-width: 560px;
   border: 1px dashed var(--ink-3);
-  border-radius: var(--r-md);
+  border-radius: 10px;
   background: var(--panel);
   color: var(--ink-2);
 }
 
-/* The head renders uppercase by text-transform, not literal caps, so the DOM text stays a readable sentence. */
 .routeRefusalHead {
-  font-family: var(--mono);
-  font-size: var(--fs-label);
-  letter-spacing: var(--track-refused);
-  text-transform: uppercase;
+  margin: 0;
+  font-size: var(--type-card);
+  font-weight: var(--w-semibold);
   color: var(--ink);
-  font-weight: 600;
 }
 
 .routeRefusalBody {
-  margin-top: 8px;
+  margin: 6px 0 0;
+  font-size: var(--type-body);
   color: var(--ink-2);
 }
 
-/* The evidence layer: the throw's own words, mono, behind a disclosure. */
+/* The error's own words, verbatim, behind a disclosure. */
 .routeRefusalEvidence {
   margin-top: 10px;
-  font-family: var(--mono);
-  font-size: var(--fs-caption);
-  color: var(--ink-3);
+  font-size: var(--type-small);
+  color: var(--ink-2);
 }
 
 .routeRefusalEvidence summary {
   cursor: pointer;
 }
 
-.routeRefusalEvidence p {
-  margin-top: 6px;
+.routeRefusalEvidence pre {
+  margin: 6px 0 0;
+  font-family: var(--mono);
+  font-size: var(--type-mono-sm);
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .routeRefusalReset {
   margin-top: 12px;
-  font-family: var(--mono);
-  font-size: var(--fs-label);
-  padding: 6px 12px;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
   border: 1px solid var(--line);
-  border-radius: var(--r-xs);
-  background: var(--panel);
-  color: var(--ink-2);
+  border-radius: 8px;
+  background: none;
+  font-size: var(--type-body);
+  font-weight: var(--w-medium);
+  color: var(--ink);
   cursor: pointer;
 }
 
 .routeRefusalReset:hover {
-  color: var(--accent-text);
   border-color: var(--accent);
 }

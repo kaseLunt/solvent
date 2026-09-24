@@ -4,9 +4,9 @@
 
 .frame {
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 10px;
   background: var(--panel);
-  padding: var(--sp-4);
+  padding: 18px 20px;
   overflow-x: auto;
   max-width: 100%;
 }
@@ -20,26 +20,19 @@
 }
 
 .kicker {
-  font-family: var(--mono);
-  font-size: var(--t-floor);
-  letter-spacing: var(--track-tag);
-  text-transform: uppercase;
+  font-size: var(--type-label);
   color: var(--ink-2);
   margin: 0;
 }
 
-/* The visible exact-data control (§11): moves focus to the ledger. */
+/* The visible exact-data control (§11): moves focus to the ledger below — a jump down this page, so its label ends in ↓. */
 .exactData {
-  font-family: var(--sans);
-  font-size: var(--t-floor);
-  font-weight: 600;
-  letter-spacing: var(--track-refused);
-  text-transform: uppercase;
+  font-size: var(--type-label);
+  font-weight: var(--w-medium);
   color: var(--accent-text);
   background: transparent;
-  border: 1px solid var(--accent);
-  border-radius: var(--r-sm);
-  padding: 3px 9px;
+  border: 0;
+  padding: 0;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -73,7 +66,7 @@
 .tick {
   fill: var(--ink-2);
   font-family: var(--sans);
-  font-size: var(--t-floor);
+  font-size: var(--type-floor);
 }
 
 /* The persistent readout — mono exact strings; the overlay register is the
@@ -86,7 +79,7 @@
   background: var(--panel-2);
   color: var(--ink);
   font-family: var(--mono);
-  font-size: var(--t-mono-sm);
+  font-size: var(--type-mono-sm);
   padding: 8px 12px;
   box-shadow: var(--shadow);
 }
@@ -98,7 +91,7 @@
 .ledgerTable {
   border-collapse: collapse;
   font-family: var(--mono);
-  font-size: var(--t-mono-sm);
+  font-size: var(--type-mono-sm);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
@@ -106,31 +99,29 @@
 .ledgerCaption {
   caption-side: top;
   text-align: left;
-  font-family: var(--mono);
-  font-size: var(--t-floor);
+  font-family: var(--sans);
+  font-size: var(--type-small);
   color: var(--ink-2);
   padding-bottom: 6px;
 }
 
 .ledgerTable th {
   font-family: var(--sans);
-  font-size: var(--t-floor);
-  font-weight: 600;
-  letter-spacing: var(--track-th);
-  text-transform: uppercase;
+  font-size: var(--type-small);
+  font-weight: var(--w-medium);
   text-align: left;
   color: var(--ink-2);
-  border-bottom: 2px solid var(--ink);
-  padding: 4px 18px 4px 0;
-}
-
-.ledgerTable td {
   border-bottom: 1px solid var(--line);
   padding: 4px 18px 4px 0;
 }
 
+.ledgerTable td {
+  border-bottom: 1px solid var(--chip-bg);
+  padding: 4px 18px 4px 0;
+}
+
 .method {
-  font-size: var(--t-ui);
+  font-size: var(--type-body);
   color: var(--ink-2);
   max-width: 720px;
   margin: 12px 0 0;

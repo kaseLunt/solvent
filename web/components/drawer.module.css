@@ -1,10 +1,10 @@
-/* Drawer — the explain-this-number slide-over. Panel styling follows the
- * mockup's .card / .kv vocabulary; motion respects prefers-reduced-motion. */
+/* Drawer — the explain-this-number slide-over, in the kit's register: the one place a page's doctrine lives, so the
+ * most legible surface on it. Motion respects prefers-reduced-motion. */
 
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(16, 24, 27, 0.35);
+  background: var(--scrim);
   z-index: 40;
   opacity: 0;
   transition: opacity 160ms ease;
@@ -45,41 +45,108 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-4);
-  padding: 10px 14px;
+  gap: 14px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--line);
-  background: var(--panel-2);
+  background: var(--panel);
 }
 
 .title {
   margin: 0;
-  font-family: var(--mono);
-  font-size: var(--fs-caption);
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
-  color: var(--ink-3);
-  font-weight: 500;
+  font-family: var(--sans);
+  font-size: var(--type-card);
+  font-weight: var(--w-semibold);
+  line-height: 1.3;
+  color: var(--ink);
 }
 
 .close {
-  font-family: var(--mono);
-  font-size: var(--fs-mono);
-  line-height: 1;
-  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-height: 32px;
+  padding: 6px 10px;
   border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--panel);
+  border-radius: 6px;
+  background: none;
+  font-family: var(--sans);
+  font-size: var(--type-label);
+  font-weight: var(--w-medium);
+  line-height: 1;
   color: var(--ink-2);
   cursor: pointer;
 }
 
 .close:hover {
+  color: var(--ink);
   border-color: var(--accent);
-  color: var(--accent-text);
 }
 
+.closeKey {
+  font-family: var(--sans);
+  font-size: var(--type-floor);
+  color: var(--ink-2);
+}
+
+/* One prose rhythm for every drawer body, whatever wrapper a page puts its paragraphs in: a block after a block is
+ * 12px down, a heading opens a group. :where keeps these at no specificity, so a page's own rule still wins. */
 .body {
   overflow-y: auto;
-  padding: var(--sp-4);
-  font-size: var(--fs-table);
+  padding: 16px 20px;
+  font-size: var(--type-body);
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.body :where(p, ul, ol, dl, pre, h3, h4, table) {
+  margin: 0;
+}
+
+.body :where(p, ul, ol, dl, pre, h3, h4, table, details, section) + :where(p, ul, ol, dl, pre, h3, h4, table, details, section) {
+  margin-top: 12px;
+}
+
+.body :where(* + h3, * + h4) {
+  margin-top: 20px;
+}
+
+.body :where(h3) {
+  font-size: var(--type-card);
+  font-weight: var(--w-semibold);
+  color: var(--ink);
+}
+
+.body :where(h4) {
+  font-size: var(--type-small);
+  font-weight: var(--w-semibold);
+  color: var(--ink-2);
+}
+
+.body :where(ul, ol) {
+  padding-left: 1.2em;
+}
+
+.body :where(code) {
+  font-family: var(--mono);
+  font-size: var(--type-mono-sm);
+}
+
+/* A touch screen has no Esc key to show; its close control is a full touch target. */
+@media (pointer: coarse) {
+  .closeKey {
+    display: none;
+  }
+
+  .close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 640px) {
+  .panel {
+    width: 100vw;
+    border-left: 0;
+  }
 }

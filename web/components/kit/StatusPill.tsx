@@ -2,7 +2,11 @@ import type { ReactNode } from "react";
 import styles from "./kit.module.css";
 
 export interface StatusPillProps {
-  tone: "crit" | "warn" | "ok" | "refused" | "projection";
+  /**
+   * A row of the one tone grammar (lib/kit.ts TONE_GRAMMAR): `live` is connection or serving posture (accent), never
+   * health; `projection` is the dashed, unfilled badge of a projected figure.
+   */
+  tone: "crit" | "warn" | "ok" | "refused" | "live" | "projection";
   children: ReactNode;
   /** The demoted detail (a wire code, a batch id) — shown on hover, never as the label. */
   title?: string;
@@ -13,6 +17,7 @@ const PILL_CLASS = {
   warn: styles.pillWarn,
   ok: styles.pillOk,
   refused: styles.pillRefused,
+  live: styles.pillLive,
   projection: styles.pillProj,
 } as const;
 

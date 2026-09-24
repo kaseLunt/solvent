@@ -11,13 +11,12 @@ export interface StatusChipProps {
    * complete, never connection posture.
    */
   tone: ChipTone;
-  /** The sans STATE WORD(s) — uppercase narration (e.g. "COVERAGE", "SNAPSHOT"). */
+  /** The sans state word(s), in sentence case as the caller writes them (e.g. "Coverage", "Snapshot"). */
   children: ReactNode;
   /**
-   * The embedded value — mono, never uppercase, tabular (e.g. "48s",
-   * "2/2"). Renders after the children; for a value mid-sentence
-   * ("COVERAGE 2/2 ENGINES", "30 BATCHES NOT RETAINED") embed `<ChipVal>`
-   * in the children instead.
+   * The embedded value — mono, tabular (e.g. "48s", "2/2"). Renders after
+   * the children; for a value mid-sentence ("Coverage 2/2 engines", "30
+   * batches not retained") embed `<ChipVal>` in the children instead.
    */
   val?: ReactNode;
   /** 7px status dot (connection chips); hollow on the unknown register. */
@@ -47,7 +46,7 @@ export function StatusChip({ tone, children, val, dot = false, title, testId }: 
 }
 
 /** An embedded mono value inside a chip's children — ages, counts, wire
- * codes are mono, never uppercase, tabular (§5 law). */
+ * codes are mono and tabular (§5 law). */
 export function ChipVal({ children }: { children: ReactNode }) {
   return <span className={styles.val}>{children}</span>;
 }
@@ -57,17 +56,18 @@ export interface RefusedChipProps {
   cause: string;
   /** The wire code — mono, rides secondary, NEVER leads (e.g. "SWEEP_FAILED"). */
   code?: string;
-  /** The state word: REFUSED (default) or WITHHELD. */
+  /** The state word: "Refused" (the refused register's own, by default) or "Withheld". */
   word?: string;
   testId?: string;
 }
 
 /**
- * The canon refused-tag (§5 D5 + §6): dashed --warn border on --warn-bg,
- * `REFUSED · <plain cause> · <wire code>`. Render order comes verbatim from
- * `refusedChipSegments` — the wire code can never lead (§8 anti-state law).
+ * The canon refused-tag (§5 D5 + §6), in the refused register: dashed ink-3
+ * on the refused ground, `Refused · <plain cause> · <wire code>`. Render
+ * order comes verbatim from `refusedChipSegments` — the wire code can never
+ * lead (§8 anti-state law).
  */
-export function RefusedChip({ cause, code, word = "REFUSED", testId }: RefusedChipProps) {
+export function RefusedChip({ cause, code, word, testId }: RefusedChipProps) {
   const segments = refusedChipSegments(cause, code, word);
   return (
     <span className={styles.refusedTag} data-testid={testId}>

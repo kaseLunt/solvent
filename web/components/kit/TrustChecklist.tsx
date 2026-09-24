@@ -4,15 +4,19 @@ export interface TrustCheckItem {
   id: string;
   label: string;
   detail: string;
+  /** A row of the one tone grammar (lib/kit.ts TONE_VOCABULARIES.trustCheck): a tick is a check that passed. */
   state: "ok" | "warn" | "refused" | "dim" | "pending";
   /** The wire words behind the item (a refusal code, a provenance word), on hover. */
   title?: string;
 }
 
 const GLYPH: Record<TrustCheckItem["state"], string> = { ok: "✓", warn: "!", refused: "×", dim: "·", pending: "…" };
-/** The state in words for assistive tech — the glyph is decorative and colour carries nothing on its own. */
-// A check whose read is in flight is pending — it has neither passed, failed nor been found unavailable.
-const STATE_WORD: Record<TrustCheckItem["state"], string> = { ok: "passed", warn: "caution", refused: "failed", dim: "not available", pending: "pending" };
+/**
+ * The state in words for assistive tech — the glyph is decorative and colour carries nothing on its own. A refusal is
+ * the service declining to answer, never a failure; a check whose read is in flight has neither passed, failed nor
+ * been found unavailable.
+ */
+const STATE_WORD: Record<TrustCheckItem["state"], string> = { ok: "passed", warn: "caution", refused: "refused", dim: "not available", pending: "pending" };
 const CLASS: Record<TrustCheckItem["state"], string | undefined> = {
   ok: undefined,
   warn: styles.checkWarn,

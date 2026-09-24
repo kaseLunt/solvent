@@ -3,10 +3,11 @@
 // The ratified canon (docs/specs/2026-08-09-p1-foundation-canon.html §03/§04,
 // build contract §1–§3) lands three things in web/app/tokens.css +
 // web/app/globals.css:
-//   1. the CLOSED --t-* type set — exactly 14 tokens, none below 12px, so a
-//      sub-12px label is impossible, not merely forbidden;
-//   2. every legacy --fs-* token re-pointed BY ROLE onto a --t-* var (the four
-//      sub-12px sizes floor-lift to 12px);
+//   1. ONE type scale, the product register --type-* (spec 2026-09-15 §3.4) —
+//      closed, none below 12px, so a sub-12px label is impossible, not merely
+//      forbidden; the retired --t-* set re-points onto it BY ROLE, and every
+//      legacy --fs-* token still resolves through a --t-* var;
+//   2. the phone step and the frame tokens (one gutter, one top offset);
 //   3. the §04 two-grade palette amendments in EVERY theme block that defines
 //      the token, and the width contract (--shell-max 1280, stepped at
 //      1920/2560; 1180 repealed).
@@ -35,43 +36,79 @@ function countOf(source: string, needle: string): number {
 }
 
 // ---------------------------------------------------------------------------
-// §1 — the closed type set
+// §1 — the one type scale: the product register --type-*, closed, floored at 12px
 // ---------------------------------------------------------------------------
 
-// Canon §03: exactly these fourteen, at exactly these sizes.
-const TYPE_SET: readonly [name: string, value: string][] = [
-  ["display", "32px"],
-  ["chapter", "24px"],
-  ["section", "18px"],
-  ["fighead", "17px"],
-  ["body", "16px"],
-  ["ui", "14px"],
-  ["meta", "13px"],
+// The product scale (spec 2026-09-15 §3.4): exactly these twelve, at exactly these sizes.
+const TYPE_SCALE: readonly [name: string, value: string][] = [
+  ["hero", "44px"],
+  ["h1", "30px"],
+  ["kpi", "26px"],
+  ["h2", "17px"],
+  ["card", "15px"],
+  ["dek", "16px"],
+  ["body", "14px"],
+  ["label", "13px"],
+  ["small", "12.5px"],
   ["floor", "12px"],
-  ["mono-lg", "14px"],
   ["mono", "13px"],
   ["mono-sm", "12.5px"],
-  ["mono-floor", "12px"],
-  ["stat-lg", "28px"],
-  ["stat", "21px"],
 ];
 
-test("p1a-1: all 14 --t-* tokens exist at their exact canon values", () => {
-  for (const [name, value] of TYPE_SET) {
-    const declaration = `--t-${name}: ${value};`;
-    expect(tokensCss, declaration).toContain(declaration);
+/** The bare :root block — the theme-invariant declarations, before any media query. */
+const rootBlock = /^\s*:root \{([\s\S]*?)\n\}/.exec(tokensCss)?.[1] ?? "";
+
+test("the product scale: all twelve --type-* tokens exist at their values, once, in the bare :root", () => {
+  for (const [name, value] of TYPE_SCALE) {
+    const declaration = `--type-${name}: ${value};`;
+    expect(rootBlock, declaration).toContain(declaration);
+  }
+  const declared = [...rootBlock.matchAll(/--type-[\w-]+:\s*([^;]+);/g)];
+  expect(declared.length, "exactly the twelve --type-* tokens").toBe(12);
+});
+
+test("the scale is CLOSED and floored: every --type-* declaration anywhere, the phone step included, is ≥ 12px", () => {
+  const declared = [...tokensCss.matchAll(/--type-[\w-]+:\s*([\d.]+)px/g)];
+  expect(declared.length).toBeGreaterThanOrEqual(12);
+  for (const match of declared) {
+    expect(Number.parseFloat(match[1] ?? "0"), `${match[0]} — the 12px floor is structural`).toBeGreaterThanOrEqual(12);
   }
 });
 
-test("p1a-1: the type set is CLOSED — 14 declarations, none below 12px", () => {
-  const declared = [...tokensCss.matchAll(/--t-[\w-]+:\s*([\d.]+)px/g)];
-  expect(declared.length, "exactly the canon's 14 --t-* tokens").toBe(14);
-  for (const match of declared) {
-    expect(
-      Number.parseFloat(match[1] ?? "0"),
-      `${match[0]} — the 12px floor is structural`,
-    ).toBeGreaterThanOrEqual(12);
+test("the phone type step: at ≤640px only the hero, the headline and the KPI value step down", () => {
+  const phone = [...tokensCss.matchAll(/@media \(max-width: 640px\) \{\s*:root \{([^}]+)\}/g)].map((match) => match[1] ?? "").join("\n");
+  expect(phone).toContain("--type-hero: 32px;");
+  expect(phone).toContain("--type-h1: 24px;");
+  expect(phone).toContain("--type-kpi: 22px;");
+  expect([...phone.matchAll(/--type-[\w-]+:/g)].map((match) => match[0])).toEqual(["--type-hero:", "--type-h1:", "--type-kpi:"]);
+});
+
+// The retired closed set re-points BY ROLE onto the product scale, so a straggler renders in the scale the pages use.
+const RETIRED_TO_SCALE: readonly [t: string, type: string][] = [
+  ["display", "h1"],
+  ["chapter", "h1"],
+  ["section", "h2"],
+  ["fighead", "h2"],
+  ["body", "dek"],
+  ["ui", "body"],
+  ["meta", "label"],
+  ["floor", "floor"],
+  ["mono-lg", "mono"],
+  ["mono", "mono"],
+  ["mono-sm", "mono-sm"],
+  ["mono-floor", "mono-sm"],
+  ["stat-lg", "kpi"],
+  ["stat", "kpi"],
+];
+
+test("every retired --t-* token is a var(--type-*) reference with the ruled role mapping — none carries a size of its own", () => {
+  for (const [t, type] of RETIRED_TO_SCALE) {
+    const declaration = `--t-${t}: var(--type-${type});`;
+    expect(tokensCss, declaration).toContain(declaration);
   }
+  const declared = [...tokensCss.matchAll(/--t-[\w-]+:\s*([^;]+);/g)];
+  expect(declared.length, "exactly the 14 retired --t-* names").toBe(14);
+  for (const match of declared) expect(match[1] ?? "", match[0]).toMatch(/^var\(--type-[\w-]+\)$/);
 });
 
 // ---------------------------------------------------------------------------
@@ -203,12 +240,34 @@ test("p1a-1: the three stepped media blocks exist with the canon widths", () => 
   expect(at2560).toContain("--breakout-max: 1680px");
 });
 
-test("p1a-1: the shell composes from the token and wears the canon padding", () => {
+test("p1a-1: the shell composes from the token and wears the one page gutter", () => {
   // `.shell { max-width: var(--shell-max) }` keeps working — the stepping
-  // lives in the token, not in hard-coded .shell overrides.
+  // lives in the token, not in hard-coded .shell overrides. The side gutter is the
+  // token the header aligns to, so the brand and the content share one edge.
   const shell = /\.shell \{([^}]+)\}/.exec(globalsCss)?.[1] ?? "";
   expect(shell).toContain("max-width: var(--shell-max)");
-  expect(shell).toContain("padding: 0 24px 120px");
+  expect(shell).toContain("padding: 0 var(--gutter) 120px");
+});
+
+test("the frame tokens: one gutter and one top offset, each stepping once at the phone breakpoint", () => {
+  expect(rootBlock).toContain("--gutter: 24px;");
+  expect(rootBlock).toContain("--frame-top: 28px;");
+  const phone = [...tokensCss.matchAll(/@media \(max-width: 640px\) \{\s*:root \{([^}]+)\}/g)].map((match) => match[1] ?? "").join("\n");
+  expect(phone).toContain("--gutter: 16px;");
+  expect(phone).toContain("--frame-top: 20px;");
+  expect(countOf(tokensCss, "--gutter:")).toBe(2);
+  expect(countOf(tokensCss, "--frame-top:")).toBe(2);
+});
+
+test("the drawer's scrim is a palette token, declared in all four theme blocks", () => {
+  expect(countOf(tokensCss, "--scrim: rgba(16, 24, 27, 0.35)"), "light (:root + data-theme)").toBe(2);
+  expect(countOf(tokensCss, "--scrim: rgba(0, 0, 0, 0.55)"), "dark (media + data-theme)").toBe(2);
+  expect(countOf(tokensCss, "--scrim:")).toBe(4);
+});
+
+test("b and strong are one weight product-wide — no component depends on the browser's 'bolder'", () => {
+  const strong = /\bb,\s*strong \{([^}]+)\}/.exec(globalsCss)?.[1] ?? "";
+  expect(strong).toContain("font-weight: var(--w-semibold)");
 });
 
 test("p1a-1: the layout utilities exist — .breakout, .prose, .grid12", () => {

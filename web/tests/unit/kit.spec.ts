@@ -39,7 +39,19 @@ import type { VerdictHeaderProps } from "../../components/kit/VerdictHeader";
 import { belowLineToggleLabel } from "../../lib/cash-summary";
 import { humanUsd } from "../../lib/human-usd";
 import type { LabHeadline } from "../../lib/lab-headline";
-import { CHIP_TONE_CLASS, exactAriaLabel, exactValueMode, headerIdentity, IDENTITY_MISSING_CHIP, refusedChipSegments } from "../../lib/kit";
+import {
+  CHIP_TONE_CLASS,
+  exactAriaLabel,
+  exactValueMode,
+  headerIdentity,
+  heatCornerLabel,
+  IDENTITY_MISSING_CHIP,
+  refusedChipSegments,
+  STATE_REGISTERS,
+  stateWordOf,
+  TONE_GRAMMAR,
+  TONE_VOCABULARIES,
+} from "../../lib/kit";
 import { materialityTier } from "../../lib/materiality";
 import { plainCause } from "../../lib/refusal-phrasebook";
 
@@ -139,9 +151,9 @@ test.describe("chip family (§5–§6) — one tone map for nine dimensions", ()
 });
 
 test.describe("refused chip (§5 D5) — the plain cause leads", () => {
-  test("canon specimen: REFUSED · collateral sweep failed · SWEEP_FAILED — cause before wire, and the code is one the phrasebook can read", () => {
+  test("canon specimen: Refused · collateral sweep failed · SWEEP_FAILED — cause before wire, and the code is one the phrasebook can read", () => {
     expect(refusedChipSegments(SPECIMEN_REFUSAL_CAUSE, SPECIMEN_REFUSAL_CODE)).toEqual([
-      { text: "REFUSED", register: "state" },
+      { text: "Refused", register: "state" },
       { text: "collateral sweep failed", register: "cause" },
       { text: "SWEEP_FAILED", register: "wire" },
     ]);
@@ -153,12 +165,12 @@ test.describe("refused chip (§5 D5) — the plain cause leads", () => {
     expect(SPECIMEN_REFUSAL_TITLE).toBe("collateral sweep failed · SWEEP_FAILED");
   });
 
-  test("a wire code NEVER leads (§8 anti-state law) — wire is last or absent; WITHHELD arm holds", () => {
-    const withWire = refusedChipSegments("missing observation", "obs_missing", "WITHHELD");
-    expect(withWire[0]).toEqual({ text: "WITHHELD", register: "state" });
+  test("a wire code NEVER leads (§8 anti-state law) — wire is last or absent; the Withheld arm holds", () => {
+    const withWire = refusedChipSegments("missing observation", "obs_missing", "Withheld");
+    expect(withWire[0]).toEqual({ text: "Withheld", register: "state" });
     expect(withWire.at(-1)).toEqual({ text: "obs_missing", register: "wire" });
-    expect(refusedChipSegments("missing observation", undefined, "WITHHELD")).toEqual([
-      { text: "WITHHELD", register: "state" },
+    expect(refusedChipSegments("missing observation", undefined, "Withheld")).toEqual([
+      { text: "Withheld", register: "state" },
       { text: "missing observation", register: "cause" },
     ]);
   });
@@ -180,12 +192,85 @@ test.describe("the header's tones — a record is ink, only a verdict wears tone
       ok: true,
       neutral: false,
       refused: false,
+      absent: false,
     };
     expect(Object.keys(wearsVerdictColor)).toEqual(["crit", "warn", "ok", "neutral", "refused"]);
 
     const record: LabHeadline = { emphasis: "50 chain actions loaded,", rest: "more exist beyond these.", tone: "neutral", dek: "" };
     const tone: VerdictHeaderProps["tone"] = record.tone;
     expect(wearsVerdictColor[tone]).toBe(false);
+  });
+});
+
+test.describe("the tone grammar — one meaning per colour, and every kit vocabulary maps onto it", () => {
+  test("six rows: a record is ink, green is health or a passed proof only, live is accent, and no answer is ink-2", () => {
+    expect(Object.keys(TONE_GRAMMAR)).toEqual(["neutral", "ok", "live", "warn", "crit", "refused"]);
+    expect(TONE_GRAMMAR.neutral.ink).toBe("--ink");
+    expect(TONE_GRAMMAR.ok.ink).toBe("--ok-text");
+    expect(TONE_GRAMMAR.live.ink).toBe("--accent-text");
+    expect(TONE_GRAMMAR.warn.ink).toBe("--warn-text");
+    expect(TONE_GRAMMAR.crit.ink).toBe("--crit-text");
+    expect(TONE_GRAMMAR.refused.ink).toBe("--ink-2");
+    // Green's row says what it means and what it never means.
+    expect(TONE_GRAMMAR.ok.means).toMatch(/health/);
+    expect(TONE_GRAMMAR.live.means).toMatch(/never health/i);
+  });
+
+  test("each vocabulary's words land on the row that means them — connection is live, a fresh age and a quiet chip are ink", () => {
+    expect(TONE_VOCABULARIES.livePill).toEqual({ live: "live", warn: "warn", dim: "neutral" });
+    expect(TONE_VOCABULARIES.livePillAge).toEqual({ neutral: "neutral", warn: "warn", crit: "crit", dim: "neutral" });
+    expect(TONE_VOCABULARIES.statusChip).toEqual({
+      ok: "ok",
+      accent: "live",
+      warn: "warn",
+      crit: "crit",
+      "crit-fill": "crit",
+      quiet: "neutral",
+      unknown: "refused",
+    });
+    expect(TONE_VOCABULARIES.statusPill).toEqual({ crit: "crit", warn: "warn", ok: "ok", refused: "refused", live: "live", projection: "warn" });
+    // Only a word that states health or a passed check reaches the green row, in any vocabulary.
+    const okWords = Object.entries(TONE_VOCABULARIES).flatMap(([vocabulary, map]) =>
+      Object.entries(map as Record<string, string>).flatMap(([word, row]) => (row === "ok" ? [`${vocabulary}.${word}`] : [])),
+    );
+    expect(okWords.sort()).toEqual(["identityChip.ok", "kpiTile.ok", "libraryOutcome.ok", "statusChip.ok", "statusPill.ok", "stepStrip.ok", "trustCheck.ok", "verdictHeader.ok"]);
+  });
+});
+
+test.describe("the state registers — one table for every place that has no figure to show", () => {
+  test("each state names its frame, its ground and its word", () => {
+    expect(STATE_REGISTERS).toEqual({
+      refused: { word: "Refused", frame: "dashed", ground: "refused", busy: false },
+      unavailable: { word: "Unavailable", frame: "solid", ground: "panel", busy: false },
+      "not-run": { word: "Not run", frame: "solid", ground: "panel", busy: false },
+      "not-served": { word: "Not served", frame: "solid", ground: "panel", busy: false },
+      pending: { word: "…", frame: "solid", ground: "panel", busy: true },
+      unreadable: { word: "Unreadable", frame: "dashed", ground: "panel", busy: false },
+    });
+  });
+
+  test("a fetch failure is never the refused register, and a read in flight is never failed or unavailable", () => {
+    expect(STATE_REGISTERS.unavailable.frame).toBe("solid");
+    expect(STATE_REGISTERS.unavailable.ground).not.toBe("refused");
+    expect(STATE_REGISTERS.unavailable.word).not.toMatch(/refused/i);
+    expect(STATE_REGISTERS.pending.word).not.toMatch(/fail|unavailable/i);
+    // No state word is a glyph that reads as "nothing here".
+    for (const [state, register] of Object.entries(STATE_REGISTERS)) expect(register.word, state).not.toBe("—");
+  });
+
+  test("the lib's own word wins where it has one; otherwise the register's word is printed", () => {
+    expect(stateWordOf("refused")).toBe("Refused");
+    expect(stateWordOf("refused", "No verdict")).toBe("No verdict");
+    expect(stateWordOf("not-served")).toBe("Not served");
+    // A blank word is not a word: the register's stands.
+    expect(stateWordOf("unavailable", "  ")).toBe("Unavailable");
+  });
+});
+
+test.describe("the heatmap corner names its axes in words — no arrow that is not a link", () => {
+  test("rows and columns, sentence case", () => {
+    expect(heatCornerLabel("today", "after")).toBe("Rows: today · columns: after");
+    expect(heatCornerLabel("today", "after")).not.toMatch(/[→↓]/);
   });
 });
 

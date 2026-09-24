@@ -13,7 +13,8 @@
 import { useState } from "react";
 import { KitTable, SmallToggle, StatusPill, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { notComputedCause } from "@/lib/cash-rows";
+import { notComputedCause, rowStandingLabel } from "@/lib/cash-rows";
+import { shortHex } from "@/lib/format";
 import { humanUsd } from "@/lib/human-usd";
 import {
   SPECIMEN_BASE_ROWS,
@@ -33,12 +34,10 @@ const COLUMNS: KitColumn[] = [
   { key: "status", header: "Status", align: "right" },
 ];
 
-const short = (address: string): string => `${address.slice(0, 6)}…${address.slice(-4)}`;
-
 function Account({ address }: { address: string }) {
   return (
     <span className={kit.addr} title={address}>
-      {short(address)}
+      {shortHex(address)}
     </span>
   );
 }
@@ -57,7 +56,7 @@ function toRow(row: SpecimenRow): KitRow {
         debt: row.row.debt === null ? "—" : humanUsd(row.row.debt, SPECIMEN_DECIMALS),
         status: (
           <StatusPill tone="refused" title={notComputedCause(row.row)}>
-            Not computed
+            {rowStandingLabel(row.row)}
           </StatusPill>
         ),
       },
@@ -88,9 +87,10 @@ export function TableSpecimen() {
     <>
       <KitTable
         testId="sg-table-kit"
+        label="Needs attention · specimen"
         columns={COLUMNS}
         rows={shown.map(toRow)}
-        emptyText="specimen rows missing (bug in the styleguide)"
+        emptyText="Specimen rows missing: a bug in the styleguide."
       />
       {SPECIMEN_BELOW_LINE_ROWS.length > 0 && (
         <SmallToggle on={showSmall} onChange={setShowSmall} testId="sg-table-toggle" label={SPECIMEN_TOGGLE_LABEL} />

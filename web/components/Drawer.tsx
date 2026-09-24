@@ -8,12 +8,13 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { DRAWER_CLOSE, DRAWER_CLOSE_KEY, DRAWER_FALLBACK_LABEL } from "@/lib/chrome";
 import styles from "./drawer.module.css";
 
 export interface DrawerProps {
   open: boolean;
   onClose: () => void;
-  /** Mono uppercase heading, e.g. "EXPLAIN · HEALTH FACTOR". */
+  /** The drawer's title, in sentence case as its trigger names it ("Methodology & evidence"). */
   title: ReactNode;
   children: ReactNode;
 }
@@ -131,14 +132,15 @@ export function Drawer({ open, onClose, title, children }: DrawerProps) {
         className={`${styles.panel}${openClass}`}
         role="dialog"
         aria-modal="true"
-        aria-label={typeof title === "string" ? title : "detail drawer"}
+        aria-label={typeof title === "string" ? title : DRAWER_FALLBACK_LABEL}
         tabIndex={-1}
         onKeyDown={onKeyDown}
       >
         <div className={styles.head}>
-          <h4 className={styles.title}>{title}</h4>
-          <button type="button" className={styles.close} onClick={onClose} aria-label="close drawer">
-            ESC ✕
+          <h2 className={styles.title}>{title}</h2>
+          <button type="button" className={styles.close} onClick={onClose} aria-label={DRAWER_CLOSE} aria-keyshortcuts="Escape">
+            {DRAWER_CLOSE}
+            <kbd className={styles.closeKey}>{DRAWER_CLOSE_KEY}</kbd>
           </button>
         </div>
         <div className={styles.body}>{children}</div>

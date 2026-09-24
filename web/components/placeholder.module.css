@@ -1,4 +1,4 @@
-/* SurfacePlaceholder — the surface-head vocabulary from the mockup. */
+/* SurfacePlaceholder — the surface-head vocabulary, on the product type scale. */
 
 .head {
   max-width: 720px;
@@ -6,20 +6,21 @@
 }
 
 .head h1 {
-  font-size: var(--fs-h2);
+  font-size: var(--type-h1);
+  font-weight: var(--w-semibold);
   margin: 0 0 8px;
-  letter-spacing: var(--track-tight);
+  letter-spacing: -0.02em;
 }
 
 .head p {
   color: var(--ink-2);
-  font-size: var(--fs-body);
+  font-size: var(--type-body);
   margin: 0 0 6px;
 }
 
 .fedBy {
   font-family: var(--mono);
-  font-size: var(--fs-mono-sm);
+  font-size: var(--type-mono-sm);
   color: var(--ink-3);
   margin-top: 10px;
 }
@@ -32,15 +33,14 @@
 .pending {
   margin-top: var(--sp-5);
   padding: var(--sp-4) var(--sp-5);
-  border: 1px dashed var(--line);
-  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  border-radius: 10px;
   background: var(--panel);
-  font-family: var(--mono);
-  font-size: var(--fs-mono-sm);
-  color: var(--ink-3);
+  font-size: var(--type-body);
+  color: var(--ink-2);
 }
 
 .pending b {
-  color: var(--ink-2);
-  font-weight: 550;
+  color: var(--ink);
+  font-weight: var(--w-semibold);
 }

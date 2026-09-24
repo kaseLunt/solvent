@@ -33,13 +33,13 @@ export function SupersededCard({
         {body ?? (
           <>
             <span className={styles.identity}>
-              Bound to 0x80b3…6e1d · batch #18251 · eth_-20 v3 · computed 04:11:07Z.
+              Bound to 0x80b3…6e1d · batch 18,251 · eth_-20 v3 · computed 04:11:07Z.
             </span>{" "}
             The address field has changed; run again for the new address.
           </>
         )}
       </p>
-      <div className={styles.chips}>{chip ?? <StatusChip tone="warn">SUPERSEDED</StatusChip>}</div>
+      <div className={styles.chips}>{chip ?? <StatusChip tone="warn">Superseded</StatusChip>}</div>
       {foot !== undefined && <p className={styles.foot}>{foot}</p>}
     </section>
   );

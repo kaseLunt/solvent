@@ -29,7 +29,7 @@ export function UnavailableCard({
       <div className={styles.chips}>
         {chip ?? (
           <StatusChip tone="unknown">
-            <ChipVal>30</ChipVal> BATCHES NOT RETAINED
+            <ChipVal>30</ChipVal> batches not retained
           </StatusChip>
         )}
       </div>

@@ -25,21 +25,21 @@ export function DrawerDemo() {
       </button>
       <Drawer open={open} onClose={() => setOpen(false)} title="Methodology & evidence">
         <div data-testid="sg-drawer-body">
-          <p style={{ marginTop: 0 }}>
-            SPECIMEN CONTENT · on a real page this drawer carries the doctrine verbatim — the method paragraphs,
+          <p>
+            Specimen content · on a real page this drawer carries the doctrine verbatim — the method paragraphs,
             the provenance, and the evidentiary chain: batch and materialization identity, input as-ofs, price
             inputs with provenance class and budget verdicts, flags and refusals, the engine-exact formula and
             comparator.
           </p>
           <dl className={styles.kv}>
-            <dt>batch</dt>
+            <dt>Batch</dt>
             <dd>bk_specimen</dd>
-            <dt>marks</dt>
+            <dt>Marks</dt>
             <dd>balances ✓ params ✓ sweep ✓</dd>
             {/* The exact layer's kit home (the Inspector drawer's "Exact wire values"): the headline prints the
                 human figure, and the drawer states the exact wire value it truncates — the crit header's, summed
                 from the table's own rows, so the three cannot disagree. */}
-            <dt>liquidatable debt</dt>
+            <dt>Liquidatable debt</dt>
             <dd data-testid="sg-drawer-exact">
               {SPECIMEN_EXACT.human} <span className={kit.sub}>· exact wire value</span> <code>{SPECIMEN_EXACT.exact}</code>
             </dd>

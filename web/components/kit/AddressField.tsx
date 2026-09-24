@@ -2,23 +2,25 @@
 
 import Link from "next/link";
 import { useId, useState } from "react";
+import { ADDRESS_FIELD } from "@/lib/chrome";
 import { isAddress } from "@/lib/format";
 import styles from "./kit.module.css";
 
+/** The field's refusal: the same sentence as lib/inspector-headline's INVALID_ADDRESS_COPY, which its unit spec welds to this file. */
 export const ADDRESS_REFUSED_COPY = "An address is 0x followed by 40 hex characters — nothing else is looked up.";
 
 export interface AddressFieldProps {
   /** The address the page is showing, if any — the field starts with it. */
   initial?: string;
   onInspect: (address: string) => void;
-  /** A ghost action beside Inspect (the Inspector's "Stress this address →"). */
+  /** A ghost action beside Inspect: a link to another page, so its label ends in "→". */
   secondary?: { href: string; label: string };
   hint?: string;
   testId: string;
 }
 
 /** Strict address entry (0x + 40 hex, verbatim). An invalid input is refused inline and never navigates. */
-export function AddressField({ initial = "", onInspect, secondary, hint = "any 0x address", testId }: AddressFieldProps) {
+export function AddressField({ initial = "", onInspect, secondary, hint = ADDRESS_FIELD.hint, testId }: AddressFieldProps) {
   const [value, setValue] = useState(initial);
   const [refused, setRefused] = useState(false);
   const hintId = useId();
@@ -49,8 +51,8 @@ export function AddressField({ initial = "", onInspect, secondary, hint = "any 0
             setValue(event.target.value);
             setRefused(false);
           }}
-          placeholder="0x…"
-          aria-label="address to inspect"
+          placeholder={ADDRESS_FIELD.placeholder}
+          aria-label={ADDRESS_FIELD.inputLabel}
           aria-invalid={refused ? "true" : undefined}
           aria-describedby={refused ? `${hintId} ${refusedId}` : hintId}
           spellCheck={false}
@@ -62,7 +64,7 @@ export function AddressField({ initial = "", onInspect, secondary, hint = "any 0
         </small>
       </label>
       <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`} data-testid={`${testId}-inspect`}>
-        Inspect
+        {ADDRESS_FIELD.inspect}
       </button>
       {secondary !== undefined && (
         <Link href={secondary.href} className={`${styles.btn} ${styles.btnGhost}`} data-testid={`${testId}-secondary`}>

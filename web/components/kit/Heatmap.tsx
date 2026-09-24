@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
+import { heatCornerLabel } from "@/lib/kit";
 import { groupInt } from "@/lib/prose";
 import styles from "./kit.module.css";
+import { ScrollRegion } from "./ScrollRegion";
 
 export interface HeatBand {
   readonly key: string;
@@ -34,7 +36,11 @@ const MOVE_CLASS: Record<HeatMovement, string | undefined> = {
   unmeasured: styles.heatUnmeasured,
 };
 
-/** The `.k-heat` grid: rows are the band today, columns the band after; a cell is a count of accounts. An empty cell stays a cell. */
+/**
+ * The `.k-heat` grid: rows are the band today, columns the band after; a cell is a count of accounts. An empty cell
+ * stays a cell. No column is narrower than 56px or its own label, so on a narrow screen the grid scrolls inside its
+ * region with the row labels held still — the refusal column is never cut.
+ */
 export function Heatmap({
   bands,
   cells,
@@ -51,70 +57,73 @@ export function Heatmap({
     cellTestIdPrefix === undefined
       ? undefined
       : `${cellTestIdPrefix}-${String(r)}-${String(c)}`;
+  const name = `${rowsLabel} by ${colsLabel}`;
   return (
-    <div
-      className={styles.heat}
-      style={{
-        gridTemplateColumns: `90px repeat(${String(bands.length)}, 1fr)`,
-      }}
-      data-testid={testId}
-      data-merged={merged ? "true" : "false"}
-      role="table"
-      aria-label={`${rowsLabel} by ${colsLabel}`}
-    >
-      <div className={styles.heatRow} role="row">
-        <div className={styles.heatCorner} aria-hidden="true">
-          {rowsLabel} ↓ · {colsLabel} →
+    <ScrollRegion label={name}>
+      <div
+        className={styles.heat}
+        style={{
+          gridTemplateColumns: `90px repeat(${String(bands.length)}, minmax(min-content, 1fr))`,
+        }}
+        data-testid={testId}
+        data-merged={merged ? "true" : "false"}
+        role="table"
+        aria-label={name}
+      >
+        <div className={styles.heatRow} role="row">
+          <div className={styles.heatCorner} aria-hidden="true">
+            {heatCornerLabel(rowsLabel, colsLabel)}
+          </div>
+          {bands.map((b) => (
+            <div
+              key={`h-${b.key}`}
+              className={styles.heatHead}
+              title={b.title}
+              role="columnheader"
+            >
+              {b.label}
+            </div>
+          ))}
         </div>
-        {bands.map((b) => (
-          <div
-            key={`h-${b.key}`}
-            className={styles.heatHead}
-            title={b.title}
-            role="columnheader"
-          >
-            {b.label}
-          </div>
-        ))}
-      </div>
-      {bands.map((row, r) => (
-        <div key={`r-${row.key}`} className={styles.heatRow} role="row">
-          <div className={styles.heatLabel} title={row.title} role="rowheader">
-            {row.label}
-          </div>
-          {bands.map((col, c) => {
-            const cell = byKey.get(`${String(r)}-${String(c)}`);
-            if (cell === undefined || cell.count === 0) {
-              // A present cell with no rows keeps its movement word: a zero is honestly a zero, and its kind is still a fact.
+        {bands.map((row, r) => (
+          <div key={`r-${row.key}`} className={styles.heatRow} role="row">
+            <div className={styles.heatLabel} title={row.title} role="rowheader">
+              {row.label}
+            </div>
+            {bands.map((col, c) => {
+              const cell = byKey.get(`${String(r)}-${String(c)}`);
+              if (cell === undefined || cell.count === 0) {
+                // A present cell with no rows keeps its movement word: a zero is honestly a zero, and its kind is still a fact.
+                return (
+                  <div
+                    key={col.key}
+                    className={`${styles.heatCell} ${styles.heatEmpty}`}
+                    title={cell?.title}
+                    data-testid={id(r, c)}
+                    data-count="0"
+                    data-movement={cell?.movement}
+                    role="cell"
+                  />
+                );
+              }
               return (
                 <div
                   key={col.key}
-                  className={`${styles.heatCell} ${styles.heatEmpty}`}
-                  title={cell?.title}
+                  className={`${styles.heatCell} ${MOVE_CLASS[cell.movement] ?? ""}`}
+                  style={{ "--heat": cell.intensity } as CSSProperties}
+                  title={cell.title}
                   data-testid={id(r, c)}
-                  data-count="0"
-                  data-movement={cell?.movement}
+                  data-count={String(cell.count)}
+                  data-movement={cell.movement}
                   role="cell"
-                />
+                >
+                  <span>{groupInt(cell.count)}</span>
+                </div>
               );
-            }
-            return (
-              <div
-                key={col.key}
-                className={`${styles.heatCell} ${MOVE_CLASS[cell.movement] ?? ""}`}
-                style={{ "--heat": cell.intensity } as CSSProperties}
-                title={cell.title}
-                data-testid={id(r, c)}
-                data-count={String(cell.count)}
-                data-movement={cell.movement}
-                role="cell"
-              >
-                <span>{groupInt(cell.count)}</span>
-              </div>
-            );
-          })}
-        </div>
-      ))}
-    </div>
+            })}
+          </div>
+        ))}
+      </div>
+    </ScrollRegion>
   );
 }

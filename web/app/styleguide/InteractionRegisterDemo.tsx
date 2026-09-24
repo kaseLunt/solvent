@@ -10,7 +10,7 @@
 //   · Enter opens the mark's evidence (here: its ledger row takes focus).
 //   · Esc leaves the chart.
 //   · aria-details → the LEDGER (the tabular twin: one row per mark, exact
-//     strings); aria-describedby → METHOD. A visible "EXACT DATA ↓" control
+//     strings); aria-describedby → METHOD. A visible "Exact data ↓" control
 //     moves focus to the ledger. Screen readers get the twin, not 100
 //     verbose point descriptions.
 //
@@ -86,14 +86,14 @@ export function InteractionRegisterDemo() {
   return (
     <div className={styles.frame}>
       <div className={styles.headRow}>
-        <p className={styles.kicker}>specimen stress ladder · aave_v3 · eligible debt by ETH step</p>
+        <p className={styles.kicker}>Specimen stress ladder · aave_v3 · eligible debt by ETH step</p>
         <button
           type="button"
           className={styles.exactData}
           data-testid="sg-ir-exact-data"
           onClick={() => ledgerRef.current?.focus()}
         >
-          EXACT DATA ↓
+          Exact data ↓
         </button>
       </div>
 
@@ -149,19 +149,19 @@ export function InteractionRegisterDemo() {
 
       <div className={styles.readout} data-testid="sg-ir-readout">
         {mark === null
-          ? "focus or click a mark — the readout populates and persists (hover is never the only path)"
+          ? "Focus or click a mark — the readout populates and persists (hover is never the only path)"
           : `${mark.step} · eligible ${mark.eligible} · Δ ${mark.delta} · batch #18251`}
       </div>
 
       <div className={styles.ledger} id="sg-ir-ledger" ref={ledgerRef} tabIndex={-1}>
         <table className={styles.ledgerTable}>
           <caption className={styles.ledgerCaption}>
-            LEDGER · the tabular twin — one row per mark, exact strings, same order
+            Ledger · the tabular twin — one row per mark, exact strings, same order
           </caption>
           <thead>
             <tr>
-              <th>stress</th>
-              <th>eligible (exact)</th>
+              <th>Stress</th>
+              <th>Eligible (exact)</th>
               <th>Δ vs current (exact)</th>
             </tr>
           </thead>
@@ -185,12 +185,12 @@ export function InteractionRegisterDemo() {
       </div>
 
       <p className={styles.method}>
-        KEYBOARD · Tab enters (one stop) · ←/→ traverse marks in data order · Home/End jump ·
+        Keyboard · Tab enters (one stop) · ←/→ traverse marks in data order · Home/End jump ·
         Enter opens the mark&apos;s ledger row · Esc leaves. The focused mark wears a 2px accent
         ring; its readout persists.
       </p>
       <p className={styles.method} id="sg-ir-method">
-        METHOD · SPECIMEN — six static stress steps for one aave_v3 book; x is the ETH price step
+        Method · specimen — six static stress steps for one aave_v3 book; x is the ETH price step
         in data order, stem height scales with log₁₀(eligible). Exact strings live in the ledger,
         not the geometry; Δ is signed (U+2212, bare zero at the baseline) and tone follows the
         outcome, not the sign.

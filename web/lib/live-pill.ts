@@ -12,21 +12,24 @@ export interface LivePillInput {
   readonly tier: FreshnessTier | null;
 }
 
+/** The pill's words and their tones, in the kit's tone grammar (lib/kit.ts TONE_GRAMMAR). */
 export interface LivePillWords {
   readonly word: "Live" | "Reconnecting" | "Not connected";
-  readonly tone: "ok" | "warn" | "dim";
+  /** The connection's register: live is posture (accent), never health; reconnecting warns; not connected claims nothing. */
+  readonly tone: "live" | "warn" | "dim";
   readonly batch: string | null;
   readonly age: string | null;
-  readonly ageTone: "ok" | "warn" | "crit" | "dim";
+  /** A fresh age is a record (ink); an aging age warns and a stale or critical one is crit — the age tier's own verdict. */
+  readonly ageTone: "neutral" | "warn" | "crit" | "dim";
 }
 
-const TIER_TONE: Record<FreshnessTier, "ok" | "warn" | "crit"> = { fresh: "ok", aging: "warn", stale: "crit", critical: "crit" };
+const TIER_TONE: Record<FreshnessTier, "neutral" | "warn" | "crit"> = { fresh: "neutral", aging: "warn", stale: "crit", critical: "crit" };
 
 export function livePillWords(input: LivePillInput): LivePillWords {
   const connected = input.streamState === "open" && input.hasBase;
   const reconnecting = input.streamState === "connecting" || input.streamState === "waiting" || (input.streamState === "open" && !input.hasBase);
   const word = connected ? "Live" : reconnecting ? "Reconnecting" : "Not connected";
-  const tone = connected ? "ok" : reconnecting ? "warn" : "dim";
+  const tone = connected ? "live" : reconnecting ? "warn" : "dim";
   const batch = input.batchId === null ? null : `batch ${input.batchId.toLocaleString("en-US")}`;
   // An unresolved age is a statement, not an omission: the batch stands, its age does not.
   const age = input.ageUnresolved ? "age unknown" : input.ageSeconds === null ? null : `${humanAge(input.ageSeconds)} ago`;

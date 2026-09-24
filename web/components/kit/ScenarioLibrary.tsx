@@ -1,10 +1,12 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
+import { LIBRARY, libraryCompareLabel } from "@/lib/chrome";
 import styles from "./kit.module.css";
 
 export type LibraryOutcomeKey =
   "not-run" | "running" | "result" | "withheld" | "not-covered" | "failed" | "definition-changed";
+/** A row of the one tone grammar (lib/kit.ts TONE_VOCABULARIES.libraryOutcome); `dim` is an outcome of record, ink-2. */
 export type LibraryOutcomeTone = "crit" | "warn" | "ok" | "refused" | "dim";
 
 export interface LibraryItem {
@@ -69,8 +71,8 @@ export function ScenarioLibrary({
     <>
       <aside className={styles.lib} data-testid={testId} data-mode={mode}>
         <div className={styles.libHead}>
-          <span>Scenarios</span>
-          <span className={styles.libMode} role="group" aria-label="mode">
+          <span>{LIBRARY.title}</span>
+          <span className={styles.libMode} role="group" aria-label={LIBRARY.modeLabel}>
             <button
               type="button"
               className={mode === "book" ? styles.libModeOn : undefined}
@@ -78,7 +80,7 @@ export function ScenarioLibrary({
               onClick={() => onMode("book")}
               data-testid="lab-mode-book"
             >
-              Whole book
+              {LIBRARY.modes.book}
             </button>
             <span aria-hidden="true">·</span>
             <button
@@ -88,7 +90,7 @@ export function ScenarioLibrary({
               onClick={() => onMode("address")}
               data-testid="lab-mode-address"
             >
-              One address
+              {LIBRARY.modes.address}
             </button>
           </span>
         </div>
@@ -113,7 +115,7 @@ export function ScenarioLibrary({
                   className={styles.libCheck}
                   checked={item.checked}
                   onChange={(event) => onCheck(item.id, event.target.checked)}
-                  aria-label={`compare ${item.label}`}
+                  aria-label={libraryCompareLabel(item.label)}
                   data-testid={`lab-library-check-${item.id}`}
                 />
               ) : (

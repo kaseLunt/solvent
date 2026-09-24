@@ -1,19 +1,13 @@
 "use client";
 
+import { ROUTE_REFUSAL } from "@/lib/chrome";
 import styles from "./primitives.module.css";
 
 /**
- * The refusal register at ROUTE scale (p1b-0).
- *
- * When a render throw unmounts a route segment, the boundary renders THIS
- * instead of Next's generic error page: the house refused tone (the dashed
- * warn register), a body that claims nothing — an unreadable
- * value is never rendered as a number — the throw's own words behind a mono
- * evidence disclosure, and a reset affordance.
- *
- * The head's DOM text is a readable sentence; the uppercase render is CSS
- * (`text-transform`, the `.statLabel` pattern), so assertions match the text,
- * not the styling.
+ * The route boundary's state (p1b-0): when a render throw unmounts a route segment, the boundary renders THIS instead
+ * of Next's generic error page — the unreadable register (a dashed ink-3 frame on the panel), a body that claims
+ * nothing (an unreadable value is never rendered as a number), the error's own words behind a disclosure, and a
+ * reset. Its words are lib/chrome's.
  */
 export function RouteRefusal({
   error,
@@ -23,19 +17,16 @@ export function RouteRefusal({
   reset: () => void;
 }) {
   return (
-    <section className={styles.routeRefusal} data-testid="route-refusal" role="alert">
-      <p className={styles.routeRefusalHead}>This view refused to render</p>
-      <p className={styles.routeRefusalBody}>
-        A value in the served data could not be read, and an unreadable value is never rendered
-        as a number. Nothing is claimed for this view.
-      </p>
+    <section className={styles.routeRefusal} data-testid="route-refusal" data-state="unreadable" role="alert">
+      <p className={styles.routeRefusalHead}>{ROUTE_REFUSAL.head}</p>
+      <p className={styles.routeRefusalBody}>{ROUTE_REFUSAL.body}</p>
       <details className={styles.routeRefusalEvidence}>
-        <summary>what the throw said</summary>
-        <p>{error.message}</p>
-        {error.digest === undefined ? null : <p>digest: {error.digest}</p>}
+        <summary>{ROUTE_REFUSAL.evidence}</summary>
+        <pre>{error.message}</pre>
+        {error.digest === undefined ? null : <pre>{ROUTE_REFUSAL.digest(error.digest)}</pre>}
       </details>
       <button type="button" className={styles.routeRefusalReset} onClick={reset}>
-        try again
+        {ROUTE_REFUSAL.reset}
       </button>
     </section>
   );

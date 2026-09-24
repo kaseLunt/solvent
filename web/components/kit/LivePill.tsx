@@ -1,23 +1,55 @@
 "use client";
 
+import { livePillTitle } from "@/lib/chrome";
 import { freshnessTier } from "@/lib/freshnessTiers";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
-import { livePillWords } from "@/lib/live-pill";
+import { livePillWords, type LivePillWords } from "@/lib/live-pill";
 import { useMetaConstants } from "@/lib/meta";
 import { usePosture } from "@/lib/posture";
 import styles from "./kit.module.css";
 
-const AGE_CLASS = {
-  ok: styles.pillAgeOk,
+const DOT_CLASS: Record<LivePillWords["tone"], string | undefined> = {
+  live: styles.dotLive,
+  warn: styles.dotWarn,
+  dim: "",
+};
+
+const AGE_CLASS: Record<LivePillWords["ageTone"], string | undefined> = {
+  neutral: styles.pillAgeNeutral,
   warn: styles.pillAgeWarn,
   crit: styles.pillAgeCrit,
   dim: styles.pillAgeDim,
-} as const;
+};
 
 /**
- * The header's one live statement: stream state · batch · snapshot age, the
- * age colored by the ratified freshness tier. Three truths kept separate
- * (spec §2): connection, batch identity, snapshot age.
+ * The pill as drawn, from its words alone: the connection's dot and word, then the batch and the age. On a phone (or
+ * `compact`, the phone's form at any width) the batch and a fresh age leave the line — they stay in the accessibility
+ * tree and in the title — so the header's first row holds the brand, the pill and the two controls. An aging or stale
+ * age stays on the line: a warning is never folded away.
+ */
+export function LivePillView({ words, compact = false, testId = "live-pill" }: { words: LivePillWords; compact?: boolean; testId?: string }) {
+  return (
+    <span className={compact ? `${styles.pill} ${styles.pillCompact}` : styles.pill} data-testid={testId} data-word={words.word} data-tone={words.tone} title={livePillTitle(words)}>
+      <span className={`${styles.dot} ${DOT_CLASS[words.tone] ?? ""}`} aria-hidden="true" />
+      {words.word}
+      {(words.batch !== null || words.age !== null) && (
+        <span
+          className={styles.pillMore}
+          data-testid={`${testId}-more`}
+          data-urgent={words.ageTone === "warn" || words.ageTone === "crit" ? "" : undefined}
+        >
+          {words.batch !== null && <span className={styles.pillBatch}> · {words.batch}</span>}
+          {words.age !== null && <span className={AGE_CLASS[words.ageTone]}> · {words.age}</span>}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The header's one live statement: stream state · batch · snapshot age, the age coloured by the ratified freshness
+ * tier. Three truths kept separate (spec §2): connection, batch identity, snapshot age. Connection is posture, never
+ * health: the live dot is the accent, and a fresh age is ink.
  */
 export function LivePill() {
   const posture = usePosture();
@@ -38,18 +70,5 @@ export function LivePill() {
     ageUnresolved: age.unresolved,
     tier: ageSeconds === null ? null : freshnessTier(ageSeconds, meta.constants),
   });
-  const dotClass = words.tone === "ok" ? styles.dotOk : words.tone === "warn" ? styles.dotWarn : "";
-  return (
-    <span
-      className={styles.pill}
-      data-testid="live-pill"
-      data-word={words.word}
-      title={`stream ${posture.streamState}${batch === null ? "" : ` · batch ${String(batch.id)}`}`}
-    >
-      <span className={`${styles.dot} ${dotClass}`} aria-hidden="true" />
-      {words.word}
-      {words.batch !== null && <> · {words.batch}</>}
-      {words.age !== null && <span className={AGE_CLASS[words.ageTone]}> · {words.age}</span>}
-    </span>
-  );
+  return <LivePillView words={words} />;
 }

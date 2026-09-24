@@ -15,6 +15,14 @@ import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
 import type { Page, Route } from "@playwright/test";
 import { FEED_CROSS_PAGE_1, FEED_POSTURE_SNAPSHOT } from "../fixtures/feed";
+import { SPECIMEN_BASE_ROWS } from "../../app/styleguide/specimen-book";
+import { rowStandingLabel } from "../../lib/cash-rows";
+import { BRAND, GITHUB_LABEL, livePillTitle } from "../../lib/chrome";
+import { livePillWords } from "../../lib/live-pill";
+
+/** The styleguide's refused row, and the word the Book's own table gives its pill. */
+const REFUSED_SPECIMEN = SPECIMEN_BASE_ROWS.flatMap((row) => (row.kind === "refused" ? [row.row] : []))[0];
+const REFUSED_LABEL = REFUSED_SPECIMEN === undefined ? "missing specimen row" : rowStandingLabel(REFUSED_SPECIMEN);
 
 async function openShell(page: Page, viewport: { width: number; height: number }): Promise<void> {
   await page.setViewportSize(viewport);
@@ -214,7 +222,7 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     // real computation over the real resolved palette; a computation stubbed
     // to a constant dies at this attribute.
     const probe = page.getByTestId("contrast-probe-bad");
-    await expect(probe).toContainText("KNOWN-BAD");
+    await expect(probe).toContainText("Known-bad probe");
 
     for (const theme of ["light", "dark"] as const) {
       await page.evaluate((value) => {
@@ -259,6 +267,13 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
       const color = await emphasis.evaluate((el) => getComputedStyle(el).color);
       expect(color, `${tone} emphasis`).toBe(await resolveAppbarToken(page, EMPHASIS_TOKEN[tone]));
     }
+    // The absent register: a headline that states there is no answer is ink-2 from its first word to its last — the
+    // rest beside the emphasis too, never half-dimmed.
+    const absent = page.getByTestId("sg-verdict-refused-headline");
+    await expect(absent).toHaveAttribute("data-register", "absent");
+    expect(await absent.evaluate((el) => getComputedStyle(el).color)).toBe(await resolveAppbarToken(page, "--ink-2"));
+    await expect(page.getByTestId("sg-verdict-crit-headline")).not.toHaveAttribute("data-register", /.+/);
+
     // Ink is not a verdict's colour: the record's emphasis differs from every tone that is one, in this theme.
     const ink = await resolveAppbarToken(page, "--ink");
     for (const verdict of ["--crit-text", "--warn-text", "--ok-text"] as const) expect(await resolveAppbarToken(page, verdict)).not.toBe(ink);
@@ -294,37 +309,37 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
   });
 
   test("the freshness tier row renders all five states, each in its tier's register", async ({ page }) => {
-    // FRESH: measured ink, quiet border, NO tier word, no green.
+    // FRESH: measured ink, quiet border, its tier named in the page's own words, no green.
     const fresh = page.getByTestId("sg-tier-fresh");
-    await expect(fresh).toHaveText("SNAPSHOT 48s");
+    await expect(fresh).toHaveText("Snapshot 48s · fresh");
     const freshRegister = await readChipRegister(fresh);
     expect(freshRegister.color).toBe(await resolveAppbarToken(page, "--ink-2"));
     expect(freshRegister.border).toBe(await resolveAppbarToken(page, "--line"));
 
     // AGING: amber text + border.
     const aging = page.getByTestId("sg-tier-aging");
-    await expect(aging).toHaveText("SNAPSHOT 5 min · AGING");
+    await expect(aging).toHaveText("Snapshot 5 min · aging");
     expect((await readChipRegister(aging)).color).toBe(
       await resolveAppbarToken(page, "--warn-text"),
     );
 
     // STALE: coral text, NO fill — outline only.
     const stale = page.getByTestId("sg-tier-stale");
-    await expect(stale).toHaveText("SNAPSHOT 22 min · STALE");
+    await expect(stale).toHaveText("Snapshot 22 min · stale");
     const staleRegister = await readChipRegister(stale);
     expect(staleRegister.color).toBe(await resolveAppbarToken(page, "--crit-text"));
     expect(staleRegister.bg).toBe("rgba(0, 0, 0, 0)");
 
     // CRITICAL: coral WITH fill — the one escalation fill.
     const critical = page.getByTestId("sg-tier-critical");
-    await expect(critical).toHaveText("SNAPSHOT 18 h 12 min · CRITICAL");
+    await expect(critical).toHaveText("Snapshot 18 h 12 min · critical");
     const criticalRegister = await readChipRegister(critical);
     expect(criticalRegister.color).toBe(await resolveAppbarToken(page, "--crit-text"));
     expect(criticalRegister.bg).toBe(await resolveAppbarToken(page, "--crit-bg", "background"));
 
-    // AGE UNKNOWN: not a tier — dashed, never any tier's color.
+    // Age unknown: not a tier — dashed, never any tier's color.
     const unknown = page.getByTestId("sg-tier-unknown");
-    await expect(unknown).toHaveText("AGE UNKNOWN — NO BATCH METADATA");
+    await expect(unknown).toHaveText("Age unknown — no batch metadata");
     const unknownRegister = await readChipRegister(unknown);
     expect(unknownRegister.borderStyle).toBe("dashed");
     expect(unknownRegister.color).toBe(await resolveAppbarToken(page, "--ink-2"));
@@ -338,28 +353,37 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     }
 
     // Rendered chip colors (task-5 carry-in): the registers resolve on the
-    // page, not just in the stylesheet. Green is rationed — HEALTHY wears it.
-    const healthy = page.getByTestId("sg-dim-6").getByText("HEALTHY · HF 1.539");
+    // page, not just in the stylesheet. Green is rationed — Healthy wears it.
+    const healthy = page.getByTestId("sg-dim-6").getByText("Healthy · HF 1.539");
     expect((await readChipRegister(healthy)).color).toBe(
       await resolveAppbarToken(page, "--ok-text"),
     );
-    // The unknown register is dashed — UNANSWERED is not a small refusal.
-    const unanswered = page.getByTestId("sg-dim-5").getByText(/UNANSWERED/);
+    // The unknown register is dashed — Unanswered is not a small refusal.
+    const unanswered = page.getByTestId("sg-dim-5").getByText(/Unanswered/);
     expect((await readChipRegister(unanswered)).borderStyle).toBe("dashed");
+    // No verdict is an absence, not a tier: dashed, in ink-2, never amber.
+    const unavailable = await readChipRegister(page.getByTestId("sg-dim-6-unavailable"));
+    expect(unavailable.borderStyle).toBe("dashed");
+    expect(unavailable.color).toBe(await resolveAppbarToken(page, "--ink-2"));
+    // Sentence case: the chips' state words are written as they read, never in capitals (an acronym such as HTTP is not a word).
+    for (const id of ["sg-freshness", "sg-dimensions", "sg-states"]) {
+      const words = await page.getByTestId(id).evaluate((el) => el.textContent ?? "");
+      expect(words, id).not.toMatch(/\b(?!HTTP\b)[A-Z]{4,}\b/);
+    }
 
-    // Composition 1 — the brief's named specimen: LIQUIDATABLE · DUST ·
-    // COMPUTED · SNAPSHOT 18h (fixed §6 order: verdict · materiality ·
+    // Composition 1 — the brief's named specimen: Liquidatable · Dust ·
+    // Computed · Snapshot 18h (fixed §6 order: verdict · materiality ·
     // knowledge · freshness). Both crit-fill chips carry the ONE escalation
     // fill, resolved.
     const composition = page.getByTestId("sg-comp-1");
-    const liquidatable = composition.getByText("LIQUIDATABLE · HF 0.4971");
+    const liquidatable = composition.getByText("Liquidatable · HF 0.4971");
     await expect(liquidatable).toBeVisible();
     expect((await readChipRegister(liquidatable)).bg).toBe(
       await resolveAppbarToken(page, "--crit-bg", "background"),
     );
-    await expect(composition.getByText("DUST · <$0.01")).toBeVisible();
-    await expect(composition.getByText("COMPUTED", { exact: true })).toBeVisible();
-    await expect(composition.getByText("SNAPSHOT 18 h 12 min · CRITICAL")).toBeVisible();
+    await expect(composition.getByText("Dust · <$0.01")).toBeVisible();
+    await expect(composition.getByText("Computed", { exact: true })).toBeVisible();
+    await expect(composition.getByText("Snapshot 18 h 12 min · critical")).toBeVisible();
 
     await expect(page.getByTestId("sg-comp-2")).toBeVisible();
     await expect(page.getByTestId("sg-comp-3")).toBeVisible();
@@ -404,9 +428,9 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
       await expect(page.getByTestId(`sg-state-${state}`)).toBeVisible();
     }
     await expect(page.getByTestId("sg-state-refused")).toContainText(
-      "REFUSED · collateral sweep failed · SWEEP_FAILED",
+      "Refused · collateral sweep failed · SWEEP_FAILED",
     );
-    await expect(page.getByTestId("sg-state-unavailable")).toContainText("30 BATCHES NOT RETAINED");
+    await expect(page.getByTestId("sg-state-unavailable")).toContainText("30 batches not retained");
     await expect(page.getByTestId("sg-state-invalid")).toContainText("0x80b3f19e2a6cZZZZ");
     await expect(page.getByTestId("sg-state-superseded")).toContainText(
       "A late response never overwrites a newer request context.",
@@ -421,7 +445,110 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     for (const text of await refusedCells.allInnerTexts()) {
       expect(text.trim(), "a refused row never prints a zero").not.toMatch(/^\$?0(\.0+)?$/);
     }
-    await expect(refusedRow.locator('[data-tone="refused"]')).toHaveText("Not computed");
+    await expect(refusedRow.locator('[data-tone="refused"]')).toHaveText(REFUSED_LABEL);
+  });
+
+  test("the state registers: a refusal and an unreadable answer are dashed, every other absence solid — a failed fetch is never drawn as a refusal, and a step with no figure says its state", async ({
+    page,
+  }) => {
+    const FRAME = {
+      refused: "dashed",
+      unavailable: "solid",
+      "not-run": "solid",
+      "not-served": "solid",
+      pending: "solid",
+      unreadable: "dashed",
+    } as const;
+    for (const [state, frame] of Object.entries(FRAME)) {
+      const card = page.getByTestId(`sg-statecard-${state}`);
+      await expect(card).toHaveAttribute("data-state", state);
+      expect((await readChipRegister(card)).borderStyle, state).toBe(frame);
+    }
+    await expect(page.getByTestId("sg-statecard-pending")).toHaveAttribute("aria-busy", "true");
+    await expect(page.getByTestId("sg-statecard-unavailable")).not.toHaveAttribute("aria-busy", /.+/);
+    // The service's own words sit behind a disclosure, verbatim — relocated, never removed.
+    const said = page.getByTestId("sg-statecard-refused").locator("details");
+    await expect(said.locator("summary")).toHaveText("What the service said");
+    await expect(said.locator("pre")).toHaveText("SWEEP_FAILED: collateral sweep failed");
+    // A step with no figure prints its state's word, never a dash; the other steps keep their figures.
+    await expect(page.getByTestId("sg-steps-strip-verify")).toHaveAttribute("data-state", "unavailable");
+    await expect(page.getByTestId("sg-steps-strip-verify")).toContainText("Unavailable");
+    await expect(page.getByTestId("sg-steps-strip")).not.toContainText("—");
+    await expect(page.getByTestId("sg-steps-strip-index")).toContainText("01");
+    await expect(page.getByTestId("sg-steps-strip-index")).toContainText("Index");
+  });
+
+  test("the toggle group: one Tab stop, arrows move, Home and End jump, Space presses — a single-choice group keeps one pressed, a multi-choice group any set", async ({
+    page,
+  }) => {
+    const engine = page.getByTestId("sg-tg-engine");
+    await expect(engine).toHaveAttribute("role", "group");
+    await expect(engine.locator("span").first()).toHaveText("Engine");
+    await expect(engine.getByRole("button")).toHaveCount(3);
+    const all = page.getByTestId("sg-tg-engine-all");
+    const cash = page.getByTestId("sg-tg-engine-debt_manager");
+    const legacy = page.getByTestId("sg-tg-engine-aave_v3_etherfi");
+    await expect(all).toHaveAttribute("aria-pressed", "true");
+    // One stop: the pressed option carries it, the others are reached by arrow.
+    await expect(all).toHaveAttribute("tabindex", "0");
+    await expect(cash).toHaveAttribute("tabindex", "-1");
+    await all.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(cash).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(cash).toHaveAttribute("aria-pressed", "true");
+    await expect(all).toHaveAttribute("aria-pressed", "false");
+    await page.keyboard.press("End");
+    await expect(legacy).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(all).toBeFocused();
+    // Tab leaves the group, onto the next group's one stop — its first option, since none is pressed.
+    await page.keyboard.press("Tab");
+    const borrow = page.getByTestId("sg-tg-type-borrow");
+    await expect(borrow).toBeFocused();
+    await page.keyboard.press("Space");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Space");
+    await expect(borrow).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("sg-tg-type-liquidation")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("sg-tg-type-repay")).toHaveAttribute("aria-pressed", "false");
+    // The wire's own word rides in the title, the page's word is the label.
+    await expect(page.getByTestId("sg-tg-type-deficit_created")).toHaveText("Bad debt realized");
+    await expect(page.getByTestId("sg-tg-type-deficit_created")).toHaveAttribute("title", "deficit_created");
+  });
+
+  test("the live pill specimens: live is the accent and never green, a fresh age is ink and an aging age amber; the phone form keeps the word and folds the rest into the title", async ({
+    page,
+  }) => {
+    const connected = page.getByTestId("sg-live-connected");
+    await expect(connected).toHaveText("Live · batch 18,251 · 42s ago");
+    const dot = connected.locator("span").first();
+    const dotColour = await dot.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(dotColour).toBe(await resolveAppbarToken(page, "--accent", "background"));
+    expect(dotColour).not.toBe(await resolveAppbarToken(page, "--ok", "background"));
+    const freshAge = page.getByTestId("sg-live-connected-more").locator("span").last();
+    expect(await freshAge.evaluate((el) => getComputedStyle(el).color)).toBe(await resolveAppbarToken(page, "--ink"));
+    const agingAge = page.getByTestId("sg-live-aging-more").locator("span").last();
+    expect(await agingAge.evaluate((el) => getComputedStyle(el).color)).toBe(await resolveAppbarToken(page, "--warn-text"));
+    expect(await page.getByTestId("sg-live-reconnecting").locator("span").first().evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(
+      await resolveAppbarToken(page, "--warn", "background"),
+    );
+    // The phone form: the word and its dot on the line; the batch and the age in the accessibility tree and the title.
+    const words = livePillWords({ streamState: "open", hasBase: true, batchId: 18_251, ageSeconds: 42, ageUnresolved: false, tier: "fresh" });
+    const phone = page.getByTestId("sg-live-phone-pill");
+    await expect(phone).toHaveAttribute("title", livePillTitle(words));
+    await expect(phone).toHaveAttribute("title", "Live updates are on. Batch 18,251 · 42s ago.");
+    const folded = page.getByTestId("sg-live-phone-pill-more");
+    await expect(folded).toContainText("batch 18,251");
+    expect((await folded.boundingBox())?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(1);
+    // An aging or stale age is a warning, never folded away: the phone form keeps it on the line and folds the batch.
+    const agingMore = page.getByTestId("sg-live-phone-aging-more");
+    expect((await agingMore.locator("span").last().boundingBox())?.width ?? 0).toBeGreaterThan(20);
+    expect((await agingMore.locator("span").first().boundingBox())?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(1);
+    // The 390px header row holds the brand, the pill and both controls, without scrolling.
+    const row = page.getByTestId("sg-live-phone");
+    expect(await row.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
   });
 
   test("the kit table: the refused row stays rendered and dimmed, and one engine's small & dust rows fold behind a toggle that names them", async ({
@@ -444,7 +571,7 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
 
     // The status column names the refusal: the label is the state, the title the plain cause then the wire code.
     const pill = refused.locator('[data-tone="refused"]');
-    await expect(pill).toHaveText("Not computed");
+    await expect(pill).toHaveText(REFUSED_LABEL);
     await expect(pill).toHaveAttribute("title", "collateral sweep failed · SWEEP_FAILED");
 
     // Folded by default — and the toggle names what it hides: the count and the summed debt of ONE engine's
@@ -491,13 +618,36 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     expect(await critValue.evaluate((el) => getComputedStyle(el).color)).toBe(
       await resolveAppbarToken(page, "--crit-text"),
     );
-    // A refused tile is dashed and prints the gap word in ink — never a tier's color, never a zero.
+    // A refused tile that carries a real count keeps its number: dashed, the figure in ink-2 — never a tier's color.
     const refusedTile = page.getByTestId("sg-kpi-refused");
     expect((await readChipRegister(refusedTile)).borderStyle).toBe("dashed");
-    const gapWord = refusedTile.getByText("withheld", { exact: true });
-    expect(await gapWord.evaluate((el) => getComputedStyle(el).color)).toBe(
+    const count = refusedTile.getByText("6", { exact: true });
+    expect(await count.evaluate((el) => getComputedStyle(el).color)).toBe(
       await resolveAppbarToken(page, "--ink-2"),
     );
+    // A tile with no figure prints its state's word in its register's frame — never a dash, never a zero — and
+    // stands as tall as a figure tile: the word sits on the figure's line.
+    const figureLine = await page.getByTestId("sg-kpi-neutral").locator("div").nth(1).boundingBox();
+    for (const [state, word, frame] of [
+      ["refused", "Refused", "dashed"],
+      ["unavailable", "Unavailable", "solid"],
+      ["not-run", "Not run", "solid"],
+      ["not-served", "Not served", "solid"],
+      ["unreadable", "Unreadable", "dashed"],
+    ] as const) {
+      const tile = page.getByTestId(`sg-kpi-state-${state}`);
+      await expect(tile).toHaveAttribute("data-state", state);
+      await expect(tile.locator("div").nth(1)).toHaveText(word);
+      await expect(tile).not.toContainText("—");
+      expect((await readChipRegister(tile)).borderStyle, state).toBe(frame);
+      expect(await tile.locator("div").nth(1).evaluate((el) => getComputedStyle(el).color), state).toBe(
+        await resolveAppbarToken(page, "--ink-2"),
+      );
+      const stateLine = await tile.locator("div").nth(1).boundingBox();
+      expect(Math.abs((stateLine?.height ?? 0) - (figureLine?.height ?? Number.NaN)), state).toBeLessThanOrEqual(1);
+    }
+    // The lib's own word wins over the register's where it has one.
+    await expect(page.getByTestId("sg-kpi-state-word").locator("div").nth(1)).toHaveText("No verdict");
     // A pending tile prints … and is aria-busy; the value it was handed is not shown as an answer.
     const pending = page.getByTestId("sg-kpi-pending");
     await expect(pending).toHaveAttribute("aria-busy", "true");
@@ -510,11 +660,16 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
       ["crit", "Liquidatable"],
       ["warn", "Near cap"],
       ["ok", "Healthy"],
-      ["refused", "Not computed"],
+      ["refused", REFUSED_LABEL],
+      ["live", "Serving"],
       ["projection", "Projection · ETH −20% v3"],
     ] as const) {
       await expect(pills.locator(`[data-tone="${tone}"]`)).toHaveText(label);
     }
+    // Live is posture: the accent, never green.
+    expect(await pills.locator('[data-tone="live"]').evaluate((el) => getComputedStyle(el).color)).toBe(
+      await resolveAppbarToken(page, "--accent-text"),
+    );
     await expect(pills.locator('[data-tone="refused"]')).toHaveAttribute("title", "collateral sweep failed · SWEEP_FAILED");
     const projection = await readChipRegister(pills.locator('[data-tone="projection"]'));
     expect(projection.borderStyle).toBe("dashed");
@@ -534,10 +689,21 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
       );
     }
     expect((await readChipRegister(tones.locator('[data-chip="Refused"]'))).borderStyle).toBe("dashed");
+    // A label-only chip prints its words alone — no empty bold — and the actions take their own column, never
+    // wrapping under a chip.
+    const actions = page.getByTestId("sg-identity-actions");
+    const labelOnly = actions.locator('[data-chip="Current, not projected"]');
+    await expect(labelOnly).toHaveText("Current, not projected");
+    await expect(labelOnly.locator("b")).toHaveCount(0);
+    const chipBox = await labelOnly.boundingBox();
+    const actionBox = await actions.getByRole("link").boundingBox();
+    expect((actionBox?.x ?? 0) > (chipBox?.x ?? 0) + (chipBox?.width ?? 0)).toBe(true);
   });
 
-  test("the type scale renders the closed set — all fourteen tokens", async ({ page }) => {
-    await expect(page.locator('[data-testid="type-token"]')).toHaveCount(14);
+  test("the type section documents the one scale the pages use — all twelve --type-* tokens", async ({ page }) => {
+    const tokens = page.locator('[data-testid="type-token"]');
+    await expect(tokens).toHaveCount(12);
+    for (const text of await tokens.allInnerTexts()) expect(text).toMatch(/^--type-/);
   });
 
   test("the interaction register: tab enters, arrows traverse, Home/End jump, Enter opens evidence, Esc leaves", async ({
@@ -720,5 +886,104 @@ test.describe("p1a-9 · the codex round", () => {
       // And the batch line pretends nothing: no base means no batch strip.
       await expect(page.getByTestId("activity-live-none")).toContainText("nothing live is shown");
     });
+  });
+});
+
+// ===========================================================================
+// The header: one frame with the content, two quiet controls, and a live pill
+// that is posture (the accent, never green) and fits a phone when connected.
+// The connected pill needs a held-open stream, so these run on the API page,
+// which is static: the header is the only thing under test.
+// ===========================================================================
+
+/** The same wide face the wide-font spec forces: Verdana on Windows, DejaVu Sans where Verdana is absent. */
+const WIDE_FACE = `:root {
+  --sans: Verdana, "DejaVu Sans", sans-serif !important;
+  --mono: "Courier New", "Liberation Mono", "DejaVu Sans Mono", monospace !important;
+}`;
+
+const CONNECTED = `event: snapshot\ndata: ${JSON.stringify(FEED_POSTURE_SNAPSHOT)}\n\n`;
+
+test.describe("the header · one frame, quiet controls, a live pill that is posture", () => {
+  test("at 1440 a connected pill says Live, its batch and its age: the dot is the accent, the fresh age is ink — and the brand stands on the content's edge", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await withHeldOpenStream(page, CONNECTED, async () => {
+      await page.goto("/developers");
+      const header = page.getByRole("banner");
+      const pill = header.getByTestId("live-pill");
+      await expect(pill).toHaveAttribute("data-word", "Live");
+      await expect(pill).toHaveAttribute("data-tone", "live");
+      const more = header.getByTestId("live-pill-more");
+      await expect(more).toContainText("batch 1");
+      await expect(more).toContainText("ago");
+      expect((await more.boundingBox())?.width ?? 0).toBeGreaterThan(40);
+      const dotColour = await pill.locator("span").first().evaluate((el) => getComputedStyle(el).backgroundColor);
+      expect(dotColour).toBe(await resolveAppbarToken(page, "--accent", "background"));
+      expect(dotColour).not.toBe(await resolveAppbarToken(page, "--ok", "background"));
+      expect(await more.locator("span").last().evaluate((el) => getComputedStyle(el).color)).toBe(await resolveAppbarToken(page, "--ink"));
+      await expect(pill).toHaveAttribute("title", /^Live updates are on\. Batch 1 · .+ ago\.$/);
+      // One frame: the header's brand starts on the content's left edge, the headline's.
+      const brand = await header.getByRole("link", { name: BRAND.linkLabel }).boundingBox();
+      const headline = await page.locator("main h1").first().boundingBox();
+      expect(Math.abs((brand?.x ?? 0) - (headline?.x ?? Number.NaN))).toBeLessThanOrEqual(1);
+    });
+  });
+
+  test("at 390 under a wide face a connected header holds brand, pill and both controls on one row — the pill folds its batch and age into its title — the current tab is in view, and nothing scrolls sideways", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await withHeldOpenStream(page, CONNECTED, async () => {
+      await page.goto("/developers");
+      const header = page.getByRole("banner");
+      const pill = header.getByTestId("live-pill");
+      await expect(pill).toHaveAttribute("data-word", "Live");
+      // The nav is a strip of its own under the first row, scrolled so the current page's tab is in view.
+      const nav = header.getByRole("navigation");
+      const navBox = await nav.boundingBox();
+      const current = await nav.locator('[aria-current="page"]').boundingBox();
+      if (navBox === null || current === null) throw new Error("the nav or its current tab has no box");
+      expect(current.x).toBeGreaterThanOrEqual(navBox.x - 1);
+      expect(current.x + current.width).toBeLessThanOrEqual(navBox.x + navBox.width + 1);
+
+      await page.addStyleTag({ content: WIDE_FACE });
+      await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
+      // The batch and the age leave the line and stay in the accessibility tree and the title.
+      const more = header.getByTestId("live-pill-more");
+      await expect(more).toContainText("batch 1");
+      expect((await more.boundingBox())?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(1);
+      await expect(pill).toHaveAttribute("title", /Batch 1 · .+ ago\.$/);
+      // One row: brand, pill, source link and theme control share a centre line, inside the 16px gutter.
+      const row = [
+        header.getByRole("link", { name: BRAND.linkLabel }),
+        pill,
+        header.getByRole("link", { name: GITHUB_LABEL }),
+        header.getByRole("button", { name: /^Theme: / }),
+      ];
+      const boxes = await Promise.all(row.map((item) => item.boundingBox()));
+      const centres = boxes.map((box) => (box === null ? Number.NaN : box.y + box.height / 2));
+      for (const centre of centres) expect(Math.abs(centre - (centres[0] ?? Number.NaN))).toBeLessThanOrEqual(2);
+      const last = boxes[boxes.length - 1];
+      expect((last?.x ?? 0) + (last?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(390 - 16 + 1);
+      expect((await nav.boundingBox())?.y ?? 0).toBeGreaterThan((boxes[0]?.y ?? 0) + (boxes[0]?.height ?? 0) - 1);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `the page scrolls sideways by ${String(overflow)}px`).toBeLessThanOrEqual(0);
+    });
+  });
+
+  test("at 1024 the header takes two rows — brand and status, then the nav strip — and the page never scrolls sideways", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await page.route("**/v1/**", (route) => route.abort());
+    await page.goto("/developers");
+    const header = page.getByRole("banner");
+    const brand = await header.getByRole("link", { name: BRAND.linkLabel }).boundingBox();
+    const nav = await header.getByRole("navigation").boundingBox();
+    expect((nav?.y ?? 0)).toBeGreaterThan((brand?.y ?? 0) + (brand?.height ?? 0) - 1);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
   });
 });

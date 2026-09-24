@@ -1,35 +1,59 @@
 /* The Console register (spec 2026-09-15 §3.1, §4). Transcribed from the
  * approved mockup docs/specs/2026-09-15-ui-mockups/pages-console.html —
- * hex colors replaced by tokens, px sizes by the --type-* scale, nothing
- * else changed. Class names keep the mockup's k- vocabulary so a diff
- * against the mockup is mechanical. */
+ * hex colors replaced by tokens, px sizes by the --type-* scale. Class names
+ * keep the mockup's k- vocabulary so a diff against the mockup is mechanical.
+ * Tones follow the one grammar in lib/kit.ts (TONE_GRAMMAR); a state with no
+ * figure follows its STATE_REGISTERS row. Breakpoints are the set tokens.css
+ * names: 640, 900, 1180 (max-width 1179px), 1280 (max-width 1279px). */
 
 /* ---- shell ---- */
-.hd { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 28px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: var(--w-semibold); font-size: var(--type-card); letter-spacing: -0.01em; color: var(--ink); }
+/* The header's content column is the page's: its inline padding puts the brand's left edge on the content's left edge
+   and the status cluster's right edge on the content's right edge, at every width. */
+.hd { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 56px; padding-inline: max(var(--gutter), calc((100% - var(--shell-max)) / 2 + var(--gutter))); border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.brand { display: flex; flex: none; align-items: center; gap: 10px; font-weight: var(--w-semibold); font-size: var(--type-card); letter-spacing: -0.01em; color: var(--ink); white-space: nowrap; }
 .brandMark { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, var(--accent), var(--chart-fill)); display: inline-block; }
 .brandTag { font-weight: 400; color: var(--ink-2); font-size: var(--type-label); margin-left: 6px; }
-.nav { display: flex; gap: 4px; }
-.nav a { padding: 6px 12px; border-radius: 6px; color: var(--ink-2); font-size: var(--type-body); }
+/* The nav never widens the page: when its links outgrow the row it scrolls, and the edge fade says there is more. The
+   block padding keeps a focused link's ring inside the scroll box. */
+.nav { display: flex; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; padding: 4px; margin-inline: -4px; }
+.nav::-webkit-scrollbar { display: none; }
+.nav a { flex: none; display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 6px; color: var(--ink-2); font-size: var(--type-body); white-space: nowrap; }
+.nav a:hover { color: var(--ink); }
 .nav a.on { color: var(--ink); background: var(--chip-bg); }
-.status { display: flex; align-items: center; gap: 14px; color: var(--ink-2); font-size: var(--type-label); }
-.status a { color: var(--ink-2); }
+.status { display: flex; flex: none; align-items: center; gap: 10px; color: var(--ink-2); font-size: var(--type-label); }
+/* The header's quiet controls: one shape for the source link and the theme toggle, a glyph and a name, never a word in capitals. */
+.iconBtn { width: 32px; height: 32px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--ink-2); cursor: pointer; }
+.iconBtn:hover { color: var(--ink); border-color: var(--accent); }
+.iconBtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.iconBtn svg { width: 16px; height: 16px; }
+/* The live pill: the connection's word always; the batch and the age beside it, folded into the title on a phone. */
 .pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); font-size: var(--type-label); white-space: nowrap; }
-.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
-.dotOk { background: var(--ok); box-shadow: 0 0 0 3px var(--refused-bg); }
+.dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--ink-3); }
+/* Connection is posture, not health: the live dot is the accent, its halo the accent's own tint. */
+.dotLive { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 .dotWarn { background: var(--warn); }
-.pillAgeOk { color: var(--ink-2); }
+.pillAgeNeutral { color: inherit; }
 .pillAgeWarn { color: var(--warn-text); }
 .pillAgeCrit { color: var(--crit-text); }
-.pillAgeDim { color: var(--ink-3); }
-.themeToggle { font: inherit; font-size: var(--type-label); color: var(--ink-2); background: none; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; white-space: nowrap; }
-.themeToggle:hover { color: var(--ink); }
-.body { padding: 28px 28px 24px; }
+.pillAgeDim { color: var(--ink-2); }
+.pillCompact .pillMore:not([data-urgent]), .pillCompact .pillMore[data-urgent] .pillBatch { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* The overflow cue for a scrolling strip (the nav, a toggle set): an edge fades only on the side where more content
+   lies, so a strip that fits shows every item at full ink. useEdgeFade sets data-fade from the strip's own scroll box. */
+.edgeFade[data-fade="end"] { mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+.edgeFade[data-fade="start"] { mask-image: linear-gradient(to left, #000 calc(100% - 24px), transparent); }
+.edgeFade[data-fade="both"] { mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+/* A mask clips everything it covers, focus rings included: while a keyboard is inside the strip, the fade gives way. */
+.edgeFade:has(:focus-visible) { mask-image: none; }
 
 /* ---- verdict header ---- */
 .kick { font-size: var(--type-small); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-text); font-weight: var(--w-semibold); margin: 0 0 8px; }
+/* A kicker token that keeps its own case: a scenario's asset (weETH), the API's version. */
+.kickCase { text-transform: none; }
 .h1 { font-size: var(--type-h1); font-weight: var(--w-semibold); letter-spacing: -0.02em; line-height: 1.2; max-width: 860px; margin: 0; color: var(--ink); }
 .h1 b { font-weight: var(--w-semibold); }
+/* The absent register: a headline that states there is no answer is ink-2, the whole line — never half-dimmed. */
+.h1Absent { color: var(--ink-2); }
 /* An instant is one token: it never breaks across lines, and its digits hold one width. */
 .nobr { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .emCrit { color: var(--crit-text); }
@@ -41,6 +65,11 @@
 .dek { color: var(--ink-2); font-size: var(--type-dek); max-width: 800px; margin: 10px 0 0; }
 .dek b { color: var(--ink); font-weight: var(--w-medium); }
 .meta { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; align-items: center; }
+/* Chips on the left, the page's actions in their own column on the right: an action never wraps under a chip. One line
+   of chips sits on the action's centre line, as it did beside it; wrapped chips hang from the top with the action. */
+.metaRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; align-items: stretch; margin-top: 16px; }
+.metaRow > .meta { margin-top: 0; align-content: center; }
+.metaActions { display: flex; gap: 8px; justify-content: flex-end; align-items: flex-start; }
 .chip { font-size: var(--type-small); padding: 4px 10px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
 .chip b { color: var(--ink); font-weight: var(--w-medium); }
 .chipOk b { color: var(--ok-text); }
@@ -48,8 +77,7 @@
 .chipWarn b { color: var(--warn-text); }
 .chipCrit { border-color: var(--crit); }
 .chipCrit b { color: var(--crit-text); }
-.chipRefused { border-style: dashed; }
-.spacer { flex: 1; }
+.chipRefused { border-style: dashed; border-color: var(--ink-3); }
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; font-size: var(--type-body); font-weight: var(--w-medium); border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; white-space: nowrap; }
 .btnPrimary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .btnGhost { background: none; }
@@ -64,6 +92,8 @@
 .sec h2 { font-size: var(--type-h2); font-weight: var(--w-semibold); margin: 0; color: var(--ink); }
 .sec h2 small { font-weight: 400; color: var(--ink-2); font-size: var(--type-body); margin-left: 10px; }
 .sec a { font-size: var(--type-label); color: var(--accent-text); white-space: nowrap; }
+/* The one badge slot of a head (the PROJECTION badge of a projected container), right after the title's words. */
+.badge { margin-left: 10px; vertical-align: 2px; }
 
 /* ---- KPI tiles ---- */
 .kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-top: 12px; }
@@ -76,9 +106,37 @@
 .kpiCrit .kpiV { color: var(--crit-text); }
 .kpiWarn .kpiV { color: var(--warn-text); }
 .kpiOk .kpiV { color: var(--ok-text); }
-.kpiRefused { border-style: dashed; }
+/* The refused register: dashed ink-3 on the refused ground, laid over the panel so the tile keeps its row's surface. */
+.kpiRefused { border-style: dashed; border-color: var(--ink-3); background: linear-gradient(var(--refused-bg), var(--refused-bg)) var(--panel); }
 .kpiRefused .kpiV { color: var(--ink-2); }
-.kpiPending .kpiV { color: var(--ink-3); }
+.kpiUnreadable { border-style: dashed; border-color: var(--ink-3); }
+.kpiPending .kpiV { color: var(--ink-2); }
+/* A tile with no figure prints its state's word. The word is set smaller than a figure, on the figure's line height (the
+   body's 1.55 at the KPI size), so a state tile stands exactly as tall as its neighbours. */
+.kpiState { font-size: var(--type-h2); font-weight: var(--w-medium); letter-spacing: 0; line-height: calc(var(--type-kpi) * 1.55); color: var(--ink-2); }
+/* ink-3 is never set on a tinted ground or beside a state word. */
+.kpiRefused .kpiS, .kpiPending .kpiS, .kpiUnreadable .kpiS, .kpiAbsent .kpiS { color: var(--ink-2); }
+
+/* ---- strips: one line of state under a header or above a table ---- */
+.strip { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: var(--type-body); color: var(--ink); }
+.strip b { font-weight: var(--w-semibold); }
+.stripWarn { border-color: var(--warn); background: linear-gradient(var(--warn-bg), var(--warn-bg)) var(--panel); }
+.stripWarn b { color: var(--warn-text); }
+.stripRefused { border-style: dashed; border-color: var(--ink-3); background: linear-gradient(var(--refused-bg), var(--refused-bg)) var(--panel); }
+.stripRefused b { color: var(--ink-2); }
+.stripUnreadable { border-style: dashed; border-color: var(--ink-3); }
+.stripUnreadable b { color: var(--ink-2); }
+
+/* ---- state card: a page's missing exhibit, in its state's register — never a skeleton's look ---- */
+.stateCard { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 18px 20px; }
+.stateCard[data-frame="dashed"] { border-style: dashed; border-color: var(--ink-3); }
+.stateCard[data-ground="refused"] { background: linear-gradient(var(--refused-bg), var(--refused-bg)) var(--panel); }
+.stateCard h3 { margin: 0; font-size: var(--type-card); font-weight: var(--w-semibold); color: var(--ink); }
+.stateCard p { margin: 6px 0 0; font-size: var(--type-body); color: var(--ink-2); }
+.stateCard summary { margin-top: 10px; font-size: var(--type-small); color: var(--ink-2); cursor: pointer; }
+.stateCard pre { margin: 6px 0 0; font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.stateAction { margin-top: 12px; font-size: var(--type-body); }
+.stateAction a { color: var(--accent-text); }
 
 /* ---- cards ---- */
 .grid { display: grid; grid-template-columns: 7fr 5fr; gap: 16px; margin-top: 12px; }
@@ -90,10 +148,47 @@
 .cardF { color: var(--ink-2); font-size: var(--type-body); margin-top: 4px; }
 .cardF b { color: var(--ink); font-weight: var(--w-medium); }
 
+/* ---- legacy fold: the legacy market, always a sibling after all Cash content, with its own figures ---- */
+.fold { margin-top: 26px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0 20px; }
+.foldSum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 14px 0; cursor: pointer; list-style: none; }
+.foldSum::-webkit-details-marker { display: none; }
+.foldSum::before { content: "▸"; color: var(--ink-2); width: 12px; flex: none; }
+.fold[open] > .foldSum::before { content: "▾"; }
+.foldT { font-size: var(--type-card); font-weight: var(--w-semibold); color: var(--ink); }
+.foldS { font-size: var(--type-body); color: var(--ink-2); }
+.foldBody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding-bottom: 18px; }
+
+/* ---- step strip: the pipeline's steps as one joined strip ---- */
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.step { padding: 18px 20px; border-right: 1px solid var(--line); min-width: 0; }
+.step:last-child { border-right: 0; }
+.stepNum { font-size: var(--type-floor); color: var(--accent-text); font-weight: var(--w-semibold); letter-spacing: 0.08em; text-transform: uppercase; }
+.stepN { margin-top: 6px; font-size: var(--type-card); font-weight: var(--w-semibold); color: var(--ink); }
+.stepD { margin-top: 6px; font-size: var(--type-label); color: var(--ink-2); line-height: 1.45; }
+.stepV { margin-top: 10px; font-size: var(--type-label); color: var(--ink); font-variant-numeric: tabular-nums; }
+.stepV b { font-weight: var(--w-semibold); }
+.step[data-tone="ok"] .stepV b { color: var(--ok-text); }
+.step[data-tone="warn"] .stepV b { color: var(--warn-text); }
+.step[data-tone="crit"] .stepV b { color: var(--crit-text); }
+.step[data-tone="refused"] .stepV, .stepState { color: var(--ink-2); }
+.stepState { font-weight: var(--w-medium); }
+
+/* ---- toggle group: a filter's options as one joined bar under a visible label — never an identity chip's shape ---- */
+.tg { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; max-width: 100%; }
+.tgLabel { font-size: var(--type-small); color: var(--ink-2); }
+.tgSet { display: inline-flex; height: 30px; min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.tgSet::-webkit-scrollbar { display: none; }
+.tgSet button { flex: none; font: inherit; font-size: var(--type-small); padding: 0 12px; border: 0; border-left: 1px solid var(--line); background: none; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.tgSet button:first-child { border-left: 0; }
+.tgSet button:hover { color: var(--ink); }
+.tgSet button[aria-pressed="true"] { background: var(--chip-bg); color: var(--ink); font-weight: var(--w-medium); box-shadow: inset 0 -2px 0 var(--accent); }
+.tgSet button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tgSet button:disabled { color: var(--ink-3); cursor: not-allowed; }
+
 /* ---- bars ---- */
 .bars { display: grid; gap: 10px; align-items: end; height: 160px; margin-top: 22px; }
 .bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
-.bar i { display: block; width: 100%; background: var(--chart-fill); border-radius: 4px 4px 0 0; }
+.bar i { display: block; width: 100%; height: var(--bar-h, 0); background: var(--chart-fill); border-radius: 4px 4px 0 0; }
 .barCrit i { background: var(--crit); }
 .barWarn i { background: var(--warn); }
 .barDim i { background: var(--line); }
@@ -108,6 +203,16 @@
 .tbl th { text-align: left; font-weight: var(--w-medium); color: var(--ink-2); font-size: var(--type-small); padding: 10px 8px 8px; border-bottom: 1px solid var(--line); }
 .tbl td { padding: 9px 8px; border-bottom: 1px solid var(--chip-bg); font-size: var(--type-body); white-space: nowrap; color: var(--ink); font-variant-numeric: tabular-nums; }
 .tbl td.r, .tbl th.r { text-align: right; }
+/* An empty table says why in one row: a state line, ink-2, wrapping rather than widening the table. */
+.tbl td.tblEmpty { color: var(--ink-2); white-space: normal; }
+/* A table scrolls inside its region, never the page: every column stays, reachable by scroll or by keyboard. The table
+   keeps its full width and grows past it only to its min-content (its nowrap cells), so a cell allowed to wrap still
+   wraps. While the region overflows, the first column holds still and the far edge fades where columns remain. */
+.tblScroll { overflow-x: auto; max-width: 100%; }
+.tblScroll[data-overflow="true"] .tbl th:first-child, .tblScroll[data-overflow="true"] .tbl td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+.tblScroll[data-fade="end"], .tblScroll[data-fade="both"] { mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+/* The ring sits outside the box, where the fade's mask would clip it away: a focused region drops the fade. */
+.tblScroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; mask-image: none; }
 .addr { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink); }
 /* An address inside a small-caps kicker keeps its own case. */
 .kickAddr { text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: var(--type-mono-sm); }
@@ -118,6 +223,8 @@
 .pillWarn { background: var(--warn-bg); color: var(--warn-text); }
 .pillOk { background: var(--refused-bg); color: var(--ok-text); }
 .pillRefused { background: var(--refused-bg); color: var(--ink-2); }
+/* Live or serving posture: the accent, never green. */
+.pillLive { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-text); }
 .pillProj { background: none; border: 1px dashed var(--warn); color: var(--warn-text); }
 .toggle { display: inline-flex; align-items: center; gap: 8px; font-size: var(--type-small); color: var(--ink-2); margin-top: 10px; background: none; border: 0; padding: 0; cursor: pointer; }
 .toggle i { width: 28px; height: 16px; border-radius: 999px; background: var(--line); position: relative; display: inline-block; }
@@ -130,19 +237,6 @@
 .kvK { color: var(--ink-2); }
 .kvV { text-align: right; font-variant-numeric: tabular-nums; }
 
-/* ---- responsive (spec §6): stack below 900px, never drop table columns ---- */
-@media (max-width: 900px) {
-  .hd { height: auto; flex-wrap: wrap; gap: 8px; padding: 10px 16px; }
-  .nav, .status { flex-wrap: wrap; }
-  .body { padding: 20px 16px; }
-  .kpis, .kpis5, .kpis4 { grid-template-columns: repeat(2, 1fr); }
-  .grid, .gridRail { grid-template-columns: 1fr; }
-  .tbl { display: block; overflow-x: auto; }
-  /* The heatmap's tracks are as wide as their labels, and so is a chip's text: a wider face than the developer's (a
-     Linux reader's system-ui) must scroll the grid inside its card and wrap the chip, never widen the page. */
-  .heat { overflow-x: auto; }
-  .chip { white-space: normal; }
-}
 /* ---- inspector toolbar (.k-search) and trust checklist (.k-check) ---- */
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* .k-search — the Inspector toolbar (mockup pages-console.html:122-124) */
@@ -159,11 +253,11 @@
 .check li { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--chip-bg); align-items: baseline; color: var(--ink); }
 .checkI { color: var(--ok-text); font-weight: var(--w-semibold); width: 14px; flex: none; }
 .checkWarn { color: var(--warn-text); }
-.checkRefused { color: var(--crit-text); }
+/* A refusal is not a failure: the × keeps its glyph and loses the verdict colour. */
+.checkRefused { color: var(--ink-2); }
 .checkDim { color: var(--ink-3); }
 .checkLabel { flex: 1 1 auto; min-width: 0; }
-.checkSmall { color: var(--ink-3); margin-left: auto; flex: 0 1 auto; max-width: 58%; text-align: right; font-size: var(--type-small); }
-@media (max-width: 720px) { .searchIn { min-width: 0; flex-basis: 100%; } }
+.checkSmall { color: var(--ink-2); margin-left: auto; flex: 0 1 auto; max-width: 58%; text-align: right; font-size: var(--type-small); }
 
 /* .k-lib — the scenario library (mockup pages-console.html rules :117-128, markup :278-286) */
 .lib { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; align-self: start; }
@@ -184,30 +278,93 @@
 .libName { font-size: var(--type-body); font-weight: var(--w-medium); color: var(--ink); }
 .libDesc { font-size: var(--type-small); color: var(--ink-2); }
 .libEngines { font-size: var(--type-small); color: var(--ink-3); }
+/* The selected row sits on the chip ground, where ink-3 is never set. */
+.libRowOn .libEngines { color: var(--ink-2); }
 .libOutcome { font-size: var(--type-small); margin-top: 2px; color: var(--ink); }
 .libCrit { color: var(--crit-text); }
 .libWarn { color: var(--warn-text); }
 .libOk { color: var(--ok-text); }
 .libRefused { color: var(--ink-2); border-bottom: 1px dashed var(--ink-3); width: fit-content; }
-.libDim { color: var(--ink-3); }
+.libDim { color: var(--ink-2); }
 .libEmpty { padding: 14px; color: var(--ink-2); font-size: var(--type-small); }
 .libFoot { padding: 12px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .libHint { font-size: var(--type-small); color: var(--ink-2); }
 .libNote { font-size: var(--type-small); color: var(--ink-3); margin: 10px 0 0; }
 
 /* .k-heat — where accounts move (mockup pages-console.html rules :129-132, markup :302-309). The tint is a ::before layer whose opacity
-   is the cell's share of the largest cell (--heat); the count sits above it at full ink. */
+   is the cell's share of the largest cell (--heat) over a readable floor; the count sits above it at full ink. A column is
+   never narrower than 56px nor than its own label, so a narrow screen scrolls the grid inside its region, every column whole. */
 .heat { display: grid; gap: 4px; margin-top: 16px; font-size: var(--type-floor); }
 .heatRow { display: contents; }
 .heatCorner { color: var(--ink-3); font-size: var(--type-floor); align-self: end; }
 .heatLabel { color: var(--ink-3); display: flex; align-items: center; }
-.heatHead { color: var(--ink-3); text-align: center; align-self: end; }
-.heatCell { position: relative; overflow: hidden; height: 34px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--ink); font-variant-numeric: tabular-nums; }
-.heatCell::before { content: ""; position: absolute; inset: 0; opacity: calc(0.3 + var(--heat, 0) * 0.7); }
+.heatLabel, .heatCorner { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+.heatHead { color: var(--ink-3); text-align: center; align-self: end; white-space: nowrap; min-width: 56px; }
+.heatCell { position: relative; overflow: hidden; height: 34px; min-width: 56px; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--ink); font-variant-numeric: tabular-nums; }
+.heatCell::before { content: ""; position: absolute; inset: 0; opacity: calc(0.2 + var(--heat, 0) * 0.8); }
 .heatCell > span { position: relative; }
-.heatEmpty { background: var(--chip-bg); }
+/* An empty pair stays a cell, drawn quietly: data ink first. */
+.heatEmpty { background: none; box-shadow: inset 0 0 0 1px var(--chip-bg); }
 .heatHeld::before { background: color-mix(in srgb, var(--ink-3) 30%, transparent); }
 .heatWorse::before { background: color-mix(in srgb, var(--crit) 55%, transparent); }
 .heatBetter::before { background: color-mix(in srgb, var(--ok) 45%, transparent); }
 .heatUnmeasured { border: 1px dashed var(--ink-3); color: var(--ink-2); }
 .heatUnmeasured::before { background: none; }
+
+/* ---- responsive (spec §6): the breakpoint set in tokens.css; never drop a table column ---- */
+@media (max-width: 1279px) {
+  .brandTag { display: none; }
+}
+
+/* Two rows: brand and status, then the nav as its own scrolling strip. */
+@media (max-width: 1179px) {
+  .hd { flex-wrap: wrap; height: auto; padding-block: 8px 0; row-gap: 0; }
+  .nav { order: 3; flex: 1 0 100%; padding: 4px 4px 8px; }
+}
+
+@media (max-width: 900px) {
+  .kpis, .kpis5, .kpis4 { grid-template-columns: repeat(2, 1fr); }
+  .grid, .gridRail { grid-template-columns: 1fr; }
+  .steps { grid-template-columns: 1fr 1fr; }
+  .step { border-bottom: 1px solid var(--line); }
+  .step:nth-child(2n) { border-right: 0; }
+  /* A chip's text wraps rather than widen the page under a wider face than the developer's (a Linux reader's system-ui). */
+  .chip { white-space: normal; }
+  /* The library keeps every row's name, engines and outcome; only the unselected rows' descriptions fold away. */
+  .libRow:not(.libRowOn) .libDesc { display: none; }
+}
+
+@media (max-width: 640px) {
+  .card { padding: 16px; }
+  .kpi { padding: 12px 14px; }
+  .steps { grid-template-columns: 1fr; }
+  .step { border-right: 0; }
+  /* The pill keeps its word and dot; its batch and age stay in the accessibility tree and in the pill's title. */
+  .pillMore:not([data-urgent]), .pillMore[data-urgent] .pillBatch { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .metaRow { grid-template-columns: 1fr; row-gap: 10px; }
+  .metaActions > * { flex: 1; justify-content: center; }
+  .meta { gap: 8px; }
+  .chip { padding: 3px 8px; }
+  .sec { flex-wrap: wrap; }
+  .sec h2 small { display: block; margin: 2px 0 0; }
+  .check li { flex-wrap: wrap; }
+  .checkSmall { flex-basis: 100%; max-width: none; text-align: left; margin-left: 24px; }
+  .tbl th, .tbl td { padding-inline: 6px; }
+  /* The search field takes the row; its hint stays the input's description, read and not shown. */
+  .searchIn { min-width: 0; flex-basis: 100%; padding: 0 10px; }
+  .searchHint { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* Band bars turn horizontal: label, bar, figure on one line each, so no label runs into its neighbour. */
+  .bars { grid-template-columns: none !important; grid-auto-flow: row; height: auto; gap: 6px; }
+  .bar { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: center; gap: 8px; height: auto; }
+  .bar i { height: 12px; width: max(var(--bar-min, 0px), calc(var(--bar, 0) * 100%)); border-radius: 0 3px 3px 0; }
+  .barLab { order: -1; text-align: left; margin: 0; }
+  .barCnt { order: 1; margin: 0; }
+}
+
+/* A touch target is at least 44px. */
+@media (pointer: coarse) {
+  .btn, .libMode button, .toggle, .nav a { min-height: 44px; }
+  .iconBtn { width: 44px; height: 44px; }
+  .tgSet { height: 44px; }
+  .libCheck { width: 22px; height: 22px; }
+}

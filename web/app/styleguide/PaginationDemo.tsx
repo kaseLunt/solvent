@@ -7,6 +7,7 @@
 import { useCallback, useEffect } from "react";
 import { KitTable, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
+import { shortHex } from "@/lib/format";
 import { useCursorPages, type CursorPage } from "@/lib/pagination";
 import styles from "./styleguide.module.css";
 
@@ -40,8 +41,6 @@ const COLUMNS: KitColumn[] = [
   { key: "rank", header: "Rank", align: "right" },
 ];
 
-const short = (address: string): string => `${address.slice(0, 6)}…${address.slice(-4)}`;
-
 function toRow(row: SpecimenRow): KitRow {
   return {
     key: row.account,
@@ -49,7 +48,7 @@ function toRow(row: SpecimenRow): KitRow {
       engine: <span className={kit.addr}>{row.engine}</span>,
       account: (
         <span className={kit.addr} title={row.account}>
-          {short(row.account)}
+          {shortHex(row.account)}
         </span>
       ),
       rank: row.rank,
@@ -72,8 +71,9 @@ export function PaginationDemo() {
       <KitTable
         testId="sg-pagination-kit"
         columns={COLUMNS}
+        label="Pagination · specimen"
         rows={rows.map(toRow)}
-        emptyText="loading first specimen page…"
+        emptyText="Loading the first specimen page…"
       />
       <div className={styles.pageFoot}>
         <span data-testid="sg-pagination-status">
@@ -90,9 +90,7 @@ export function PaginationDemo() {
             {loading ? "Loading…" : "Load more"}
           </button>
         ) : (
-          <span className={kit.sub} data-testid="sg-pagination-end">
-            end reached
-          </span>
+          <span data-testid="sg-pagination-end">End of the list.</span>
         )}
       </div>
     </>

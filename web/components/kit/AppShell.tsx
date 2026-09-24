@@ -2,36 +2,46 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
+import { BRAND, GITHUB_LABEL, GITHUB_URL, NAV_LABEL, NAV_TABS } from "@/lib/chrome";
 import { ThemeToggle } from "../ThemeToggle";
+import { GithubGlyph } from "./HeaderGlyphs";
 import styles from "./kit.module.css";
 import { LivePill } from "./LivePill";
+import { useEdgeFade } from "./useEdgeFade";
 
-/** Nav labels are the page names (spec §3.2); routes are unchanged. */
-const TABS = [
-  { href: "/", label: "Overview" },
-  { href: "/book", label: "Book" },
-  { href: "/inspector", label: "Inspector" },
-  { href: "/lab", label: "Scenarios" },
-  { href: "/observatory", label: "History" },
-  { href: "/feed", label: "Activity" },
-  { href: "/proof", label: "Verification" },
-  { href: "/developers", label: "API" },
-] as const;
-
-export const GITHUB_URL = "https://github.com/kaseLunt/solvent";
+/** How far past the nav's edge the active tab is brought: clear of the edge fade. */
+const FADE_CLEARANCE = 24;
 
 export function AppShell() {
   const pathname = usePathname();
+  const navRef = useRef<HTMLElement>(null);
+  useEdgeFade(navRef);
   const isActive = (href: string): boolean =>
     href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+
+  // When the nav scrolls (a narrow screen), the current page's tab is brought into its view. Only the nav's own
+  // scroll moves — never the window, so a deep link's anchor keeps its place — and it moves at once, never smoothly.
+  useEffect(() => {
+    const nav = navRef.current;
+    const active = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (nav === null || nav === undefined || active === null || active === undefined) return;
+    if (nav.scrollWidth <= nav.clientWidth) return;
+    const box = nav.getBoundingClientRect();
+    const tab = active.getBoundingClientRect();
+    if (tab.left < box.left + FADE_CLEARANCE) nav.scrollLeft -= box.left + FADE_CLEARANCE - tab.left;
+    else if (tab.right > box.right - FADE_CLEARANCE) nav.scrollLeft += tab.right - (box.right - FADE_CLEARANCE);
+  }, [pathname]);
+
   return (
     <header className={styles.hd}>
-      <Link href="/" className={styles.brand} aria-label="Solvent · go to the overview">
+      <Link href="/" className={styles.brand} aria-label={BRAND.linkLabel}>
         <i className={styles.brandMark} aria-hidden="true" />
-        Solvent<span className={styles.brandTag}>ether.fi Cash risk</span>
+        {BRAND.name}
+        <span className={styles.brandTag}>{BRAND.tag}</span>
       </Link>
-      <nav className={styles.nav} aria-label="app surfaces">
-        {TABS.map((tab) => (
+      <nav ref={navRef} className={`${styles.nav} ${styles.edgeFade}`} aria-label={NAV_LABEL}>
+        {NAV_TABS.map((tab) => (
           <Link
             key={tab.href}
             href={tab.href}
@@ -44,8 +54,8 @@ export function AppShell() {
       </nav>
       <div className={styles.status}>
         <LivePill />
-        <a href={GITHUB_URL} rel="noreferrer">
-          GitHub
+        <a href={GITHUB_URL} rel="noreferrer" className={styles.iconBtn} aria-label={GITHUB_LABEL} title={GITHUB_LABEL}>
+          <GithubGlyph />
         </a>
         <ThemeToggle />
       </div>

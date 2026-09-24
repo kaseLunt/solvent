@@ -37,23 +37,23 @@ interface ContrastPair {
 
 /** The §04 audited text pairs: every text token on its worst ground(s). */
 const AUDITED: readonly ContrastPair[] = [
-  { id: "ink-on-panel", fg: "ink", bg: "panel", note: "primary ink on the card ground" },
-  { id: "ink-on-panel-2", fg: "ink", bg: "panel-2", note: "primary ink on the inset ground" },
-  { id: "ink-2-on-panel", fg: "ink-2", bg: "panel", note: "secondary ink on the card ground" },
-  { id: "ink-2-on-panel-2", fg: "ink-2", bg: "panel-2", note: "secondary ink on the inset ground" },
-  { id: "ink-3-on-panel", fg: "ink-3", bg: "panel", note: "dark's worst ink-3 ground (§04 REV)" },
-  { id: "ink-3-on-panel-2", fg: "ink-3", bg: "panel-2", note: "light's worst ink-3 ground (§04 REV)" },
-  { id: "accent-text-on-panel-2", fg: "accent-text", bg: "panel-2", note: "text grade on panel-2" },
-  { id: "accent-text-on-chip-bg", fg: "accent-text", bg: "chip-bg", note: "text grade on the chip ground" },
-  { id: "ok-text-on-panel-2", fg: "ok-text", bg: "panel-2", note: "text grade on panel-2" },
-  { id: "ok-text-on-chip-bg", fg: "ok-text", bg: "chip-bg", note: "text grade on the chip ground" },
-  { id: "warn-text-on-panel-2", fg: "warn-text", bg: "panel-2", note: "light amber was the worst §04 offender" },
-  { id: "warn-text-on-chip-bg", fg: "warn-text", bg: "chip-bg", note: "text grade on the chip ground" },
-  { id: "crit-text-on-panel-2", fg: "crit-text", bg: "panel-2", note: "text grade on panel-2" },
-  { id: "crit-text-on-chip-bg", fg: "crit-text", bg: "chip-bg", note: "the §04 ledger's tightest pass" },
-  { id: "term-ink-on-term-bg", fg: "term-ink", bg: "term-bg", note: "terminal body — constant across themes" },
-  { id: "term-dim-on-term-bg", fg: "term-dim", bg: "term-bg", note: "terminal comments are text too (§04 REV)" },
-  { id: "accent-ink-on-accent", fg: "accent-ink", bg: "accent", note: "solid-accent controls" },
+  { id: "ink-on-panel", fg: "ink", bg: "panel", note: "Primary ink on the card ground" },
+  { id: "ink-on-panel-2", fg: "ink", bg: "panel-2", note: "Primary ink on the inset ground" },
+  { id: "ink-2-on-panel", fg: "ink-2", bg: "panel", note: "Secondary ink on the card ground" },
+  { id: "ink-2-on-panel-2", fg: "ink-2", bg: "panel-2", note: "Secondary ink on the inset ground" },
+  { id: "ink-3-on-panel", fg: "ink-3", bg: "panel", note: "Dark's worst ink-3 ground (§04 REV)" },
+  { id: "ink-3-on-panel-2", fg: "ink-3", bg: "panel-2", note: "Light's worst ink-3 ground (§04 REV)" },
+  { id: "accent-text-on-panel-2", fg: "accent-text", bg: "panel-2", note: "Text grade on panel-2" },
+  { id: "accent-text-on-chip-bg", fg: "accent-text", bg: "chip-bg", note: "Text grade on the chip ground" },
+  { id: "ok-text-on-panel-2", fg: "ok-text", bg: "panel-2", note: "Text grade on panel-2" },
+  { id: "ok-text-on-chip-bg", fg: "ok-text", bg: "chip-bg", note: "Text grade on the chip ground" },
+  { id: "warn-text-on-panel-2", fg: "warn-text", bg: "panel-2", note: "Light amber was the worst §04 offender" },
+  { id: "warn-text-on-chip-bg", fg: "warn-text", bg: "chip-bg", note: "Text grade on the chip ground" },
+  { id: "crit-text-on-panel-2", fg: "crit-text", bg: "panel-2", note: "Text grade on panel-2" },
+  { id: "crit-text-on-chip-bg", fg: "crit-text", bg: "chip-bg", note: "The §04 ledger's tightest pass" },
+  { id: "term-ink-on-term-bg", fg: "term-ink", bg: "term-bg", note: "Terminal body — constant across themes" },
+  { id: "term-dim-on-term-bg", fg: "term-dim", bg: "term-bg", note: "Terminal comments are text too (§04 REV)" },
+  { id: "accent-ink-on-accent", fg: "accent-ink", bg: "accent", note: "Solid-accent controls" },
 ] as const;
 
 /** The deliberate failure — the proof the measurement is live. */
@@ -62,7 +62,7 @@ const PROBE: ContrastPair = {
   fg: "ink-3",
   bg: "chip-bg",
   note:
-    "KNOWN-BAD PROBE — ink-3 never sits on chip or tinted grounds (§04 demotion). " +
+    "Known-bad probe — ink-3 never sits on chip or tinted grounds (§04 demotion). " +
     "This pair fails by design; its failing measured ratio is the proof the computation is live.",
 };
 
@@ -168,7 +168,7 @@ export function ContrastSpecimens() {
             failing ? `${styles.contrastRatio} ${styles.contrastFail}` : styles.contrastRatio
           }
         >
-          {ratio === undefined ? "measuring…" : `${ratio} ${failing ? "✗ < 4.5" : "✓ ≥ 4.5"}`}
+          {ratio === undefined ? "Measuring…" : `${ratio} ${failing ? "✗ < 4.5" : "✓ ≥ 4.5"}`}
         </span>
         <span className={styles.contrastNote}>{pair.note}</span>
       </div>
@@ -200,7 +200,7 @@ export function ContrastSpecimens() {
           diagnostic
         </span>
         <span className={styles.contrastName}>
-          REAL CONSUMER — inspector .verdict.verdictWarn on --panel
+          Real consumer — the Inspector&apos;s .verdict.verdictWarn on --panel
         </span>
         <span
           className={
@@ -210,13 +210,12 @@ export function ContrastSpecimens() {
           }
         >
           {consumerRatio === undefined
-            ? "measuring…"
+            ? "Measuring…"
             : `${consumerRatio} ${consumerFailing ? "✗ < 4.5" : "✓ ≥ 4.5"}`}
         </span>
         <span className={styles.contrastNote}>
-          the p1a-9 F5 specimen: a live consumer CLASS, not a token pair — text on this chip must
-          reference the -text grade, and a regression to the fill token dies at this measured
-          ratio.
+          A live consumer class, not a token pair: text on this chip must reference the -text
+          grade, and a regression to the fill token dies at this measured ratio.
         </span>
       </div>
     </div>

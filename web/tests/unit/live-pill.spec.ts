@@ -2,10 +2,11 @@
 import { expect, test } from "@playwright/test";
 import { livePillWords } from "../../lib/live-pill";
 
-test("stream words", () => {
+test("stream words — a connection is posture, never health: the live pill is accent and its fresh age is ink", () => {
   expect(livePillWords({ streamState: "open", hasBase: true, batchId: 18251, ageSeconds: 42, ageUnresolved: false, tier: "fresh" })).toEqual({
-    word: "Live", tone: "ok", batch: "batch 18,251", age: "42s ago", ageTone: "ok",
+    word: "Live", tone: "live", batch: "batch 18,251", age: "42s ago", ageTone: "neutral",
   });
+  expect(livePillWords({ streamState: "waiting", hasBase: true, batchId: 1, ageSeconds: 5, ageUnresolved: false, tier: "fresh" }).tone).toBe("warn");
   expect(livePillWords({ streamState: "open", hasBase: false, batchId: null, ageSeconds: null, ageUnresolved: false, tier: null }).word).toBe("Reconnecting");
   expect(livePillWords({ streamState: "waiting", hasBase: true, batchId: 1, ageSeconds: 5, ageUnresolved: false, tier: "fresh" }).word).toBe("Reconnecting");
   expect(livePillWords({ streamState: "closed", hasBase: false, batchId: null, ageSeconds: null, ageUnresolved: false, tier: null })).toEqual({
@@ -15,6 +16,7 @@ test("stream words", () => {
 
 test("age tone follows the ratified tiers; an unknown age is dim, never a tier color", () => {
   const base = { streamState: "open" as const, hasBase: true, batchId: 7, ageUnresolved: false };
+  expect(livePillWords({ ...base, ageSeconds: 42, tier: "fresh" }).ageTone).toBe("neutral");
   expect(livePillWords({ ...base, ageSeconds: 200, tier: "aging" }).ageTone).toBe("warn");
   expect(livePillWords({ ...base, ageSeconds: 4000, tier: "stale" }).ageTone).toBe("crit");
   expect(livePillWords({ ...base, ageSeconds: 9000, tier: "critical" }).ageTone).toBe("crit");
@@ -24,7 +26,7 @@ test("age tone follows the ratified tiers; an unknown age is dim, never a tier c
 
 test("an unresolved age is said beside its batch — 'age unknown', never an omitted clause and never the floor's number", () => {
   expect(livePillWords({ streamState: "open", hasBase: true, batchId: 7, ageSeconds: null, ageUnresolved: true, tier: null })).toEqual({
-    word: "Live", tone: "ok", batch: "batch 7", age: "age unknown", ageTone: "dim",
+    word: "Live", tone: "live", batch: "batch 7", age: "age unknown", ageTone: "dim",
   });
   // The unresolved flag wins over a number and a tier a caller may still be holding.
   expect(livePillWords({ streamState: "open", hasBase: true, batchId: 7, ageSeconds: 42, ageUnresolved: true, tier: "fresh" })).toMatchObject({

@@ -26,10 +26,10 @@ export function SurfacePlaceholder({ eyebrow, name, description, fedBy, wave }: 
         <p className="eyebrow">{eyebrow}</p>
         <h1>{name}</h1>
         <p>{description}</p>
-        <p className={styles.fedBy}>fed by {fedBy}</p>
+        <p className={styles.fedBy}>Fed by {fedBy}</p>
       </div>
       <div className={styles.pending}>
-        surface not yet landed. It arrives in <b>{wave}</b>. This page is the W0 shell: real
+        Surface not yet landed. It arrives in <b>{wave}</b>. This page is the shell alone: real
         chrome, real posture ribbon, no pretend data.
       </div>
     </section>

@@ -18,7 +18,7 @@
 
 .exact::after {
   content: " ⧉";
-  font-size: var(--t-floor);
+  font-size: var(--type-floor);
   color: var(--ink-3);
 }
 

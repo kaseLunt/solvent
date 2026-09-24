@@ -1,7 +1,9 @@
 /* The status-chip family (canon §05/§06) — components/StatusChip.tsx's own
- * module and the family's one home. Sans 12px uppercase state words, mono
- * embedded values, outline-first: a fill is the top escalation register
- * only. */
+ * module and the family's one home: the retired header vocabulary, kept for
+ * the styleguide's specimens. Sans state words set as their callers write
+ * them (no CSS capitals, no tracking), mono embedded values, outline-first: a
+ * fill is the top escalation register only. Tones map onto the one grammar in
+ * lib/kit.ts (TONE_VOCABULARIES.statusChip). */
 
 .chip {
   display: inline-flex;
@@ -12,21 +14,17 @@
   border-radius: var(--r-sm);
   background: transparent;
   font-family: var(--sans);
-  font-size: var(--t-floor);
-  font-weight: 600;
-  letter-spacing: var(--track-refused);
-  text-transform: uppercase;
+  font-size: var(--type-floor);
+  font-weight: var(--w-semibold);
   color: var(--ink-2);
   white-space: nowrap;
 }
 
-/* Embedded values are mono, never uppercase, tabular. */
+/* Embedded values are mono, tabular. */
 .chip .val {
   font-family: var(--mono);
-  font-size: var(--t-mono-floor);
-  font-weight: 500;
-  letter-spacing: normal;
-  text-transform: none;
+  font-size: var(--type-mono-sm);
+  font-weight: var(--w-medium);
   font-variant-numeric: tabular-nums;
 }
 
@@ -92,31 +90,28 @@
   border: 1px solid currentColor;
 }
 
-/* ---- the canon refused-tag (§05 D5 / §06): dashed --warn border on the
- * --warn-bg state fill, --warn-text ink. The plain cause is narration —
- * sentence case, NO uppercase transform (the REFUSED/WITHHELD word is
- * literal caps); the wire code rides secondary in mono. ---- */
+/* ---- the refused-tag: the refused register (lib/kit STATE_REGISTERS.refused) — dashed --ink-3 on the refused
+ * ground, ink-2 words, never a tier's colour. The plain cause is narration in sentence case; the wire code rides
+ * secondary in mono. ---- */
 .refusedTag {
   /* inline-block, not inline-flex: the tag is mixed PROSE (word · cause ·
    * code with literal middots), and flex would swallow the separators'
    * surrounding whitespace. */
   display: inline-block;
   padding: 3px 9px;
-  border: 1px dashed var(--warn);
+  border: 1px dashed var(--ink-3);
   border-radius: var(--r-sm);
-  background: var(--warn-bg);
+  background: var(--refused-bg);
   font-family: var(--sans);
-  font-size: var(--t-floor);
-  font-weight: 600;
-  letter-spacing: var(--track-refused);
-  color: var(--warn-text);
+  font-size: var(--type-floor);
+  font-weight: var(--w-semibold);
+  color: var(--ink-2);
   white-space: nowrap;
 }
 
 /* The wire code: mono, quoted-register, never leading. */
 .wire {
   font-family: var(--mono);
-  font-size: var(--t-mono-floor);
-  font-weight: 500;
-  letter-spacing: normal;
+  font-size: var(--type-mono-sm);
+  font-weight: var(--w-medium);
 }

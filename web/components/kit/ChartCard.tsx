@@ -6,6 +6,8 @@ export type ChartCardLink = { href: string; label: string } | { onClick: () => v
 
 export interface ChartCardProps {
   title: string;
+  /** The card's one badge, right after the title: the PROJECTION badge of a projected exhibit. */
+  badge?: ReactNode;
   /** The finding line under the title — states what the chart shows, in words. */
   finding?: ReactNode;
   /** A navigation link, or an in-page action (opens a drawer) rendered as a button. */
@@ -14,11 +16,14 @@ export interface ChartCardProps {
   testId?: string;
 }
 
-export function ChartCard({ title, finding, link, children, testId }: ChartCardProps) {
+export function ChartCard({ title, badge, finding, link, children, testId }: ChartCardProps) {
   return (
     <section className={styles.card} data-testid={testId} aria-label={title}>
       <div className={styles.cardT}>
-        <h3>{title}</h3>
+        <h3>
+          {title}
+          {badge !== undefined && <span className={styles.badge}>{badge}</span>}
+        </h3>
         {link !== undefined &&
           ("href" in link ? (
             <Link href={link.href}>{link.label}</Link>

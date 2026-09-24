@@ -1,39 +1,36 @@
-/* The degradation banner (components/DegradationBanner.tsx) — this module's one consumer. A full-width strip under
- * the app bar: crit ground when the service is unavailable, the refused ground (.warn) when it is degraded or the
- * stream is reconnecting; the tag names the state and the body says what still stands. */
+/* The degradation banner (components/DegradationBanner.tsx) — this module's one consumer. A full-width line under the
+ * app bar, aligned to the content column: the panel with a solid line when the service has no servable batch (an
+ * absence, never a verdict), the warn line when the batch is degraded or the stream is reconnecting. The state's word
+ * leads in semibold; what still stands follows in ink-2, its figures and names in ink. */
 .banner {
   border-bottom: 1px solid var(--line);
-  background: var(--crit-bg);
+  background: var(--panel);
   color: var(--ink);
-  font-family: var(--mono);
-  font-size: var(--fs-caption);
+  font-size: var(--type-body);
 }
 
 .banner.warn {
-  background: var(--refused-bg);
+  border-bottom-color: var(--warn);
+  background: linear-gradient(var(--warn-bg), var(--warn-bg)) var(--panel);
 }
 
 .bannerInner {
   max-width: var(--shell-max);
   margin: 0 auto;
-  padding: 8px 20px;
+  padding: 8px var(--gutter);
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 14px;
+  gap: 4px 12px;
   align-items: baseline;
 }
 
 .bannerTag {
-  font-size: var(--fs-badge);
-  letter-spacing: var(--track-label);
-  padding: 2px 7px;
-  border-radius: var(--r-xs);
-  background: var(--crit);
-  color: var(--panel);
+  font-weight: var(--w-semibold);
+  color: var(--ink);
 }
 
-.bannerTag.warnTag {
-  background: var(--warn);
+.warn .bannerTag {
+  color: var(--warn-text);
 }
 
 .bannerBody {
@@ -42,5 +39,5 @@
 
 .bannerBody b {
   color: var(--ink);
-  font-weight: 550;
+  font-weight: var(--w-semibold);
 }
