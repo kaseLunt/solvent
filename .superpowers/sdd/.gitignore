@@ -38,3 +38,10 @@
 !2026-09-16-ui-convergence/
 !2026-09-22-settle-for-deploy/
 !2026-09-24-design-coherence/
+# The Aave V4 engine + go-live design record (2026-09-24): research briefs, code-reader reports, the Python integer
+# replica that matched getUserAccountData, and the stand-in round-3 review panel's verified findings. The specs in
+# docs/specs cite these by path, so they must be tracked.
+!2026-09-24-aave-v4/
+!2026-09-24-aave-v4/*/
+!2026-09-24-aave-v4/replica/*.py
+!2026-09-24-aave-v4/round3-panel.json
