@@ -26,6 +26,7 @@ import { expect, test } from "@playwright/test";
 import {
   FEED_EXHAUSTED,
   FEED_LOADING,
+  LIQUIDATION_WORDS,
   RAW_UNITS_TAG,
   TYPE_WORDS,
   feedAmount,
@@ -33,11 +34,13 @@ import {
   feedTagTone,
   feedTakeaway,
   liquidationEstablished,
+  liquidationRepaid,
+  liquidationSeized,
   renderBps,
   typeLabel,
 } from "../../lib/feed-view";
 import { joinAnd, plural } from "../../lib/prose";
-import { EM_DASH } from "../../lib/format";
+import { EM_DASH, truncateAddress } from "../../lib/format";
 import { EVENT_DISPLAY_TYPES, type FeedChainEvent } from "../../lib/feed-data";
 import { FEED_LIQUIDATIONS, FEED_UNITS } from "../fixtures/feed";
 
@@ -198,6 +201,117 @@ test.describe("feedAmount", () => {
       expect(amount.unitChip ?? "").not.toContain("$");
     }
   });
+
+  test("an amount that is not a wire decimal is `unreadable` — never printed as digits, never scaled, never a throw; no unit is named beside it", () => {
+    for (const bad of ["1e6", "1.5", " 12", "0x10", ""]) {
+      for (const unit of ["dm_normalized_debt", "aave_scaled", "opaque", "none", "who_knows", undefined]) {
+        const amount = feedAmount(row({ amount: bad, amount_decimals: null, amount_unit: unit }), { engineValueDecimals: 6 });
+        expect(amount).toMatchObject({ kind: "amount", display: "unreadable", unitChip: null, symbol: null, rawUnits: false });
+      }
+    }
+    const unreadable = feedAmount(row({ amount: "1e6", amount_unit: "dm_normalized_debt" }), { engineValueDecimals: 6 });
+    if (unreadable.kind !== "amount") throw new Error("an amount arm");
+    expect(unreadable.unitTitle).toContain("not a decimal integer");
+  });
+
+  test("a scale the guard refuses licenses nothing: a malformed leg scale leaves the integer raw and tagged, a malformed row scale yields to the engine's own, a malformed engine scale to none — never a throw", () => {
+    for (const decimals of [-1, 1.5, 1001, -0]) {
+      const aave = feedAmount(row({ amount: "1500000000000000000", amount_decimals: decimals, amount_unit: "aave_scaled" }));
+      expect(aave).toMatchObject({ display: "1500000000000000000", rawUnits: true });
+      if (aave.kind === "amount") expect(aave.unitTitle).toContain("no readable decimals for the leg");
+      const dmOwn = feedAmount(row({ amount: "1199403000", amount_decimals: decimals, amount_unit: "dm_normalized_debt" }), { engineValueDecimals: 6 });
+      expect(dmOwn).toMatchObject({ display: "1,199.403", rawUnits: false });
+      const dmNeither = feedAmount(row({ amount: "1199403000", amount_decimals: decimals, amount_unit: "dm_normalized_debt" }));
+      expect(dmNeither).toMatchObject({ display: "1199403000", rawUnits: true });
+      const dmEngine = feedAmount(row({ amount: "1199403000", amount_decimals: null, amount_unit: "dm_normalized_debt" }), { engineValueDecimals: decimals });
+      expect(dmEngine).toMatchObject({ display: "1199403000", rawUnits: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A liquidation's figures, decided once for both surfaces that print them.
+// ---------------------------------------------------------------------------
+
+test.describe("liquidationRepaid · liquidationSeized · LIQUIDATION_WORDS", () => {
+  const legacyDetail = FEED_LIQUIDATIONS.events.find((event) => event.engine === "aave_v3_etherfi")?.liquidation ?? null;
+  const cashDetail = FEED_LIQUIDATIONS.events.find((event) => event.engine === "debt_manager")?.liquidation ?? null;
+  if (legacyDetail === null || cashDetail === null) throw new Error("fixture invariant: one liquidation per engine");
+  const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+
+  test("scaled: the exact decimals, grouped and never truncated, with the unit the engine's figure is counted in — Cash's own USD, the legacy row's symbol", () => {
+    expect(liquidationRepaid({ engine: "debt_manager", symbol: "USDC" }, { ...cashDetail, debt_repaid: "358120", debt_decimals: 6 })).toEqual({ figure: "0.35812", unit: "USD" });
+    expect(liquidationRepaid({ engine: "aave_v3_etherfi", symbol: "USDC" }, { ...legacyDetail, debt_repaid: "2500000000", debt_decimals: 6 })).toEqual({ figure: "2,500", unit: "USDC" });
+    // Never truncated: every digit the scale places is printed.
+    expect(liquidationRepaid({ engine: "debt_manager", symbol: "USDC" }, { ...cashDetail, debt_repaid: "1234567891234", debt_decimals: 6 })).toEqual({ figure: "1,234,567.891234", unit: "USD" });
+    expect(liquidationRepaid({ engine: "aave_v3_etherfi", symbol: "WBTC" }, { ...legacyDetail, debt_repaid: "123456789", debt_decimals: 8 })).toEqual({ figure: "1.23456789", unit: "WBTC" });
+  });
+
+  test("scaled on the legacy engine with no symbol: its debt asset shortened; with neither, a dash — the unit is never silently absent", () => {
+    expect(liquidationRepaid({ engine: "aave_v3_etherfi" }, { ...legacyDetail, debt_asset: USDC })).toEqual({ figure: "2,500", unit: truncateAddress(USDC) });
+    expect(liquidationRepaid({ engine: "aave_v3_etherfi" }, { ...legacyDetail, debt_asset: null })).toEqual({ figure: "2,500", unit: EM_DASH });
+    // Cash's figure is its own USD whatever the row's symbol says.
+    expect(liquidationRepaid({ engine: "debt_manager" }, cashDetail).unit).toBe("USD");
+  });
+
+  test("null: a dash with no unit — never zero, never a unit beside a figure that is not there", () => {
+    for (const event of [{ engine: "debt_manager", symbol: "USDC" }, { engine: "aave_v3_etherfi", symbol: "USDC" }]) {
+      expect(liquidationRepaid(event, { ...legacyDetail, debt_repaid: null })).toEqual({ figure: EM_DASH, unit: null });
+    }
+  });
+
+  test("not a wire decimal: `unreadable` with no unit, whatever the scale — its bytes are never printed", () => {
+    for (const bad of ["1e6", "1.5", " 12", "0x10", ""]) {
+      for (const decimals of [null, 6]) {
+        for (const engine of ["debt_manager", "aave_v3_etherfi"]) {
+          expect(liquidationRepaid({ engine, symbol: "USDC" }, { ...legacyDetail, debt_repaid: bad, debt_decimals: decimals })).toEqual({ figure: "unreadable", unit: null });
+        }
+      }
+    }
+  });
+
+  test("no licensed scale: the wire's digits verbatim, the raw tag and NO currency or token unit — on either engine", () => {
+    for (const decimals of [null, -1, 1.5, 1001]) {
+      expect(liquidationRepaid({ engine: "debt_manager", symbol: "USDC" }, { ...cashDetail, debt_repaid: "358120", debt_decimals: decimals })).toEqual({ figure: "358120", unit: RAW_UNITS_TAG });
+      expect(liquidationRepaid({ engine: "aave_v3_etherfi", symbol: "USDC" }, { ...legacyDetail, debt_repaid: "2500000000", debt_decimals: decimals })).toEqual({ figure: "2500000000", unit: RAW_UNITS_TAG });
+    }
+  });
+
+  test("seized legs: each in its own token's exact decimals, named by symbol (or its asset shortened); an unscaled or unreadable leg names its asset apart from the figure; none carried is stated", () => {
+    const leg = legacyDetail.seized[0];
+    if (leg === undefined) throw new Error("fixture invariant: a seizure leg");
+    const weeth = { ...leg, symbol: "weETH", amount: "656250000000000000", decimals: 18 };
+    expect(liquidationSeized({ seized: [weeth] })).toBe("0.65625 weETH");
+    expect(liquidationSeized({ seized: [weeth, { ...weeth, symbol: "wstETH", amount: "100000000000000000" }] })).toBe("0.65625 weETH, 0.1 wstETH");
+    expect(liquidationSeized({ seized: [{ ...weeth, symbol: undefined }] })).toBe(`0.65625 ${truncateAddress(weeth.asset)}`);
+    expect(liquidationSeized({ seized: [{ ...weeth, decimals: -1 }] })).toBe(`656250000000000000 ${RAW_UNITS_TAG} (weETH)`);
+    expect(liquidationSeized({ seized: [{ ...weeth, amount: "6.5e17" }] })).toBe("unreadable (weETH)");
+    expect(liquidationSeized({ seized: [] })).toBe(`${EM_DASH} (no seizure legs carried)`);
+  });
+
+  test("the extract's words are one set, the lib's", () => {
+    expect(LIQUIDATION_WORDS).toEqual({
+      liquidator: "liquidator",
+      repaid: "debt repaid",
+      seized: "seized",
+      bonusRealized: "bonus realized",
+      bonusConfigured: "configured",
+    });
+  });
+});
+
+test.describe("typeLabel", () => {
+  test("an own-property lookup: a wire word that names an Object.prototype member prints verbatim, as a string", () => {
+    for (const word of ["__proto__", "constructor", "toString", "hasOwnProperty", "valueOf"]) {
+      expect(typeLabel(word)).toBe(word);
+      expect(typeof typeLabel(word)).toBe("string");
+    }
+    expect(feedTakeaway([row({ type: "__proto__" as FeedChainEvent["type"] })], "engine-scoped", false).rest).toContain("a __proto__");
+  });
+
+  test("one spelling: the pool's bad-debt event is realized, as the wire spells realized_bonus_bps", () => {
+    expect(typeLabel("deficit_created")).toBe("bad debt realized");
+  });
 });
 
 test.describe("severity + bps", () => {
@@ -211,6 +325,17 @@ test.describe("severity + bps", () => {
   test("a null bonus is an em dash — never an estimate", () => {
     expect(renderBps(null)).toBe(EM_DASH);
     expect(renderBps("500")).toBe("500 bps");
+  });
+
+  test("a bonus outside the Decimal pattern is the unreadable word with no bps beside it — never its bytes as a figure", () => {
+    for (const value of ["1e6", "1.5", "", " 500", "0x10", "abc"]) {
+      expect(renderBps(value)).toBe("unreadable");
+      expect(renderBps(value)).not.toContain("bps");
+    }
+    expect(renderBps(500 as unknown as string)).toBe("unreadable");
+    expect(renderBps(undefined as unknown as string)).toBe("unreadable");
+    expect(renderBps("-25")).toBe("-25 bps");
+    expect(renderBps("0")).toBe("0 bps");
   });
 });
 
@@ -354,12 +479,12 @@ test.describe("feedTakeaway", () => {
     const types = ["deficit_created", "collateral_enabled"] as const;
     expect(feedTakeaway(rows, "cross-engine", false, { ...at, types })).toEqual({
       emphasis: "2 chain actions loaded,",
-      rest: `filtered to bad debt realised and collateral enabled; the newest at ${nb("Jul 29, 09:57 UTC")}; that is every action matching this filter.`,
+      rest: `filtered to bad debt realized and collateral enabled; the newest at ${nb("Jul 29, 09:57 UTC")}; that is every action matching this filter.`,
     });
     expect(feedTakeaway(rows, "cross-engine", false, { ...at, types }).rest).toContain(`filtered to ${joinAnd(types.map(typeLabel))};`);
     // One row: a type the page says as a phrase is a statement and takes no article; a type that is a noun keeps "a".
     expect(feedTakeaway(rows.slice(0, 1), "engine-scoped", false).rest).toBe(
-      "bad debt realised, at block 25,635,601; that is the only action matching this filter.",
+      "bad debt realized, at block 25,635,601; that is the only action matching this filter.",
     );
     expect(feedTakeaway([row({ block_number: 25635601, block_time: null, type: "collateral_disabled" })], "engine-scoped", true).rest).toBe(
       "collateral disabled, at block 25,635,601; more exist beyond this one.",
@@ -371,7 +496,7 @@ test.describe("feedTakeaway", () => {
     }
     // The page's words for the three wire ids, and a word outside the vocabulary as the wire sent it.
     expect(Object.keys(TYPE_WORDS).sort()).toEqual(["collateral_disabled", "collateral_enabled", "deficit_created"]);
-    expect(typeLabel("deficit_created")).toBe("bad debt realised");
+    expect(typeLabel("deficit_created")).toBe("bad debt realized");
     expect(typeLabel("flash_thing")).toBe("flash_thing");
   });
 

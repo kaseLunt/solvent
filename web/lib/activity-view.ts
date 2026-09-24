@@ -18,10 +18,11 @@
 //     summed; the live strip and the paged record are two instruments, and
 //     that doctrine lives in the drawer;
 //   - a row's amount is the engine's own accounting unit, named beside it
-//     (feedAmount's arms printed as the list printed them, the raw-units tag
-//     included) and never a dollar figure; its scale is the wire's own —
-//     the stream's aggregates, then the book's — or none, and a record with
-//     no amount is a dash with its word in the unit cell;
+//     (feedAmount's arms) and never a dollar figure; its scale is the wire's
+//     own — the stream's aggregates, then the book's — or none, and a figure
+//     no scale placed carries the raw-units tag in its own cell, beside the
+//     digits, because one column holds scaled and unscaled figures alike; a
+//     record with no amount is a dash with its word in the unit cell;
 //   - a type prints in the page's words, the wire's word kept for its title;
 //   - a cross-engine row without custodied header time is the untimed tail:
 //     dimmed, its block number where the time would be, never an invented
@@ -34,7 +35,7 @@
 //     what was refused;
 //   - every wire integer printed here passes the population guard first.
 
-import { groupDecimalString } from "./book-format";
+import { inlineParts } from "./inline-parts";
 import { bookEnvelopeFault } from "./cash-refusal";
 import {
   splitUntimedTail,
@@ -45,6 +46,7 @@ import {
   type FeedOrderMode,
 } from "./feed-data";
 import {
+  LIQUIDATION_WORDS,
   RAW_UNITS_TAG,
   RECORD_ONLY_TITLE,
   RECORD_ONLY_WORD,
@@ -53,10 +55,12 @@ import {
   feedRowKey,
   feedTagTone,
   feedTakeaway,
+  liquidationRepaid,
+  liquidationSeized,
   renderBps,
   typeLabel,
 } from "./feed-view";
-import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal, truncateAddress } from "./format";
+import { EM_DASH, formatBlock, renderBlockTime, truncateAddress } from "./format";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import { refused, sentence, type LabHeadline } from "./lab-headline";
@@ -104,6 +108,19 @@ export interface ActivityInput {
 }
 
 /**
+ * One run of a liquidation's extract line, in order: prose (its words and separators the lib's), the liquidator's
+ * Inspector link, a figure, or the unit a figure is counted in — the table sets each and adds nothing.
+ */
+export type LiquidationPart =
+  | { readonly kind: "text" | "figure" | "unit"; readonly text: string }
+  | { readonly kind: "liquidator"; readonly text: string; readonly href: string; readonly title: string };
+
+/** One run of the wire's note: its words, with the contract's code and bold markers read as formatting. */
+export type NotePart =
+  | { readonly kind: "text" | "code"; readonly text: string }
+  | { readonly kind: "strong"; readonly parts: readonly NotePart[] };
+
+/**
  * A liquidation's typed extract, as parts the table prints visibly beneath the pill: the liquidator (with its
  * Inspector link), the repaid debt and the seized legs in each asset's own units, both bonus figures as renderBps
  * gives them — every unestablished field an em dash, never an estimate and never behind a hover — and the wire's note.
@@ -111,18 +128,22 @@ export interface ActivityInput {
 export interface ActivityLiquidation {
   readonly liquidator: string;
   readonly liquidatorHref: string;
-  /** The repaid debt at the extract's own decimals; the wire's digits verbatim when it carried no scale; an em dash when it carried no figure. */
+  /** The repaid figure as liquidationRepaid decides it for both surfaces: exact decimals, the wire's raw digits, the unreadable word, or a dash. */
   readonly repaid: string;
   /**
    * What the figure is counted in: the Debt Manager's own USD, the legacy row's symbol (its debt asset shortened when
-   * no symbol is carried), the raw-units tag for an unscaled figure; null beside a dash, or when nothing names it.
+   * no symbol is carried, a dash when neither is), the raw-units tag beside unscaled digits; null beside a dash or the
+   * unreadable word.
    */
   readonly repaidUnit: string | null;
-  /** Every seizure leg as `amount symbol`, comma-joined; the no-legs statement when none was carried. */
+  /** Every seizure leg as liquidationSeized says it, comma-joined; the no-legs statement when none was carried. */
   readonly seized: string;
   readonly bonusRealized: string;
   readonly bonusConfigured: string;
-  readonly note: string;
+  /** The extract as one line, in the order the table prints it — every word from LIQUIDATION_WORDS. */
+  readonly line: readonly LiquidationPart[];
+  /** The wire's own note, every word kept and its markers read (inlineParts); empty when the wire carried none. */
+  readonly note: readonly NotePart[];
 }
 
 export interface ActivityRow {
@@ -141,9 +162,14 @@ export interface ActivityRow {
   readonly account: string;
   /** The amount as far as its unit licenses, or a dash for a record with no amount. */
   readonly amount: string;
+  /**
+   * The raw-units tag when no scale placed the figure, set beside the digits in the Amount cell itself — one column
+   * holds scaled and unscaled figures, so the word sits where the magnitude is read; null for a placed figure or a dash.
+   */
+  readonly amountTag: string | null;
   /** A null amount: the dash is a statement about the record, not a value, and the table sets it as one. */
   readonly recordOnly: boolean;
-  /** The unit named beside the amount: the unit tag, the raw-units tag when unscaled, the symbol — or the record-only word. */
+  /** The unit named beside the amount: the unit tag and the symbol (the raw word is the Amount cell's, said once) — or the record-only word. */
   readonly unit: string;
   /** What the unit is and what converting it would take; for a record-only row, what its dash means. */
   readonly unitTitle: string | null;
@@ -348,47 +374,48 @@ export function activityScales(stream: readonly EngineScale[] | null, book: unkn
   return scales;
 }
 
-/**
- * What a liquidation's repaid figure is counted in. The row's asset IS the debt asset on both engines, so the legacy
- * row's symbol names it (its debt asset, shortened, when no symbol was carried); the Debt Manager's figure is its own
- * USD at its value_decimals, as the wire's note on the row says. A figure the wire carried no scale for is its raw
- * integer, tagged — never dressed as dollars or tokens — and a dash has no unit.
- */
-function repaidUnit(event: FeedChainEvent, detail: NonNullable<FeedChainEvent["liquidation"]>): string | null {
-  if (detail.debt_repaid === null) return null;
-  if (!isWireScale(detail.debt_decimals)) return RAW_UNITS_TAG;
-  if (event.engine === CASH) return "USD";
-  const symbol = event.symbol ?? null;
-  if (symbol !== null) return symbol;
-  return detail.debt_asset === null ? null : `${detail.debt_asset.slice(0, 10)}…`;
+/** The wire's note as runs: a bold run's own code spans read in turn, so no marker prints and no word is lost. */
+function noteParts(note: string): readonly NotePart[] {
+  return inlineParts(note).map(
+    (part): NotePart => (part.kind === "strong" ? { kind: "strong", parts: noteParts(part.text) } : { kind: part.kind, text: part.text }),
+  );
 }
 
-/** The typed extract as parts: liquidator, repaid debt, seized legs, both bonus figures, the wire's note. An unestablished field is an em dash, never an estimate. */
+/**
+ * The typed extract as parts: liquidator, repaid debt, seized legs, both bonus figures, the wire's note. An
+ * unestablished field is an em dash, never an estimate. The repaid figure and the seized legs are feed-view's, the
+ * figures the Inspector's card prints too.
+ */
 function liquidationDetail(event: FeedChainEvent, detail: NonNullable<FeedChainEvent["liquidation"]>): ActivityLiquidation {
-  const repaid =
-    detail.debt_repaid === null
-      ? EM_DASH
-      : isWireScale(detail.debt_decimals)
-        ? groupDecimalString(renderNullableDecimal(detail.debt_repaid, { decimals: detail.debt_decimals }))
-        : detail.debt_repaid;
-  const seized =
-    detail.seized.length === 0
-      ? `${EM_DASH} (no seizure legs carried)`
-      : detail.seized
-          .map(
-            (leg) =>
-              `${groupDecimalString(renderNullableDecimal(leg.amount, { decimals: leg.decimals }))} ${leg.symbol ?? `${leg.asset.slice(0, 8)}…`}`,
-          )
-          .join(", ");
+  const words = LIQUIDATION_WORDS;
+  const repaid = liquidationRepaid(event, detail);
+  const seized = liquidationSeized(detail);
+  const bonusRealized = renderBps(detail.realized_bonus_bps);
+  const bonusConfigured = renderBps(detail.configured_bonus_bps);
+  const liquidatorHref = `/inspector/${detail.liquidator}`;
+  const line: LiquidationPart[] = [
+    { kind: "text", text: `${words.liquidator} ` },
+    { kind: "liquidator", text: truncateAddress(detail.liquidator), href: liquidatorHref, title: detail.liquidator },
+    { kind: "text", text: ` · ${words.repaid} ` },
+    { kind: "figure", text: repaid.figure },
+    ...(repaid.unit === null ? [] : [{ kind: "text", text: " " } as const, { kind: "unit", text: repaid.unit } as const]),
+    { kind: "text", text: ` · ${words.seized} ` },
+    { kind: "figure", text: seized },
+    { kind: "text", text: ` · ${words.bonusRealized} ` },
+    { kind: "figure", text: bonusRealized },
+    { kind: "text", text: ` / ${words.bonusConfigured} ` },
+    { kind: "figure", text: bonusConfigured },
+  ];
   return {
     liquidator: detail.liquidator,
-    liquidatorHref: `/inspector/${detail.liquidator}`,
-    repaid,
-    repaidUnit: repaidUnit(event, detail),
+    liquidatorHref,
+    repaid: repaid.figure,
+    repaidUnit: repaid.unit,
     seized,
-    bonusRealized: renderBps(detail.realized_bonus_bps),
-    bonusConfigured: renderBps(detail.configured_bonus_bps),
-    note: detail.note,
+    bonusRealized,
+    bonusConfigured,
+    line,
+    note: noteParts(detail.note),
   };
 }
 
@@ -406,13 +433,12 @@ function activityRow(
   const coordinates = `${block}log ${String(log)}${seq === 0 ? "" : ` · seq ${String(seq)}`}`;
   const explorer =
     url === null ? ` (no explorer configured for chain ${String(readWirePopulation(event.chain_id, "chain_id"))})` : "";
-  // A record with no amount: a dash where the figure would be, its word where the unit is named.
+  // A record with no amount: a dash where the figure would be, its word where the unit is named. The raw word is the
+  // Amount cell's, beside the digits, so the unit cell never says it twice.
   const unit =
     amount.kind === "record-only"
       ? RECORD_ONLY_WORD
-      : [amount.unitChip, amount.rawUnits ? RAW_UNITS_TAG : null, amount.symbol]
-          .filter((part): part is string => part !== null)
-          .join(" · ");
+      : [amount.unitChip, amount.symbol].filter((part): part is string => part !== null).join(" · ");
   return {
     key: feedRowKey(event),
     dim: mode === "cross-engine" && event.block_time === null,
@@ -423,6 +449,7 @@ function activityRow(
     tone: feedTagTone(event.type),
     account: event.account,
     amount: amount.kind === "record-only" ? EM_DASH : amount.display,
+    amountTag: amount.kind === "amount" && amount.rawUnits ? RAW_UNITS_TAG : null,
     recordOnly: amount.kind === "record-only",
     unit,
     unitTitle: amount.kind === "record-only" ? RECORD_ONLY_TITLE : amount.unitTitle,
@@ -508,7 +535,7 @@ function engineSplit(rows: readonly FeedChainEvent[]): string {
 
 /**
  * The answered page's dek: computed facts about the loaded rows, each sentence conditional on its own count — the
- * other crit type (bad debt realised), where the rows sit, and the untimed tail. Every number is counted here from
+ * other crit type (bad debt realized), where the rows sit, and the untimed tail. Every number is counted here from
  * the rows. A type is said in the page's words and glossed with no wire id the page does not print. When none
  * applies, the dek says how the list is ordered.
  */
@@ -520,8 +547,8 @@ function factDek(input: ActivityInput): string {
   if (deficits > 0) {
     sentences.push(
       n === 1
-        ? "It records bad debt being realised."
-        : `${groupInt(deficits)} of them record${deficits === 1 ? "s" : ""} bad debt being realised.`,
+        ? "It records bad debt being realized."
+        : `${groupInt(deficits)} of them record${deficits === 1 ? "s" : ""} bad debt being realized.`,
     );
   }
   if (mode === "cross-engine") {

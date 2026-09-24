@@ -1,9 +1,29 @@
 import Link from "next/link";
+import { Fragment } from "react";
 import { KitTable, StatusPill, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { ACTIVITY_AMOUNT_HEADER, type ActivityLiquidation, type ActivityRow } from "@/lib/activity-view";
+import { ACTIVITY_AMOUNT_HEADER, type ActivityLiquidation, type ActivityRow, type NotePart } from "@/lib/activity-view";
 import { truncateAddress } from "@/lib/format";
 import styles from "./activity.module.css";
+
+/** The wire's note with its markers read: code as code, bold as bold, every word as it came. */
+function NoteText({ parts }: { parts: readonly NotePart[] }) {
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.kind === "code" ? (
+          <code key={index}>{part.text}</code>
+        ) : part.kind === "strong" ? (
+          <strong key={index}>
+            <NoteText parts={part.parts} />
+          </strong>
+        ) : (
+          <Fragment key={index}>{part.text}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
 
 /**
  * The liquidation's typed extract, visible beneath the pill in every view: the liquidator opens the Inspector, the
@@ -14,16 +34,24 @@ import styles from "./activity.module.css";
 function LiquidationLine({ detail, dim }: { detail: ActivityLiquidation; dim: boolean }) {
   return (
     <span className={dim ? `${styles.detail} ${styles.detailDim}` : styles.detail} data-testid="activity-liquidation">
-      liquidator{" "}
-      <Link href={detail.liquidatorHref} className={kit.addr} title={detail.liquidator} data-testid="activity-liquidator">
-        {truncateAddress(detail.liquidator)}
-      </Link>{" "}
-      · debt repaid <b>{detail.repaid}</b>
-      {detail.repaidUnit !== null && <span className={kit.dim}> {detail.repaidUnit}</span>} · seized <b>{detail.seized}</b> · bonus realized{" "}
-      <b>{detail.bonusRealized}</b> / configured <b>{detail.bonusConfigured}</b>
-      {detail.note !== "" && (
+      {detail.line.map((part, index) =>
+        part.kind === "liquidator" ? (
+          <Link key={index} href={part.href} className={kit.addr} title={part.title} data-testid="activity-liquidator">
+            {part.text}
+          </Link>
+        ) : part.kind === "figure" ? (
+          <b key={index}>{part.text}</b>
+        ) : part.kind === "unit" ? (
+          <span key={index} className={kit.dim}>
+            {part.text}
+          </span>
+        ) : (
+          <Fragment key={index}>{part.text}</Fragment>
+        ),
+      )}
+      {detail.note.length > 0 && (
         <span className={styles.detailNote} data-testid="activity-liquidation-note">
-          {detail.note}
+          <NoteText parts={detail.note} />
         </span>
       )}
     </span>
@@ -44,10 +72,11 @@ const COLUMNS: KitColumn[] = [
  * The paged record as the kit's table: every loaded row in WIRE ORDER (the service orders, the page discloses),
  * the untimed tail dim with its block number where the time would be, the type in the page's words with the wire's
  * word as its title, a liquidation's pill crit with its typed extract visible beneath it, the account opening the
- * Inspector, the amount alone in its right-aligned column so the digits share an edge — placed only by a scale the
- * wire licensed, otherwise the wire's integer verbatim, aligned and never reformatted — with its unit named in the
- * quiet column beside it, the tx on its chain's explorer. A record-only row's dash is a statement, not a value, and
- * is set as one; its word stands in the unit column. Every cell is the view model's word; nothing is decided here.
+ * Inspector, the amount in its right-aligned column — placed only by a scale the wire licensed, otherwise the wire's
+ * integer verbatim with the raw word beside it in the same cell, so an unscaled figure is never read against a
+ * scaled one — with its unit named in the quiet column beside it, the tx on its chain's explorer. A record-only
+ * row's dash is a statement, not a value, and is set as one; its word stands in the unit column. Every cell is the
+ * view model's word; nothing is decided here.
  */
 export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[]; emptyText: string }) {
   const kitRows: KitRow[] = rows.map((row) => ({
@@ -77,9 +106,19 @@ export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[
         </Link>
       ),
       amount: (
-        <span className={row.recordOnly ? kit.sub : kit.addr} data-testid="activity-amount">
-          {row.amount}
-        </span>
+        <>
+          <span className={row.recordOnly ? kit.sub : kit.addr} data-testid="activity-amount">
+            {row.amount}
+          </span>
+          {row.amountTag !== null && (
+            <>
+              {" "}
+              <span className={styles.amountTag} data-testid="activity-amount-tag">
+                {row.amountTag}
+              </span>
+            </>
+          )}
+        </>
       ),
       unit:
         row.unit === "" ? null : (

@@ -108,7 +108,10 @@ test("(4) with the stream muted, the book's own value_decimals scale the DM amou
   await page.route("**/v1/book*", (route) => fulfillJson(route, BOOK_WITHOUT_SCALES));
   await page.goto("/feed");
   await expect(page.getByTestId("activity-amount").filter({ hasText: "1199403000" })).toBeVisible();
-  await expect(page.getByTestId("activity-unit").filter({ hasText: "normalized debt" })).toContainText("raw units");
+  // The tag sits in the Amount cell beside the digits; the unit cell names the unit and does not repeat it.
+  const dmRow = page.locator('[data-testid^="activity-row-"]', { has: page.getByTestId("activity-amount").filter({ hasText: "1199403000" }) });
+  await expect(dmRow.getByTestId("activity-amount-tag")).toHaveText("raw units");
+  await expect(page.getByTestId("activity-unit").filter({ hasText: "normalized debt" })).not.toContainText("raw units");
 });
 
 test("(4) an aave_scaled amount with no leg decimals stays RAW and is TAGGED as such", async ({
@@ -126,8 +129,12 @@ test("(4) an aave_scaled amount with no leg decimals stays RAW and is TAGGED as 
   await expect(
     page.getByTestId("activity-amount").filter({ hasText: "1500000000000000000" }),
   ).toBeVisible();
-  // The tag is part of the unit named beside the amount (the Activity table's one unit cell per row).
-  await expect(page.getByTestId("activity-unit").filter({ hasText: "aave-scaled" })).toContainText("raw units");
+  // The tag sits in the Amount cell beside the digits, where the magnitude is read; the unit cell does not repeat it.
+  const aaveRow = page.locator('[data-testid^="activity-row-"]', {
+    has: page.getByTestId("activity-amount").filter({ hasText: "1500000000000000000" }),
+  });
+  await expect(aaveRow.getByTestId("activity-amount-tag")).toHaveText("raw units");
+  await expect(page.getByTestId("activity-unit").filter({ hasText: "aave-scaled" })).not.toContainText("raw units");
 });
 
 // ---------------------------------------------------------------------------

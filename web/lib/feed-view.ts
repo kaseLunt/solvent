@@ -11,6 +11,8 @@
 //     integer verbatim — even `amount_decimals` is an interpretation the
 //     unit does not license;
 //   - a null amount is "record-only" — a different statement from zero;
+//   - an amount the wire's Decimal pattern refuses is "unreadable": its bytes
+//     are never printed, scaled or named in a unit;
 //   - an ABSENT tag (a wire outside the 1.2.0 contract, which made
 //     `amount_unit` required) is WIRE DRIFT: the raw integer renders
 //     verbatim with the drift named — never formatted through a scale the
@@ -19,7 +21,7 @@
 // Nothing in this module produces a "$" — that is asserted in
 // tests/unit/feed-view.spec.ts, not just promised here.
 
-import { EM_DASH, formatBlock, renderNullableDecimal } from "./format";
+import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "./format";
 import { groupDecimalString } from "./book-format";
 import {
   isKnownAmountUnit,
@@ -29,7 +31,9 @@ import {
   type FeedOrderMode,
 } from "./feed-data";
 import { humanUtc } from "./human-utc";
+import { CASH } from "./inspector-position";
 import { joinAnd, plural } from "./prose";
+import { isWireDecimal, isWireScale } from "./wireGuard";
 
 export type FeedAmount =
   | { kind: "record-only" }
@@ -54,11 +58,11 @@ export type FeedAmount =
 /**
  * The scale the ENGINE's own value unit carries, when the caller knows it.
  *
- * WAVE R1 ITEM 4 — THE DEFECT: the Feed rendered `amount` through
- * `amount_decimals`, which this API serves as NULL on every row (it says so
- * in its own notes: the value "is not a display-ready token amount, which is
- * why `amount_decimals` is null"). The result was a wall of raw integers: a
- * $22 borrow rendered as `22064279`, indistinguishable from $22 million.
+ * Why a scale at all: this API serves `amount_decimals` as NULL on every row
+ * (it says so in its own notes: the value "is not a display-ready token
+ * amount, which is why `amount_decimals` is null"). Rendered through that
+ * field alone, the Feed would be a wall of raw integers: a $22 borrow as
+ * `22064279`, indistinguishable from $22 million.
  *
  * The fix is scale-by-provenance, never scale-by-guess:
  *
@@ -75,7 +79,8 @@ export type FeedAmount =
  *     engine's 8 here would be exactly the fabrication the unit law forbids.
  *
  * `amount_decimals`, when the wire DOES carry it, still wins — it is the
- * row's own statement about itself.
+ * row's own statement about itself. Every scale passes the scale guard first:
+ * one it refuses licenses nothing.
  */
 export interface FeedAmountScale {
   /** The active engine's `value_decimals` from the wire, or null when unknown. */
@@ -94,13 +99,27 @@ export const RECORD_ONLY_WORD = "record-only";
 /** The record-only word's title: what the dash beside it means. */
 export const RECORD_ONLY_TITLE = "record only: this event carries no amount";
 
-/** Exact placement + thousands separators, via the shared money formatter. */
+/** The word a figure the wire's Decimal pattern refuses prints as: its bytes are never a figure. */
+const UNREADABLE = "unreadable";
+
+/** Exact placement + thousands separators, via the shared money formatter. Call ONLY on a guarded value and scale. */
 function scaled(amount: string, decimals: number): string {
   return groupDecimalString(renderNullableDecimal(amount, { decimals }));
 }
 
 export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): FeedAmount {
   if (event.amount === null) return { kind: "record-only" };
+  if (!isWireDecimal(event.amount)) {
+    // No unit is named beside it: a unit word must be true of a figure, and there is none.
+    return {
+      kind: "amount",
+      display: UNREADABLE,
+      unitChip: null,
+      unitTitle: "the wire's amount is not a decimal integer, so it is not printed as a figure",
+      symbol: null,
+      rawUnits: false,
+    };
+  }
   const symbol = event.symbol ?? null;
   // The generated type makes amount_unit required; the runtime guard stays
   // because the wire's own bytes are the authority, not our types.
@@ -163,14 +182,14 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
       // The event carries them or it does not; the ENGINE's value_decimals
       // (the pool's base currency, 8) is a different unit entirely and is
       // deliberately NOT substituted here.
-      const decimals = event.amount_decimals;
+      const decimals = isWireScale(event.amount_decimals) ? event.amount_decimals : null;
       return {
         kind: "amount",
         display: decimals === null ? event.amount : scaled(event.amount, decimals),
         unitChip: "aave-scaled",
         unitTitle:
           decimals === null
-            ? "ray-scaled aToken/variableDebtToken units, and this row carries NO decimals for the leg, so the raw integer renders verbatim rather than through the engine's base-currency scale, which is a different unit. The nominal token amount is rayMul(scaled, live index); never a USD figure"
+            ? "ray-scaled aToken/variableDebtToken units, and this row carries no readable decimals for the leg, so the raw integer renders verbatim rather than through the engine's base-currency scale, which is a different unit. The nominal token amount is rayMul(scaled, live index); never a USD figure"
             : "ray-scaled aToken/variableDebtToken units. The nominal token amount is rayMul(scaled, live index); not converted here, never a USD figure",
         symbol,
         rawUnits: decimals === null,
@@ -179,8 +198,9 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
     case "dm_normalized_debt": {
       // Normalized debt IS a fixed point at the engine's own value_decimals
       // (the USD-6 view is value × index ÷ 1e18). The row's own decimals win
-      // when present; otherwise the engine's, FROM THE WIRE; otherwise raw.
-      const decimals = event.amount_decimals ?? scale.engineValueDecimals ?? null;
+      // when readable; otherwise the engine's, FROM THE WIRE; otherwise raw.
+      const own = isWireScale(event.amount_decimals) ? event.amount_decimals : null;
+      const decimals = own ?? (isWireScale(scale.engineValueDecimals) ? scale.engineValueDecimals : null);
       return {
         kind: "amount",
         display: decimals === null ? event.amount : scaled(event.amount, decimals),
@@ -203,20 +223,21 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
 export const TYPE_WORDS: Readonly<Partial<Record<EventDisplayType, string>>> = {
   collateral_enabled: "collateral enabled",
   collateral_disabled: "collateral disabled",
-  deficit_created: "bad debt realised",
+  deficit_created: "bad debt realized",
 };
 
 /**
  * A display type as the page prints it — in a button, a cell, a chip and the headline alike; a word outside the
- * vocabulary prints as the wire sent it, never guessed at.
+ * vocabulary prints as the wire sent it, never guessed at. The lookup is the table's OWN keys: a wire word such as
+ * `__proto__` or `toString` would otherwise read Object.prototype, which is not a word and cannot render.
  */
 export function typeLabel(type: string): string {
-  return (TYPE_WORDS as Readonly<Record<string, string | undefined>>)[type] ?? type;
+  return Object.hasOwn(TYPE_WORDS, type) ? ((TYPE_WORDS as Readonly<Record<string, string>>)[type] ?? type) : type;
 }
 
 /**
  * One row's type as a sentence names it: a type that is a noun takes its article ("a repay"); a type the page says as
- * a phrase ("bad debt realised") is a statement and takes none.
+ * a phrase ("bad debt realized") is a statement and takes none.
  */
 function typeInSentence(type: string): string {
   const words = typeLabel(type);
@@ -237,9 +258,79 @@ export function feedRowKey(event: FeedChainEvent): string {
   return `${String(event.chain_id)}·${event.tx_hash}·${String(event.log_index)}·${String(event.seq)}`;
 }
 
-/** Render a nullable bps decimal, with the never-estimated dash for null. */
+/**
+ * Render a nullable bps decimal, with the never-estimated dash for null. A value outside the Decimal pattern is the
+ * unreadable word with no "bps" beside it: its bytes are not a figure.
+ */
 export function renderBps(value: string | null): string {
-  return value === null ? EM_DASH : `${value} bps`;
+  if (value === null) return EM_DASH;
+  return isWireDecimal(value) ? `${value} bps` : UNREADABLE;
+}
+
+/** A liquidation's typed extract, as the wire carries it on both surfaces that print one. */
+type LiquidationExtract = NonNullable<FeedChainEvent["liquidation"]>;
+
+/** The words a liquidation's extract is said in, on the Activity table and the Inspector's card alike. */
+export const LIQUIDATION_WORDS = {
+  liquidator: "liquidator",
+  repaid: "debt repaid",
+  seized: "seized",
+  bonusRealized: "bonus realized",
+  bonusConfigured: "configured",
+} as const;
+
+/** A payload figure and what it is counted in, decided once. */
+export interface LiquidationFigure {
+  /** Exact decimals, grouped and never truncated; the wire's digits when no scale is licensed; the unreadable word; or a dash. */
+  readonly figure: string;
+  /**
+   * What the figure is counted in. Beside the wire's digits it is the raw-units tag and never a currency or token —
+   * the digits are not that many dollars or tokens. Null beside a dash or the unreadable word, which are not figures.
+   */
+  readonly unit: string | null;
+}
+
+/**
+ * One payload figure through the wire guards, in order: a null value is not established, a value outside the
+ * Decimal pattern is unreadable, a scale the guard refuses licenses no placement — then the exact decimals.
+ */
+function payloadFigure(value: string | null, decimals: number | null, unit: string): LiquidationFigure {
+  if (value === null) return { figure: EM_DASH, unit: null };
+  if (!isWireDecimal(value)) return { figure: UNREADABLE, unit: null };
+  if (!isWireScale(decimals)) return { figure: value, unit: RAW_UNITS_TAG };
+  return { figure: scaled(value, decimals), unit };
+}
+
+/**
+ * A liquidation's repaid figure, as both surfaces print it. The API serves the Debt Manager's figure as its own
+ * USD-6 quantity at the engine's value_decimals, and the legacy market's as the debt asset's own token units at that
+ * token's decimals; the row's asset is the debt asset on both, so the legacy row's symbol names it (the debt asset
+ * shortened when no symbol was carried, a dash when neither was).
+ */
+export function liquidationRepaid(
+  event: Pick<FeedChainEvent, "engine" | "symbol">,
+  detail: Pick<LiquidationExtract, "debt_repaid" | "debt_decimals" | "debt_asset">,
+): LiquidationFigure {
+  const unit =
+    event.engine === CASH ? "USD" : (event.symbol ?? (detail.debt_asset === null ? EM_DASH : truncateAddress(detail.debt_asset)));
+  return payloadFigure(detail.debt_repaid, detail.debt_decimals, unit);
+}
+
+/**
+ * Every seizure leg in its own token's exact decimals, comma-joined, each named by its symbol (its asset shortened
+ * when no symbol was carried). A leg that is not a placed figure names its asset apart from the figure, so the digits
+ * are never read as that many tokens; none carried is stated, never a silent omission.
+ */
+export function liquidationSeized(detail: Pick<LiquidationExtract, "seized">): string {
+  if (detail.seized.length === 0) return `${EM_DASH} (no seizure legs carried)`;
+  return detail.seized
+    .map((leg) => {
+      const name = leg.symbol ?? truncateAddress(leg.asset);
+      const { figure, unit } = payloadFigure(leg.amount, leg.decimals, name);
+      if (unit === null) return `${figure} (${name})`;
+      return unit === RAW_UNITS_TAG ? `${figure} ${unit} (${name})` : `${figure} ${unit}`;
+    })
+    .join(", ");
 }
 
 

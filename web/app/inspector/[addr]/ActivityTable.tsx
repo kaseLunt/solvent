@@ -1,6 +1,6 @@
 "use client";
 
-import { KitTable, SectionHead, StatusPill, type KitRow } from "@/components/kit";
+import { KitTable, SectionHead, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import {
   ACTIVITY_CARD_QUALIFIER,
@@ -13,7 +13,6 @@ import {
 } from "@/lib/activity-rows";
 import { ACTIVITY_AMOUNT_HEADER } from "@/lib/activity-view";
 import { useAddressActivity } from "@/lib/address-lookup";
-import { RAW_UNITS_TAG } from "@/lib/feed-view";
 import styles from "../inspector.module.css";
 
 // The Amount head carries the Activity page's caveat where the number is read: engine units, never dollars.
@@ -45,13 +44,11 @@ export function ActivityTable({ addr, valid, scale }: { addr: string; valid: boo
       amount: (
         <>
           <span title={r.amountTitle ?? undefined}>{r.amount}</span>
-          {r.rawUnits && (
-            <>
+          {r.amountTag !== null && (
+            <span className={kit.sub} title={r.amountTitle ?? undefined} data-testid="inspector-activity-amount-tag">
               {" "}
-              <StatusPill tone="refused" title={r.amountTitle ?? undefined}>
-                {RAW_UNITS_TAG}
-              </StatusPill>
-            </>
+              {r.amountTag}
+            </span>
           )}
           {r.unit !== "" && (
             <span className={kit.sub} title={r.amountTitle ?? undefined} data-testid="inspector-activity-unit">

@@ -1,16 +1,23 @@
-// This account's chain actions as table rows (spec 2026-09-15 §5.3; plan 2
-// ruling R12). Times are custodied header times or nothing — a null
-// block_time renders the block number, never an invented clock. Amounts speak
-// the feed's own accounting vocabulary (lib/feed-view.ts), in the Activity
-// page's order: the figure, then what it is counted in.
+// This account's chain actions as table rows (spec 2026-09-15 §5.3). Times
+// are custodied header times or nothing — a null block_time renders the block
+// number, never an invented clock. Amounts speak the feed's own accounting
+// vocabulary (lib/feed-view.ts), in the Activity page's order: the figure, then
+// what it is counted in; a liquidation's figures are the ones the Activity
+// page prints, from the same functions.
 import { EVENT_DISPLAY_TYPES } from "./feed-data";
-import { RECORD_ONLY_TITLE, RECORD_ONLY_WORD, feedAmount, typeLabel } from "./feed-view";
+import {
+  LIQUIDATION_WORDS,
+  RAW_UNITS_TAG,
+  RECORD_ONLY_TITLE,
+  RECORD_ONLY_WORD,
+  feedAmount,
+  liquidationRepaid,
+  liquidationSeized,
+  typeLabel,
+} from "./feed-view";
 import { renderBlockTime, truncateAddress } from "./format";
-import { humanAmount } from "./human-price";
 import { txExplorerUrl, type ChainEvent } from "./inspector-data";
-import { CASH } from "./inspector-position";
 import { groupInt, plural } from "./prose";
-import { isWireDecimal, isWireScale } from "./wireGuard";
 
 /**
  * An action as this card heads its row: the Activity page's word for the same wire type, sentence-cased — one
@@ -39,8 +46,11 @@ export interface ActivityRow {
    * USDC"), or the record-only word beside a dash, which is not a figure and takes none.
    */
   readonly unit: string;
-  /** True when `amount` is the wire's raw integer because no scale was licensed — the renderer tags it visibly. */
-  readonly rawUnits: boolean;
+  /**
+   * The raw-units tag when `amount` is the wire's raw integer because no scale was licensed, set beside the digits in
+   * the Amount cell; the unit words never repeat it. Null for a placed figure or a dash.
+   */
+  readonly amountTag: string | null;
   readonly tx: { hash: string; short: string; url: string | null };
   readonly detail: string | null;
 }
@@ -50,35 +60,17 @@ export interface ActivityScale {
   readonly valueDecimalsByEngine?: Readonly<Record<string, number>>;
 }
 
-const RAW = "(raw units)";
-
 /**
- * A payload amount in its asset's own decimals. Three distinct statements,
- * never blurred: a null value is "—" (not established); a value that is not
- * a wire decimal is "unreadable" (the repo's word for a malformed wire scalar
- * — its bytes are never printed as a figure); a readable value with no
- * licensed scale prints raw and says so. Never a throw on a bad scale.
+ * A liquidation's extract in the Activity page's words, its repaid figure and seized legs exactly as that page prints
+ * them (liquidationRepaid, liquidationSeized): the guards, the exact decimals and the unit words decided once.
  */
-function payloadAmount(value: string | null, decimals: number | null): string {
-  if (value === null) return "—";
-  if (!isWireDecimal(value)) return "unreadable";
-  if (!isWireScale(decimals)) return `${value} ${RAW}`;
-  return humanAmount(BigInt(value), decimals);
-}
-
 function liquidationDetail(event: ChainEvent): string | null {
   const l = event.liquidation;
   if (l === null) return null;
-  const repaid = payloadAmount(l.debt_repaid, l.debt_decimals);
-  // The Debt Manager's repaid figure is its own USD unit, not a token amount; other engines name the token
-  // (`debt_asset` is nullable on the wire; a row with neither symbol nor asset names the debt with a dash).
-  const debtUnit = event.engine === CASH ? "USD" : (event.symbol ?? (l.debt_asset === null ? "—" : truncateAddress(l.debt_asset)));
-  // An empty seizure list is an unestablished field, stated in the Feed's words — never a silent omission.
-  const seized =
-    l.seized.length === 0
-      ? "— (no seizure legs carried)"
-      : l.seized.map((s) => `${payloadAmount(s.amount, s.decimals)} ${s.symbol ?? truncateAddress(s.asset)}`).join(", ");
-  return `liquidator ${truncateAddress(l.liquidator)} repaid ${repaid} ${debtUnit}; seized ${seized}`;
+  const words = LIQUIDATION_WORDS;
+  const { figure, unit } = liquidationRepaid(event, l);
+  const repaid = unit === null ? figure : `${figure} ${unit}`;
+  return `${words.liquidator} ${truncateAddress(l.liquidator)} · ${words.repaid} ${repaid} · ${words.seized} ${liquidationSeized(l)}`;
 }
 
 /** A figure's unit words, set off from the figure by the separator; nothing to name is nothing printed. */
@@ -103,7 +95,7 @@ export function activityRows(events: readonly ChainEvent[], scale?: ActivityScal
       amount: amount.kind === "record-only" ? "—" : amount.display,
       amountTitle: amount.kind === "record-only" ? RECORD_ONLY_TITLE : (amount.unitTitle ?? amount.unitChip),
       unit: amount.kind === "record-only" ? RECORD_ONLY_WORD : unitWords([amount.unitChip, amount.symbol]),
-      rawUnits: amount.kind === "record-only" ? false : amount.rawUnits,
+      amountTag: amount.kind === "amount" && amount.rawUnits ? RAW_UNITS_TAG : null,
       tx: { hash: event.tx_hash, short: shortHash(event.tx_hash), url: txExplorerUrl(event.chain_id, event.tx_hash) },
       detail: liquidationDetail(event),
     };

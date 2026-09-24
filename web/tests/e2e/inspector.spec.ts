@@ -282,7 +282,27 @@ test("activity amounts: the Activity page's caveat heads the column; a normalize
   await expect(amount(1)).toHaveText("— record-only");
   await expect(amount(1).getByTestId("inspector-activity-unit")).toHaveAttribute("title", "record only: this event carries no amount");
   await expect(table).not.toContainText("622 USDC");
+  // Every figure here is placed by the account's own scale: no raw word, in the Amount cell or the unit words.
   await expect(table).not.toContainText("raw units");
+  await expect(table.getByTestId("inspector-activity-amount-tag")).toHaveCount(0);
+});
+
+test("activity amounts, two scales in one column: an unscaled figure carries the raw word in its own cell, beside the digits, and the unit words never repeat it; a liquidation's figures are the Activity page's, exact", async ({ page }) => {
+  // The /v1/events example: a legacy liquidation (ray-scaled, so no scale licenses it) above a Cash borrow the
+  // account's own value_decimals place.
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR, events: EVENTS });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  const table = page.getByTestId("inspector-activity");
+  await expect(table.locator("tbody tr")).toHaveCount(2);
+  const amount = (row: number) => table.locator("tbody tr").nth(row).locator("td").nth(3);
+  const legacy = EVENTS.events[0]?.amount ?? "NEVER";
+  await expect(amount(0)).toHaveText(`${legacy} raw units · aave-scaled · USDC`);
+  await expect(amount(0).getByTestId("inspector-activity-amount-tag")).toHaveText("raw units");
+  await expect(amount(0).getByTestId("inspector-activity-unit")).toHaveText("· aave-scaled · USDC");
+  await expect(amount(1)).toHaveText("1,199.403 · normalized debt · USDC");
+  await expect(amount(1).getByTestId("inspector-activity-amount-tag")).toHaveCount(0);
+  // The extract in the Activity page's words and figures: the seized leg exact, never truncated.
+  await expect(table.locator("tbody tr").nth(0)).toContainText("liquidator 0xBBbB…0002 · debt repaid 2,500 USDC · seized 0.65625 weETH");
 });
 
 test("stress: the committed scenarios inline — two flips, one projection", async ({ page }) => {

@@ -58,12 +58,16 @@
 
 /* ---- the table's cells: the unit in its own quiet column beside the amount, the type word, the liquidation extract, the tx link ---- */
 .unit { font-size: var(--type-floor); color: var(--ink-3); }
+/* The raw word beside unscaled digits, in the Amount cell itself: the quiet register of the unit column, never a pill. */
+.amountTag { font-size: var(--type-floor); color: var(--ink-3); white-space: nowrap; }
 .type { font-size: var(--type-small); color: var(--ink-2); }
 /* The extract stacks beneath the pill and wraps inside the nowrap cell, so an em dash is read, not hovered for. */
 .detail { display: block; max-width: 44ch; margin-top: 4px; white-space: normal; line-height: 1.5; font-size: var(--type-floor); color: var(--ink-2); }
 .detail b { font-family: var(--mono); font-weight: var(--w-medium); color: var(--ink); font-variant-numeric: tabular-nums; }
 /* The wire's note is the extract's last line: page text, not a hover, at the extract's own size and measure. */
 .detailNote { display: block; margin-top: 2px; }
+/* A field name the note quotes is set as code, in the page's mono, at the note's own ink. */
+.detailNote code { font-family: var(--mono); font-size: var(--type-mono-sm); }
 /* In the untimed tail the row is dim, and its extract dims with it: the cell's ink, figures included. */
 .detailDim, .detailDim b { color: inherit; }
 .tx { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-3); text-decoration: none; }

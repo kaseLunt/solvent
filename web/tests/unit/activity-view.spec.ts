@@ -39,11 +39,13 @@ import {
   sinceBlockDroppedNotice,
   typeLabel,
   type ActivityInput,
+  type LiquidationPart,
   type LiveStripInput,
+  type NotePart,
 } from "../../lib/activity-view";
 import { EVENT_DISPLAY_TYPES } from "../../lib/feed-data";
-import { RAW_UNITS_TAG, RECORD_ONLY_TITLE, RECORD_ONLY_WORD, feedTakeaway } from "../../lib/feed-view";
-import { EM_DASH } from "../../lib/format";
+import { LIQUIDATION_WORDS, RAW_UNITS_TAG, RECORD_ONLY_TITLE, RECORD_ONLY_WORD, feedTakeaway } from "../../lib/feed-view";
+import { EM_DASH, truncateAddress } from "../../lib/format";
 import { DEMO_BOOK, DEMO_FEED_PAGE_1 } from "../fixtures/demo";
 import { FEED_CROSS_PAGE_1, FEED_ENGINE_AAVE_PAGE_1, FEED_POSTURE_SNAPSHOT } from "../fixtures/feed";
 
@@ -77,6 +79,13 @@ const base = (over: Partial<ActivityInput> = {}): ActivityInput => ({
 const chipValue = (input: ActivityInput, label: string): string | undefined =>
   deriveActivityView(input).chips.find((c) => c.label === label)?.value;
 
+/** The note's words as a reader sees them: every part's text, a bold part's own parts read in turn. */
+const plainNote = (parts: readonly NotePart[]): string =>
+  parts.map((part) => (part.kind === "strong" ? plainNote(part.parts) : part.text)).join("");
+
+/** The extract's line as the table prints it: every part's text, in order. */
+const plainLine = (parts: readonly LiquidationPart[]): string => parts.map((part) => part.text).join("");
+
 test("rows: 50 from the demo page; the last two are the untimed tail — dim, their block numbers where the time would be; every other row carries its custodied time", () => {
   const v = deriveActivityView(base());
   expect(v.rows).toHaveLength(50);
@@ -102,7 +111,7 @@ test("rows: three liquidations, each the crit tone with its typed extract behind
   expect(v.rows.filter((r) => r.type !== "liquidation").every((r) => r.detail === null)).toBe(true);
   // The extract as parts the table prints visibly: the liquidator with its Inspector link, the amounts in the
   // extract's own units, an unestablished bonus an em dash (never an estimate), the configured one in bps.
-  expect(liquidations[0]?.detail).toEqual({
+  expect(liquidations[0]?.detail).toMatchObject({
     liquidator: "0xBBbB000000000000000000000000000000000002",
     liquidatorHref: "/inspector/0xBBbB000000000000000000000000000000000002",
     repaid: "2,500",
@@ -110,8 +119,8 @@ test("rows: three liquidations, each the crit tone with its typed extract behind
     seized: "0.65625 weETH",
     bonusRealized: EM_DASH,
     bonusConfigured: "500 bps",
-    note: expect.stringContaining("never estimated"),
   });
+  expect(plainNote(liquidations[0]?.detail?.note ?? [])).toContain("never estimated");
   // The DM extracts carry no debt asset and no configured bonus: null is a dash, never "0"; their repaid figure is
   // the Debt Manager's own USD unit.
   expect(liquidations[1]?.detail).toMatchObject({ repaidUnit: "USD", bonusRealized: EM_DASH, bonusConfigured: EM_DASH });
@@ -142,14 +151,23 @@ test("rows: amounts follow the feed's unit law — DM scaled by the wire's own v
   expect(scaled[0]).toMatchObject({ amount: "252.733333", unit: "normalized debt · USDC" });
   expect(scaled[0]?.unitTitle).toContain("Debt Manager normalized debt units at the engine's own value_decimals");
 
+  expect(scaled[0]?.amountTag).toBeNull();
+
+  // An unscaled figure carries its raw word IN the Amount cell, beside the digits; the unit cell does not say it twice.
   const raw = deriveActivityView(base({ valueDecimals: {} })).rows;
-  expect(raw[0]).toMatchObject({ amount: "252733333", unit: `normalized debt · ${RAW_UNITS_TAG} · USDC` });
+  expect(raw[0]).toMatchObject({ amount: "252733333", amountTag: RAW_UNITS_TAG, unit: "normalized debt · USDC" });
 
   const aaveIndex = ROWS.findIndex((e) => e.engine === "aave_v3_etherfi" && e.amount !== null);
-  expect(scaled[aaveIndex]).toMatchObject({ amount: ROWS[aaveIndex]?.amount, unit: `aave-scaled · ${RAW_UNITS_TAG} · USDC` });
+  expect(scaled[aaveIndex]).toMatchObject({ amount: ROWS[aaveIndex]?.amount, amountTag: RAW_UNITS_TAG, unit: "aave-scaled · USDC" });
+  // Scaled Cash beside raw legacy integers: every unscaled figure is tagged where it is read, and only those.
+  for (const [i, row] of scaled.entries()) {
+    expect(row.unit).not.toContain(RAW_UNITS_TAG);
+    const event = ROWS[i];
+    expect(row.amountTag).toBe(event?.amount !== null && event?.engine === "aave_v3_etherfi" ? RAW_UNITS_TAG : null);
+  }
 
   const recordOnlyIndex = ROWS.findIndex((e) => e.amount === null);
-  expect(scaled[recordOnlyIndex]).toMatchObject({ amount: EM_DASH, recordOnly: true, unit: "record-only", unitTitle: RECORD_ONLY_TITLE });
+  expect(scaled[recordOnlyIndex]).toMatchObject({ amount: EM_DASH, amountTag: null, recordOnly: true, unit: "record-only", unitTitle: RECORD_ONLY_TITLE });
   expect(RECORD_ONLY_WORD).toBe("record-only");
   // The numeric column holds only figures or dashes; the record's word is the unit cell's, flagged so the table sets
   // the dash as a statement, never a figure; every valued row is not.
@@ -172,7 +190,7 @@ test("the book's own value_decimals are a second scale source beneath the stream
   expect(rows[0]?.unit).not.toContain(RAW_UNITS_TAG);
   // The legacy market's 8 is its base-currency scale, a different unit from a ray-scaled token amount: never applied.
   const aaveIndex = ROWS.findIndex((e) => e.engine === "aave_v3_etherfi" && e.amount !== null);
-  expect(rows[aaveIndex]).toMatchObject({ amount: ROWS[aaveIndex]?.amount, unit: `aave-scaled · ${RAW_UNITS_TAG} · USDC` });
+  expect(rows[aaveIndex]).toMatchObject({ amount: ROWS[aaveIndex]?.amount, amountTag: RAW_UNITS_TAG, unit: "aave-scaled · USDC" });
 
   // The stream wins where it describes an engine; the book fills only what the stream has not described.
   const bookWith = (engines: readonly unknown[]): unknown => ({ ...DEMO_BOOK, engines });
@@ -191,14 +209,15 @@ test("the book's own value_decimals are a second scale source beneath the stream
   // No scale at all: the raw integer, tagged — the same arm as before any source answered.
   expect(deriveActivityView(base({ valueDecimals: activityScales(null, null) })).rows[0]).toMatchObject({
     amount: "252733333",
-    unit: `normalized debt · ${RAW_UNITS_TAG} · USDC`,
+    amountTag: RAW_UNITS_TAG,
+    unit: "normalized debt · USDC",
   });
 });
 
-test("a liquidation names the unit it repaid: the Debt Manager's own USD, the legacy row's symbol — the address only when no symbol is carried; a dash has no unit and an unscaled figure is never dressed as one", () => {
+test("a liquidation names the unit it repaid: the Debt Manager's own USD, the legacy row's symbol — its debt asset shortened when no symbol is carried, a dash when neither is; a dash or an unreadable figure has no unit, and an unscaled figure is tagged raw, never dressed as dollars or tokens", () => {
   const liquidations = deriveActivityView(base()).rows.filter((r) => r.type === "liquidation");
   const line = (i: number): string => `debt repaid ${liquidations[i]?.detail?.repaid ?? ""} ${liquidations[i]?.detail?.repaidUnit ?? ""}`;
-  // The demo's Cash liquidations are sub-dollar positions: the figures are the fixture's own.
+  // The demo's Cash liquidations are sub-dollar positions: the figures are the fixture's own, exact, never truncated.
   expect(line(0)).toBe("debt repaid 2,500 USDC");
   expect(line(1)).toBe("debt repaid 0.35812 USD");
   expect(line(2)).toBe("debt repaid 0.409762 USD");
@@ -206,20 +225,87 @@ test("a liquidation names the unit it repaid: the Debt Manager's own USD, the le
   const legacy = ROWS[5];
   if (legacy?.liquidation === null || legacy?.liquidation === undefined) throw new Error("fixture: row 5 is the legacy liquidation");
   const detail = (event: (typeof ROWS)[number]) => deriveActivityView(base({ rows: [event] })).rows[0]?.detail;
-  expect(detail({ ...legacy, symbol: undefined })).toMatchObject({ repaid: "2,500", repaidUnit: "0xA0b86991…" });
-  expect(detail({ ...legacy, symbol: undefined, liquidation: { ...legacy.liquidation, debt_asset: null } })).toMatchObject({ repaid: "2,500", repaidUnit: null });
+  const debtAsset = legacy.liquidation.debt_asset ?? "";
+  expect(detail({ ...legacy, symbol: undefined })).toMatchObject({ repaid: "2,500", repaidUnit: truncateAddress(debtAsset) });
+  expect(detail({ ...legacy, symbol: undefined, liquidation: { ...legacy.liquidation, debt_asset: null } })).toMatchObject({ repaid: "2,500", repaidUnit: EM_DASH });
   expect(detail({ ...legacy, liquidation: { ...legacy.liquidation, debt_repaid: null } })).toMatchObject({ repaid: EM_DASH, repaidUnit: null });
+  // Not a wire decimal: the word, never its bytes, and no unit beside it — scaled or not.
+  expect(detail({ ...legacy, liquidation: { ...legacy.liquidation, debt_repaid: "1e6", debt_decimals: null } })).toMatchObject({ repaid: "unreadable", repaidUnit: null });
+  expect(detail({ ...legacy, liquidation: { ...legacy.liquidation, debt_repaid: "1e6" } })).toMatchObject({ repaid: "unreadable", repaidUnit: null });
   // No scale on the extract: the wire's digits verbatim, tagged raw — never grouped, never a USD or token figure.
   expect(detail({ ...legacy, liquidation: { ...legacy.liquidation, debt_decimals: null } })).toMatchObject({ repaid: "2500000000", repaidUnit: RAW_UNITS_TAG });
   const cash = ROWS[19];
   if (cash?.liquidation === null || cash?.liquidation === undefined) throw new Error("fixture: row 19 is a Cash liquidation");
   expect(detail({ ...cash, liquidation: { ...cash.liquidation, debt_decimals: null } })).toMatchObject({ repaid: "358120", repaidUnit: RAW_UNITS_TAG });
+  expect(detail({ ...cash, liquidation: { ...cash.liquidation, debt_decimals: -1 } })).toMatchObject({ repaid: "358120", repaidUnit: RAW_UNITS_TAG });
+  // A seizure leg the guards refuse is never scaled and never a throw.
+  const leg = legacy.liquidation.seized[0];
+  if (leg === undefined) throw new Error("fixture: the legacy liquidation seized one leg");
+  expect(detail({ ...legacy, liquidation: { ...legacy.liquidation, seized: [{ ...leg, amount: "6.5e17" }] } })?.seized).toBe("unreadable (weETH)");
+  expect(detail({ ...legacy, liquidation: { ...legacy.liquidation, seized: [{ ...leg, decimals: 1001 }] } })?.seized).toBe(`${leg.amount} ${RAW_UNITS_TAG} (weETH)`);
+});
+
+test("the extract's line is the lib's, word for word: the liquidator's link, then the repaid figure with its unit, the seized legs and both bonus figures — every word and separator from here, the figures and the unit marked for the table", () => {
+  const liquidations = deriveActivityView(base()).rows.filter((r) => r.type === "liquidation");
+  const legacy = liquidations[0]?.detail;
+  if (legacy === undefined || legacy === null) throw new Error("fixture: the legacy extract");
+  expect(plainLine(legacy.line)).toBe("liquidator 0xBBbB…0002 · debt repaid 2,500 USDC · seized 0.65625 weETH · bonus realized — / configured 500 bps");
+  expect(legacy.line.filter((part) => part.kind === "liquidator")).toEqual([
+    { kind: "liquidator", text: "0xBBbB…0002", href: "/inspector/0xBBbB000000000000000000000000000000000002", title: "0xBBbB000000000000000000000000000000000002" },
+  ]);
+  expect(legacy.line.filter((part) => part.kind === "figure").map((part) => part.text)).toEqual(["2,500", "0.65625 weETH", EM_DASH, "500 bps"]);
+  expect(legacy.line.filter((part) => part.kind === "unit").map((part) => part.text)).toEqual(["USDC"]);
+  // The words are the one set both surfaces print.
+  for (const word of Object.values(LIQUIDATION_WORDS)) expect(plainLine(legacy.line)).toContain(word);
+  expect(plainLine(liquidations[1]?.detail?.line ?? [])).toContain("debt repaid 0.35812 USD · seized");
+  // A dash has no unit part: nothing is named beside a figure that is not there.
+  const row = ROWS[5];
+  if (row?.liquidation === null || row?.liquidation === undefined) throw new Error("fixture: row 5 is the legacy liquidation");
+  const dashed = deriveActivityView(base({ rows: [{ ...row, liquidation: { ...row.liquidation, debt_repaid: null } }] })).rows[0]?.detail;
+  expect(dashed?.line.filter((part) => part.kind === "unit")).toEqual([]);
+  expect(plainLine(dashed?.line ?? [])).toContain(`debt repaid ${EM_DASH} · seized`);
+  // A bonus outside the Decimal pattern is the unreadable word, never its bytes with "bps" beside them.
+  const skewed = deriveActivityView(
+    base({ rows: [{ ...row, liquidation: { ...row.liquidation, configured_bonus_bps: "1e6", realized_bonus_bps: "1.5" } }] }),
+  ).rows[0]?.detail;
+  expect(skewed).toMatchObject({ bonusRealized: "unreadable", bonusConfigured: "unreadable" });
+  expect(plainLine(skewed?.line ?? [])).toContain("bonus realized unreadable / configured unreadable");
+  expect(plainLine(skewed?.line ?? [])).not.toContain("bps");
+});
+
+test("the wire's note keeps every word, its code spans read as code: no backtick prints, and an unbalanced marker stays literal", () => {
+  const legacy = ROWS[5];
+  if (legacy?.liquidation === null || legacy?.liquidation === undefined) throw new Error("fixture: row 5 is the legacy liquidation");
+  const wire = legacy.liquidation.note;
+  expect(wire).toContain("`configured_bonus_bps`");
+  const note = deriveActivityView(base({ rows: [legacy] })).rows[0]?.detail?.note ?? [];
+  expect(note.flatMap((part) => (part.kind === "code" ? [part.text] : []))).toEqual(["configured_bonus_bps", "realized_bonus_bps"]);
+  expect(plainNote(note)).toBe(wire.replaceAll("`", ""));
+  expect(plainNote(note)).not.toContain("`");
+  // Bold reads its own code spans; a lone marker is the note's own character.
+  const marked = deriveActivityView(base({ rows: [{ ...legacy, liquidation: { ...legacy.liquidation, note: "a **bold `x`** word and a lone ` tick" } }] })).rows[0]?.detail?.note;
+  expect(marked).toEqual([
+    { kind: "text", text: "a " },
+    { kind: "strong", parts: [{ kind: "text", text: "bold " }, { kind: "code", text: "x" }] },
+    { kind: "text", text: " word and a lone ` tick" },
+  ]);
+  // No note carried: no parts, so nothing prints.
+  expect(deriveActivityView(base({ rows: [{ ...legacy, liquidation: { ...legacy.liquidation, note: "" } }] })).rows[0]?.detail?.note).toEqual([]);
+});
+
+test("a wire type that names an Object.prototype member prints verbatim in the row, never the prototype", () => {
+  const first = ROWS[0];
+  if (first === undefined) throw new Error("fixture: the demo page has rows");
+  for (const type of ["__proto__", "constructor", "toString"]) {
+    const row = deriveActivityView(base({ rows: [{ ...first, type: type as (typeof ROWS)[number]["type"] }] })).rows[0];
+    expect(row?.typeLabel).toBe(type);
+  }
 });
 
 test("the three raw enum words print plain — in the row and on the type buttons — with the wire word kept for the title; every other type is its own word", () => {
   expect(typeLabel("collateral_enabled")).toBe("collateral enabled");
   expect(typeLabel("collateral_disabled")).toBe("collateral disabled");
-  expect(typeLabel("deficit_created")).toBe("bad debt realised");
+  expect(typeLabel("deficit_created")).toBe("bad debt realized");
   for (const word of ["borrow", "repay", "supply", "withdraw", "liquidation"]) expect(typeLabel(word)).toBe(word);
   // A word outside the vocabulary is printed as the wire sent it, never guessed at.
   expect(typeLabel("flash_thing")).toBe("flash_thing");
@@ -229,7 +315,7 @@ test("the three raw enum words print plain — in the row and on the type button
 
   const rows = deriveActivityView(base()).rows;
   const deficit = rows.find((r) => r.type === "deficit_created");
-  expect(deficit).toMatchObject({ typeLabel: "bad debt realised", tone: "crit" });
+  expect(deficit).toMatchObject({ typeLabel: "bad debt realized", tone: "crit" });
   expect(rows.find((r) => r.type === "collateral_enabled")?.typeLabel).toBe("collateral enabled");
   expect(rows.find((r) => r.type === "borrow")?.typeLabel).toBe("borrow");
   expect(rows.every((r) => r.typeLabel === typeLabel(r.type))).toBe(true);
@@ -238,11 +324,11 @@ test("the three raw enum words print plain — in the row and on the type button
   const filtered = ROWS.filter((event) => event.type === "deficit_created" || event.type === "collateral_enabled");
   const types = ["deficit_created", "collateral_enabled"] as const;
   expect(h1(base({ rows: filtered, types, hasMore: false }))).toBe(
-    `4 chain actions loaded, filtered to bad debt realised and collateral enabled; the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`,
+    `4 chain actions loaded, filtered to bad debt realized and collateral enabled; the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`,
   );
   const lone = ROWS.filter((event) => event.type === "deficit_created");
   expect(h1(base({ rows: lone, types: ["deficit_created"], hasMore: false }))).toBe(
-    `1 chain action loaded, bad debt realised, at ${nb("Aug 8, 20:06 UTC")}; that is the only action matching this filter.`,
+    `1 chain action loaded, bad debt realized, at ${nb("Aug 8, 20:06 UTC")}; that is the only action matching this filter.`,
   );
   for (const input of [base({ rows: filtered, types, hasMore: false }), base({ rows: lone, types: ["deficit_created"], hasMore: false })]) {
     expect(h1(input)).not.toContain("_");
@@ -302,7 +388,7 @@ test("header: the kicker names the scope, the headline IS feedTakeaway's two par
   expect(v.headline).toEqual({
     ...takeaway,
     tone: "neutral",
-    dek: "1 of them records bad debt being realised. 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
+    dek: "1 of them records bad debt being realized. 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
   });
   expect(v.headline.emphasis).toBe("3 liquidations among the 50 chain actions loaded,");
   expect(v.headline.rest).toBe(`the newest at ${nb("Aug 8, 20:21 UTC")}; more exist beyond these.`);
@@ -330,7 +416,7 @@ test("the dek counts what is loaded, each sentence conditional on its own count:
   expect([deficits, cash, legacy, untimed]).toEqual([1, 21, 29, 2]);
   expect(cash + legacy).toBe(ROWS.length);
   expect(deriveActivityView(base()).headline.dek).toBe(
-    `${String(deficits)} of them records bad debt being realised. ${String(cash)} are on Cash and ${String(legacy)} on the legacy Aave v3 market. ${String(untimed)} have no block time yet and are listed last, by chain and then block number.`,
+    `${String(deficits)} of them records bad debt being realized. ${String(cash)} are on Cash and ${String(legacy)} on the legacy Aave v3 market. ${String(untimed)} have no block time yet and are listed last, by chain and then block number.`,
   );
 
   // No deficit, no tail: only the split is said. One engine among the rows: "All n".
@@ -347,14 +433,14 @@ test("the dek counts what is loaded, each sentence conditional on its own count:
   const deficit = ROWS.find((e) => e.type === "deficit_created");
   if (deficit === undefined) throw new Error("fixture: the demo page carries a deficit_created row");
   expect(deriveActivityView(base({ rows: [deficit, { ...deficit, log_index: 99 }, ...cashOnly] })).headline.dek).toBe(
-    "2 of them record bad debt being realised. 20 are on Cash and 2 on the legacy Aave v3 market.",
+    "2 of them record bad debt being realized. 20 are on Cash and 2 on the legacy Aave v3 market.",
   );
   // An engine this page does not name is counted as such, never folded into one of the two.
   const foreign = [...cashOnly.slice(0, 2), { ...deficit, type: "borrow" as const, engine: "morpho_blue" }];
   expect(deriveActivityView(base({ rows: foreign })).headline.dek).toBe("2 are on Cash and 1 on an engine this page does not name.");
   // One row: the headline names it, the dek says where it sits.
   expect(deriveActivityView(base({ rows: [deficit] })).headline.dek).toBe(
-    "It records bad debt being realised. It is on the legacy Aave v3 market.",
+    "It records bad debt being realized. It is on the legacy Aave v3 market.",
   );
 
   // One engine chosen: no split and no tail (a null time is a per-row fallback there); nothing else to say, so the order is said.
@@ -418,7 +504,7 @@ test("chips: Scope · View · Order · Newest · Filter applied in that order �
   );
   // Types in the page's own words; an empty list is every type; an account the service echoed is said, shortened.
   expect(appliedFilter({ filter: { engine: "debt_manager", types: ["deficit_created", "collateral_enabled", "liquidation"], since_block: null }, limit: 1000, served_at })).toBe(
-    "Cash · bad debt realised, collateral enabled and liquidation · any block · 1,000 per page",
+    "Cash · bad debt realized, collateral enabled and liquidation · any block · 1,000 per page",
   );
   expect(appliedFilter({ filter: { engine: null, types: [], since_block: null }, limit: 25, served_at })).toBe("all engines · all types · any block · 25 per page");
   expect(appliedFilter({ filter: { engine: null, account: "0x7a3f19e2c8b4d0a6f1e3b5c7d9a2f4e6b8c0c21e", types: null, since_block: null }, limit: 25, served_at })).toBe(

@@ -23,9 +23,10 @@
 // row in the untimed tail;
 // load more appending and the tiles counting; degraded envelopes and the
 // empty filter as real answers; amount units named or raw, never a dollar —
-// a Cash figure placed by the book's own value_decimals, raw and tagged when
-// no source licenses a scale (/v1/book is routed explicitly wherever an
-// amount is asserted); a liquidation's repaid unit named; the three raw enum
+// a Cash figure placed by the book's own value_decimals, raw and tagged in its
+// own cell when no source licenses a scale (/v1/book is routed explicitly
+// wherever an amount is asserted); a liquidation's repaid unit named and its
+// note's code spans read as code; the three raw enum
 // types and the applied filter said in words;
 // the live strip as its own instrument, one plain line naming no roadmap;
 // a broken ordering as a standing alert; the doctrine in the drawer; answer
@@ -50,7 +51,8 @@ import {
   ACTIVITY_TAIL_NOTICE_UNORDERED,
   FILTER_APPLIED_LABEL,
 } from "../../lib/activity-view";
-import { RECORD_ONLY_TITLE, feedTakeaway, type FeedTakeawayScope } from "../../lib/feed-view";
+import { inlineParts } from "../../lib/api-view";
+import { RAW_UNITS_TAG, RECORD_ONLY_TITLE, feedTakeaway, type FeedTakeawayScope } from "../../lib/feed-view";
 import { DEMO_BOOK, DEMO_FEED_PAGE_1 } from "../fixtures/demo";
 import {
   FEED_CROSS_PAGE_1,
@@ -67,6 +69,9 @@ import {
 } from "../fixtures/feed";
 
 const CORS = { "access-control-allow-origin": "*" };
+
+/** A wire note as the page prints it: its code spans' markers read as formatting, every word kept. */
+const noteWords = (note: string): string => inlineParts(note).map((part) => part.text).join("");
 
 function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
   return route.fulfill({ status, headers: CORS, contentType: "application/json", body: JSON.stringify(body) });
@@ -156,7 +161,7 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "neutral");
   await expect(page.getByTestId("activity-verdict")).toContainText("Activity · all engines");
   await expect(page.getByTestId("activity-verdict-dek")).toHaveText(
-    "1 of them records bad debt being realised. 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
+    "1 of them records bad debt being realized. 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
   );
 
   await expect(chip(page, "Scope")).toContainText("all engines");
@@ -188,20 +193,28 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   await expect(rows(page).first()).toHaveAttribute("data-testid", `activity-row-10·${first.tx_hash}·38·0`);
 
   // The amount stands alone in its right-aligned cell — a Cash figure placed by the book's own value_decimals (the
-  // stream is muted, so the book is the one scale source) — and its unit sits in the quiet column beside it, not
-  // upper-cased and no longer tagged raw.
+  // stream is muted, so the book is the one scale source), carrying no raw word — and its unit sits in the quiet
+  // column beside it, not upper-cased.
   const headCells = page.getByTestId("activity-table").locator("thead th");
   await expect(headCells).toHaveText(["When", "Engine", "Type", "Account", ACTIVITY_AMOUNT_HEADER, "Unit", "Tx"]);
   expect(first.amount).toBe("252733333");
   await expect(head.locator("td").nth(4)).toHaveText("252.733333");
   await expect(head.locator("td").nth(4)).toHaveCSS("text-align", "right");
   await expect(head.locator("td").nth(4).getByTestId("activity-unit")).toHaveCount(0);
+  await expect(head.getByTestId("activity-amount-tag")).toHaveCount(0);
   await expect(head.locator("td").nth(5).getByTestId("activity-unit")).toHaveText("normalized debt · USDC");
   await expect(head.getByTestId("activity-unit")).toHaveCSS("text-transform", "none");
-  // The legacy market's scaled rows stay raw and tagged: the book's 8 is its base currency, not a token's decimals.
+  // The legacy market's scaled rows stay raw: the book's 8 is its base currency, not a token's decimals. One column
+  // holds scaled Cash figures and raw legacy integers, so the raw word sits IN the Amount cell, beside the digits, in
+  // the quiet register — and the unit cell does not say it twice.
   const legacy = DEMO_FEED_PAGE_1.events.findIndex((event) => event.engine === "aave_v3_etherfi" && event.amount !== null);
-  await expect(rows(page).nth(legacy).locator("td").nth(4)).toHaveText(DEMO_FEED_PAGE_1.events[legacy]?.amount ?? "NEVER");
-  await expect(rows(page).nth(legacy).getByTestId("activity-unit")).toHaveText("aave-scaled · raw units · USDC");
+  const legacyAmount = DEMO_FEED_PAGE_1.events[legacy]?.amount ?? "NEVER";
+  await expect(rows(page).nth(legacy).locator("td").nth(4)).toHaveText(`${legacyAmount} ${RAW_UNITS_TAG}`);
+  await expect(rows(page).nth(legacy).locator("td").nth(4).getByTestId("activity-amount")).toHaveText(legacyAmount);
+  await expect(rows(page).nth(legacy).locator("td").nth(4).getByTestId("activity-amount-tag")).toHaveText(RAW_UNITS_TAG);
+  await expect(rows(page).nth(legacy).getByTestId("activity-amount-tag")).not.toHaveClass(/addr/);
+  await expect(rows(page).nth(legacy).getByTestId("activity-unit")).toHaveText("aave-scaled · USDC");
+  await expect(page.getByTestId("activity-unit").filter({ hasText: RAW_UNITS_TAG })).toHaveCount(0);
 
   // No unit on this page licenses a dollar figure.
   expect((await page.getByTestId("activity-table").innerText()).includes("$")).toBe(false);
@@ -216,8 +229,9 @@ test("no licensed scale: a book that states no value_decimals, or a book read th
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
   await expect(rows(page)).toHaveCount(50);
-  await expect(head().locator("td").nth(4)).toHaveText("252733333");
-  await expect(head().getByTestId("activity-unit")).toHaveText("normalized debt · raw units · USDC");
+  await expect(head().locator("td").nth(4)).toHaveText(`252733333 ${RAW_UNITS_TAG}`);
+  await expect(head().getByTestId("activity-amount-tag")).toHaveText(RAW_UNITS_TAG);
+  await expect(head().getByTestId("activity-unit")).toHaveText("normalized debt · USDC");
 
   // A failed read: the same raw arm, and the page's own state is untouched by it.
   await page.unroute("**/v1/book*");
@@ -225,8 +239,8 @@ test("no licensed scale: a book that states no value_decimals, or a book read th
   await page.goto("/feed");
   await expect(rows(page)).toHaveCount(50);
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
-  await expect(head().locator("td").nth(4)).toHaveText("252733333");
-  await expect(head().getByTestId("activity-unit")).toHaveText("normalized debt · raw units · USDC");
+  await expect(head().locator("td").nth(4)).toHaveText(`252733333 ${RAW_UNITS_TAG}`);
+  await expect(head().getByTestId("activity-unit")).toHaveText("normalized debt · USDC");
   await expect(page.getByTestId("activity-error")).toHaveCount(0);
   await expect(page.getByTestId("activity-refusal")).toHaveCount(0);
 });
@@ -255,7 +269,7 @@ test("the three raw enum words print plain: the type buttons, the Type cells and
   for (const [wire, word] of [
     ["collateral_enabled", "collateral enabled"],
     ["collateral_disabled", "collateral disabled"],
-    ["deficit_created", "bad debt realised"],
+    ["deficit_created", "bad debt realized"],
     ["borrow", "borrow"],
   ] as const) {
     await expect(page.getByTestId(`activity-type-${wire}`)).toHaveText(word);
@@ -265,7 +279,7 @@ test("the three raw enum words print plain: the type buttons, the Type cells and
   // The write-off's crit pill says what happened; its wire word rides the title.
   const deficit = DEMO_FEED_PAGE_1.events.findIndex((event) => event.type === "deficit_created");
   const pill = rows(page).nth(deficit).locator('[data-tone="crit"]');
-  await expect(pill).toHaveText("bad debt realised");
+  await expect(pill).toHaveText("bad debt realized");
   await expect(pill).toHaveAttribute("title", "deficit_created");
   const enabled = DEMO_FEED_PAGE_1.events.findIndex((event) => event.type === "collateral_enabled");
   await expect(rows(page).nth(enabled).locator("td").nth(2)).toHaveText("collateral enabled");
@@ -280,9 +294,9 @@ test("the three raw enum words print plain: the type buttons, the Type cells and
   const of = (...types: string[]) => DEMO_FEED_PAGE_1.events.filter((event) => types.includes(event.type));
   await expect(rows(page)).toHaveCount(1);
   const one = takeawayText(of("deficit_created"), "cross-engine", false, asServed(served, { types: ["deficit_created"] }));
-  expect(one).toBe(`1 chain action loaded, bad debt realised, at ${nb("Aug 8, 20:06 UTC")}; that is the only action matching this filter.`);
+  expect(one).toBe(`1 chain action loaded, bad debt realized, at ${nb("Aug 8, 20:06 UTC")}; that is the only action matching this filter.`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(one);
-  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("all engines · bad debt realised · any block · 50 per page");
+  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("all engines · bad debt realized · any block · 50 per page");
 
   await page.getByTestId("activity-type-collateral_enabled").click();
   await expect(rows(page)).toHaveCount(4);
@@ -293,7 +307,7 @@ test("the three raw enum words print plain: the type buttons, the Type cells and
     asServed(served, { types: ["deficit_created", "collateral_enabled"] }),
   );
   expect(two).toBe(
-    `4 chain actions loaded, filtered to bad debt realised and collateral enabled; the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`,
+    `4 chain actions loaded, filtered to bad debt realized and collateral enabled; the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`,
   );
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(two);
   await expect(page.getByTestId("activity-verdict")).not.toContainText(/collateral_|deficit_/);
@@ -372,8 +386,12 @@ test("the ledger view pins the type to liquidation: the request says so, three r
   const notes = page.getByTestId("activity-liquidation-note");
   await expect(notes).toHaveCount(3);
   for (const [i, event] of LEDGER_PAGE.events.entries()) {
+    const note = event.liquidation?.note ?? "NEVER";
     await expect(notes.nth(i)).toBeVisible();
-    await expect(notes.nth(i)).toHaveText(event.liquidation?.note ?? "NEVER");
+    // Every word of the wire's note, its backticked field names set as code: no marker prints.
+    await expect(notes.nth(i)).toHaveText(noteWords(note));
+    await expect(notes.nth(i)).not.toContainText("`");
+    await expect(notes.nth(i).locator("code")).toHaveText(inlineParts(note).filter((part) => part.kind === "code").map((part) => part.text));
     await expect(extracts.nth(i)).not.toHaveAttribute("title", /.+/);
   }
   const ledgerSentence = takeawayText(LEDGER_PAGE.events, "cross-engine", false, asServed(LEDGER_PAGE.served_at, { ledger: true }));
@@ -414,7 +432,8 @@ test("all-actions view: an UNESTABLISHED extract is visible on cold load — the
   // reach of a keyboard and of a touch screen).
   await expect(extract.getByTestId("activity-liquidation-note")).toBeVisible();
   await expect(extract).toContainText("never estimated");
-  await expect(extract).toContainText(FEED_CROSS_PAGE_1.events[0]?.liquidation?.note ?? "NEVER");
+  await expect(extract).toContainText(noteWords(FEED_CROSS_PAGE_1.events[0]?.liquidation?.note ?? "NEVER"));
+  await expect(extract.getByTestId("activity-liquidation-note").locator("code")).toHaveText(["configured_bonus_bps", "realized_bonus_bps"]);
   await expect(extract).not.toHaveAttribute("title", /.+/);
   await expect(extract.getByTestId("activity-liquidator")).toHaveAttribute("href", /^\/inspector\/0x/);
   // The extract sits inside its own row, beneath the crit pill.
@@ -686,8 +705,12 @@ test("amount units render honestly: named, raw where unlicensed and tagged, a re
   await expect(units.filter({ hasText: "aave-scaled" })).toHaveCount(1);
   await expect(units.filter({ hasText: "normalized debt" })).toHaveCount(1);
   await expect(units.filter({ hasText: "opaque units" })).toHaveCount(1);
-  // With the stream muted and a book that states no scale, no engine has a licensed scale: every non-null amount is raw and says so.
-  await expect(units.filter({ hasText: "raw units" })).toHaveCount(3);
+  // With the stream muted and a book that states no scale, no engine has a licensed scale: every non-null amount is raw
+  // and says so in its own cell, beside the digits — the unit cell does not say it twice.
+  await expect(page.getByTestId("activity-amount-tag")).toHaveCount(3);
+  await expect(page.getByTestId("activity-amount-tag")).toHaveText([RAW_UNITS_TAG, RAW_UNITS_TAG, RAW_UNITS_TAG]);
+  await expect(units.filter({ hasText: RAW_UNITS_TAG })).toHaveCount(0);
+  await expect(rows(page).nth(2).getByTestId("activity-amount-tag")).toHaveCount(0);
 
   // The record-only row (unit `none`, null amount) is its own statement, not a zero — and not a value: its amount cell
   // holds a dash set in the table's dim sub register, never the mono of a figure, and its word stands in the unit
