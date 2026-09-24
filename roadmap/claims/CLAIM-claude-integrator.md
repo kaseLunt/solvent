@@ -30,8 +30,8 @@ allowed_paths:
   - docs/readme/**
 scope_hash: sha256:8e09f2dd45841f26336c83df64aaa4e04678633eaedf176cfc47188e428d3d1c
 issued_at: 2026-09-24T03:34:11Z
-lease_expires: 2026-09-24T11:34:11Z
-updated_at: 2026-09-24T03:34:11Z
+lease_expires: 2026-09-25T03:57:31Z
+updated_at: 2026-09-24T03:57:31Z
 ---
 
 # Claim: claude-integrator -> W3
