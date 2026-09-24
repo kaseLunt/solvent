@@ -12,6 +12,7 @@
 // before it is formatted; a bucket the rollup withheld or never recorded — or a
 // figure that fails its guard — is a dashed tile with the gap's word, never a 0
 // and never a throw. The surface prints this and decides nothing twice.
+import { answeredUnreadably, malformedStatus } from "./fetch-failure";
 import { EM_DASH, MINUS, formatBlock, truncateAddress } from "./format";
 import { humanUsd } from "./human-usd";
 import { exactUtc, humanUtc } from "./human-utc";
@@ -19,11 +20,12 @@ import { engineName } from "./inspector-headline";
 import type { LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
 import { signedBookMoney } from "./money";
-import type {
-  ObservatoryEngine,
-  ObservatorySeriesPoint,
-  ObservatorySeriesResponse,
-  RateIndex,
+import {
+  ObservatoryFetchError,
+  type ObservatoryEngine,
+  type ObservatorySeriesPoint,
+  type ObservatorySeriesResponse,
+  type RateIndex,
 } from "./observatory-data";
 import {
   buildBucketAxis,
@@ -107,8 +109,21 @@ export interface HistoryReading {
   readonly message: string | null;
   /** The service's own words, verbatim, for the state card's disclosure (status, code, message and URL); null when there are none. */
   readonly serviceSaid?: string | null;
-  /** The HTTP status a failed fetch answered with; null when the request never reached the service. */
+  /** The HTTP status a failed fetch answered with; null when the page got no response to read a status from. */
   readonly status?: number | null;
+  /** The service answered with a 2xx body the page could not read: an answer arrived, and it is unreadable, not unfetched. */
+  readonly unreadable?: boolean;
+}
+
+/**
+ * A failed series read as the view reads it: the fetch's own words for the card's disclosure; the envelope's status, or
+ * the status of an answer whose body the client could not read — unreadable when that answer was a 2xx, a failed
+ * request when it was a proxy's error page; no status when no response came back to read one from.
+ */
+export function historyFailure(cause: unknown): { message: string; serviceSaid: string; status: number | null; unreadable: boolean } {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const status = cause instanceof ObservatoryFetchError ? cause.status : malformedStatus(cause);
+  return { message, serviceSaid: message, status, unreadable: answeredUnreadably(cause) };
 }
 
 /**
@@ -166,6 +181,9 @@ export const HISTORY_DEGRADED_NOTE =
 
 /** An unfetched record is never shown as an empty one. */
 export const HISTORY_UNAVAILABLE_CLAUSE = "The record is unavailable, and none of it is being shown as empty.";
+
+/** An answer that arrived and could not be read, said as what it is: never a request that got no response. */
+export const HISTORY_UNREADABLE_ANSWER = "The service answered, but the page could not read the hourly record.";
 
 /** A series whose scale is outside the wire contract: no figure on it prints at any other scale than its own. */
 export const HISTORY_UNREADABLE_SCALE = "The series states a value scale outside the contract, so none of its dollar figures can be placed.";
@@ -358,7 +376,7 @@ const noAnswer = (emphasis: string, dek: string, tone: "absent" | "refused"): La
 
 /** What a fetch that failed says at reader altitude: the one system token, the status, in parentheses. */
 function unavailableDek(status: number | null | undefined): string {
-  const said = typeof status === "number" ? `The service did not return the hourly record (HTTP ${String(status)}).` : "The request for the hourly record did not reach the service.";
+  const said = typeof status === "number" ? `The service did not return the hourly record (HTTP ${String(status)}).` : "The page could not get a response from the service for the hourly record.";
   return `${said} ${HISTORY_UNAVAILABLE_CLAUSE}`;
 }
 
@@ -413,6 +431,21 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
         title: "A series for another engine",
         cause: `Nothing of it is charted here: ${HISTORY_FOREIGN_CLAUSE.charAt(0).toLowerCase()}${HISTORY_FOREIGN_CLAUSE.slice(1)}`,
         serviceSaid: null,
+        action: "retry",
+      },
+    };
+  }
+  if (reading.phase === "error" && reading.unreadable === true) {
+    return {
+      ...base,
+      state: "unavailable",
+      headline: noAnswer(`The history of ${inProse} could not be read.`, `${HISTORY_UNREADABLE_ANSWER} ${HISTORY_UNAVAILABLE_CLAUSE}`, "absent"),
+      chips: [{ label: "Hourly record", value: "unreadable", tone: "refused" }],
+      stateCard: {
+        state: "unreadable",
+        title: "Hourly record unreadable",
+        cause: "An answer came, and nothing of it could be read, so nothing is charted.",
+        serviceSaid: saidOf(reading.serviceSaid ?? reading.message),
         action: "retry",
       },
     };

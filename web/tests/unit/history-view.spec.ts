@@ -13,6 +13,7 @@
 // bucket is a tile that says its gap's word in the figure's place, never a 0 or
 // a dash — and never a throw at the route boundary.
 import { expect, test } from "@playwright/test";
+import { MalformedResponseError } from "@solvent/client";
 import {
   deriveHistoryView,
   foreignSeries,
@@ -29,6 +30,7 @@ import {
   HISTORY_RATE_COLUMNS,
   HISTORY_UNAVAILABLE_CLAUSE,
   HISTORY_UNREADABLE_SCALE,
+  historyFailure,
   historyLoadingDek,
   marksFor,
   pointRecord,
@@ -40,7 +42,7 @@ import { EM_DASH, formatBlock } from "../../lib/format";
 import { humanUsd } from "../../lib/human-usd";
 import { humanUtc } from "../../lib/human-utc";
 import { signedBookMoney } from "../../lib/money";
-import { OBSERVATORY_ENGINES, type ObservatorySeriesResponse } from "../../lib/observatory-data";
+import { OBSERVATORY_ENGINES, ObservatoryFetchError, type ObservatorySeriesResponse } from "../../lib/observatory-data";
 import {
   buildBucketAxis,
   describeRange,
@@ -469,10 +471,50 @@ test("error — a fetch that failed is never a refusal: the absent register, the
   });
   expect(v.chips).toEqual([{ label: "Hourly record", value: "unavailable" }]);
   expect(v.tiles).toEqual([]);
-  // A request that never reached the service states no status.
+  // A fetch that came back with no status states none, and says only that no response was had — never where the request got to.
   const offline = deriveHistoryView({ engine: "debt_manager", metric: "debt_usd", phase: "error", response: null, message: "Failed to fetch" });
-  expect(offline.headline.dek).toBe(`The request for the hourly record did not reach the service. ${HISTORY_UNAVAILABLE_CLAUSE}`);
+  expect(offline.headline.dek).toBe(`The page could not get a response from the service for the hourly record. ${HISTORY_UNAVAILABLE_CLAUSE}`);
+  expect(offline.headline.dek).not.toMatch(/reach/);
   expect(offline.stateCard?.serviceSaid).toEqual({ label: SERVICE_SAID, text: "Failed to fetch" });
+});
+
+test("a failed series read is classified by what came back: no status is no response had; a 2xx body the page could not read is an answer, in the unreadable register; a non-2xx page without the envelope is a request that failed, with its status", () => {
+  const url = "http://api/v1/observatory/series?engine=debt_manager";
+  const offline = new TypeError("Failed to fetch");
+  const garbled = new MalformedResponseError(url, 200, "<html>", "a 200 response body was not JSON: Unexpected token '<'");
+  const proxy = new MalformedResponseError(url, 502, "<html>502 Bad Gateway</html>", "a 502 response did not carry the contract's error envelope ({ error: { code, message } })");
+  const envelope = new ObservatoryFetchError(url, 500, "internal", "boom");
+  expect(historyFailure(offline)).toEqual({ message: "Failed to fetch", serviceSaid: "Failed to fetch", status: null, unreadable: false });
+  expect(historyFailure(garbled)).toEqual({ message: garbled.message, serviceSaid: garbled.message, status: 200, unreadable: true });
+  expect(historyFailure(proxy)).toEqual({ message: proxy.message, serviceSaid: proxy.message, status: 502, unreadable: false });
+  expect(historyFailure(envelope)).toEqual({ message: envelope.message, serviceSaid: envelope.message, status: 500, unreadable: false });
+
+  const read = (cause: unknown) => deriveHistoryView({ engine: "debt_manager", metric: "debt_usd", phase: "error", response: null, ...historyFailure(cause) });
+  // An answer that arrived and could not be read: never "could not get a response", never "fetched" — the unreadable register.
+  const unread = read(garbled);
+  expect(unread.state).toBe("unavailable");
+  expect(unread.headline).toEqual({
+    emphasis: "The history of Cash could not be read.",
+    rest: "",
+    tone: "absent",
+    dek: `The service answered, but the page could not read the hourly record. ${HISTORY_UNAVAILABLE_CLAUSE}`,
+  });
+  expect(unread.chips).toEqual([{ label: "Hourly record", value: "unreadable", tone: "refused" }]);
+  expect(unread.stateCard).toEqual({
+    state: "unreadable",
+    title: "Hourly record unreadable",
+    cause: "An answer came, and nothing of it could be read, so nothing is charted.",
+    serviceSaid: { label: SERVICE_SAID, text: garbled.message },
+    action: "retry",
+  });
+  expect(JSON.stringify([unread.headline, unread.chips, unread.stateCard])).not.toMatch(/could not get a response|fetched/);
+  // A proxy's page on a non-2xx answer is a request that failed, with its status — never unreadable.
+  const proxied = read(proxy);
+  expect(proxied.headline).toMatchObject({ emphasis: "The history of Cash could not be fetched.", dek: `The service did not return the hourly record (HTTP 502). ${HISTORY_UNAVAILABLE_CLAUSE}` });
+  expect(proxied.stateCard?.state).toBe("unavailable");
+  expect(proxied.chips).toEqual([{ label: "Hourly record", value: "unavailable" }]);
+  // No status: no response was had.
+  expect(read(offline).headline.dek).toBe(`The page could not get a response from the service for the hourly record. ${HISTORY_UNAVAILABLE_CLAUSE}`);
 });
 
 test("doctrine: the intro, the chart's method notes and the source note verbatim, in sentences, the stride's sentence, then the wire's own notes — and an absent hour is one no complete batch was OBSERVED in", () => {

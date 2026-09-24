@@ -336,6 +336,30 @@ test("compareHeadline: a tie names every leader; a set where nothing moves says 
   });
 });
 
+test("compareHeadline: a set where nothing ranked moves claims only the ranked scenarios once any member is left out of the ranking — a projection or a withheld member — and keeps each one's explanation in the dek", () => {
+  const zeroed = (set: RunBookSetResponse): RunBookSetResponse =>
+    ["eth_minus_30", "ethfi_minus_50", "weeth_market_depeg_oracles_held"].reduce((s, id) => edit(s, id, cashDelta("0")), set);
+  // Every member ranked, every one at zero: the unqualified negative is true.
+  const everyRanked = compareHeadline(compareRows(zeroed(demoSetFor(TWO)), "debt_manager"));
+  expect(everyRanked.emphasis).toBe("No scenario in this set makes more Cash debt liquidatable.");
+  // The rate horizon is a projection with no spot pass: it was never ranked, so the negative is not said of it.
+  const withProjection = compareHeadline(compareRows(zeroed(demoSetFor(ALL)), "debt_manager"));
+  expect(withProjection).toEqual({
+    emphasis: "No ranked spot scenario in this set makes more Cash debt liquidatable.",
+    rest: "",
+    tone: "neutral",
+    dek: "ETH −30%, weETH depeg to 0.95, oracles held and ETHFI −50% leave it unchanged. Cash borrow APY +200 bps is a projection with no spot pass, so it is not ranked on spot liquidatability.",
+  });
+  // A withheld member could move the book more than any ranked one: the same qualified claim, the refusal named.
+  const withWithheld = compareHeadline(compareRows(edit(zeroed(demoSetFor(TWO)), "ethfi_minus_50", withheldCash), "debt_manager"));
+  expect(withWithheld).toEqual({
+    emphasis: "No ranked spot scenario in this set makes more Cash debt liquidatable.",
+    rest: "",
+    tone: "neutral",
+    dek: "ETH −30% leaves it unchanged. ETHFI −50% could not be evaluated: withheld.",
+  });
+});
+
 test("compareHeadline: a refused or withheld member is left out of the ranking and named in the dek; a set with nothing to rank says so", () => {
   const withheld = compareHeadline(compareRows(edit(demoSetFor(TWO), "ethfi_minus_50", withheldCash), "debt_manager"));
   expect(withheld.emphasis).toBe("ETH −30% moves the most:");

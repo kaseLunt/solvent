@@ -4,7 +4,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { BOOK, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { META } from "../fixtures/meta";
-import { EVIDENCE_MANIFEST } from "../fixtures/proof";
+import { EVIDENCE_MANIFEST, EVIDENCE_NO_RECEIPT } from "../fixtures/proof";
 import { CASH_PRICE_SOURCE, CASH_PRICE_SOURCE_CHIP, PIPELINE_STEPS } from "../../lib/prose";
 
 const CORS = { "access-control-allow-origin": "*" };
@@ -72,6 +72,20 @@ test("hero, live strip, entries and pipeline render from the fixtures", async ({
   // Never summed: the two engines' debts never appear as one figure
   // (6,000 legacy at 8 decimals + 4,200 Cash at 6 decimals).
   await expect(page.locator("body")).not.toContainText("$10,200");
+});
+
+test("a receipt the wire says is not committed wears the refused register on the front door, in its own word — the same frame the Verification step gives it, never a solid unavailable one", async ({ page }) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, BOOK));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", (route) => json(route, EVIDENCE_NO_RECEIPT));
+  await page.goto("/");
+  const verify = page.getByTestId("pipeline-verify");
+  await expect(verify).toHaveAttribute("data-state", "refused");
+  await expect(verify).toHaveAttribute("data-tone", "refused");
+  await expect(verify).toContainText("No committed receipt");
+  await expect(verify).not.toContainText("Unavailable");
 });
 
 test("with the API unreachable the hero still renders and the strip refuses honestly", async ({ page }) => {

@@ -946,6 +946,29 @@ test("loading: the absent register — a read in flight is never a refusal — t
   await expect(page.getByTestId("history-chart")).toHaveCount(0);
 });
 
+test("an answer the page cannot read is the unreadable register, never a request that got no response: a 200 body that is not JSON says the service answered, in a dashed card with the fetch's own words disclosed; no tiles, no chart", async ({
+  page,
+}) => {
+  await mockShell(page);
+  await page.route("**/v1/observatory/series*", (route) =>
+    route.fulfill({ status: 200, headers: CORS, contentType: "text/html", body: "<html>maintenance</html>" }),
+  );
+  await page.goto("/observatory");
+  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "unavailable");
+  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "absent");
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText("The history of Cash could not be read.");
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(`The service answered, but the page could not read the hourly record. ${HISTORY_UNAVAILABLE_CLAUSE}`);
+  await expect(chip(page, "Hourly record")).toContainText("unreadable");
+  const card = page.getByTestId("history-state");
+  await expect(card).toHaveAttribute("data-state", "unreadable");
+  await expect(card).toHaveAttribute("data-frame", "dashed");
+  await expect(card.getByRole("heading", { name: "Hourly record unreadable" })).toBeVisible();
+  await expect(card.locator("details")).toContainText("was not JSON");
+  await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(0);
+  await expect(page.getByTestId("history-chart")).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText(/could not get a response|could not be fetched/);
+});
+
 test("a failed fetch is the unavailable state, never a refusal: the absent register, the one status code and the never-shown-as-empty clause in the dek, its own solid card with the service's words disclosed and a retry that reads again; no tiles, no chart", async ({
   page,
 }) => {

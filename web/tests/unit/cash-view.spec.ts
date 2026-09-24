@@ -473,11 +473,11 @@ test("the legacy fold's line is the market's own finding over computed positions
   // The aggregate sums debt over computed positions only, so with none computed the wire serves a zero that is no
   // position's debt: the line names the debt as not computed and never prints that zero.
   const zero = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }))?.summary ?? "";
-  expect(zero).toBe("3 positions · debt not computed · 3 refused");
+  expect(zero).toBe("3 positions · debt not computed · 3 with no verdict");
   expect(zero).not.toContain("$0");
   // Nothing computed: no "0 of 0", no "0 liquidatable" — the liquidatable clause is omitted, the population and refusals stand.
   const none = deriveLegacyView(legacyWith({ positions: 1, computed: 0, liquidatable: 0, refused: 1, debt: null }))?.summary ?? "";
-  expect(none).toBe("1 position · debt not computed · 1 refused");
+  expect(none).toBe("1 position · debt not computed · 1 with no verdict");
   expect(none).not.toMatch(/liquidatable|\b0 of\b/);
   // One computed position is said in the singular; counts are grouped.
   expect(deriveLegacyView(legacyWith({ positions: 1, computed: 1, liquidatable: 1, refused: 0 }))?.summary).toBe(
@@ -556,7 +556,7 @@ test("over a census the engine computed none of, the aggregate's zeros sum no po
 test("the legacy fold reads one decision over nothing computed — its line, its Debt tile and its Liquidatable tile print no zero; an empty market's zero is its own", () => {
   // Every position refused: the wire's zero debt and zero liquidatable count are sums over nothing computed.
   const none = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }));
-  expect(none?.summary).toBe("3 positions · debt not computed · 3 refused");
+  expect(none?.summary).toBe("3 positions · debt not computed · 3 with no verdict");
   expect(none?.debt).toEqual({ kind: "absent" });
   expect(none?.liquidatable).toBeNull();
   expect(none?.positions).toBe(3);

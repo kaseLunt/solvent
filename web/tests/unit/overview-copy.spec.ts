@@ -6,8 +6,10 @@ import { readCashRow } from "../../lib/cash-rows";
 import { summarizeCash } from "../../lib/cash-summary";
 import * as copy from "../../lib/overview-copy";
 import { CASH_PRICE_SOURCE, CASH_PRICE_SOURCE_CHIP, PIPELINE_STEPS } from "../../lib/prose";
-import type { PipelineStep } from "../../lib/verification-view";
-import { POSITIONS_DM_PAGE_1 } from "../fixtures/book";
+import { BOOK_LOADING, bookAnswered, pipelineSteps, type BookReading, type PipelineStep } from "../../lib/verification-view";
+import { BOOK, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
+import { META } from "../fixtures/meta";
+import { EVIDENCE_MANIFEST, EVIDENCE_NO_RECEIPT } from "../fixtures/proof";
 
 const settled = { walkComplete: true, walkStopped: null, walkStopKind: null, refusedWhole: null } as const;
 const rows = POSITIONS_DM_PAGE_1.positions.map((p) => readCashRow(refinePositionSummary(p)));
@@ -75,18 +77,39 @@ test("the pipeline's steps: the shared names and ordinals; a figure in ink (a ch
   ]);
 
   const absent = copy.overviewPipeline([
-    step({ key: "index", value: "—", sub: "pending", pending: true, line: { before: "OP block ", figure: "unavailable", after: "" } }),
-    step({ key: "compute", value: "—", sub: "unavailable", tone: "refused", line: { before: "", figure: "unavailable", after: "" } }),
-    step({ key: "verify", value: "—", sub: "no committed receipt", tone: "refused", line: { before: "", figure: "unavailable", after: " checked rows exact" } }),
+    step({ key: "index", value: "—", sub: "pending", pending: true, state: "pending", line: { before: "OP block ", figure: "unavailable", after: "" } }),
+    step({ key: "compute", value: "—", sub: "unavailable", state: "unavailable", stateWord: "Unavailable", line: { before: "", figure: "unavailable", after: "" } }),
+    step({ key: "verify", value: "—", sub: "no committed receipt", tone: "refused", state: "refused", stateWord: "No committed receipt", line: { before: "", figure: "unavailable", after: " checked rows exact" } }),
     step({ key: "serve", tone: "refused", line: { before: "batch ", figure: "18,251", after: " · Cash accounts withheld" } }),
   ]);
-  expect(absent[0]).toMatchObject({ state: "pending", line: null });
-  expect(absent[1]).toMatchObject({ state: "unavailable", stateWord: "Unavailable", line: null });
-  expect(absent[2]).toMatchObject({ state: "unavailable", stateWord: "No committed receipt", line: null });
+  expect(absent[0]).toMatchObject({ state: "pending", tone: "neutral", line: null });
+  expect(absent[1]).toMatchObject({ state: "unavailable", stateWord: "Unavailable", tone: "neutral", line: null });
+  expect(absent[2]).toMatchObject({ state: "refused", stateWord: "No committed receipt", tone: "refused", line: null });
   // A refused census keeps its figure, in the refused register: the batch printed, the census named withheld.
   expect(absent[3]).toMatchObject({ tone: "refused", line: { before: "Batch ", figure: "18,251" } });
   for (const s of absent) expect(s.tone).not.toBe("ok");
   for (const s of [...out, ...absent]) expect(`${s.stateWord ?? ""}${s.line?.figure ?? ""}`).not.toBe("—");
+});
+
+test("a step with no figure wears the shared law's register on the front door as on Verification: a receipt the wire says is not committed is refused in its own word, a failed read unavailable, a stated no-batch refused, a read in flight pending", () => {
+  const NO_BATCH: BookReading = { phase: "no-batch", book: null, failure: { message: "no complete risk batch is available", retryAfterSeconds: null } };
+  const FAILED: BookReading = { phase: "error", book: null, failure: { message: "Failed to fetch", retryAfterSeconds: null } };
+  const cases: { shared: readonly PipelineStep[]; key: PipelineStep["key"]; state: string; stateWord: string | undefined; tone: string }[] = [
+    { shared: pipelineSteps(META, EVIDENCE_NO_RECEIPT, bookAnswered(BOOK)), key: "verify", state: "refused", stateWord: "No committed receipt", tone: "refused" },
+    { shared: pipelineSteps(null, null, FAILED), key: "verify", state: "unavailable", stateWord: "Unavailable", tone: "neutral" },
+    { shared: pipelineSteps(null, null, FAILED), key: "compute", state: "unavailable", stateWord: "Unavailable", tone: "neutral" },
+    { shared: pipelineSteps(META, EVIDENCE_MANIFEST, NO_BATCH), key: "compute", state: "refused", stateWord: "No servable batch", tone: "refused" },
+    { shared: pipelineSteps(null, null, BOOK_LOADING, { meta: true, evidence: true }), key: "verify", state: "pending", stateWord: undefined, tone: "neutral" },
+  ];
+  for (const { shared, key, state, stateWord, tone } of cases) {
+    const verification = shared.find((s) => s.key === key);
+    const front = copy.overviewPipeline(shared).find((s) => s.key === key);
+    // One state, one register: the Verification step and the front door's step are the same frame, word and tone.
+    expect(verification).toMatchObject({ state, tone });
+    expect(verification?.stateWord).toBe(stateWord);
+    expect(front).toMatchObject({ line: null, state, tone });
+    expect(front?.stateWord).toBe(stateWord);
+  }
 });
 
 test("the Inspector entry offers the account nearest liquidation, shortened with one ellipsis, its room worded over cap by — never a minus on dollars", () => {

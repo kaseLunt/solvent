@@ -178,6 +178,12 @@ export const NONE_COMPUTED_SUB = "No account computed";
 /** The state word of the engine-refused population — the tile, the row's pill and the dek say the same two words. */
 export const NO_VERDICT = "No verdict";
 
+/** The median room's word over computed accounts none of which has a borrow cap: a room is a share of a cap. */
+export const ROOM_NOT_MEASURABLE = "Not measurable";
+
+/** What the median room tile says beneath that word. */
+export const ROOM_NOT_MEASURABLE_SUB = "No account has a borrow cap to measure room against";
+
 /** The liquidatable tile's label: the material line it headlines, from the one constant that places it. */
 export const liquidatableTileLabel = `Liquidatable · ≥ $${MATERIAL_LINE_USD.toString()}`;
 
@@ -300,7 +306,9 @@ export function nearCapTile(summary: CashSummary): TileView {
  * The median-room tile: the lower median of the room the walk read, beside its 10th percentile, at one fixed decimal,
  * busy while the walk runs. (No summary is the view's to word.) A walk that ended short of whole says so in place of a
  * figure. Over a book the engine computed none of no room was read: the population's word, "No verdict". An empty book
- * refused nothing and holds no room to measure: it says so, in ink — never a dash.
+ * refused nothing and holds no room to measure: it says so, in ink — never a dash. A book whose computed accounts all
+ * carry no borrow cap holds accounts and no room to take a median of: "Not measurable", in the unavailable register —
+ * never "No accounts", and never a refusal, since the engine refused none of them.
  */
 export function medianRoomTile(summary: CashSummary): TileView {
   const register = registerOf(summary);
@@ -311,7 +319,10 @@ export function medianRoomTile(summary: CashSummary): TileView {
   const { median, p10 } = summary.percentiles;
   if (median === null) {
     if (register === "running") return { value: "", sub: "Of borrow cap", tone: "neutral", pending: true };
-    if (register === "whole") return { value: "No accounts", sub: "No room to measure", tone: "neutral", pending: false };
+    if (register === "whole") {
+      if (summary.computed === 0) return { value: "No accounts", sub: "No room to measure", tone: "neutral", pending: false };
+      return { value: "", sub: ROOM_NOT_MEASURABLE_SUB, tone: stateTone("unavailable"), pending: false, state: "unavailable", stateWord: ROOM_NOT_MEASURABLE };
+    }
     const state = declinedState(register);
     return { value: "", sub: declinedSub(register, summary.unreadable), tone: stateTone(state), pending: false, state };
   }

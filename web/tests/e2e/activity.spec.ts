@@ -17,7 +17,8 @@
 // number where the time would be, the When column headed "When (UTC)" with the
 // wire's ISO as every cell's title; a liquidation or bad-debt realization a key
 // record set apart by weight, never a crit pill; the amount alone in its
-// right-aligned column with its unit in the column beside it; the ledger view
+// column — right-aligned only within one engine, set left across engines —
+// with its unit in the column beside it; the ledger view
 // pinning the type; since-block impossible with no single engine (short form,
 // the sentence in its title), real with one, removed with a notice when the
 // engine changes, and no cursor ever crossing a mode; a 400 refusal in the
@@ -209,15 +210,15 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   await expect(head.getByTestId("activity-tx")).toHaveAttribute("href", `https://optimistic.etherscan.io/tx/${first.tx_hash}`);
   await expect(rows(page).first()).toHaveAttribute("data-testid", `activity-row-10·${first.tx_hash}·38·0`);
 
-  // The amount stands alone in its right-aligned cell — a Cash figure placed by the book's own value_decimals (the
-  // stream is muted, so the book is the one scale source), carrying no raw word — and its unit sits in the quiet
-  // column beside it, not upper-cased.
+  // The amount stands alone in its cell — a Cash figure placed by the book's own value_decimals (the stream is muted,
+  // so the book is the one scale source), carrying no raw word — set left across engines, so no Cash figure shares a
+  // digit axis with a legacy one; its unit sits in the quiet column beside it, not upper-cased.
   const headCells = page.getByTestId("activity-table").locator("thead th");
   await expect(headCells).toHaveText([ACTIVITY_WHEN_HEADER, "Engine", "Type", "Account", ACTIVITY_AMOUNT_HEADER, "Unit", "Tx"]);
   expect(ACTIVITY_WHEN_HEADER).toBe("When (UTC)");
   expect(first.amount).toBe("252733333");
   await expect(head.locator("td").nth(4)).toHaveText("252.733333");
-  await expect(head.locator("td").nth(4)).toHaveCSS("text-align", "right");
+  await expect(head.locator("td").nth(4)).toHaveCSS("text-align", "left");
   await expect(head.locator("td").nth(4).getByTestId("activity-unit")).toHaveCount(0);
   await expect(head.getByTestId("activity-amount-tag")).toHaveCount(0);
   await expect(head.locator("td").nth(5).getByTestId("activity-unit")).toHaveText("normalized debt · USDC");
@@ -263,6 +264,38 @@ test("no licensed scale: a book that states no value_decimals, or a book read th
   await expect(head().getByTestId("activity-unit")).toHaveText("normalized debt · USDC");
   await expect(page.getByTestId("activity-error")).toHaveCount(0);
   await expect(page.getByTestId("activity-refusal")).toHaveCount(0);
+});
+
+/** The demo page's own Cash rows as the engine-scoped page: the engine echoed, the cursor spent. */
+const CASH_PAGE: typeof DEMO_FEED_PAGE_1 = {
+  ...DEMO_FEED_PAGE_1,
+  events: DEMO_FEED_PAGE_1.events.filter((event) => event.engine === "debt_manager"),
+  filter: { ...DEMO_FEED_PAGE_1.filter, engine: "debt_manager" },
+  next_cursor: null,
+};
+
+test("one digit axis only within one engine: across engines the Amount column is set left, header and every cell, so Cash and legacy figures never share an axis; scoped to Cash it is right-aligned", async ({ page }) => {
+  await muteStream(page);
+  await routeBook(page, DEMO_BOOK);
+  await mockEvents(page, (params, route) => (params.get("engine") === "debt_manager" ? fulfillJson(route, CASH_PAGE) : demoWalk(params, route)));
+  await page.goto("/feed");
+  await expect(rows(page)).toHaveCount(50);
+  const table = page.getByTestId("activity-table");
+  const amountHeader = table.locator("thead th").nth(4);
+  await expect(amountHeader).toHaveText(ACTIVITY_AMOUNT_HEADER);
+  const aligns = () => rows(page).evaluateAll((trs) => trs.map((tr) => (tr.children[4] === undefined ? "" : getComputedStyle(tr.children[4]).textAlign)));
+  await expect(amountHeader).toHaveCSS("text-align", "left");
+  const across = await aligns();
+  expect(across).toHaveLength(50);
+  expect(new Set(across)).toEqual(new Set(["left"]));
+
+  await page.getByTestId("activity-engine-debt_manager").click();
+  await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-mode", "engine-scoped");
+  await expect(rows(page)).toHaveCount(CASH_PAGE.events.length);
+  await expect(amountHeader).toHaveCSS("text-align", "right");
+  const scoped = await aligns();
+  expect(scoped).toHaveLength(CASH_PAGE.events.length);
+  expect(new Set(scoped)).toEqual(new Set(["right"]));
 });
 
 /** A type-filtered first page: the demo page's own rows of the requested types, the filter echoed, the cursor spent. */
@@ -732,6 +765,47 @@ test("degraded envelopes: 429 and 500 are fetch failures, never a refusal — th
   await expect(rows(page)).toHaveCount(50);
   await expect(page.getByTestId("activity-error")).toHaveCount(0);
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
+});
+
+test("an answer the page cannot read is the unreadable register, never a request that got no response: a 200 body that is not JSON — on the first page and on the next — says the service answered, in a dashed card, with Unreadable tiles and table word", async ({ page }) => {
+  await muteStream(page);
+  let first: "garbled" | "ok" = "garbled";
+  const garbled = (route: Route) => route.fulfill({ status: 200, headers: CORS, contentType: "text/html", body: "<html>maintenance</html>" });
+  await mockEvents(page, (params, route) => {
+    if (params.get("cursor") !== null) return garbled(route);
+    return first === "garbled" ? garbled(route) : fulfillJson(route, DEMO_FEED_PAGE_1);
+  });
+  await page.goto("/feed");
+
+  const card = page.getByTestId("activity-error");
+  await expect(card).toHaveAttribute("data-state", "unreadable");
+  await expect(card).toHaveAttribute("data-frame", "dashed");
+  await expect(card.getByRole("heading", { name: "Page unreadable" })).toBeVisible();
+  await expect(card.locator("details")).toContainText("was not JSON");
+  await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "error");
+  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "absent");
+  await expect(headline(page)).toHaveText("Recorded chain actions could not be read.");
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText("The service answered, but the page could not read the answer, so no row of the list is shown.");
+  for (const tile of ["activity-kpi-liquidations", "activity-kpi-deficits"]) {
+    await expect(page.getByTestId(tile)).toHaveAttribute("data-state", "unreadable");
+    await expect(page.getByTestId(tile)).toContainText("Unreadable");
+    await expect(page.getByTestId(tile)).not.toContainText("0");
+  }
+  await expect(page.getByTestId("activity-table").locator("tbody td")).toHaveText("Unreadable");
+  await expect(page.locator("main")).not.toContainText(/could not get a response|could not be fetched|Unavailable/);
+
+  // The first page answers; the next one is the unreadable answer, and the rows served before it stand.
+  first = "ok";
+  await page.getByTestId("activity-retry").click();
+  await expect(rows(page)).toHaveCount(50);
+  await page.getByTestId("activity-load-more").click();
+  await expect(card).toHaveAttribute("data-state", "unreadable");
+  await expect(headline(page)).toHaveText("The next page could not be read, after 50 chain actions loaded.");
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText(
+    "The service answered, but the page could not read the answer for the next page; the rows below were served before it.",
+  );
+  await expect(chip(page, "Loaded")).toContainText("50 · next page unreadable");
+  await expect(rows(page)).toHaveCount(50);
 });
 
 test("an empty filtered feed is a real answer in ink: the exhausted state, the table's state word, a headline scoped to the filter the service echoed — never an unscoped negative — and the one way to see more", async ({ page }) => {

@@ -8,6 +8,7 @@
 // over the loaded window. An instant in prose is humanUtc's (U+00A0 joins,
 // hence `nb`), its year by the envelope's own served_at.
 import { expect, test } from "@playwright/test";
+import { MalformedResponseError } from "@solvent/client";
 import {
   ACTIVITY_AMOUNT_HEADER,
   ACTIVITY_CLEAR_FILTER_DEK,
@@ -36,6 +37,7 @@ import {
   TYPE_WORDS,
   UNTIMED_WHEN,
   activeFilter,
+  activityFailed,
   activityScales,
   deriveActivityView,
   deriveLiveStrip,
@@ -48,6 +50,7 @@ import {
   type NotePart,
 } from "../../lib/activity-view";
 import { EVENT_DISPLAY_TYPES } from "../../lib/feed-data";
+import { InspectorFetchError } from "../../lib/inspector-data";
 import { LIQUIDATION_WORDS, RAW_UNITS_TAG, RECORD_ONLY_TITLE, RECORD_ONLY_WORD, feedTakeaway } from "../../lib/feed-view";
 import { EM_DASH, shortHex, truncateAddress } from "../../lib/format";
 import { DEMO_BOOK, DEMO_FEED_PAGE_1 } from "../fixtures/demo";
@@ -573,6 +576,7 @@ test("a refused page: the refused register, emphasis only; the dek in reader wor
     dek: "The service would not return the next page of the list. Start again from the newest actions.",
   });
   expect(v.refusal).toEqual({
+    state: "refused",
     title: "Page refused",
     cause: "The rows below were served before it and still stand.",
     serviceSaid: { label: SERVICE_SAID, text: BAD_CURSOR },
@@ -627,6 +631,7 @@ test("a failed fetch is never a refusal: the absent register, a plain-cause dek 
     dek: "The service did not return this page (HTTP 429), so no row of it is shown.",
   });
   expect(v.failure).toEqual({
+    state: "unavailable",
     title: "Page unavailable",
     cause: "No row of the list was read.",
     serviceSaid: { label: SERVICE_SAID, text: failure.message },
@@ -641,14 +646,70 @@ test("a failed fetch is never a refusal: the absent register, a plain-cause dek 
     emphasis: "The next page could not be fetched, after 50 chain actions loaded.",
     rest: "",
     tone: "absent",
-    dek: "The request for the next page did not reach the service; the rows below were served before it.",
+    dek: "The page could not get a response from the service for the next page; the rows below were served before it.",
   });
+  // A fetch that came back with no status says only that no response was had — never where the request got to.
+  const offline = deriveActivityView(base({ rows: [], failure: { status: null, code: null, message: "Failed to fetch" } }));
+  expect(offline.headline.dek).toBe("The page could not get a response from the service, so no row of the list is shown.");
+  for (const said of [offline.headline.dek, later.headline.dek]) expect(said).not.toMatch(/reach/);
   expect(deriveActivityView(base({ failure: { status: 500, code: "internal", message: "x" } })).headline.dek).toBe(
     "The service did not return the next page (HTTP 500); the rows below were served before it.",
   );
   const both = deriveActivityView(base({ failure: { status: 500, code: null, message: "boom" }, refusal: { status: 400, code: "bad_request", message: "no" } }));
   expect(both.state).toBe("refused");
   expect(both.headline.emphasis).toBe("The next page was refused, after 50 chain actions loaded.");
+});
+
+test("a failed page fetch is classified by what came back: no status is no response had; a 2xx body the page could not read is an answer, in the unreadable register; a non-2xx page without the envelope is a request that failed, with its status", () => {
+  const url = "http://api/v1/events";
+  const offline = new TypeError("Failed to fetch");
+  const garbled = new MalformedResponseError(url, 200, "<html>", "a 200 response body was not JSON: Unexpected token '<'");
+  const proxy = new MalformedResponseError(url, 502, "<html>502 Bad Gateway</html>", "a 502 response did not carry the contract's error envelope ({ error: { code, message } })");
+  const envelope = new InspectorFetchError(url, 429, "rate_limited", "rate limit exceeded");
+  expect(activityFailed(offline)).toEqual({ status: null, code: null, message: "Failed to fetch", unreadable: false });
+  expect(activityFailed(garbled)).toEqual({ status: 200, code: null, message: garbled.message, unreadable: true });
+  expect(activityFailed(proxy)).toEqual({ status: 502, code: null, message: proxy.message, unreadable: false });
+  expect(activityFailed(envelope)).toEqual({ status: 429, code: "rate_limited", message: envelope.message, unreadable: false });
+
+  // An answer that arrived and could not be read: never "could not get a response", never "fetched" — the unreadable register throughout.
+  const cold = deriveActivityView(base({ rows: [], failure: activityFailed(garbled) }));
+  expect(cold.state).toBe("error");
+  expect(cold.headline).toEqual({
+    emphasis: "Recorded chain actions could not be read.",
+    rest: "",
+    tone: "absent",
+    dek: "The service answered, but the page could not read the answer, so no row of the list is shown.",
+  });
+  expect(cold.failure).toEqual({
+    state: "unreadable",
+    title: "Page unreadable",
+    cause: "No row of the list was read.",
+    serviceSaid: { label: SERVICE_SAID, text: garbled.message },
+    action: "Try again",
+  });
+  expect(cold.emptyText).toBe("Unreadable");
+  expect(cold.tiles.liquidations).toEqual({ label: "Liquidations", value: "", sub: "This page could not be read", state: "unreadable", stateWord: null });
+  const later = deriveActivityView(base({ failure: activityFailed(garbled) }));
+  expect(later.headline).toEqual({
+    emphasis: "The next page could not be read, after 50 chain actions loaded.",
+    rest: "",
+    tone: "absent",
+    dek: "The service answered, but the page could not read the answer for the next page; the rows below were served before it.",
+  });
+  expect(later.chips).toContainEqual({ label: "Loaded", value: "50 · next page unreadable" });
+  for (const view of [cold, later]) {
+    expect(JSON.stringify([view.headline, view.failure, view.tiles, view.chips, view.emptyText])).not.toMatch(/could not get a response|fetched|nreachable|navailable/);
+  }
+
+  // A proxy's page on a non-2xx answer is a request that failed, with its status — never unreadable.
+  const proxied = deriveActivityView(base({ rows: [], failure: activityFailed(proxy) }));
+  expect(proxied.headline.dek).toBe("The service did not return this page (HTTP 502), so no row of it is shown.");
+  expect(proxied.failure?.state).toBe("unavailable");
+  expect(proxied.emptyText).toBe("Unavailable");
+  // No status: no response was had.
+  expect(deriveActivityView(base({ rows: [], failure: activityFailed(offline) })).headline.dek).toBe(
+    "The page could not get a response from the service, so no row of the list is shown.",
+  );
 });
 
 test("exhausted: an empty list is a real answer in ink, and the H1 names the scope it answers for — engine, types and since-block, as the service echoed them — never an unscoped negative; a narrowed list offers to clear its filter", () => {

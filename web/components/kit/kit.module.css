@@ -201,11 +201,13 @@
 
 /* ---- table ---- */
 .r { text-align: right; }
+.l { text-align: left; }
 .dim { color: var(--ink-3); }
 .tbl { border-collapse: collapse; width: 100%; margin-top: 10px; }
 .tbl th { text-align: left; font-weight: var(--w-medium); color: var(--ink-2); font-size: var(--type-small); padding: 10px 8px 8px; border-bottom: 1px solid var(--line); }
 .tbl td { padding: 9px 8px; border-bottom: 1px solid var(--chip-bg); font-size: var(--type-body); white-space: nowrap; color: var(--ink); font-variant-numeric: tabular-nums; }
 .tbl td.r, .tbl th.r { text-align: right; }
+.tbl td.l, .tbl th.l { text-align: left; }
 /* An empty table says why in one row: a state line, ink-2, wrapping rather than widening the table. */
 .tbl td.tblEmpty { color: var(--ink-2); white-space: normal; }
 /* A table scrolls inside its region, never the page: every column stays, reachable by scroll or by keyboard. The table

@@ -417,8 +417,11 @@ test("evidence unavailable: state unavailable, its own register — never a refu
   await expect(surface(page)).toHaveAttribute("data-receipt", "unavailable");
   await expect(verdict(page)).toHaveAttribute("data-variant", "absent");
   await expect(headline(page)).toHaveText("The verification record could not be fetched.");
-  // The request never reached the service, so the dek claims no status; the fetch's own words are the card's disclosure.
-  await expect(page.getByTestId("verification-verdict-dek")).toHaveText("The proof request did not reach the service, so there is no proof to show.");
+  // The fetch came back with no status, so the dek claims none and says only that no response was had; the fetch's own
+  // words are the card's disclosure.
+  await expect(page.getByTestId("verification-verdict-dek")).toHaveText(
+    "The page could not get a response from the service to the proof request, so there is no proof to show.",
+  );
   const card = page.getByTestId("verification-unavailable");
   await expect(card).toHaveAttribute("data-state", "unavailable");
   await expect(card).toContainText("Proof record unavailable");
@@ -587,6 +590,26 @@ test("a proxy's error page is a request that failed, never a body the page could
   await expect(step(page, "compute")).toContainText("The batch could not be fetched.");
   await expect(step(page, "verify")).toContainText("The receipt could not be fetched.");
   for (const words of ["could not be read", "could not read", "unreadable"]) await expect(surface(page)).not.toContainText(words);
+});
+
+test("a manifest that could not be fetched beside a book that states no servable batch: the Live batch chip reads the book as the Compute step does — its words, its refused register — while the manifest's own chips stay unavailable", async ({
+  page,
+}) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => json(route, BOOK_ERROR_UNAVAILABLE, 503));
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", (route) => route.abort());
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-state", "unavailable");
+  await expect(step(page, "compute")).toHaveAttribute("data-state", "refused");
+  await expect(step(page, "compute")).toContainText("No servable batch");
+  await expect(chip(page, "Live batch")).toContainText("no servable batch");
+  await expect(chip(page, "Live batch")).toHaveClass(/chipRefused/);
+  for (const label of ["Proof pin", "Receipt", "Batch key"]) {
+    await expect(chip(page, label)).toContainText("unavailable");
+    await expect(chip(page, label)).not.toHaveClass(/chipRefused/);
+  }
 });
 
 test("an absence the wire stated is worded as one: a 503 no-batch book on the Compute step, a manifest with no receipt on the Verify step", async ({

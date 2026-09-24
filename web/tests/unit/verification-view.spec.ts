@@ -365,7 +365,7 @@ test("a proxy's error page on a non-2xx answer is a request that failed, not a b
   expect(JSON.stringify([v.headline, v.stateCard, v.steps])).not.toMatch(/could not (be )?read|unreadable/);
 });
 
-test("the manifest's failure as the page holds it: the envelope's status and retry hint when the service answered, no status for a request that never reached it, and neither is unreadable", () => {
+test("the manifest's failure as the page holds it: the envelope's status and retry hint when the service answered, no status for a fetch that got no response, and neither is unreadable", () => {
   const refused = new ProofFetchError("http://api/v1/evidence", 503, "no_batch", "no complete risk batch is available", 30);
   expect(evidenceFailed(refused)).toEqual({ phase: "error", message: refused.message, retryAfterSeconds: 30, status: 503, unreadable: false });
   expect(evidenceFailed(new TypeError("Failed to fetch"))).toEqual({ phase: "error", message: "Failed to fetch", retryAfterSeconds: null, status: null, unreadable: false });
@@ -767,10 +767,11 @@ test("evidence unavailable: its own register, never a refusal — the reader's c
   expect(timed.steps.map((s) => s.value)).toEqual(["154,796,552", "1", "—", "17"]);
   expect(timed.steps.map((s) => s.line.figure)).toEqual(["154,796,552", "1", "unavailable", "17"]);
   expect(byKey(timed.steps, "verify")).toMatchObject({ sentence: "The receipt could not be fetched.", state: "unavailable", stateWord: "Unavailable", tone: "neutral" });
-  // A request that never reached the service says so, and claims no status it never received.
+  // A fetch that came back with no status claims none, and says only that no response was had — never where the request got to.
   const untimed = view({ phase: "error", message: "Failed to fetch", retryAfterSeconds: null });
   expect(untimed.headline.emphasis).toBe("The verification record could not be fetched.");
-  expect(untimed.headline.dek).toBe("The proof request did not reach the service, so there is no proof to show.");
+  expect(untimed.headline.dek).toBe("The page could not get a response from the service to the proof request, so there is no proof to show.");
+  expect(untimed.headline.dek).not.toMatch(/reach/);
   expect(untimed.stateCard?.serviceSaid).toEqual({ label: "What the service said", text: "Failed to fetch" });
 });
 
@@ -1090,10 +1091,44 @@ test("a fetch that failed is never a refusal: the absent headline, a dek that sa
   });
   // What stands in for nothing is the drawer's, with the service's words.
   expect(v.doctrine).toContain("Nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.");
-  // With no book answer either, the Live batch chip is unavailable too; a request that never reached the service states no status.
+  // With no book answer either, the Live batch chip is unavailable too; a fetch that came back with no status states none.
   const blind = deriveVerificationView({ state: { phase: "error", message: "Failed to fetch", retryAfterSeconds: 30, status: null }, meta: META, metaInFlight: false, book: FAILED });
   expect(blind.chips[1]).toEqual({ label: "Live batch", value: "unavailable" });
-  expect(blind.headline.dek).toBe("The proof request did not reach the service, so there is no proof to show. Try again after 30s.");
+  expect(blind.headline.dek).toBe("The page could not get a response from the service to the proof request, so there is no proof to show. Try again after 30s.");
+});
+
+test("a manifest read that failed before the book answered: the Live batch chip is pending while its own read is in flight — never unavailable beside a pending Compute step — and takes its own state once the book settles", () => {
+  const failed: EvidenceState = { phase: "error", message: "Failed to fetch", retryAfterSeconds: null, status: null };
+  const early = deriveVerificationView({ state: failed, meta: META, metaInFlight: false, book: BOOK_LOADING });
+  expect(early.chips).toEqual([
+    { label: "Proof pin", value: "unavailable" },
+    { label: "Live batch", value: "pending" },
+    { label: "Receipt", value: "unavailable" },
+    { label: "Batch key", value: "unavailable" },
+  ]);
+  expect(byKey(early.steps, "compute")).toMatchObject({ state: "pending", pending: true });
+  expect(early.chips.some((c) => c.tone === "refused")).toBe(false);
+  // The book answers: the chip names the batch it served.
+  const served = deriveVerificationView({ state: failed, meta: META, metaInFlight: false, book: read(BOOK) });
+  expect(served.chips[1]).toEqual({ label: "Live batch", value: "1" });
+  // The book's read fails too: only now is the chip unavailable.
+  const unserved = deriveVerificationView({ state: failed, meta: META, metaInFlight: false, book: FAILED });
+  expect(unserved.chips[1]).toEqual({ label: "Live batch", value: "unavailable" });
+});
+
+test("a manifest read that failed beside a book that states no servable batch: the Live batch chip says what the Compute step says, in its register — one book state, one reading on the page", () => {
+  const failed: EvidenceState = { phase: "error", message: "Failed to fetch", retryAfterSeconds: null, status: null };
+  const v = deriveVerificationView({ state: failed, meta: META, metaInFlight: false, book: NO_BATCH });
+  const compute = byKey(v.steps, "compute");
+  expect(compute).toMatchObject({ sub: "no servable batch", state: "refused", stateWord: "No servable batch", tone: "refused" });
+  expect(v.chips[1]).toEqual({ label: "Live batch", value: "no servable batch", tone: "refused" });
+  expect(v.chips[1]?.value).toBe(compute.sub);
+  // The manifest's own chips stay a failed read's: unavailable, never refused.
+  expect([v.chips[0], v.chips[2], v.chips[3]]).toEqual([
+    { label: "Proof pin", value: "unavailable" },
+    { label: "Receipt", value: "unavailable" },
+    { label: "Batch key", value: "unavailable" },
+  ]);
 });
 
 test("the Verify step states its register with no figure: pending in flight, unavailable after a failed read, refused where the wire stated no receipt — and the compute step's instant is the reader's", () => {

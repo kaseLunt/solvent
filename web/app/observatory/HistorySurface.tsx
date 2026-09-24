@@ -31,12 +31,11 @@ import { useEffect, useState } from "react";
 import { ChartCard, StateCard, ToggleGroup, VerdictHeader, type ToggleOption } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { solventBaseUrl } from "@/lib/api";
-import { deriveHistoryView, foreignSeries, HISTORY_COPY, HISTORY_ENGINES, type HistoryReading } from "@/lib/history-view";
+import { deriveHistoryView, foreignSeries, HISTORY_COPY, HISTORY_ENGINES, historyFailure, type HistoryReading } from "@/lib/history-view";
 import { engineName } from "@/lib/inspector-headline";
 import {
   fetchObservatorySeries,
   isRollupUnavailable,
-  ObservatoryFetchError,
   type ObservatoryEngine,
   type ObservatorySeriesResponse,
 } from "@/lib/observatory-data";
@@ -47,11 +46,12 @@ import { HistoryDrawer } from "./HistoryDrawer";
 import { HistoryPoint } from "./HistoryPoint";
 import { HistoryTiles } from "./HistoryTiles";
 
-/** A read that did not answer with a series: its own words for the card's disclosure, and the status it answered with. */
+/** A read that did not answer with a series: its own words for the card's disclosure, the status it answered with, and whether it answered with a body the page could not read. */
 interface Failure {
   message: string;
   serviceSaid: string | null;
   status: number | null;
+  unreadable?: boolean;
 }
 
 type SeriesState =
@@ -119,13 +119,7 @@ function EngineHistory({
           setSeries({ phase: "degraded", message: cause.serverMessage, serviceSaid: cause.message, status: cause.status });
           return;
         }
-        const message = cause instanceof Error ? cause.message : String(cause);
-        setSeries({
-          phase: "error",
-          message,
-          serviceSaid: message,
-          status: cause instanceof ObservatoryFetchError ? cause.status : null,
-        });
+        setSeries({ phase: "error", ...historyFailure(cause) });
       });
     return () => {
       controller.abort();
@@ -139,7 +133,16 @@ function EngineHistory({
         ? { engine, metric, phase: "loading", response: null, message: null }
         : series.phase === "foreign"
           ? { engine, metric, phase: "foreign", response: null, message: series.message }
-          : { engine, metric, phase: series.phase, response: null, message: series.message, serviceSaid: series.serviceSaid, status: series.status };
+          : {
+              engine,
+              metric,
+              phase: series.phase,
+              response: null,
+              message: series.message,
+              serviceSaid: series.serviceSaid,
+              status: series.status,
+              unreadable: series.unreadable === true,
+            };
   const view = deriveHistoryView(reading);
   // The chart and the record render only for a series the view could read: a scale outside the contract is the
   // view's own refusal, and nothing below the header is drawn at it.

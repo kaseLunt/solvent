@@ -39,15 +39,19 @@ function LiquidationLine({ detail, dim }: { detail: ActivityLiquidation; dim: bo
   );
 }
 
-const COLUMNS: KitColumn[] = [
-  { key: "when", header: ACTIVITY_WHEN_HEADER },
-  { key: "engine", header: "Engine" },
-  { key: "type", header: "Type" },
-  { key: "account", header: "Account" },
-  { key: "amount", header: ACTIVITY_AMOUNT_HEADER, align: "right" },
-  { key: "unit", header: "Unit" },
-  { key: "tx", header: "Tx" },
-];
+/** The columns in each view: the Amount column is right-aligned only while one engine is chosen — across engines a
+ * right edge would put Cash and legacy figures on one digit axis — and set left otherwise, header and cells alike. */
+function columnsFor(alignAmounts: boolean): KitColumn[] {
+  return [
+    { key: "when", header: ACTIVITY_WHEN_HEADER },
+    { key: "engine", header: "Engine" },
+    { key: "type", header: "Type" },
+    { key: "account", header: "Account" },
+    { key: "amount", header: ACTIVITY_AMOUNT_HEADER, align: alignAmounts ? "right" : "left" },
+    { key: "unit", header: "Unit" },
+    { key: "tx", header: "Tx" },
+  ];
+}
 
 export interface ActivityTableProps {
   rows: readonly ActivityRow[];
@@ -63,10 +67,10 @@ export interface ActivityTableProps {
  * the untimed tail dim with its block number where the time would be, the time a typeset instant with the wire's ISO
  * as its title, the type in the page's words with the wire's word as its title — a key record set apart by weight,
  * never by a verdict's colour — a liquidation's typed extract beneath it, the account opening the Inspector, the
- * amount in its right-aligned column — placed only by a scale the wire licensed, otherwise the wire's integer grouped
- * with the raw word beside it in the same cell — with its unit named in the quiet column beside it, the tx on its
- * chain's explorer. A record-only row's dash is a statement, not a value, and is set as one. Every cell is the view
- * model's word; nothing is decided here.
+ * amount in its own column, right-aligned only within one engine — placed only by a scale the wire licensed, otherwise
+ * the wire's integer grouped with the raw word beside it in the same cell — with its unit named in the quiet column
+ * beside it, the tx on its chain's explorer. A record-only row's dash is a statement, not a value, and is set as one.
+ * Every cell is the view model's word; nothing is decided here.
  */
 export function ActivityTable({ rows, emptyText, alignAmounts, bonusNote }: ActivityTableProps) {
   // One digit axis needs one tag slot on every row, empty or not, so a tagged row's digits do not step left.
@@ -142,7 +146,7 @@ export function ActivityTable({ rows, emptyText, alignAmounts, bonusNote }: Acti
   return (
     <div>
       <div className={kit.card}>
-        <KitTable testId="activity-table" columns={COLUMNS} rows={kitRows} emptyText={emptyText} label={ACTIVITY_LIST_TITLE} />
+        <KitTable testId="activity-table" columns={columnsFor(alignAmounts)} rows={kitRows} emptyText={emptyText} label={ACTIVITY_LIST_TITLE} />
       </div>
       {bonusNote !== null && (
         <p className={styles.footnote} data-testid="activity-bonus-note">

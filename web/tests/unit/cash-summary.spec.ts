@@ -532,6 +532,23 @@ test("the median room tile is the lib's decision: over a book the engine compute
   // An empty book read whole holds no room to take a median of, and refused nothing: it says so, in ink — never a dash.
   const empty = summarizeCash({ rows: [], decimals: 6, refusedPositions: 0, ...settled });
   expect(medianRoomTile(empty)).toEqual({ value: "No accounts", sub: "No room to measure", tone: "neutral", pending: false });
+  // A book read whole whose every computed account has no borrow cap holds accounts, and no room to take a median of:
+  // never "No accounts" — the state, in the lib's word, refusing nothing.
+  const wire = POSITIONS_DM_PAGE_1.positions.find((p) => p.status === "computed");
+  if (wire === undefined || wire.health_factor === null) throw new Error("fixture invariant: the committed page serves a computed row");
+  const capless = readCashRow(refinePositionSummary({ ...wire, account: "0xcapless", health_factor: { ...wire.health_factor, num: "0" } }));
+  expect(capless).toMatchObject({ computed: true, cap: 0n, roomTenths: null });
+  const uncapped = summarizeCash({ rows: [capless], decimals: 6, refusedPositions: 0, ...settled });
+  expect(uncapped).toMatchObject({ whole: true, computed: 1, notComputed: 0, percentiles: { median: null, p10: null } });
+  expect(medianRoomTile(uncapped)).toEqual({
+    value: "",
+    sub: "No account has a borrow cap to measure room against",
+    tone: "neutral",
+    pending: false,
+    state: "unavailable",
+    stateWord: "Not measurable",
+  });
+  expect(JSON.stringify(medianRoomTile(uncapped))).not.toContain("No accounts");
   // Walking: the median so far, busy. Stopped: no figure, in the unavailable register, the stop said.
   const walking = summarizeCash({ rows, decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: null, walkStopKind: null, refusedWhole: null });
   const { median, p10 } = walking.percentiles;

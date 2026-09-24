@@ -105,9 +105,9 @@ const sentenceCase = (text: string): string => `${text.charAt(0).toUpperCase()}$
 
 /**
  * The shared pipeline law's four steps (lib/verification-view `pipelineSteps`) in the front door's words. A read in
- * flight is pending — never failed; a step with no figure states why in the unavailable register, in the law's own words
- * ("Unavailable" for a read that failed, the absence the wire stated otherwise) — never the refused register, never a
- * dash; a refused census keeps its batch figure, in the refused register.
+ * flight is pending — never failed; a step with no figure keeps the law's own state, word and tone — "Unavailable" for
+ * a read that failed, the refused register and its word for an absence the wire stated — so one state wears one
+ * register on both pages, never a dash; a refused census keeps its batch figure, in the refused register.
  */
 export function overviewPipeline(steps: readonly PipelineStep[]): OverviewStep[] {
   return steps.map((step) => {
@@ -119,8 +119,10 @@ export function overviewPipeline(steps: readonly PipelineStep[]): OverviewStep[]
       description: PIPELINE_DESCRIPTIONS[step.key],
       tone: step.tone === "ok" ? "neutral" : step.tone,
     };
-    if (step.pending) return { ...base, tone: "neutral", line: null, state: "pending" };
-    if (step.value === EM_DASH) return { ...base, tone: "neutral", line: null, state: "unavailable", stateWord: sentenceCase(step.sub) };
+    if (step.pending) return { ...base, tone: "neutral", line: null, state: "pending", stateWord: step.stateWord };
+    if (step.value === EM_DASH) {
+      return { ...base, line: null, state: step.state ?? "unavailable", stateWord: step.stateWord ?? sentenceCase(step.sub) };
+    }
     return { ...base, line: { ...step.line, before: sentenceCase(step.line.before) } };
   });
 }

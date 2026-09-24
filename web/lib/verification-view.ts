@@ -8,7 +8,7 @@
 // absences. The four architecture steps are the
 // Overview's pipeline law, derived here once and rendered by both pages
 // (app/overview/Pipeline.tsx and app/proof/VerificationArchitecture.tsx).
-import { MalformedResponseError, UnavailableError, type components } from "@solvent/client";
+import { UnavailableError, type components } from "@solvent/client";
 import { CASH_ENGINE_MISSING, wholeRefusal } from "./cash-refusal";
 import {
   CHECKED_ROWS_LABEL,
@@ -32,6 +32,7 @@ import {
   WELDS_NOTE,
   type EvidenceDescriptor,
 } from "./evidence";
+import { answeredUnreadably, malformedStatus } from "./fetch-failure";
 import { EM_DASH, shortHex } from "./format";
 import { exactUtc, humanUtc } from "./human-utc";
 import type { StateRegister } from "./kit";
@@ -78,16 +79,6 @@ export function bookFailed(cause: unknown): BookReading {
   return answeredUnreadably(cause)
     ? { phase: "error", book: null, failure: { message, retryAfterSeconds: null, unreadable: true } }
     : { phase: "error", book: null, failure: { message, retryAfterSeconds: null } };
-}
-
-/**
- * Whether a failed ask was answered with a body the page could not read. Only
- * a 2xx body counts: the client raises the same error for a non-2xx answer
- * that lacks the contract's envelope — usually a proxy's error page — and that
- * request never reached the service's answer, so it failed.
- */
-export function answeredUnreadably(cause: unknown): boolean {
-  return cause instanceof MalformedResponseError && cause.status >= 200 && cause.status < 300;
 }
 
 /**
@@ -196,6 +187,8 @@ export function markerLine(descriptor: Pick<EvidenceDescriptor, "marker" | "mark
 const UNAVAILABLE = "unavailable";
 /** The pending register's word: a read in flight, which has neither answered nor failed. */
 const PENDING = "pending";
+/** The book's own 503, said in one word wherever the page names it: the Compute step and the Live batch chip. */
+const NO_SERVABLE_BATCH = "no servable batch";
 const n = (value: number | null | undefined): string =>
   typeof value === "number" ? value.toLocaleString("en-US") : UNAVAILABLE;
 /** The receipt's drift in its counted register — "0 drifted"; a tally that is no number is unavailable, never a zero. */
@@ -451,11 +444,11 @@ export function pipelineSteps(
           label: PIPELINE_STEPS.compute.name,
           ordinal: PIPELINE_STEPS.compute.ordinal,
           value: EM_DASH,
-          sub: bookPending ? PENDING : reading.phase === "no-batch" ? "no servable batch" : UNAVAILABLE,
+          sub: bookPending ? PENDING : reading.phase === "no-batch" ? NO_SERVABLE_BATCH : UNAVAILABLE,
           tone: bookPending || reading.phase !== "no-batch" ? "neutral" : "refused",
           pending: bookPending,
           state: noFigure(bookPending, reading.phase !== "no-batch"),
-          stateWord: wordOf(bookPending, reading.phase === "no-batch" ? "no servable batch" : UNAVAILABLE),
+          stateWord: wordOf(bookPending, reading.phase === "no-batch" ? NO_SERVABLE_BATCH : UNAVAILABLE),
           sentence: bookPending
             ? COMPUTE_PENDING
             : reading.phase === "no-batch"
@@ -898,16 +891,18 @@ function pendingChips(): LabChip[] {
 /**
  * The manifest could not be read: each chip says so in a word — a failed read is never a refusal, so no chip is
  * dashed — and nothing is invented in its place. The live batch is the one exception the page can still name: the
- * batch `/v1/book` served, when it answered.
+ * batch `/v1/book` served, when it answered — pending while that read is still in flight, since the manifest failing
+ * first says nothing of the book; and where the book states no servable batch, the Compute step's own words, in its
+ * refused register.
  */
 function unavailableChips(reading: BookReading): LabChip[] {
-  const served = reading.phase === "ok" && reading.book !== null ? n(reading.book.batch.id) : UNAVAILABLE;
-  return [
-    { label: "Proof pin", value: UNAVAILABLE },
-    { label: "Live batch", value: served },
-    { label: "Receipt", value: UNAVAILABLE },
-    { label: "Batch key", value: UNAVAILABLE },
-  ];
+  const liveBatch: LabChip =
+    reading.phase === "loading"
+      ? { label: "Live batch", value: PENDING }
+      : reading.phase === "no-batch"
+        ? { label: "Live batch", value: NO_SERVABLE_BATCH, tone: "refused" }
+        : { label: "Live batch", value: reading.phase === "ok" && reading.book !== null ? n(reading.book.batch.id) : UNAVAILABLE };
+  return [{ label: "Proof pin", value: UNAVAILABLE }, liveBatch, { label: "Receipt", value: UNAVAILABLE }, { label: "Batch key", value: UNAVAILABLE }];
 }
 
 /** The identity line — batch, key, commit, receipt — one line of the drawer's doctrine; an absent value is the dash and its reason. */
@@ -952,7 +947,7 @@ export function evidenceFailed(cause: unknown): Extract<EvidenceState, { phase: 
     phase: "error",
     message: cause instanceof Error ? cause.message : String(cause),
     retryAfterSeconds: null,
-    status: cause instanceof MalformedResponseError ? cause.status : null,
+    status: malformedStatus(cause),
     unreadable: answeredUnreadably(cause),
   };
 }
@@ -1040,7 +1035,7 @@ function unavailableDek(status: number | null | undefined, retryAfterSeconds: nu
   const said =
     typeof status === "number"
       ? `The service did not answer the proof request (HTTP ${String(status)}), so there is no proof to show.`
-      : "The proof request did not reach the service, so there is no proof to show.";
+      : "The page could not get a response from the service to the proof request, so there is no proof to show.";
   const retry = retryWords(retryAfterSeconds);
   return retry === "" ? said : `${said} ${retry}`;
 }

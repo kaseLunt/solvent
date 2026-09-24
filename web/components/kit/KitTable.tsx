@@ -26,6 +26,14 @@ export interface KitTableProps {
   label?: string;
 }
 
+/**
+ * A column's alignment, stated: "right" sets its digits on one axis, "left" holds a column at the start even where the
+ * page around the table is set otherwise; no alignment leaves the cell to inherit.
+ */
+function alignClass(align: KitColumn["align"]): string | undefined {
+  return align === "right" ? styles.r : align === "left" ? styles.l : undefined;
+}
+
 /** Every column stays on every screen: a table wider than its card scrolls inside its own region, never the page. */
 export function KitTable({ columns, rows, testId, emptyText = TABLE_EMPTY_FALLBACK, label }: KitTableProps) {
   return (
@@ -34,7 +42,7 @@ export function KitTable({ columns, rows, testId, emptyText = TABLE_EMPTY_FALLBA
         <thead>
           <tr>
             {columns.map((c) => (
-              <th key={c.key} className={c.align === "right" ? styles.r : undefined} scope="col">
+              <th key={c.key} className={alignClass(c.align)} scope="col">
                 {c.header}
               </th>
             ))}
@@ -51,7 +59,7 @@ export function KitTable({ columns, rows, testId, emptyText = TABLE_EMPTY_FALLBA
           {rows.map((row) => (
             <tr key={row.key} className={row.dim ? styles.dim : undefined} data-testid={row.testId}>
               {columns.map((c) => (
-                <td key={c.key} className={c.align === "right" ? styles.r : undefined}>
+                <td key={c.key} className={alignClass(c.align)}>
                   {row.cells[c.key]}
                 </td>
               ))}

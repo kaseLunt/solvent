@@ -17,7 +17,8 @@
 //     so changing engine drops it (same number, different chain, different
 //     meaning) — with a visible notice, never silently re-meant;
 //   - a refused page (400 — e.g. a cursor minted for the other mode) and a
-//     fetch that failed are two states: each has its own card, with the
+//     fetch that failed (or an answer the page could not read, in its own
+//     register) are two states: each has its own card, with the
 //     service's own words disclosed once, and its one way forward — the
 //     restart for a refusal (a refused walk offers no "Load more": its cursor
 //     was refused, and re-sending it can only be refused again), the retry
@@ -34,11 +35,11 @@ import {
   ACTIVITY_LIST_TITLE,
   CLEAR_FILTER,
   END_OF_FEED,
+  activityFailed,
   activityScales,
   deriveActivityView,
   notABlockNumberNotice,
   sinceBlockDroppedNotice,
-  type ActivityFailure,
   type ActivityTile,
 } from "@/lib/activity-view";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
@@ -75,13 +76,6 @@ interface Refusal {
   status: number;
   code: string | null;
   message: string;
-}
-
-/** A failed fetch as the view model reads it: the status when the service answered at all, and the failure's own words. */
-function failureOf(error: Error): ActivityFailure {
-  return error instanceof InspectorFetchError
-    ? { status: error.status, code: error.code, message: error.message }
-    : { status: null, code: null, message: error.message };
 }
 
 /** A tile in its register: pending while the first page loads, the state's frame when it has no count. */
@@ -267,7 +261,7 @@ export function ActivitySurface() {
     sinceBlock,
     envelope,
     refusal,
-    failure: error === null ? null : failureOf(error),
+    failure: error === null ? null : activityFailed(error),
     valueDecimals,
   });
   const pending = activity.state === "loading";
@@ -342,7 +336,7 @@ export function ActivitySurface() {
       {activity.refusal !== null && (
         <div role="alert">
           <StateCard
-            state="refused"
+            state={activity.refusal.state}
             testId="activity-refusal"
             title={activity.refusal.title}
             cause={activity.refusal.cause}
@@ -359,7 +353,7 @@ export function ActivitySurface() {
       {activity.failure !== null && (
         <div role="alert">
           <StateCard
-            state="unavailable"
+            state={activity.failure.state}
             testId="activity-error"
             title={activity.failure.title}
             cause={activity.failure.cause}

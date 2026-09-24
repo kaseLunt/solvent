@@ -61,8 +61,10 @@ import {
   typeLabel,
   typeWord,
 } from "./feed-view";
+import { answeredUnreadably, malformedStatus } from "./fetch-failure";
 import { EM_DASH, blockTimeTitle, formatBlock, renderBlockTime, shortHex, truncateAddress } from "./format";
 import { humanUtc } from "./human-utc";
+import { InspectorFetchError } from "./inspector-data";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import type { LabHeadline } from "./lab-headline";
@@ -98,6 +100,19 @@ export interface ActivityFailure {
   readonly status: number | null;
   readonly code: string | null;
   readonly message: string;
+  /** The service answered with a 2xx body the page could not read: an answer arrived, and it is unreadable, not unfetched. */
+  readonly unreadable?: boolean;
+}
+
+/**
+ * A failed page fetch as the view reads it: the envelope's status and code when the service refused or failed in the
+ * contract's words; the status of an answer whose body the client could not read — unreadable when that answer was a
+ * 2xx, a failed request when it was a proxy's error page; and no status when no response came back to read one from.
+ */
+export function activityFailed(cause: unknown): ActivityFailure {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (cause instanceof InspectorFetchError) return { status: cause.status, code: cause.code, message, unreadable: false };
+  return { status: malformedStatus(cause), code: null, message, unreadable: answeredUnreadably(cause) };
 }
 
 export interface ActivityInput {
@@ -203,12 +218,14 @@ export interface ActivityTile {
   readonly label: string;
   readonly value: string;
   readonly sub: string;
-  readonly state: "refused" | "unavailable" | "not-served" | null;
+  readonly state: "refused" | "unavailable" | "unreadable" | "not-served" | null;
   readonly stateWord: string | null;
 }
 
 /** A page's missing exhibit, stated in its place: what is missing, why, the service's own words disclosed, the way forward. */
 export interface ActivityStateCard {
+  /** The absence's register (lib/kit STATE_REGISTERS): a refusal, a request that failed, or an answer the page could not read. */
+  readonly state: "refused" | "unavailable" | "unreadable";
   readonly title: string;
   readonly cause: string;
   readonly serviceSaid: { readonly label: string; readonly text: string } | null;
@@ -693,9 +710,19 @@ function exhaustedSentence(input: ActivityInput): string {
 
 /** The status the page may say at reader altitude: the one system token a failure keeps, in parentheses. */
 function failureDek(failure: ActivityFailure, loaded: number): string {
+  if (failure.unreadable === true) {
+    return loaded === 0
+      ? "The service answered, but the page could not read the answer, so no row of the list is shown."
+      : "The service answered, but the page could not read the answer for the next page; the rows below were served before it.";
+  }
+  if (failure.status === null) {
+    // With no status, where the request got to is not known — only that no response came back to the page.
+    return loaded === 0
+      ? "The page could not get a response from the service, so no row of the list is shown."
+      : "The page could not get a response from the service for the next page; the rows below were served before it.";
+  }
   const which = loaded === 0 ? "this page" : "the next page";
   const after = loaded === 0 ? ", so no row of it is shown." : "; the rows below were served before it.";
-  if (failure.status === null) return `The request for ${which} did not reach the service${after}`;
   return `The service did not return ${which} (HTTP ${String(failure.status)})${after}`;
 }
 
@@ -711,8 +738,9 @@ function headlineFor(state: ActivityState, input: ActivityInput): LabHeadline {
     };
   }
   if (state === "error" && input.failure !== null) {
+    const verb = input.failure.unreadable === true ? "read" : "fetched";
     return {
-      emphasis: n === 0 ? "Recorded chain actions could not be fetched." : `The next page could not be fetched, ${after}`,
+      emphasis: n === 0 ? `Recorded chain actions could not be ${verb}.` : `The next page could not be ${verb}, ${after}`,
       rest: "",
       tone: "absent",
       dek: failureDek(input.failure, n),
@@ -737,6 +765,7 @@ const cardCause = (loaded: number): string => (loaded === 0 ? "No row of the lis
 function refusalCard(input: ActivityInput): ActivityStateCard | null {
   if (input.refusal === null) return null;
   return {
+    state: "refused",
     title: "Page refused",
     cause: cardCause(input.rows.length),
     serviceSaid: input.refusal.message.trim() === "" ? null : { label: SERVICE_SAID, text: input.refusal.message },
@@ -746,8 +775,10 @@ function refusalCard(input: ActivityInput): ActivityStateCard | null {
 
 function failureCard(input: ActivityInput): ActivityStateCard | null {
   if (input.refusal !== null || input.failure === null) return null;
+  const unreadable = input.failure.unreadable === true;
   return {
-    title: "Page unavailable",
+    state: unreadable ? "unreadable" : "unavailable",
+    title: unreadable ? "Page unreadable" : "Page unavailable",
     cause: cardCause(input.rows.length),
     serviceSaid: input.failure.message.trim() === "" ? null : { label: SERVICE_SAID, text: input.failure.message },
     action: "Try again",
@@ -767,7 +798,11 @@ function tileOf(label: string, type: EventDisplayType, state: ActivityState, inp
   if (n === 0) {
     // Nothing loaded is not zero: the tile states which absence it is — except an exhausted list, whose zero is true.
     if (state === "refused") return { ...plain, value: "", sub: "Nothing counted", state: "refused" };
-    if (state === "error") return { ...plain, value: "", sub: "This page could not be fetched", state: "unavailable" };
+    if (state === "error") {
+      return input.failure?.unreadable === true
+        ? { ...plain, value: "", sub: "This page could not be read", state: "unreadable" }
+        : { ...plain, value: "", sub: "This page could not be fetched", state: "unavailable" };
+    }
     if (state === "exhausted") return { ...plain, value: "0", sub: "No rows loaded" };
     return { ...plain, value: "", sub: "" };
   }
@@ -789,7 +824,15 @@ function loadedChip(state: ActivityState, input: ActivityInput): LabChip[] {
   const n = input.rows.length;
   if (n === 0 && state !== "exhausted") return [];
   const where =
-    state === "refused" ? "next page refused" : state === "error" ? "next page unavailable" : input.hasMore ? "more available" : "end of the list";
+    state === "refused"
+      ? "next page refused"
+      : state === "error"
+        ? input.failure?.unreadable === true
+          ? "next page unreadable"
+          : "next page unavailable"
+        : input.hasMore
+          ? "more available"
+          : "end of the list";
   return [{ label: "Loaded", value: `${groupInt(n)} · ${where}` }];
 }
 
@@ -839,14 +882,14 @@ function distinctNotes(rows: readonly FeedChainEvent[]): readonly (readonly Note
 }
 
 /** The table's word when it holds no row: the state's own word (lib/kit STATE_REGISTERS), never a bare dash. */
-function emptyWord(state: ActivityState): string {
+function emptyWord(state: ActivityState, failure: ActivityFailure | null): string {
   switch (state) {
     case "loading":
       return "Loading…";
     case "refused":
       return "Refused";
     case "error":
-      return "Unavailable";
+      return failure?.unreadable === true ? "Unreadable" : "Unavailable";
     case "exhausted":
     case "ok":
       return "No rows";
@@ -1016,7 +1059,7 @@ export function deriveActivityView(input: ActivityInput): ActivityView {
     },
     rows: rows.map((event) => activityRow(event, mode, valueDecimals)),
     alignAmounts: mode === "engine-scoped",
-    emptyText: emptyWord(state),
+    emptyText: emptyWord(state, input.failure),
     listQualifier: listQualifier(input, drifted),
     pageSize: envelope === null ? null : `Loads ${groupInt(readWirePopulation(envelope.limit, "limit"))} at a time`,
     tailNote:

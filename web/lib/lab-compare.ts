@@ -250,7 +250,8 @@ function unrankedClause(row: CompareRow, engine: string, book: string): string {
  * share of the book, crit when that is more debt. The ranking is the view's own (|share|, then |Δ|); a tie in the
  * figure names every leader. Every other ranked scenario is one clause of the dek; a refused, withheld or unmeasurable
  * scenario is left out of the ranking and named; a projection with no spot pass is never ranked on spot
- * liquidatability, and the dek says so. A set where no ranked scenario moves anything says that instead.
+ * liquidatability, and the dek says so. A set where no ranked scenario moves anything says that instead — of the whole
+ * set only when every member was ranked, otherwise of the ranked spot scenarios, the dek naming each one left out.
  */
 export function compareHeadline(view: CompareView): LabHeadline {
   const book = bookWord(view.engine);
@@ -266,7 +267,9 @@ export function compareHeadline(view: CompareView): LabHeadline {
   if (points.every((p) => p.deltaUsd === 0n)) {
     const names = points.map((p) => p.label);
     const still = `${joinAnd(names)} ${names.length === 1 ? "leaves" : "leave"} it unchanged.`;
-    return { emphasis: `No scenario in this set makes more ${book} debt liquidatable.`, rest: "", tone: "neutral", dek: [still, ...unrankedDek].join(" ") };
+    // The negative is said of the scenarios ranked, and of the set only when the set is every one of them.
+    const scope = unranked.length === 0 ? "No scenario" : "No ranked spot scenario";
+    return { emphasis: `${scope} in this set makes more ${book} debt liquidatable.`, rest: "", tone: "neutral", dek: [still, ...unrankedDek].join(" ") };
   }
   const leaders = points.filter((p) => p.deltaUsd === first.deltaUsd);
   const others = points.slice(leaders.length);
