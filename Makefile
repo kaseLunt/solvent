@@ -61,10 +61,12 @@ vet:
 run-indexer:
 	go run ./cmd/indexer
 
-# run-api starts the public REST + SSE read surface with .env exported. It needs
-# SOLVENT_API_DATABASE_URL (preferred — the SELECT-only role) or
-# SOLVENT_DATABASE_URL, and nothing else: cmd/api makes ZERO RPC calls, so no
-# SOLVENT_RPC_* variable is consulted and none is required.
+# run-api starts the public REST + SSE read surface with .env exported. It loads
+# config/contracts.json at startup, which refuses unless SOLVENT_DATABASE_URL,
+# SOLVENT_RPC_OP and SOLVENT_RPC_ETH are all set — even though cmd/api makes ZERO
+# RPC calls and never dials those endpoints. For its own connection it prefers
+# SOLVENT_API_DATABASE_URL (the SELECT-only role) and falls back to
+# SOLVENT_DATABASE_URL, logging a warning when it does.
 #
 # It NEVER migrates and REFUSES to start unless the database's goose version
 # equals the one this build's queries were written against. Against a database
