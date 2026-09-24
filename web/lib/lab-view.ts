@@ -32,6 +32,7 @@ import {
 } from "./lab-headline";
 import { definitionSkew, libraryRows, type HeldResult, type LibraryRow, type RunRecord, type ScenarioDefinition, type ScenariosResponse } from "./lab-library";
 import type { LabReading } from "./lab-reading";
+import type { HeatmapView } from "./lab-transitions";
 import { groupInt, joinAnd } from "./prose";
 import type { ResultIdentity } from "./resultIdentity";
 import type { LabRunBook, RunBookOutcome } from "./runbook";
@@ -43,11 +44,16 @@ export type { Banner, HeldCondition, Retained } from "./lab-headline";
 /**
  * Three populations, three words. The lane tile counts `lane_changed_rows`,
  * rows whose lane changed, which the contract says is NOT `movers_total`, so
- * it never says "moved". The movers table prints the service's rows in the
- * service's own ranking (its caption, `moversCaption`, names which accounts
- * they are). The dek's "move to a worse band" is the web's own band count.
+ * it never says "moved". A lane is one of the buckets the service's
+ * histogram serves and every lane change is between buckets, so the tile
+ * names the bucket and never the word "lane", which no page defines. "Risk"
+ * is the engine-neutral word: only the legacy market's comparator is a health
+ * factor, and on Cash the buckets are a disclosure of cap ÷ debt.
+ * The movers table prints the service's rows in the service's own ranking
+ * (its caption, `moversCaption`, names which accounts they are). The dek's
+ * "move to a worse band" is the web's own band count.
  */
-export const LANE_TILE_LABEL = "Accounts changing lane";
+export const LANE_TILE_LABEL = "Accounts changing risk bucket";
 export const MOVERS_TITLE = "Most affected accounts";
 export const MOVERS_QUALIFIER = "room today → after the shock · ranked by the service";
 export const MOVERS_LINK = `${MOVERS_TITLE} →`;
@@ -62,6 +68,26 @@ export const MOVERS_EMPTY = "No account is listed.";
 export const ASSUMPTIONS_BUTTON = "Assumptions · What the model leaves out";
 export const ASSUMPTIONS_TITLE = "Assumptions & what the model leaves out";
 export const ASSUMPTIONS_LEFT_OUT = "Left out of the model";
+
+/**
+ * The transition grid's reading. On Cash the grid joins the service's risk
+ * buckets into fewer room bands, so its band count runs below the lane tile's
+ * bucket count, and the axes say how the bands are made. Unmerged, the grid
+ * draws one bucket to a row, so its count is the tile's, in the tile's word.
+ */
+export function transitionFinding(view: HeatmapView): string {
+  const one = (n: number, plural: string, singular: string) => (n === 1 ? singular : plural);
+  const bucketBands = view.bands.filter((b) => b.kind === "bucket");
+  const buckets = bucketBands.reduce((n, b) => n + b.lanes.length, 0);
+  const axes = view.merged
+    ? `Rows: room under cap today, in ${groupInt(bucketBands.length)} bands made from the service's ${groupInt(buckets)} risk buckets · columns: after the shock · cells are accounts.`
+    : "Rows: risk bucket today · columns: after the shock, as the wire serves them · cells are accounts.";
+  const unit = view.merged ? "band" : "bucket";
+  const improved = view.improved === 0 ? "none improve" : `${groupInt(view.improved)} ${one(view.improved, "improve", "improves")}`;
+  const moves = `${groupInt(view.bandChanged)} ${one(view.bandChanged, "accounts change", "account changes")} ${unit}; ${groupInt(view.crossedCap)} ${one(view.crossedCap, "cross", "crosses")} the cap; ${improved}.`;
+  const unmeasured = view.unmeasuredRows === 0 ? "" : ` ${groupInt(view.unmeasuredRows)} not measured.`;
+  return `${axes} ${moves}${unmeasured}`;
+}
 
 /** A chip on the identity strip; structurally the kit's IdentityChip, kept out of the component layer. */
 export interface LabChip {
@@ -118,6 +144,34 @@ export type CompareState =
 export interface HeldCompare {
   readonly cash: CompareView;
   readonly legacy: CompareView;
+}
+
+/** The Compare button, and while it cannot act, the reason shown beside it. */
+export interface CompareControl {
+  readonly label: string;
+  readonly disabled: boolean;
+  readonly hint: string | null;
+}
+
+/**
+ * Compare runs two or more ticked scenarios the listing names, and waits for a
+ * comparison already in flight. The hint names whichever of those holds the
+ * button back, and is null exactly when the button can act.
+ */
+export function compareControl(view: Pick<LabView, "listingLoad" | "library" | "checked" | "compare">): CompareControl {
+  const ticked = view.checked.length;
+  const label = ticked >= 2 ? `Compare ${String(ticked)} scenarios` : "Compare…";
+  const hint = compareHint(view, ticked);
+  return { label, disabled: hint !== null, hint };
+}
+
+function compareHint(view: Pick<LabView, "listingLoad" | "library" | "compare">, ticked: number): string | null {
+  if (view.listingLoad.phase !== "ready") return "Nothing can be compared until the scenarios are listed.";
+  if (view.library.length < 2) return `Compare needs two or more scenarios; ${view.library.length === 0 ? "none is" : "one is"} listed.`;
+  if (ticked === 0) return "Tick two or more scenarios to compare them.";
+  if (ticked === 1) return "Tick one more scenario to compare.";
+  if (view.compare.kind === "running") return "A comparison is running.";
+  return null;
 }
 
 export interface LabUi {

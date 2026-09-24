@@ -89,16 +89,17 @@ test("the Cash lanes are the Book's histogram and the plan's movement table; eve
   expect(r.view.nearCrossed).toBe(27);
 });
 
-test("the movers are the demo pages' own accounts that cross under ×0.7, ascending by the ratio after (furthest past the cap first), 20 of 118", () => {
+test("the movers are the demo pages' own accounts that cross under ×0.7, the service's top 20 of 118 by debt", () => {
   const c = cash();
   expect(c.movers).toHaveLength(20);
   expect(c.movers_total).toBe(118);
-  // The note states the order the rows below are checked in, and the truncation.
-  expect(c.movers_note).toContain("ranked here by the exact ratio AFTER the shock, ascending: the account furthest past the cap first");
-  expect(c.movers_note).toContain("`movers` carries the 20 furthest past the cap; the other 98 are not on this page.");
+  // The note states the service's ranking rule and its truncation, in the service's own words.
+  expect(c.movers_note).toContain("ranked by their debt in this engine's 6-decimal USD, largest first");
+  expect(c.movers_note).toContain("`movers` is TRUNCATED to the top 20 of 118; `movers_total` is the full count and the other 98 are not on this page.");
   // The two pages are the whole Cash book; a mover may come from either.
-  const rows = new Map([...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => [p.account.toLowerCase(), p]));
-  let previous = 0n;
+  const pages = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions];
+  const rows = new Map(pages.map((p) => [p.account.toLowerCase(), p]));
+  let previous: bigint | null = null;
   for (const m of c.movers) {
     const row = rows.get(m.account.toLowerCase());
     expect(row).toBeDefined();
@@ -110,11 +111,24 @@ test("the movers are the demo pages' own accounts that cross under ×0.7, ascend
     expect(BigInt(m.hf_after_num!) < BigInt(m.hf_after_den!)).toBe(true);
     expect(m.became_eligible).toBe(true);
     expect(m.debt_usd).toBe(String(row!.total_debt));
-    // ascending by the ratio after (row 1 is the account furthest past the cap): num_after/den_after non-decreasing
-    const ratio = (BigInt(m.hf_after_num!) * 1_000_000n) / BigInt(m.hf_after_den!);
-    expect(ratio >= previous).toBe(true);
-    previous = ratio;
+    // largest debt first: debt non-increasing down the list
+    const debt = BigInt(m.debt_usd!);
+    if (previous !== null) expect(debt <= previous).toBe(true);
+    previous = debt;
   }
+  // The 20 are the LARGEST: no crossing row left off the list carries more debt than the smallest carried.
+  const carried = new Set(c.movers.map((m) => m.account.toLowerCase()));
+  const crossingLeftOff = pages.filter(
+    (p) =>
+      p.status === "computed" &&
+      p.liquidatable === false &&
+      p.health_factor?.num != null &&
+      p.health_factor?.den != null &&
+      BigInt(p.health_factor.num) * 7n < BigInt(p.health_factor.den) * 10n &&
+      !carried.has(p.account.toLowerCase()),
+  );
+  expect(crossingLeftOff.length).toBeGreaterThan(0);
+  for (const p of crossingLeftOff) expect(BigInt(String(p.total_debt)) <= previous!).toBe(true);
 });
 
 test("the weETH realization is the depeg rule over the Book's figures, and the rule reproduces the contract's own weETH example", () => {

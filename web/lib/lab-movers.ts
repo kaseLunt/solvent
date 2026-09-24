@@ -1,16 +1,20 @@
-// The most-affected accounts: the wire's `movers`, in the wire's order, each
-// side's room from the Cash ratio (cap ÷ debt) or the legacy market's health
-// factor from its wad. Every field passes the guards; a field that fails is
-// named and its cell prints "unreadable", never a number.
+// The most-affected accounts: the wire's `movers`, listed in the engine's own
+// ranking, each side's room from the Cash ratio (cap ÷ debt) or the legacy
+// market's health factor from its wad. Every field passes the guards; a field
+// that fails is named and its cell prints "unreadable", never a number.
 //
 // The caption names WHICH accounts these are in the contract's own terms,
 // engine by engine: on Cash the accounts whose eligibility flips false → true,
 // ranked by debt; on the legacy market the accounts whose health factor
 // strictly drops, ranked by the drop. Neither is "moved" — that verb belongs
 // to the web's band count, and the lane tile's rows are a third population.
+// It also names the order the rows are listed in, so the table sets that
+// order itself from the same key rather than trusting the order they arrive
+// in: a caption read as the sort order must be the sort order.
 import type { components } from "@solvent/client";
 import { hfDisplayFromWad } from "./book-format";
 import { humanUsdFull } from "./human-price";
+import { CASH, LEGACY } from "./inspector-position";
 import { materialityTier, type MaterialityTier } from "./materiality";
 import { formatTenths, percentTenths } from "./percent";
 import { groupInt } from "./prose";
@@ -25,7 +29,7 @@ export type RunBookMover = Schemas["RunBookMover"];
  * — the wire's or the sealed one the Lab holds — is a MoverEngine; the
  * projection is no part of this reading and is never handed across.
  */
-export type MoverEngine = Pick<RunBookEngine, "usd_decimals" | "movers" | "movers_total" | "movers_note">;
+export type MoverEngine = Pick<RunBookEngine, "engine" | "usd_decimals" | "movers" | "movers_total" | "movers_note">;
 
 export interface MoverRow {
   readonly account: string;
@@ -94,7 +98,7 @@ export function moversTable(engine: MoverEngine): MoversTable {
   if (!isWireScale(decimals)) {
     return { rows: [], shown: 0, total: null, note: engine.movers_note, decimals: 0, unreadable: ["usd_decimals"] };
   }
-  const rows: MoverRow[] = engine.movers.map((m, i) => {
+  const ranked = engine.movers.map((m, i) => {
     const at = `movers[${String(i)}]`;
     const roomBefore = ratio(m.hf_before_num, m.hf_before_den, `${at}.hf_before`, unreadable);
     const roomAfter = ratio(m.hf_after_num, m.hf_after_den, `${at}.hf_after`, unreadable);
@@ -111,7 +115,13 @@ export function moversTable(engine: MoverEngine): MoversTable {
         debtText = "unreadable";
       }
     }
-    return {
+    let key: bigint | null = null;
+    if (engine.engine === CASH) key = debt;
+    else if (engine.engine === LEGACY && m.hf_drop_wad !== null) {
+      if (isWireDecimal(m.hf_drop_wad)) key = BigInt(m.hf_drop_wad);
+      else unreadable.push(`${at}.hf_drop_wad`);
+    }
+    const row: MoverRow = {
       account: m.account,
       roomBefore,
       roomAfter,
@@ -122,7 +132,17 @@ export function moversTable(engine: MoverEngine): MoversTable {
       tier: debt === null ? null : materialityTier(debt, decimals),
       becomesLiquidatable: m.became_eligible,
     };
+    return { row, key };
   });
+  // Largest key first; a row with no readable key goes last. The sort is
+  // stable, so equal keys keep the order they arrived in, which is the
+  // service's own tie-break.
+  ranked.sort((a, b) => {
+    if (a.key === null) return b.key === null ? 0 : 1;
+    if (b.key === null) return -1;
+    return a.key === b.key ? 0 : a.key > b.key ? -1 : 1;
+  });
+  const rows = ranked.map((r) => r.row);
   let total: number | null = engine.movers_total;
   if (!isWirePopulation(engine.movers_total)) {
     unreadable.push("movers_total");
@@ -136,9 +156,11 @@ export function moversCaption(t: MoversTable, engine: "debt_manager" | "aave_v3_
   // claim about the book, and the truth is that the scale could not be read.
   if (t.unreadable.includes("usd_decimals")) return "not readable: unreadable scale";
   const accounts = (n: number) => `${groupInt(n)} account${n === 1 ? "" : "s"}`;
-  if (t.total === null) return `${accounts(t.shown)} shown · total not stated`;
-  const total = t.total;
   const cash = engine === "debt_manager";
+  // The order `moversTable` lists the rows in, named wherever there are rows to order.
+  const order = t.shown > 1 ? ` · listed largest ${cash ? "debt" : "drop"} first` : "";
+  if (t.total === null) return `${accounts(t.shown)} shown${order} · total not stated`;
+  const total = t.total;
   // The legacy zero claims only what the service's `movers_note` licenses: no health factor it measured on both
   // sides strictly dropped. An account with no debt has an unbounded health factor, no drop to rank, and is not
   // counted — so the zero is never "no account's health factor drops", a negative over accounts it never tested.
@@ -149,17 +171,15 @@ export function moversCaption(t: MoversTable, engine: "debt_manager" | "aave_v3_
   }
   // A list longer than its own full count, or empty under a count above zero,
   // is not a window onto that count: it is said as it stands, never as "all".
-  if (t.shown > total || t.shown === 0) return `${accounts(t.shown)} listed · the service states ${groupInt(total)} in all`;
+  if (t.shown > total || t.shown === 0) return `${accounts(t.shown)} shown${order} · the service states ${groupInt(total)} in all`;
   if (t.shown < total) {
     // The stated cap is named only beside a list it can bound: a longer list
     // would make "at most" a claim the answer on the page contradicts.
     const cap = t.shown <= MOVERS_CAP ? ` · the service returns at most ${groupInt(MOVERS_CAP)}` : "";
     return cash
-      ? `the ${groupInt(t.shown)} largest of the ${groupInt(total)} accounts that become liquidatable, by debt${cap}`
-      : `the ${groupInt(t.shown)} largest health-factor drops of ${groupInt(total)} accounts${cap}`;
+      ? `the ${groupInt(t.shown)} largest of the ${groupInt(total)} accounts that become liquidatable, by debt${order}${cap}`
+      : `the ${groupInt(t.shown)} largest health-factor drops of ${groupInt(total)} accounts${order}${cap}`;
   }
   if (total === 1) return cash ? "the 1 account that becomes liquidatable" : "the 1 account whose health factor drops";
-  return cash
-    ? `all ${groupInt(total)} accounts that become liquidatable, by debt`
-    : `all ${groupInt(total)} accounts whose health factor drops, largest drop first`;
+  return cash ? `all ${groupInt(total)} accounts that become liquidatable${order}` : `all ${groupInt(total)} accounts whose health factor drops${order}`;
 }

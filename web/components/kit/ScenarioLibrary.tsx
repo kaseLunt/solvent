@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import styles from "./kit.module.css";
 
 export type LibraryOutcomeKey =
@@ -31,8 +31,11 @@ export interface ScenarioLibraryProps {
   addressSlot?: ReactNode;
   /** Absent when the mode has its own action (one-address mode runs on Inspect). */
   run?: { label: string; disabled: boolean; onRun: () => void };
-  /** Null hides the button (address mode, or Compare not built yet). */
-  compare: { label: string; disabled: boolean; onCompare: () => void } | null;
+  /**
+   * Null hides the button (address mode, or Compare not built yet). `hint` is why a disabled Compare cannot act: shown
+   * beside it and read as its description, since a title never reaches keyboard or touch.
+   */
+  compare: { label: string; disabled: boolean; hint?: string | null; onCompare: () => void } | null;
   emptyText: string;
   footnote?: string;
   testId?: string;
@@ -60,6 +63,8 @@ export function ScenarioLibrary({
   footnote,
   testId,
 }: ScenarioLibraryProps) {
+  const compareHintId = useId();
+  const compareHint = compare !== null && compare.disabled && compare.hint ? compare.hint : null;
   return (
     <>
       <aside className={styles.lib} data-testid={testId} data-mode={mode}>
@@ -151,10 +156,16 @@ export function ScenarioLibrary({
                 className={`${styles.btn} ${styles.btnGhost}`}
                 disabled={compare.disabled}
                 onClick={compare.onCompare}
+                aria-describedby={compareHint !== null ? compareHintId : undefined}
                 data-testid="lab-compare"
               >
                 {compare.label}
               </button>
+            )}
+            {compareHint !== null && (
+              <span id={compareHintId} className={styles.libHint} data-testid="lab-compare-hint">
+                {compareHint}
+              </span>
             )}
           </div>
         )}

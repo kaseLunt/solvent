@@ -1,13 +1,14 @@
-// The most-affected table: the wire's movers in the wire's order, room from
-// the Cash ratio, HF wads for the legacy market, the $100 line as a display
-// tier, a null verdict as "cannot say", and unreadable fields named. The
-// caption names which accounts they are in the contract's own terms per
-// engine, and the service's stated cap.
+// The most-affected table: the wire's movers listed in the engine's own
+// ranking, room from the Cash ratio, HF wads for the legacy market, the $100
+// line as a display tier, a null verdict as "cannot say", and unreadable
+// fields named. The caption names which accounts they are in the contract's
+// own terms per engine, the order they are listed in, and the service's
+// stated cap.
 import { expect, test } from "@playwright/test";
 import { MOVERS_CAP, moversCaption, moversTable, roomFromRatio, type MoversTable } from "../../lib/lab-movers";
 import { cashEngine, legacyEngine } from "./helpers/run-book-engine";
 
-/** A table as the reader builds it: `shown` rows in the wire's ranking, the wire's full count beside them (null when it failed its guard). */
+/** A table as the reader builds it: `shown` rows in the engine's ranking, the wire's full count beside them (null when it failed its guard). */
 const table = ({ shown, total }: { shown: number; total: number | null }): MoversTable => ({
   rows: Array.from({ length: shown }, (_, i) => ({
     account: `0x${String(i + 1).padStart(40, "0")}`,
@@ -51,7 +52,7 @@ test("roomFromRatio: the room a cap/debt ratio means, floored to tenths; at or o
   expect(roomFromRatio(5n, 0n)).toBe("no debt");
 });
 
-test("Cash movers: wire order, room today → after from the ratios, debt in the account register, tiers, verdicts", () => {
+test("Cash movers: largest debt first, room today → after from the ratios, debt in the account register, tiers, verdicts", () => {
   const engine = cashEngine(
     { 3: { 0: 2 }, 5: { 2: 1 } },
     {
@@ -101,24 +102,25 @@ test("Cash movers: wire order, room today → after from the ratios, debt in the
   expect(four.tier).toBeNull();
   expect(four.becomesLiquidatable).toBe(false);
   expect(moversCaption(t, "debt_manager")).toBe(
-    "the 4 largest of the 118 accounts that become liquidatable, by debt · the service returns at most 20",
+    "the 4 largest of the 118 accounts that become liquidatable, by debt · listed largest debt first · the service returns at most 20",
   );
 });
 
-test("the movers caption says which accounts they are, in the contract's own terms, and the service's cap", () => {
+test("the movers caption says which accounts they are, in the contract's own terms, the order they are listed in, and the service's cap", () => {
   // The cap is the contract's own ("BOUNDED to the top 20"), never read off the length of one answer.
   expect(MOVERS_CAP).toBe(20);
   expect(moversCaption(table({ shown: 20, total: 118 }), "debt_manager")).toBe(
-    "the 20 largest of the 118 accounts that become liquidatable, by debt · the service returns at most 20",
+    "the 20 largest of the 118 accounts that become liquidatable, by debt · listed largest debt first · the service returns at most 20",
   );
-  expect(moversCaption(table({ shown: 5, total: 5 }), "debt_manager")).toBe("all 5 accounts that become liquidatable, by debt");
+  expect(moversCaption(table({ shown: 5, total: 5 }), "debt_manager")).toBe("all 5 accounts that become liquidatable · listed largest debt first");
   expect(moversCaption(table({ shown: 1, total: 1 }), "debt_manager")).toBe("the 1 account that becomes liquidatable");
   expect(moversCaption(table({ shown: 20, total: 300 }), "aave_v3_etherfi")).toBe(
-    "the 20 largest health-factor drops of 300 accounts · the service returns at most 20",
+    "the 20 largest health-factor drops of 300 accounts · listed largest drop first · the service returns at most 20",
   );
-  expect(moversCaption(table({ shown: 5, total: 5 }), "aave_v3_etherfi")).toBe("all 5 accounts whose health factor drops, largest drop first");
+  expect(moversCaption(table({ shown: 5, total: 5 }), "aave_v3_etherfi")).toBe("all 5 accounts whose health factor drops · listed largest drop first");
   expect(moversCaption(table({ shown: 1, total: 1 }), "aave_v3_etherfi")).toBe("the 1 account whose health factor drops");
-  expect(moversCaption(table({ shown: 20, total: null }), "debt_manager")).toBe("20 accounts shown · total not stated");
+  expect(moversCaption(table({ shown: 20, total: null }), "debt_manager")).toBe("20 accounts shown · listed largest debt first · total not stated");
+  expect(moversCaption(table({ shown: 20, total: null }), "aave_v3_etherfi")).toBe("20 accounts shown · listed largest drop first · total not stated");
   expect(moversCaption(unreadableScale(), "debt_manager")).toBe("not readable: unreadable scale");
   // No arm says "moved": that verb is the web's band count in the dek, and the lane tile is a third population.
   for (const shown of [0, 1, 5, 20]) {
@@ -138,10 +140,76 @@ test("no mover is a count the service stated; a list its own count cannot hold i
     "of the health factors measured today and after the shock, none drops · an account with no debt has none to drop",
   );
   expect(moversCaption(table({ shown: 0, total: 0 }), "aave_v3_etherfi")).not.toMatch(/\bno account\b/);
-  expect(moversCaption(table({ shown: 5, total: 3 }), "debt_manager")).toBe("5 accounts listed · the service states 3 in all");
-  expect(moversCaption(table({ shown: 0, total: 5 }), "aave_v3_etherfi")).toBe("0 accounts listed · the service states 5 in all");
+  expect(moversCaption(table({ shown: 5, total: 3 }), "debt_manager")).toBe("5 accounts shown · listed largest debt first · the service states 3 in all");
+  expect(moversCaption(table({ shown: 0, total: 5 }), "aave_v3_etherfi")).toBe("0 accounts shown · the service states 5 in all");
   // A list longer than the stated cap is never captioned "at most 20" — the rows on the page would contradict it.
-  expect(moversCaption(table({ shown: 25, total: 118 }), "debt_manager")).toBe("the 25 largest of the 118 accounts that become liquidatable, by debt");
+  expect(moversCaption(table({ shown: 25, total: 118 }), "debt_manager")).toBe(
+    "the 25 largest of the 118 accounts that become liquidatable, by debt · listed largest debt first",
+  );
+});
+
+const account = (n: number) => `0x${String(n).padStart(40, "0")}`;
+const aaveMover = (n: number, before: string, after: string, drop: string | null) => ({
+  account: account(n),
+  engine: "aave_v3_etherfi",
+  hf_before_wad: before,
+  hf_after_wad: after,
+  hf_drop_wad: drop,
+  hf_before_num: null,
+  hf_before_den: null,
+  hf_after_num: null,
+  hf_after_den: null,
+  became_eligible: null,
+  debt_usd: null,
+});
+
+test("Cash rows are listed largest debt first whatever order they arrive in; equal debts keep their order, and a debt absent or unreadable goes last", () => {
+  // Arrival ordered by room today: the caption states the table's order, so the table keeps it whatever the wire's.
+  const engine = cashEngine(
+    { 3: { 0: 1 } },
+    {
+      movers: [
+        mover(account(1), "1003400000", "1000000000", "12621352543", true),
+        mover(account(2), "1003500000", "1000000000", "45061282814", true),
+        mover(account(3), "1003600000", "1000000000", null, true),
+        mover(account(4), "1004600000", "1000000000", "0x10", true),
+        mover(account(5), "1005100000", "1000000000", "48501009860", true),
+        mover(account(6), "1008400000", "1000000000", "45061282814", true),
+      ],
+      movers_total: 118,
+      movers_note: "",
+    },
+  );
+  const t = moversTable(engine);
+  expect(t.rows.map((r) => r.account)).toEqual([account(5), account(2), account(6), account(1), account(3), account(4)]);
+  expect(t.rows.map((r) => r.roomBefore)).toEqual(["0.5%", "0.3%", "0.8%", "0.3%", "0.3%", "0.4%"]);
+  // An unreadable field is named by its place on the wire, not by its row in the table.
+  expect(t.unreadable).toEqual(["movers[3].debt_usd"]);
+  expect(moversCaption(t, "debt_manager")).toBe(
+    "the 6 largest of the 118 accounts that become liquidatable, by debt · listed largest debt first · the service returns at most 20",
+  );
+});
+
+test("legacy rows are listed largest drop first whatever order they arrive in; a drop absent or unreadable goes last, and an unreadable one is named", () => {
+  const engine = legacyEngine(
+    { 4: { 0: 1 } },
+    {
+      movers: [
+        aaveMover(1, "1100000000000000000", "1050000000000000000", "50000000000000000"),
+        aaveMover(2, "1400000000000000000", "980000000000000000", "420000000000000000"),
+        aaveMover(3, "1200000000000000000", "1000000000000000000", "2e17"),
+        aaveMover(4, "1300000000000000000", "1100000000000000000", null),
+        aaveMover(5, "1250000000000000000", "1050000000000000000", "200000000000000000"),
+      ],
+      movers_total: 5,
+      movers_note: "",
+    },
+  );
+  const t = moversTable(engine);
+  expect(t.rows.map((r) => r.account)).toEqual([account(2), account(5), account(1), account(3), account(4)]);
+  expect(t.rows.map((r) => r.hfBefore)).toEqual(["1.4", "1.25", "1.1", "1.2", "1.3"]);
+  expect(t.unreadable).toEqual(["movers[2].hf_drop_wad"]);
+  expect(moversCaption(t, "aave_v3_etherfi")).toBe("all 5 accounts whose health factor drops · listed largest drop first");
 });
 
 test("legacy movers speak wads; a null side is a dash, never a zero", () => {

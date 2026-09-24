@@ -9,6 +9,7 @@ import {
   ASSUMPTIONS_BUTTON,
   ASSUMPTIONS_LEFT_OUT,
   ASSUMPTIONS_TITLE,
+  compareControl,
   deriveLabView,
   LANE_TILE_LABEL,
   MOVERS_EMPTY,
@@ -16,6 +17,7 @@ import {
   MOVERS_QUALIFIER,
   MOVERS_TITLE,
   readEngine,
+  transitionFinding,
 } from "../../lib/lab-view";
 import { compareRerunFailedLine, contradictoryHeadline, failureHeadline, staleBannerLine } from "../../lib/lab-headline";
 import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
@@ -798,7 +800,7 @@ test("the listing is judged before it is ready: a 200 that is no listing — nul
 
 test("three populations, three words: the lane tile is not a count of movers, the movers are ranked by the service, and the assumptions never reuse the tiles' 'not modelled'", () => {
   // `lane_changed_rows` counts rows whose lane changed; the contract says it is NOT `movers_total`.
-  expect(LANE_TILE_LABEL).toBe("Accounts changing lane");
+  expect(LANE_TILE_LABEL).toBe("Accounts changing risk bucket");
   expect(LANE_TILE_LABEL).not.toMatch(/\bmoved?\b/i);
   expect(MOVERS_TITLE).toBe("Most affected accounts");
   expect(MOVERS_QUALIFIER).toBe("room today → after the shock · ranked by the service");
@@ -808,4 +810,52 @@ test("three populations, three words: the lane tile is not a count of movers, th
   expect(ASSUMPTIONS_TITLE).toBe("Assumptions & what the model leaves out");
   expect(ASSUMPTIONS_LEFT_OUT).toBe("Left out of the model");
   for (const words of [ASSUMPTIONS_BUTTON, ASSUMPTIONS_TITLE, ASSUMPTIONS_LEFT_OUT]) expect(words.toLowerCase()).not.toContain("not modelled");
+});
+
+test("the lane tile names its unit, the service's risk bucket, and the grid says how its bands are made from those buckets", () => {
+  // A lane is one of the buckets the histogram serves, and every lane change is between buckets: no page says "lane".
+  expect(LANE_TILE_LABEL).not.toMatch(/\blane\b/i);
+  // Only the legacy market's comparator is a health factor: a label both engines wear never says so.
+  expect(LANE_TILE_LABEL).not.toMatch(/health/i);
+  const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
+  const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: run }) }), ui());
+  const cash = v.book.cash;
+  const legacy = v.book.legacy;
+  if (cash?.kind !== "result" || legacy?.kind !== "result") throw new Error("both engines must read");
+  // Cash: the tile counts bucket changes; the grid joins the eight buckets into five bands, so fewer rows change band.
+  expect(cash.result.laneChanged).toBe(941);
+  expect(cash.result.heat.bandChanged).toBe(425);
+  expect(transitionFinding(cash.result.heat)).toBe(
+    "Rows: room under cap today, in 5 bands made from the service's 8 risk buckets · columns: after the shock · cells are accounts. 425 accounts change band; 118 cross the cap; none improve. 6 not measured.",
+  );
+  // The legacy grid draws the buckets one to a row, so its count and the tile's are the same count, in the same word.
+  expect(legacy.result.laneChanged).toBe(legacy.result.heat.bandChanged);
+  expect(transitionFinding(legacy.result.heat)).toBe(
+    "Rows: risk bucket today · columns: after the shock, as the wire serves them · cells are accounts. 2 accounts change bucket; 0 cross the cap; none improve.",
+  );
+  for (const finding of [transitionFinding(cash.result.heat), transitionFinding(legacy.result.heat)]) expect(finding).not.toMatch(/\blane\b/i);
+});
+
+test("the Compare button says why it cannot act, in its own rule's words, and says nothing when it can", () => {
+  const ids = SCENARIOS.scenarios.map((s) => s.id);
+  const [a, b, c] = ids;
+  if (a === undefined || b === undefined || c === undefined) throw new Error("the listing names fewer than three scenarios");
+  expect(compareControl(deriveLabView(reading({}), ui()))).toEqual({ label: "Compare…", disabled: true, hint: "Tick two or more scenarios to compare them." });
+  expect(compareControl(deriveLabView(reading({}), ui(a, [a])))).toEqual({ label: "Compare…", disabled: true, hint: "Tick one more scenario to compare." });
+  expect(compareControl(deriveLabView(reading({}), ui(a, [a, b])))).toEqual({ label: "Compare 2 scenarios", disabled: false, hint: null });
+  expect(compareControl(deriveLabView(reading({}), ui(a, [a, b, c])))).toEqual({ label: "Compare 3 scenarios", disabled: false, hint: null });
+  // A tick the listing does not name does not count toward the two.
+  expect(compareControl(deriveLabView(reading({}), ui(a, [a, "not_listed"])))).toEqual({ label: "Compare…", disabled: true, hint: "Tick one more scenario to compare." });
+  // A comparison in flight: the button waits for it, and says so.
+  const running = deriveLabView(reading({ set: withSetRunning(null, [a, b], 1) }), ui(a, [a, b]));
+  expect(compareControl(running)).toEqual({ label: "Compare 2 scenarios", disabled: true, hint: "A comparison is running." });
+  // Nothing listed yet, or a listing that failed: ticks a link brought do not count, and the words claim no failure.
+  for (const listing of [{ phase: "loading" } as const, { phase: "error", message: "down" } as const]) {
+    expect(compareControl(deriveLabView(reading({ listing }), ui(a, [a, b])))).toEqual({ label: "Compare…", disabled: true, hint: "Nothing can be compared until the scenarios are listed." });
+  }
+  // A listing too short to compare says so rather than asking for a tick that cannot be made.
+  const one = { ...SCENARIOS, scenarios: SCENARIOS.scenarios.slice(0, 1) };
+  expect(compareControl(deriveLabView(reading({ listing: { phase: "ready", value: one } }), ui()))).toEqual({ label: "Compare…", disabled: true, hint: "Compare needs two or more scenarios; one is listed." });
+  const none = { ...SCENARIOS, scenarios: [] };
+  expect(compareControl(deriveLabView(reading({ listing: { phase: "ready", value: none } }), ui()))).toEqual({ label: "Compare…", disabled: true, hint: "Compare needs two or more scenarios; none is listed." });
 });

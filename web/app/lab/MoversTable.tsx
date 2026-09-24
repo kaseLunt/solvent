@@ -13,7 +13,7 @@ const COLUMNS = [
   { key: "flips", header: "Becomes liquidatable?", align: "right" as const },
 ];
 
-/** The wire's movers, one row each, in the wire's own ranking; rows open the Inspector; a row under the small line is dimmed, never dropped. The caption names the engine's own population. */
+/** The wire's movers, one row each, in the engine's own ranking (the order the caption names); rows open the Inspector; a row under the small line is dimmed, never dropped. The caption names the engine's own population. */
 export function MoversTable({ table, engine }: { table: Table; engine: "debt_manager" | "aave_v3_etherfi" }) {
   const rows: KitRow[] = table.rows.map((m) => ({
     key: m.account,

@@ -193,6 +193,28 @@ const expectDisabledRegister = async (page: Page, id: string, ground: "panel-2" 
   await expect(button).toHaveCSS("background-color", ground === "none" ? "rgba(0, 0, 0, 0)" : await resolveToken(page, "--panel-2", "background"));
 };
 
+/**
+ * A Compare that cannot act says why in words on the page, not in a title keyboard and touch never reach, and the
+ * button carries those words as its description. The words are the lib's, for the state the page is in.
+ */
+const expectCompareHint = async (page: Page, text: string) => {
+  const button = page.getByTestId("lab-compare");
+  const hint = page.getByTestId("lab-compare-hint");
+  await expect(button).toBeDisabled();
+  await expect(hint).toBeVisible();
+  await expect(hint).toHaveText(text);
+  const id = await hint.getAttribute("id");
+  expect(id, "the hint has an id the button can point at").toBeTruthy();
+  await expect(button).toHaveAttribute("aria-describedby", id ?? "");
+  await expect(button).toHaveAccessibleDescription(text);
+};
+/** A Compare that can act has no reason beside it and no description pointing at one. */
+const expectNoCompareHint = async (page: Page) => {
+  await expect(page.getByTestId("lab-compare")).toBeEnabled();
+  await expect(page.getByTestId("lab-compare-hint")).toHaveCount(0);
+  await expect(page.getByTestId("lab-compare")).not.toHaveAttribute("aria-describedby");
+};
+
 test("cold load: the library from the listing, the first scenario's definition, nothing dispatched, tiles in the not-run register", async ({ page }) => {
   const counts = await mockLab(page);
   await page.goto("/lab");
@@ -250,8 +272,10 @@ test("one click, one POST: the demo result — the §3.5 headline, the dek, the 
   await expect(tile(page, "moved")).toContainText("of 1,406 measured · 0 improved");
   // The tile counts rows whose lane changed — not the movers (118), not the dek's band count (425) — and says so.
   await expect(tile(page, "moved")).toContainText(LANE_TILE_LABEL);
-  await expect(tile(page, "moved")).toContainText("Accounts changing lane");
+  await expect(tile(page, "moved")).toContainText("Accounts changing risk bucket");
   await expect(tile(page, "moved")).not.toContainText(/\bmoved\b/i);
+  // No page defines "lane": the tile names the service's bucket, and the grid says its bands are made from those buckets.
+  await expect(tile(page, "moved")).not.toContainText(/\blane\b/i);
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "result");
   await expect(row(page, "eth_minus_30")).toContainText("+$1.2M liquidatable · 118 accounts");
   await expect(page.getByTestId("lab-drawer")).toBeVisible();
@@ -283,11 +307,11 @@ test("where accounts move: the wire's lanes merged into seven room bands with th
   await expect(cell(page, 0, 4)).toHaveAttribute("data-count", "0");
   await expect(cell(page, 0, 4)).toHaveText("");
   await expect(page.getByTestId("lab-transitions-finding")).toHaveText(
-    "Rows: room under cap today · columns: after the shock · cells are accounts. 425 accounts change band; 118 cross the cap; none improve. 6 not measured.",
+    "Rows: room under cap today, in 5 bands made from the service's 8 risk buckets · columns: after the shock · cells are accounts. 425 accounts change band; 118 cross the cap; none improve. 6 not measured.",
   );
 });
 
-test("most affected accounts: the wire's movers, 20 of 118, rows open the Inspector, the verdict pill, the caption names which accounts they are and the service's cap", async ({ page }) => {
+test("most affected accounts: the wire's movers, 20 of 118, listed largest debt first, rows open the Inspector, the verdict pill, the caption names which accounts they are, their order and the service's cap", async ({ page }) => {
   await mockLab(page);
   await page.goto("/lab");
   await runIt(page);
@@ -298,11 +322,22 @@ test("most affected accounts: the wire's movers, 20 of 118, rows open the Inspec
   const firstRow = page.getByTestId(`lab-movers-row-${first.account}`);
   await expect(firstRow.locator("a")).toHaveAttribute("href", `/inspector/${first.account}`);
   await expect(firstRow).toContainText("Yes");
+  // The rows are listed largest debt first whatever order the wire sends them in: the caption names that order,
+  // and a reader takes a caption's order for the table's.
+  const debt = (m: Engine["movers"][number]) => {
+    if (m.debt_usd === null) throw new Error(`the demo mover ${m.account} carries no debt`);
+    return BigInt(m.debt_usd);
+  };
+  const largest = cashEngine().movers.reduce((a, b) => (debt(b) > debt(a) ? b : a));
+  await expect(rows.first()).toHaveAttribute("data-testid", `lab-movers-row-${largest.account}`);
+  expect(await rows.evaluateAll((trs) => trs.map((tr) => tr.getAttribute("data-testid")))).toEqual(
+    moversTable(cashEngine()).rows.map((m) => `lab-movers-row-${m.account}`),
+  );
   // The Cash movers are the accounts whose eligibility flips false → true, ranked by debt (the wire's movers_note),
   // bounded by the contract's stated cap of 20: never "moved", the dek's word for the web's band count.
   await expect(page.getByTestId("lab-movers-caption")).toHaveText(moversCaption(moversTable(cashEngine()), "debt_manager"));
   await expect(page.getByTestId("lab-movers-caption")).toHaveText(
-    "the 20 largest of the 118 accounts that become liquidatable, by debt · the service returns at most 20",
+    "the 20 largest of the 118 accounts that become liquidatable, by debt · listed largest debt first · the service returns at most 20",
   );
   await expect(page.getByTestId("lab-movers-caption")).toHaveAttribute("title", cashEngine().movers_note);
   await expect(page.getByTestId("lab-movers").locator("h2")).toHaveText(`${MOVERS_TITLE}${MOVERS_QUALIFIER}`);
@@ -577,6 +612,8 @@ test("a listing that cannot be fetched says so in the library and the workspace,
   // Nothing can run, and no control beside that sentence looks as if it could: disabled, and wearing the kit's disabled register.
   await expectDisabledRegister(page, "lab-run", "panel-2");
   await expectDisabledRegister(page, "lab-compare", "none");
+  // The reason beside it waits on the listing; it claims no failure of its own.
+  await expectCompareHint(page, "Nothing can be compared until the scenarios are listed.");
   await page.waitForTimeout(300);
   expect(counts.runs()).toBe(0);
   expect(counts.sets()).toBe(0);
@@ -585,6 +622,7 @@ test("a listing that cannot be fetched says so in the library and the workspace,
   await expect(surface(page)).toHaveAttribute("data-state", "listing-unavailable");
   await expect(page.getByTestId("lab-compare")).toBeDisabled();
   await expect(page.getByTestId("lab-compare")).toHaveText("Compare…");
+  await expectCompareHint(page, "Nothing can be compared until the scenarios are listed.");
   await expect(page.getByTestId("lab-run")).toBeDisabled();
   await expect(page.getByTestId("lab-compare-state")).toHaveCount(0);
   await page.waitForTimeout(300);
@@ -896,12 +934,15 @@ test("compare: two ticks enable the button, one POST posts exactly those ids, th
   const button = page.getByTestId("lab-compare");
   await expect(button).toHaveText("Compare…");
   await expect(button).toBeDisabled();
+  await expectCompareHint(page, "Tick two or more scenarios to compare them.");
   await expect(page.getByTestId("lab-compare-card")).toHaveCount(0);
   await page.getByTestId("lab-library-check-eth_minus_30").check();
   await expect(button).toBeDisabled();
+  await expectCompareHint(page, "Tick one more scenario to compare.");
   await page.getByTestId("lab-library-check-ethfi_minus_50").check();
   await expect(button).toHaveText("Compare 2 scenarios");
   await expect(button).toBeEnabled();
+  await expectNoCompareHint(page);
   // Two ticks stand the card up, idle; nothing is dispatched until Compare is pressed.
   await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "idle");
   await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
@@ -1008,6 +1049,8 @@ test("compare: a busy evaluator fails the set by name and frees the button; a se
   await expect(state).toHaveText("The evaluator is busy. Another evaluation holds the slot. 1 of 1 slots in use.");
   await expect(page.getByTestId("lab-dotplot")).toHaveCount(0);
   await expect(button).toBeEnabled();
+  // A failed Compare frees the button; the failure is the card's to name, never a reason held beside the button.
+  await expectNoCompareHint(page);
   expect(busy.sets()).toBe(1);
 
   await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -1022,9 +1065,11 @@ test("compare: a busy evaluator fails the set by name and frees the button; a se
   await expect(state).toHaveAttribute("data-kind", "running");
   await expect(state).toHaveText("Evaluating 2 scenarios…");
   await expect(button).toBeDisabled();
+  await expectCompareHint(page, "A comparison is running.");
   await button.click({ force: true });
   await expect(state).toHaveAttribute("data-kind", "ok");
   expect(slow.sets()).toBe(1);
+  await expectNoCompareHint(page);
   const superseded = page.getByTestId("lab-compare-superseded");
   await expect(superseded).toHaveAttribute("data-freshness", "superseded");
   await expect(superseded).toContainText("evaluated on batch 18,251; the newest servable batch is 18,252");

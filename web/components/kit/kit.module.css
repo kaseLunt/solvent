@@ -125,7 +125,7 @@
 .toggleOn i { background: var(--accent); }
 .toggleOn i::after { left: 14px; background: var(--accent-ink); }
 
-/* ---- kv rows (Inspector, plan 2) ---- */
+/* ---- kv rows (Inspector) ---- */
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; font-size: var(--type-body); margin-top: 12px; }
 .kvK { color: var(--ink-2); }
 .kvV { text-align: right; font-variant-numeric: tabular-nums; }
@@ -139,7 +139,7 @@
   .grid, .gridRail { grid-template-columns: 1fr; }
   .tbl { display: block; overflow-x: auto; }
 }
-/* ---- inspector toolbar (.k-search) and trust checklist (.k-check) — plan 2 ---- */
+/* ---- inspector toolbar (.k-search) and trust checklist (.k-check) ---- */
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* .k-search — the Inspector toolbar (mockup pages-console.html:122-124) */
 .search { display: flex; gap: 10px; margin-top: 4px; align-items: center; flex-wrap: wrap; }
@@ -188,6 +188,7 @@
 .libDim { color: var(--ink-3); }
 .libEmpty { padding: 14px; color: var(--ink-2); font-size: var(--type-small); }
 .libFoot { padding: 12px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.libHint { font-size: var(--type-small); color: var(--ink-2); }
 .libNote { font-size: var(--type-small); color: var(--ink-3); margin: 10px 0 0; }
 
 /* .k-heat — where accounts move (mockup pages-console.html rules :129-132, markup :302-309). The tint is a ::before layer whose opacity

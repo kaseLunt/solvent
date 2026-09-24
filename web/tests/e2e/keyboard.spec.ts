@@ -401,10 +401,14 @@ test("scenarios · Space ticks and unticks a focused box, the Compare control co
   const compare = tab.getByTestId("lab-compare");
   const a = libraryCheck(tab, "eth_minus_30");
   const b = libraryCheck(tab, "ethfi_minus_50");
+  const hint = tab.getByTestId("lab-compare-hint");
   await expect(a).not.toBeChecked();
   await expect(b).not.toBeChecked();
   await expect(compare).toHaveText("Compare…");
   await expect(compare).toBeDisabled();
+  // The reason it cannot act is words on the page and the button's description, so a keyboard reaches it; never a title.
+  await expect(hint).toHaveText("Tick two or more scenarios to compare them.");
+  await expect(compare).toHaveAccessibleDescription("Tick two or more scenarios to compare them.");
 
   await tab.getByTestId("lab-mode-address").focus();
   await tabTo(tab, a, 4);
@@ -413,12 +417,15 @@ test("scenarios · Space ticks and unticks a focused box, the Compare control co
   // One tick compares nothing.
   await expect(compare).toHaveText("Compare…");
   await expect(compare).toBeDisabled();
+  await expect(compare).toHaveAccessibleDescription("Tick one more scenario to compare.");
 
   await tabTo(tab, b, 12);
   await tab.keyboard.press("Space");
   await expect(b).toBeChecked();
   await expect(compare).toHaveText("Compare 2 scenarios");
   await expect(compare).toBeEnabled();
+  await expect(hint).toHaveCount(0);
+  await expect(compare).not.toHaveAttribute("aria-describedby");
 
   // The same key takes the tick back, and the control follows it down.
   await expect(b).toBeFocused();
@@ -427,6 +434,7 @@ test("scenarios · Space ticks and unticks a focused box, the Compare control co
   await expect(a).toBeChecked();
   await expect(compare).toHaveText("Compare…");
   await expect(compare).toBeDisabled();
+  await expect(hint).toHaveText("Tick one more scenario to compare.");
 
   // A tick is a selection for Compare, never a run; the selection it sits beside did not move.
   expect(counts.sets()).toBe(0);

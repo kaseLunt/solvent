@@ -2,7 +2,7 @@ import { ChartCard, Heatmap, type HeatCellView } from "@/components/kit";
 import { engineName } from "@/lib/inspector-headline";
 import { heatIntensity } from "@/lib/lab-geometry";
 import type { HeatmapView } from "@/lib/lab-transitions";
-import { MOVERS_LINK, type EngineReading } from "@/lib/lab-view";
+import { MOVERS_LINK, transitionFinding, type EngineReading } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import styles from "./lab.module.css";
 import { bookMoney } from "./money";
@@ -19,24 +19,11 @@ export function cellsOf(view: HeatmapView): HeatCellView[] {
   }));
 }
 
-export function finding(view: HeatmapView): string {
-  const axes = view.merged
-    ? "Rows: room under cap today · columns: after the shock · cells are accounts."
-    : "Rows: health-factor lane today · columns: after the shock, as the wire serves them · cells are accounts.";
-  const one = (n: number, plural: string, singular: string) => (n === 1 ? singular : plural);
-  const moves = `${groupInt(view.bandChanged)} ${one(view.bandChanged, "accounts change", "account changes")} band; ${groupInt(view.crossedCap)} ${one(view.crossedCap, "cross", "crosses")} the cap; ${view.improved === 0 ? "none improve" : `${groupInt(view.improved)} ${one(view.improved, "improve", "improves")}`}.`;
-  const unmeasured =
-    view.unmeasuredRows === 0
-      ? ""
-      : ` ${groupInt(view.unmeasuredRows)} not measured.`;
-  return `${axes} ${moves}${unmeasured}`;
-}
-
 function words(reading: EngineReading | null, engine: string): string {
   if (reading === null) return "Run a scenario to see where accounts move.";
   switch (reading.kind) {
     case "result":
-      return finding(reading.result.heat);
+      return transitionFinding(reading.result.heat);
     case "withheld":
       return `Withheld: ${engineName(engine)} was not computed under this scenario.`;
     case "not-covered":

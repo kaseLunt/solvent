@@ -23,7 +23,7 @@ import {
   unlistedScenarioNotice,
 } from "@/lib/lab-deep-link";
 import { useLabReading } from "@/lib/lab-reading";
-import { ASSUMPTIONS_BUTTON, deriveLabView, type LabChip } from "@/lib/lab-view";
+import { ASSUMPTIONS_BUTTON, compareControl, deriveLabView, type LabChip } from "@/lib/lab-view";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { useMetaConstants } from "@/lib/meta";
 import { resultReceipt } from "@/lib/resultIdentity";
@@ -101,6 +101,7 @@ export function LabSurface() {
   const [readerSelected, setReaderSelected] = useState(false);
 
   const view = deriveLabView(reading, { selectedId, checked });
+  const compareButton = compareControl(view);
   const book = view.book;
   const definition = book.definition;
 
@@ -334,12 +335,7 @@ export function LabSurface() {
           compare={
             mode === "book"
               ? {
-                  label:
-                    view.checked.length >= 2
-                      ? `Compare ${String(view.checked.length)} scenarios`
-                      : "Compare…",
-                  disabled:
-                    view.checked.length < 2 || view.compare.kind === "running",
+                  ...compareButton,
                   onCompare: () => reading.runSet(view.checked),
                 }
               : null

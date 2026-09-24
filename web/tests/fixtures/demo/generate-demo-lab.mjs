@@ -26,16 +26,16 @@
 //     example's shape with the table's margins as counts, and the Book's
 //     histogram must state those same edges and counts; the movers are the demo
 //     pages' own computed, non-liquidatable rows that cross under ×0.7
-//     (num×7 < den×10), ranked by the exact ratio after, ascending — the
-//     account furthest past the cap first — 20 of them, and `movers_total` is
+//     (num×7 < den×10), ranked as the service ranks Cash movers — by debt,
+//     largest first — the top 20 of them, and `movers_total` is
 //     the Book's newly-eligible count: the two positions pages are the WHOLE
 //     1,412-row Cash book and bucket to the Book's histogram exactly (asserted
 //     before anything is read from them), but the Book's transition table, not
 //     a naive re-shock of the rows, is the law for the crossings — a reader who
 //     re-shocks every row by ×0.7 by hand finds 207 (asserted, so this sentence
 //     cannot go stale), most of them from lane 1.25–1.50, where the table moves
-//     18; the movers_note is the example's with the ranking rule and the
-//     truncation restated; the legacy engine's before side is the Book's Aave card,
+//     18; the movers_note is the example's ranking rule with the service's
+//     own truncation sentence; the legacy engine's before side is the Book's Aave card,
 //     bad-debt entry and histogram and its after side steps each bucket one
 //     lane down with 14 crossing (a design assumption, as the demo waterfall's
 //     Aave arm is), its two deltas the contract example's own; the legacy
@@ -308,13 +308,14 @@ function cashEngine() {
     collateral_by_asset: template.after.collateral_by_asset,
   };
   // Movers: the whole book's computed, non-liquidatable rows that cross under
-  // ×0.7, ascending by the ratio after — the account furthest past the cap first.
+  // ×0.7, ranked as the service ranks Cash movers — by debt, largest first
+  // (cmd/api/p5_runbook.go runBookMoversNote), account ascending on a tie.
   // The table above, not this re-shock, is the law for how many cross.
   weldPages(card, hist);
   const crossing = PAGES.filter((p) => p.status === "computed" && p.liquidatable === false && p.health_factor.num !== null && p.health_factor.den !== null)
     .filter((p) => BigInt(p.health_factor.num) * 7n < BigInt(p.health_factor.den) * 10n)
-    .map((p) => ({ p, ratio: (BigInt(p.health_factor.num) * 7_000_000n) / (BigInt(p.health_factor.den) * 10n) }))
-    .sort((a, b) => (a.ratio < b.ratio ? -1 : a.ratio > b.ratio ? 1 : a.p.account.localeCompare(b.p.account)));
+    .map((p) => ({ p, debt: BigInt(p.total_debt) }))
+    .sort((a, b) => (a.debt > b.debt ? -1 : a.debt < b.debt ? 1 : a.p.account.localeCompare(b.p.account)));
   if (crossing.length !== NAIVE_CROSSINGS) fail(`${String(crossing.length)} page rows cross under a naive ×0.7 and the header states ${String(NAIVE_CROSSINGS)}; restate it`);
   if (crossing.length < MOVERS_CARRIED) fail(`only ${String(crossing.length)} rows cross under ×0.7; never pad the list`);
   const movers = crossing.slice(0, MOVERS_CARRIED).map(({ p }) => ({
@@ -330,15 +331,16 @@ function cashEngine() {
     became_eligible: true,
     debt_usd: String(p.total_debt),
   }));
-  // The example's movers_note states a debt ranking and a complete list; this
-  // demo ranks by the ratio after, ascending, and carries 20 of the Book's
-  // newly eligible — the 20 furthest past the cap.
+  // The example's movers_note states the service's debt ranking (kept: this demo
+  // ranks the same way) and a complete list; the demo carries 20 of the Book's
+  // newly eligible, so the carry sentence becomes the service's own truncation.
   const ranking = "ranked by their debt in this engine's 6-decimal USD, largest first";
   const carries = /`movers` carries all \d+ of them\.$/;
   if (!template.movers_note.includes(ranking) || !carries.test(template.movers_note)) fail("the example's Cash movers_note no longer states the ranking and the carry sentence this generator restates");
-  const movers_note = template.movers_note
-    .replace(ranking, "ranked here by the exact ratio AFTER the shock, ascending: the account furthest past the cap first")
-    .replace(carries, `\`movers\` carries the ${String(movers.length)} furthest past the cap; the other ${String(newly - movers.length)} are not on this page.`);
+  const movers_note = template.movers_note.replace(
+    carries,
+    `\`movers\` is TRUNCATED to the top ${String(movers.length)} of ${String(newly)}; \`movers_total\` is the full count and the other ${String(newly - movers.length)} are not on this page.`,
+  );
   return {
     engine: CASH,
     usd_decimals: card.value_decimals,
