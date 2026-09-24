@@ -138,6 +138,10 @@
   .kpis, .kpis5, .kpis4 { grid-template-columns: repeat(2, 1fr); }
   .grid, .gridRail { grid-template-columns: 1fr; }
   .tbl { display: block; overflow-x: auto; }
+  /* The heatmap's tracks are as wide as their labels, and so is a chip's text: a wider face than the developer's (a
+     Linux reader's system-ui) must scroll the grid inside its card and wrap the chip, never widen the page. */
+  .heat { overflow-x: auto; }
+  .chip { white-space: normal; }
 }
 /* ---- inspector toolbar (.k-search) and trust checklist (.k-check) ---- */
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
