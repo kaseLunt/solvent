@@ -4617,3 +4617,82 @@ Per-pin tables live in each task's report beside the plan's ledger (`.superpower
       - the Book chart card's empty two-thirds and its mixed Room units;
       - the official-looking brand;
       - verificationUnavailable's batch contradiction.
+
+## 2026-09-24 · Design coherence CLOSES (owner: "make sure everything is presented in a coherent way. a lesser model designed this")
+
+- **Range:** `5f8f6d0..bfa7ab4` on main, plus the ledger commit. Ledger: `.superpowers/sdd/2026-09-24-design-coherence/`.
+  - `progress.md`: every event, agent and ruling.
+  - `design-audits.md`: four audit lenses.
+  - `design-plan.md`: the director's 42 items.
+  - `design-critique.md`: the completeness critic.
+  - `design-amendments.md`: the binding adjudication.
+  - `design-gate.md`: two gate verdicts and the 15 merged items.
+  - `codex-*.md`: both Codex rounds.
+- **Commits:**
+  - wave 1 formats `569d90f`;
+  - wave 2 charts `f657116`, kit `755468a`;
+  - wave 3 pages + integration `53f16bf`;
+  - gate fixes `52e96f1`;
+  - pins + README screenshots `960f164`;
+  - Codex fixes `35d322a` and `bfa7ab4`.
+  - Pushed before this pass: CI green `0fdf19e` `6d131dd` `f0e73ef` `0ff0ee5` `e5ac266`.
+- **What changed, in one line:** the product now reads as one instrument:
+  - one page frame owned by the shell;
+  - one header aligned to the content, with quiet icon controls and a live pill that is posture (accent), not health;
+  - one tone grammar (green = a health verdict or a passed check);
+  - one state-register table (refused and unreadable dashed; unavailable, not run and not served solid; pending never "failed");
+  - one vocabulary for figures (typeset exact instants under "When (UTC)", book / account / exact money registers, one precision per column, a display-only U+2212, ages that never break, one hex shortener);
+  - one chart family, with floors shown and reference lines labelled;
+  - new kit parts (ToggleGroup, StepStrip, LegacyFold, StateCard, ScrollRegion);
+  - failure states in reader words, the service's own words under a disclosure;
+  - sentence case and one arrow grammar;
+  - the false "RedStone" removed from the front door.
+- **Process:**
+  1. Understand: four lenses, a director synthesis and a critic.
+  2. Integrator adjudication.
+  3. Three waves on disjoint files: formats → kit ‖ charts → three page areas. Each area had an independent review and a fix-up.
+  4. Integration (every changed assertion adversarially reviewed).
+  5. Design gate on fresh captures ("not at the bar yet, one round away"; 15 items).
+  6. The gate's fix round.
+  7. Codex round 1: NOT APPROVED, 6 findings, all fixed.
+  8. Round 2: 6 closed, 1 new, fixed.
+  9. **Round 3: APPROVED.**
+- **The reviews caught these defects of the change's own making before they shipped:**
+  - an Inspector drawer instant that had lost its zone;
+  - a stale legacy price that lost its amber pill;
+  - `max-content` tables that stopped wrapping;
+  - a focus ring the edge fade clipped;
+  - a Compare age that restarted after a failed re-run;
+  - a proxy's error page classified as an unreadable answer;
+  - "did not reach the service" asserted without proof;
+  - a mixed-engine digit axis;
+  - "No accounts" over accounts with no cap;
+  - an all-zero compare headline claiming scenarios it excluded;
+  - a book read in flight labelled unavailable;
+  - a whole-book negative over refused accounts' unknown caps.
+- **Suite on the final tree (`bfa7ab4`):** tsc / eslint / stylelint / build clean.
+  - Locally: **1,646 passed / 0 failed** (1,311 unit, 335 e2e), including the 16 pixel pins re-baselined after reading each capture, and the new wide-font spec.
+  - `CI=1`: 1,629 passed, 17 skipped (the 16 pins and the one reference-face check).
+  - CI on GitHub was green on `0ff0ee5`. This pass is not yet pushed.
+- **Rulings of record** (they reverse approved copy, a mockup value, a documented rule or a pinned behaviour; for the owner's review — full reasoning in `design-amendments.md`):
+  - **R1:** the Snapshot chip is ink when fresh.
+  - **R2:** the live dot and the pill's fresh age are accent / ink, never green.
+  - **R3:** Activity's liquidation and bad-debt rows are ink records with a semibold type word.
+  - **R4:** the Book's "Room to cap" is signed percent, with dollars in the title.
+  - **R5:** the time law. Reader altitude uses humanUtc. Columns print the exact typeset instant under "When (UTC)". The wire ISO appears only in titles and the drawer.
+  - **R6:** History's chart labels use the book register, with the exact figure in `<title>`.
+  - **R7:** the Scenarios tile is "Accounts changing band 425" (941 is in its title).
+  - **R8:** the Overview cards use the kit radius and surface.
+  - **R9:** "No verdict" is the one state word for the engine-refused population. It also replaces the legacy fold's "N refused".
+  - **R10:** on Cash, the noun is "account" everywhere, History's Cash view included.
+  - **R11:** the "counted, not hidden" clause moves to the Methodology drawer.
+  - **R12:** a failed receipt is crit on every page, the Inspector included; drift stays warn.
+  - **Also:** "RedStone" removed from the front door (false, per the project's own errata); the Scenarios tile gloss "risk bucket" became "band"; the Overview step titles became the shared "Index / Compute / Verify / Serve"; the live strip joined Activity's tile row; the API's two restating tiles became one line of contract vocabulary.
+- **Deferred (owner's list / Plan B):**
+  - From the plan: spacing-scale tokenization; API endpoint disclosure; Verification IA; the Activity phone record layout; the chip-grammar overhaul; a global footer; one banding shared by the Book and Scenarios (needs the API).
+  - From Codex round 3 (MEDIUM, unreachable — Go rejects negative borrowings at `internal/risk/dm.go:105`; the reader predates this pass): `cash-rows.ts` accepts a positive cap with a negative denominator as computed. This belongs to Plan B's reader classification.
+  - The remaining copy composed in a few pre-existing components: BookMethodology prose, LabSurface's single-run "Computed" chip.
+  - `actions/setup-node@v4` → v5, a protected ci.yml edit.
+- **Owner decisions:**
+  - **PUSH this pass.** GitHub shows the pre-design build, including the "RedStone" line this pass removes.
+  - The rulings above.
