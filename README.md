@@ -225,8 +225,8 @@ Demo dataset; the live stream is not connected in these captures. Dark theme, 14
 
 To regenerate them, start a production build (`cd web && npm run build && npm run start`), then
 from `web/` run `node scripts/screenshot-pages.mjs ../docs/readme overview book inspector lab
-history activity api`. The script imports the TypeScript fixtures directly, so it needs Node
-22.18 or later.
+history activity api` and keep each page's `-dark-fold.png` (the script also writes light and
+full-page captures). It imports the TypeScript fixtures directly, so it needs Node 22.18 or later.
 
 ## Repository map
 
