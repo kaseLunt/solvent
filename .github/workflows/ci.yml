@@ -24,6 +24,14 @@ jobs:
       SOLVENT_DATABASE_URL: postgres://solvent:solvent@localhost:5432/solvent?sslmode=disable
     steps:
       - uses: actions/checkout@v5
+      # Two cmd/reconcile tests re-derive constants from ether.fi's cash-v3 source,
+      # which is not committed here (recon/cash-v3/ is ignored): fetch it at the
+      # commit the README pins.
+      - name: fetch cash-v3 source
+        run: |
+          git init -q recon/cash-v3
+          git -C recon/cash-v3 fetch -q --depth 1 https://github.com/etherfi-protocol/cash-v3 247faab2206cb651e2e81b2331404eed841145b8
+          git -C recon/cash-v3 checkout -q FETCH_HEAD
       - uses: actions/setup-go@v6
         with: { go-version: "1.24" }
       - name: create test db
@@ -57,6 +65,14 @@ jobs:
       SOLVENT_DATABASE_URL: postgres://solvent:solvent@localhost:5432/solvent?sslmode=disable
     steps:
       - uses: actions/checkout@v5
+      # Two cmd/reconcile tests re-derive constants from ether.fi's cash-v3 source,
+      # which is not committed here (recon/cash-v3/ is ignored): fetch it at the
+      # commit the README pins.
+      - name: fetch cash-v3 source
+        run: |
+          git init -q recon/cash-v3
+          git -C recon/cash-v3 fetch -q --depth 1 https://github.com/etherfi-protocol/cash-v3 247faab2206cb651e2e81b2331404eed841145b8
+          git -C recon/cash-v3 checkout -q FETCH_HEAD
       - uses: actions/setup-go@v6
         with: { go-version: "1.24" }
       - name: create test db
@@ -69,7 +85,9 @@ jobs:
   # NEXT_PUBLIC_SHOW_STYLEGUIDE compiles the /styleguide specimen route into
   # the production bundle so the smoke e2e can walk every base component.
   web:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the e2e geometry checks that run here are measured in the image's fallback
+    # face (DejaVu Sans), so a font change should arrive as a deliberate edit, not an image migration.
+    runs-on: ubuntu-24.04
     env:
       NEXT_PUBLIC_SHOW_STYLEGUIDE: "1"
     defaults:
