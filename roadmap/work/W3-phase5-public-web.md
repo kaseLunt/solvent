@@ -28,6 +28,7 @@ allowed_paths:
   - .github/workflows/ci.yml
   - .gitignore
   - docker-compose.yml
+  - docs/readme/**
 deliverables:
   - docs/plans/2026-07-30-solvent-phase5-web.md
   - docs/specs/2026-07-30-solvent-phase5-web-design.md
@@ -143,3 +144,5 @@ cd packages/client-ts && npm ci && npm run verify
   is queued and still owed.
 
 AMENDMENT 1 (2026-08-02): allowed_paths gains the serving stack (internal/**, cmd/**, go.mod, go.sum). Basis: the owner-directed six-audit fix train (Waves R1/R2+) lands correctness fixes in the API/risk layers the deploy will serve - the Aave verdict-null aggregate defect and the stream CORS blocker are launch blockers, not post-launch work. Owner direction recorded in-session (2026-08-02 02:30-13:23).
+
+AMENDMENT 2 (2026-09-22): allowed_paths gains `docs/readme/**` — the README's screenshots. Basis: this work object's own Acceptance item 5 ("README landing per spec §8 … screenshots") names an artifact its scope gave no home; the owner's direction for the settle-for-deploy plan ("the goal is the resume piece. keep moving toward that. use your judgement", 2026-09-21). Images only, produced by `web/scripts/screenshot-pages.mjs` against the demo dataset.

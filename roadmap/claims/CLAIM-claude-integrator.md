@@ -1,13 +1,13 @@
 ---
-claim_id: 42b3e1c4-dd06-4cee-8ac2-9d12d4b07275
-generation: 15
+claim_id: a774bb58-ba66-47fe-991b-347f4a544613
+generation: 16
 agent: claude-integrator
 task: W3
 status: active
 integrator: true
 branch: main
 worktree_id: 391b6a12-eb13-597c-bc9a-37240d9dfd29
-base_commit: 10f84cf3ae4b13dee877353fb1f66c2d55fcff83
+base_commit: 77dd5ae13be97f6a6c56d24dd1a81fa23f828021
 allowed_paths:
   - web/**
   - internal/**
@@ -27,10 +27,11 @@ allowed_paths:
   - .github/workflows/ci.yml
   - .gitignore
   - docker-compose.yml
-scope_hash: sha256:e1576647db6471d5b8d8d6f616871d6c5c037aa99474706e0994a6b48234f7a8
-issued_at: 2026-08-02T20:27:27Z
-lease_expires: 2026-09-25T03:34:00Z
-updated_at: 2026-09-24T03:34:00Z
+  - docs/readme/**
+scope_hash: sha256:8e09f2dd45841f26336c83df64aaa4e04678633eaedf176cfc47188e428d3d1c
+issued_at: 2026-09-24T03:34:11Z
+lease_expires: 2026-09-24T11:34:11Z
+updated_at: 2026-09-24T03:34:11Z
 ---
 
 # Claim: claude-integrator -> W3
