@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { KitTable, SmallToggle, StatusPill, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { notComputedCause, rowStandingLabel, type CashRow, type SizedCashRow } from "@/lib/cash-rows";
+import { notComputedCause, refusedRowDebtCell, rowStandingLabel, type CashRow, type SizedCashRow } from "@/lib/cash-rows";
 import { attentionEmptyText, belowLineToggleLabel, nearCapToggleLabel, type CashSummary } from "@/lib/cash-summary";
 import { humanUsd } from "@/lib/human-usd";
 import styles from "./book.module.css";
@@ -43,6 +43,7 @@ function toRow(r: SizedCashRow, status: "liquidatable" | "near"): KitRow {
 
 /** A row with no verdict here — refused by the engine, or unreadable by this page: dimmed, its standing and its cause in the lib's words. */
 function refusedRow(r: CashRow): KitRow {
+  const debt = refusedRowDebtCell(r);
   return {
     key: r.account,
     testId: `book-row-${r.account}`,
@@ -54,7 +55,7 @@ function refusedRow(r: CashRow): KitRow {
         </Link>
       ),
       room: "—",
-      debt: r.debt === null ? "—" : humanUsd(r.debt, r.decimals),
+      debt: debt.title === null ? debt.text : <span title={debt.title}>{debt.text}</span>,
       status: (
         <StatusPill tone="refused" title={notComputedCause(r)}>
           {rowStandingLabel(r)}

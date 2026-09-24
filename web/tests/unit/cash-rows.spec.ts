@@ -2,11 +2,16 @@
 import { expect, test } from "@playwright/test";
 import { refinePositionsResponse, refinePositionSummary, type RefinedPositionsResponse } from "@solvent/client";
 import {
+  DEBT_UNREADABLE,
   liquidatableRows,
   nearCapRows,
   notComputedCause,
   readCashPage,
   readCashRow,
+  REFUSED_DEBT_UNSERVED,
+  refusedDebtUnserved,
+  refusedRowDebtCell,
+  refusedRows,
   roomBands,
   roomPercentiles,
   rowStandingLabel,
@@ -99,6 +104,56 @@ test("a refused row keeps a readable debt for display but never enters the liqui
   expect(liquidatableRows([r])).toEqual([]);
   expect(nearCapRows([r])).toEqual([]);
   expect(roomBands([r]).reduce((n, b) => n + b.count, 0)).toBe(0);
+});
+
+test("a refused row's Debt cell: a dash that says on hover no debt figure is served for a position the engine could not compute — never $0; a served figure prints with no such title; an unreadable row is not a refusal and never wears it", () => {
+  const refusedNoFigure = readCashRow(
+    row({ account: "0xc", status: "refused", refusal: { code: "SWEEP_NEVER", detail: "", note: "" }, health_factor: null, total_debt: null, total_collateral: null, liquidation_verdict: "unknowable" }),
+  );
+  const refusedWithFigure = readCashRow(
+    row({ account: "0xe", status: "refused", refusal: { code: "API_RECONSTRUCTION_MISMATCH", detail: "", note: "" }, health_factor: null, total_debt: "1500000000", liquidation_verdict: "unknowable" }),
+  );
+  const unreadable = readCashRow(row({ account: "0xbad", total_debt: "1e6" }));
+  expect(REFUSED_DEBT_UNSERVED).toBe("no debt figure is served for a position the engine could not compute");
+  expect(refusedRowDebtCell(refusedNoFigure)).toEqual({ text: "—", title: REFUSED_DEBT_UNSERVED });
+  expect(refusedRowDebtCell(refusedWithFigure)).toEqual({ text: "$1,500", title: null });
+  expect(refusedRowDebtCell(unreadable)).toEqual({ text: "unreadable", title: DEBT_UNREADABLE });
+  // The dek's flag: at least one refused row landed, and none carries a figure.
+  expect(refusedRows([refusedNoFigure, refusedWithFigure, unreadable]).map((r) => r.account)).toEqual(["0xc", "0xe"]);
+  expect(refusedDebtUnserved([refusedNoFigure])).toBe(true);
+  expect(refusedDebtUnserved([refusedNoFigure, refusedWithFigure])).toBe(false);
+  expect(refusedDebtUnserved([])).toBe(false);
+  expect(refusedDebtUnserved([unreadable])).toBe(false);
+});
+
+test("a refused row served a debt this page cannot read: the figure was served, so its cell says unreadable and names the fault — never the dash of a debt not served — and the dek's absence clause is not said over it", () => {
+  const refusal = { code: "SWEEP_NEVER", detail: "", note: "" };
+  const refused = (account: string, total_debt: unknown): CashWireRow =>
+    row({ account, status: "refused", refusal, health_factor: null, total_debt: total_debt as string, liquidation_verdict: "unknowable" });
+  const noFigure = readCashRow(refused("0xc", null));
+  const absentKey = readCashRow(row({ account: "0xk", status: "refused", refusal, health_factor: null, total_debt: undefined, liquidation_verdict: "unknowable" }));
+  const malformed = [readCashRow(refused("0xm1", "1e6")), readCashRow(refused("0xm2", 1500)), readCashRow(refused("0xm3", ""))];
+  expect(DEBT_UNREADABLE).toBe("this page could not read the debt served: total_debt is not a wire decimal");
+  for (const r of malformed) {
+    // Still the engine's refusal — not the page's unreadable row — and still no figure to size or sum.
+    expect(r.unreadable).toBeUndefined();
+    expect(rowStandingLabel(r)).toBe("Not computed");
+    expect(r.debt).toBeNull();
+    expect(r.debtUnreadable).toBe(true);
+    expect(refusedRowDebtCell(r)).toEqual({ text: "unreadable", title: DEBT_UNREADABLE });
+    expect(refusedRowDebtCell(r).title).not.toBe(REFUSED_DEBT_UNSERVED);
+    expect(refusedDebtUnserved([r])).toBe(false);
+    expect(refusedDebtUnserved([noFigure, r])).toBe(false);
+  }
+  // Null and an absent key are both a debt not served: the dash, and the absence said.
+  for (const r of [noFigure, absentKey]) {
+    expect(r.debtUnreadable).toBeUndefined();
+    expect(refusedRowDebtCell(r)).toEqual({ text: "—", title: REFUSED_DEBT_UNSERVED });
+  }
+  expect(refusedDebtUnserved([noFigure, absentKey])).toBe(true);
+  expect(refusedRows([noFigure, ...malformed]).map((r) => r.account)).toEqual(["0xc", "0xm1", "0xm2", "0xm3"]);
+  // A readable row carries no such mark.
+  expect(readCashRow(row({ account: "0xa" })).debtUnreadable).toBeUndefined();
 });
 
 test("an unknowable verdict on a row the engine calls computed is a withheld verdict: not computed, in no band, never near cap", () => {

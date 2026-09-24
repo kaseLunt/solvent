@@ -1,3 +1,4 @@
+import { REFUSED_DEBT_UNSERVED } from "./cash-rows";
 import { humanUsd } from "./human-usd";
 import { belowLineSentence } from "./materiality";
 
@@ -13,6 +14,11 @@ export interface BookHeadlineInput {
   readonly nearCap: Sum;
   /** Positions the batch refused, from the book's own aggregate. */
   readonly notComputed: number;
+  /**
+   * At least one refused row has landed and none carries a debt figure. Absent means nothing is said about their
+   * debt: a refused row served with a figure makes any sentence about absence false.
+   */
+  readonly refusedDebtUnserved?: boolean;
   /** Accounts the walk has read with a known verdict. */
   readonly computed: number;
   /**
@@ -70,10 +76,19 @@ export function nearCapSentence(nearCap: Sum, decimals: number, complete = true)
   return `${plural(nearCap.count, "account")} ${one ? "is" : "are"} within 10% of ${one ? "its" : "their"} borrow cap, carrying ${humanUsd(nearCap.sum, decimals)}.`;
 }
 
-export function notComputedSentence(n: number): string | null {
+/**
+ * The refused positions' sentence, true of every refusal code: a cause may be permanent, so it says what the batch
+ * holds — no verdict — and never that the positions "could not be computed this batch". Where no refused row carries a
+ * debt figure it says their debt is not known, so a column of dashes cannot read as a table still loading; it is
+ * never a zero and never a sum.
+ */
+export function notComputedSentence(n: number, debtUnserved = false): string | null {
   if (n === 0) return null;
   const one = n === 1;
-  return `${plural(n, "position")} could not be computed this batch and ${one ? "is" : "are"} counted, not hidden.`;
+  const counted = `${plural(n, "position")} ${one ? "has" : "have"} no verdict in this batch and ${one ? "is" : "are"} counted, not hidden.`;
+  if (!debtUnserved) return counted;
+  const unserved = `${REFUSED_DEBT_UNSERVED.charAt(0).toUpperCase()}${REFUSED_DEBT_UNSERVED.slice(1)}`;
+  return `${counted} ${unserved}, so ${one ? "its" : "their"} debt is not known.`;
 }
 
 /**
@@ -178,7 +193,7 @@ export function bookHeadline(input: BookHeadlineInput): Headline {
   const unreadable = input.unreadable ?? 0;
   const below = belowLineSentence({ belowLine: input.belowLine.count }, { belowLine: input.belowLine.sum }, input.decimals);
   const near = nearCapSentence(input.nearCap, input.decimals, input.complete && unreadable === 0);
-  const notComputed = notComputedSentence(input.notComputed);
+  const notComputed = notComputedSentence(input.notComputed, input.refusedDebtUnserved ?? false);
   const unread = unreadableSentence(unreadable);
   const walk = walkSentence(input);
   if (input.material.count > 0) {

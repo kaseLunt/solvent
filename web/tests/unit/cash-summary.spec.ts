@@ -296,7 +296,7 @@ test("an unreadable computed row is counted and blocks every all-clear: no quiet
   const both = summarizeCash({ rows: [unreadable, unreadable, far], decimals: 6, refusedPositions: 2, ...settled });
   expect(both.headline.dek).toBe(
     "2 positions the engine calls computed could not be read by this page and are counted, not cleared. No verdict is claimed over them. " +
-      "2 positions could not be computed this batch and are counted, not hidden.",
+      "2 positions have no verdict in this batch and are counted, not hidden.",
   );
 });
 
@@ -305,7 +305,7 @@ test("beside an unreadable row a positive finding stands as a lower bound, and n
   expect(s.headline.variant).toBe("material");
   expect(s.headline.emphasis).toBe("$4,200 of Cash debt is liquidatable right now,");
   expect(s.headline.dek).toBe(
-    "1 position could not be computed this batch and is counted, not hidden. " +
+    "1 position has no verdict in this batch and is counted, not hidden. " +
       "1 position the engine calls computed could not be read by this page and is counted, not cleared. " +
       "Every figure is a lower bound over the 1 computed account this page could read.",
   );
@@ -363,6 +363,50 @@ test("the demo walk is read whole: not one unreadable row, so its settled render
   expect(s.whole).toBe(true);
   expect(tileBoundNote(s)).toBe("");
   expect(bandsFinding(s).barsNote).toBeNull();
+});
+
+test("the demo's refused rows carry no debt figure, as the engine serves a refusal: the dek sizes the blind spot in words — their debt is not known, never $0 and never summed — and one refused row served with a figure silences it", () => {
+  const demo = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => readCashRow(refinePositionSummary(p)));
+  const refused = demo.filter((r) => !r.computed);
+  expect(refused).toHaveLength(6);
+  for (const r of refused) expect(r.debt).toBeNull();
+  const clause = "No debt figure is served for a position the engine could not compute, so their debt is not known.";
+  const s = summarizeCash({ rows: demo, decimals: 6, refusedPositions: 6, ...settled });
+  expect(s.headline.dek).toContain(`6 positions have no verdict in this batch and are counted, not hidden. ${clause}`);
+  expect(s.headline.dek).not.toMatch(/could not be computed this batch/);
+  // The committed page's refused row is served with a debt figure: nothing is said about absence.
+  const committed = summarizeCash({ rows, decimals: 6, refusedPositions: 1, ...settled });
+  expect(committed.headline.dek).toBe("No account is within 10% of its borrow cap. 1 position has no verdict in this batch and is counted, not hidden.");
+  // One refused row with a figure beside the demo's six: the clause would be false of it, so it is not said.
+  const withFigure = rows.find((r) => !r.computed);
+  if (withFigure === undefined || withFigure.debt === null) throw new Error("fixture invariant: the committed refused row carries a debt figure");
+  const mixed = summarizeCash({ rows: [...demo, withFigure], decimals: 6, refusedPositions: 7, ...settled });
+  expect(mixed.headline.dek).not.toContain("debt is not known");
+  // No refused row landed yet: nothing is known of their debt, so nothing is said.
+  const computedOnly = demo.filter((r) => r.computed);
+  const early = summarizeCash({ rows: computedOnly, decimals: 6, refusedPositions: 6, walkComplete: false, walkStopped: null, walkStopKind: null, refusedWhole: null });
+  expect(early.headline.dek).toContain("6 positions have no verdict in this batch and are counted, not hidden.");
+  expect(early.headline.dek).not.toContain("debt is not known");
+  // A row the page could not read is not a refusal: its missing figure says nothing of the engine's refusals.
+  const unreadableOnly = summarizeCash({ rows: [unreadable, far], decimals: 6, refusedPositions: 2, ...settled });
+  expect(unreadableOnly.headline.dek).not.toContain("debt is not known");
+});
+
+test("a refused row served a debt this page cannot read — a malformed string or a JSON number — is a figure served, not a figure absent: the dek never says their debt is not served", () => {
+  const demo = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions].map((p) => refinePositionSummary(p));
+  const refusedWire = demo.find((p) => p.status === "refused");
+  if (refusedWire === undefined) throw new Error("fixture invariant: the demo serves a refused row");
+  for (const served of ["1e6", 1500] as const) {
+    const bad = readCashRow({ ...refusedWire, account: "0xmalformed", total_debt: served as unknown as string });
+    expect(bad.computed).toBe(false);
+    expect(bad.debt).toBeNull();
+    const alone = summarizeCash({ rows: [bad], decimals: 6, refusedPositions: 1, ...settled });
+    expect(alone.headline.dek).toContain("1 position has no verdict in this batch and is counted, not hidden.");
+    expect(alone.headline.dek).not.toContain("debt is not known");
+    expect(alone.headline.dek).not.toContain("No debt figure is served");
+    const beside = summarizeCash({ rows: [...demo.map(readCashRow), bad], decimals: 6, refusedPositions: 7, ...settled });
+    expect(beside.headline.dek).not.toContain("debt is not known");
+  }
 });
 
 /** The tile's inputs over a book read whole, and over a walk still running: the partition's counts, as summarizeCash states them. */

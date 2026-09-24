@@ -110,7 +110,7 @@ export const HISTORY_METHOD: readonly string[] = [
   "withheld bucket · the book was refused, so totals are null and never 0",
   `${UNREADABLE} figure · the bucket was recorded, but this figure is not the exact decimal the contract allows, so it is a hole and never 0`,
   "zero floor drawn · the scale never crops it away",
-  "click any bucket for its full record",
+  "click any hour for its record",
   "source · observatory_points rollup (points survive batch retention; batch + materialization identity retained by the rollup)",
 ];
 

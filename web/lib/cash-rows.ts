@@ -1,6 +1,7 @@
 // web/lib/cash-rows.ts
 import type { components } from "@solvent/client";
 import { HEADROOM_BANDS, headroomBand, headroomPercent, headroomTenths } from "./headroom";
+import { humanUsd } from "./human-usd";
 import { plainCause } from "./refusal-phrasebook";
 import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
@@ -33,6 +34,11 @@ export interface CashRow {
    * and on a row the engine refused.
    */
   readonly unreadable?: string;
+  /**
+   * Set when the wire served a total_debt that is not a wire decimal — on a refused row too. `debt` is then null, and
+   * that null is this page's failure to read a figure the service sent, never the service's absence of one.
+   */
+  readonly debtUnreadable?: true;
 }
 
 function wireInt(value: string | null | undefined): bigint | null {
@@ -46,6 +52,9 @@ export function readCashRow(row: CashWireRow): CashRow {
       ? null
       : { code: row.refusal.code, detail: row.refusal.detail ?? null };
   const debt = wireInt(row.total_debt);
+  // Null and an absent key are a debt not served; any other value the guard refuses was served and could not be read.
+  const servedDebt: unknown = row.total_debt;
+  const debtUnreadable = debt === null && servedDebt !== null && servedDebt !== undefined;
   const collateral = wireInt(row.total_collateral);
   // A health factor the wire omitted is an absence, never a dereference.
   const hf = row.health_factor ?? null;
@@ -65,6 +74,7 @@ export function readCashRow(row: CashWireRow): CashRow {
     const held: CashRow = {
       account: row.account, decimals: row.value_decimals, debt, collateral, cap: null, room: null,
       roomPercent: null, roomTenths: null, band: null, verdict: row.liquidation_verdict, refusal, computed: false,
+      ...(debtUnreadable ? { debtUnreadable: true as const } : {}),
     };
     if (row.status !== "computed") return held;
     // The engine calls the row computed, so what is missing is the page's to name — in read order.
@@ -108,6 +118,40 @@ export function notComputedCause(row: CashRow): string {
 /** The rows the engine calls computed that this page could not read: counted on their own, never cleared. */
 export function unreadableRows(rows: readonly CashRow[]): CashRow[] {
   return rows.filter((r) => !r.computed && r.unreadable !== undefined);
+}
+
+/**
+ * The rows the status says the engine refused — not the rows the engine calls computed that this page could not read.
+ * A refused row's own figures may still fail their guards: `debtUnreadable` marks a debt served and not read.
+ */
+export function refusedRows(rows: readonly CashRow[]): CashRow[] {
+  return rows.filter((r) => !r.computed && r.unreadable === undefined);
+}
+
+/** Why a refused row's Debt cell is a dash: the engine writes no totals on a position it refuses, so none is served. */
+export const REFUSED_DEBT_UNSERVED = "no debt figure is served for a position the engine could not compute";
+
+/** Why a Debt cell reads "unreadable": a figure was served, and it failed the guard — never a debt that was not served. */
+export const DEBT_UNREADABLE = "this page could not read the debt served: total_debt is not a wire decimal";
+
+/**
+ * At least one refused row has landed and every one was served with no debt at all — null or no key. A refusal the
+ * service lays over a position the engine did compute keeps the batch's own figures, so one refused row served with a
+ * debt — readable or not — is enough to say nothing about the absence of the rest.
+ */
+export function refusedDebtUnserved(rows: readonly CashRow[]): boolean {
+  const refused = refusedRows(rows);
+  return refused.length > 0 && refused.every((r) => r.debt === null && r.debtUnreadable === undefined);
+}
+
+/**
+ * The Debt cell of a row with no verdict: its served figure; "unreadable", naming the fault, when the figure served
+ * fails its guard; or a dash — on a refused row, with why on hover. Never $0.
+ */
+export function refusedRowDebtCell(row: CashRow): { readonly text: string; readonly title: string | null } {
+  if (row.debt !== null) return { text: humanUsd(row.debt, row.decimals), title: null };
+  if (row.debtUnreadable === true) return { text: "unreadable", title: DEBT_UNREADABLE };
+  return { text: "—", title: !row.computed && row.unreadable === undefined ? REFUSED_DEBT_UNSERVED : null };
 }
 
 /** The standing a row without a verdict wears in the table: the engine's act, or the page's own inability — never one word for both. */

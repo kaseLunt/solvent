@@ -505,6 +505,63 @@ test("the legacy fold reads one decision over nothing computed — its line, its
   expect(deriveLegacyView(legacyWith({ positions: 2, computed: 1, liquidatable: 0, refused: 1 }))?.liquidatable).toBe(0);
 });
 
+test("the legacy fold's words are the view's: every tile's label, figure, sub line and register, and every note, decided in the lib and printed as given", () => {
+  const find = <T extends { engine: string }>(list: readonly T[]): T => {
+    const hit = list.find((e) => e.engine === "aave_v3_etherfi");
+    if (hit === undefined) throw new Error("fixture invariant: the legacy engine is on the wire");
+    return hit;
+  };
+  const note = "The ether.fi Aave v3 market is being wound down. Its figures are shown for completeness and are never added to the Cash book.";
+  const bandsCaption = "Positions by health factor · liquidation at 1.00 · counts, not dollars";
+  // Served whole: the census, the market's own debt, its liquidatable count beside the eligible debt, its refusals.
+  const legacy = { engine: find(BOOK.engines), badDebt: find(BOOK.bad_debt), histogram: find(BOOK.hf_histogram.engines), refusedWhole: null };
+  const served = deriveLegacyView(legacy);
+  expect(served).toMatchObject({ note, withheldNote: null, histogramWithheldNote: null, bandsCaption });
+  expect(served?.tiles).toEqual({
+    positions: { label: "Positions", value: "2", sub: "1 computed", tone: "neutral" },
+    debt: { label: "Debt", value: "$6,000", tone: "neutral" },
+    liquidatable: { label: "Liquidatable", value: "0", sub: "$0 eligible debt", tone: "neutral" },
+    notComputed: { label: "Not computed", value: "1", tone: "refused" },
+  });
+  // A liquidatable count stands in the crit register; with no bad-debt row served, the sum's place says withheld.
+  const counted = deriveLegacyView(legacyWith({ positions: 8552, computed: 8552, liquidatable: 46, refused: 0 }));
+  expect(counted?.tiles.liquidatable).toEqual({ label: "Liquidatable", value: "46", sub: "Σ withheld", tone: "crit" });
+  expect(counted?.tiles.positions).toEqual({ label: "Positions", value: "8,552", sub: "8,552 computed", tone: "neutral" });
+  // A malformed eligible debt is named unreadable — never a refusal the wire did not make, never "$0".
+  const malformed = deriveLegacyView({ ...legacy, badDebt: { ...legacy.badDebt, eligible_debt_usd: "" } });
+  expect(malformed?.tiles.liquidatable).toEqual({ label: "Liquidatable", value: "0", sub: "Σ unreadable", tone: "neutral" });
+  // Nothing computed: the debt and the liquidatable count are sums over nothing — dashes in the refused register.
+  const none = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }));
+  expect(none?.tiles).toEqual({
+    positions: { label: "Positions", value: "3", sub: "0 computed", tone: "neutral" },
+    debt: { label: "Debt", value: "—", tone: "refused" },
+    liquidatable: { label: "Liquidatable", value: "—", sub: "not computed", tone: "refused" },
+    notComputed: { label: "Not computed", value: "3", tone: "refused" },
+  });
+  // A histogram withheld on its own is said in the fold's sentence, with its cause.
+  const refusedHistogram = { ...legacy.histogram, refused: true, refusal: { engine: "aave_v3_etherfi", code: "SWEEP_FAILED", detail: "", note: "" } };
+  expect(deriveLegacyView({ ...legacy, histogram: refusedHistogram })?.histogramWithheldNote).toBe("Histogram withheld: collateral sweep failed.");
+  // Withheld whole: the cause in the fold's sentence, and no tile prints a population, a figure or a count.
+  const withheld = deriveLegacyView({
+    engine: find(BOOK_ENGINE_REFUSED.engines),
+    badDebt: find(BOOK_ENGINE_REFUSED.bad_debt),
+    histogram: find(BOOK_ENGINE_REFUSED.hf_histogram.engines),
+    refusedWhole: { code: "FLAG_CUSTODY_UNPROVEN", detail: "" },
+  });
+  expect(withheld).toMatchObject({
+    note,
+    bandsCaption,
+    histogramWithheldNote: null,
+    withheldNote: "The engine withheld its whole book this batch: collateral-flag custody unproven. Its populations, debt and histogram are not computed.",
+  });
+  expect(withheld?.tiles).toEqual({
+    positions: { label: "Positions", value: "—", sub: "not computed", tone: "refused" },
+    debt: { label: "Debt", value: "—", tone: "refused" },
+    liquidatable: { label: "Liquidatable", value: "—", sub: "not computed", tone: "refused" },
+    notComputed: { label: "Not computed", value: "—", tone: "refused" },
+  });
+});
+
 test("over nothing computed the legacy histogram draws no bar — its buckets count computed positions only, so each zero counts nothing — and the fold says why in the lib's words; an empty or a computed market keeps its bars", () => {
   const servedHistogram = BOOK.hf_histogram.engines.find((e) => e.engine === "aave_v3_etherfi");
   if (servedHistogram === undefined) throw new Error("fixture invariant: the committed book serves the legacy histogram");

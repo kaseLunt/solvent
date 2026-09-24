@@ -8,6 +8,7 @@ import {
   unreadableHeadline,
   walkEntryLine,
   type CashSummary,
+  type TileTone,
   type TileView,
 } from "./cash-summary";
 import { humanAge } from "./freshness";
@@ -378,6 +379,15 @@ export interface LegacyBand {
   readonly count: number;
 }
 
+/** A tile of the legacy fold as the fold prints it: decided here, printed by the component as given. */
+export interface LegacyTile {
+  readonly label: string;
+  readonly value: string;
+  /** Absent where the tile carries no sub line. */
+  readonly sub?: string;
+  readonly tone: TileTone;
+}
+
 /** The legacy Aave v3 section, derived once: a withheld engine names its cause and prints no population, no debt, no histogram. */
 export interface LegacyView {
   /** The engine's whole book is withheld, with this plain cause. */
@@ -402,6 +412,60 @@ export interface LegacyView {
   readonly histogramWithheld: string | null;
   /** The collapsed section's one line. */
   readonly summaryLine: string;
+  /** Why the market is shown at all, and that it is never added to the Cash book. */
+  readonly note: string;
+  /** The whole-book withholding in the fold's own sentence; null unless the engine withheld its book. */
+  readonly withheldNote: string | null;
+  readonly tiles: {
+    readonly positions: LegacyTile;
+    readonly debt: LegacyTile;
+    readonly liquidatable: LegacyTile;
+    readonly notComputed: LegacyTile;
+  };
+  /** The histogram's own withholding in the fold's sentence; null unless the histogram alone is withheld. */
+  readonly histogramWithheldNote: string | null;
+  /** The caption over the bars: what they bucket, where liquidation sits, and that they count positions, not dollars. */
+  readonly bandsCaption: string;
+}
+
+const LEGACY_NOTE =
+  "The ether.fi Aave v3 market is being wound down. Its figures are shown for completeness and are never added to the Cash book.";
+const LEGACY_BANDS_CAPTION = "Positions by health factor · liquidation at 1.00 · counts, not dollars";
+
+/** A legacy population as a tile prints it: grouped, or the dash where there is no count. */
+const legacyCount = (value: number | null): string => (value === null ? "—" : n(value));
+
+/**
+ * The fold's four tiles from the view's own decisions. A withheld engine prints no population; a count over nothing
+ * computed is a dash in the refused register; the eligible debt beside the liquidatable count is the figure, or why it
+ * is not there — withheld where the wire serves none, unreadable where it serves one the decimal guard refuses.
+ */
+function legacyTiles(
+  v: Pick<LegacyView, "withheld" | "positions" | "computed" | "liquidatable" | "refused" | "debt" | "eligibleDebt">,
+): LegacyView["tiles"] {
+  const withheld = v.withheld !== null;
+  const eligible =
+    v.eligibleDebt.kind === "value"
+      ? `${v.eligibleDebt.text} eligible debt`
+      : v.eligibleDebt.kind === "absent"
+        ? "Σ withheld"
+        : "Σ unreadable";
+  return {
+    positions: {
+      label: "Positions",
+      value: legacyCount(v.positions),
+      sub: withheld ? "not computed" : `${legacyCount(v.computed)} computed`,
+      tone: withheld ? "refused" : "neutral",
+    },
+    debt: { label: "Debt", value: moneyText(v.debt), tone: v.debt.kind === "value" ? "neutral" : "refused" },
+    liquidatable: {
+      label: "Liquidatable",
+      value: legacyCount(v.liquidatable),
+      sub: v.liquidatable === null ? "not computed" : eligible,
+      tone: v.liquidatable === null ? "refused" : v.liquidatable > 0 ? "crit" : "neutral",
+    },
+    notComputed: { label: "Not computed", value: legacyCount(v.refused), tone: "refused" },
+  };
 }
 
 /** The legacy fold's line in place of the histogram, over a market the engine computed none of. */
@@ -415,19 +479,19 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
   const withheld = legacy.refusedWhole === null ? null : plainCause(legacy.refusedWhole.code, legacy.refusedWhole.detail);
   if (withheld !== null) {
     // The aggregate's populations under a withheld engine are placeholders, not counts: none is read.
+    const counts = { withheld, positions: null, computed: null, liquidatable: null, refused: null, debt: ABSENT, eligibleDebt: ABSENT };
     return {
-      withheld,
+      ...counts,
       decimals,
-      positions: null,
-      computed: null,
-      liquidatable: null,
-      refused: null,
-      debt: ABSENT,
-      eligibleDebt: ABSENT,
       bands: null,
       bandsNote: null,
       histogramWithheld: null,
       summaryLine: `Legacy · Aave v3 market — withheld this batch: ${withheld}`,
+      note: LEGACY_NOTE,
+      withheldNote: `The engine withheld its whole book this batch: ${withheld}. Its populations, debt and histogram are not computed.`,
+      tiles: legacyTiles(counts),
+      histogramWithheldNote: null,
+      bandsCaption: LEGACY_BANDS_CAPTION,
     };
   }
   // Every population is a wire integer: classified before render, never coerced.
@@ -479,18 +543,18 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
     computed > 0
       ? `${n(liquidatable)} of ${n(computed)} computed ${computed === 1 ? "position is" : "positions are"} liquidatable`
       : `${n(positions)} position${positions === 1 ? "" : "s"}`;
+  const counts = { withheld: null, positions, computed, liquidatable: nothingComputed ? null : liquidatable, refused, debt, eligibleDebt };
   return {
-    withheld: null,
+    ...counts,
     decimals,
-    positions,
-    computed,
-    liquidatable: nothingComputed ? null : liquidatable,
-    refused,
-    debt,
-    eligibleDebt,
     bands,
     bandsNote,
     histogramWithheld,
     summaryLine: `Legacy · Aave v3 market — ${finding} · ${debtWord} · ${n(refused)} refused`,
+    note: LEGACY_NOTE,
+    withheldNote: null,
+    tiles: legacyTiles(counts),
+    histogramWithheldNote: histogramWithheld === null ? null : `Histogram withheld: ${histogramWithheld}.`,
+    bandsCaption: LEGACY_BANDS_CAPTION,
   };
 }

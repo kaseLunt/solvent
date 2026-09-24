@@ -3,7 +3,7 @@
 // mocked from committed fixtures; strings come from lib/book-headline.ts.
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
-import { readCashRow } from "../../lib/cash-rows";
+import { DEBT_UNREADABLE, readCashRow, REFUSED_DEBT_UNSERVED } from "../../lib/cash-rows";
 import {
   bandsFinding,
   belowLineToggleLabel,
@@ -61,7 +61,7 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
     "$4,200 of Cash debt is liquidatable right now, across 1 account.",
   );
   await expect(page.getByTestId("book-verdict-dek")).toHaveText(
-    "No account is within 10% of its borrow cap. 1 position could not be computed this batch and is counted, not hidden.",
+    "No account is within 10% of its borrow cap. 1 position has no verdict in this batch and is counted, not hidden.",
   );
   const identity = page.getByTestId("book-verdict-identity");
   await expect(identity).toContainText("Batch 1");
@@ -147,7 +147,15 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
   // serves a refusal, with no debt: the Debt cell is a dash, never a figure the engine did not write.
   const dim = page.getByTestId("book-attention").locator("tbody tr.dim, tbody tr[class*='dim']");
   await expect(dim).toHaveCount(6);
-  for (const row of await dim.all()) await expect(row.locator("td").nth(2)).toHaveText("—");
+  for (const row of await dim.all()) {
+    await expect(row.locator("td").nth(2)).toHaveText("—");
+    // The dash says why on hover, in the lib's words: the engine serves no debt figure for a position it could not compute.
+    await expect(row.locator("td").nth(2).locator("[title]")).toHaveAttribute("title", REFUSED_DEBT_UNSERVED);
+  }
+  // The dek sizes the blind spot in words — their debt is not known — and never as a figure or a sum.
+  await expect(page.getByTestId("book-verdict-dek")).toContainText(
+    "6 positions have no verdict in this batch and are counted, not hidden. No debt figure is served for a position the engine could not compute, so their debt is not known.",
+  );
   // The legacy fold's line states the market's own finding over its computed positions — never summed with Cash.
   await expect(page.getByTestId("book-legacy").locator("summary")).toHaveText(
     "Legacy · Aave v3 market — 46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused",
@@ -717,7 +725,7 @@ test("a duplicate account never satisfies the census: page one returns A, the la
   await expect(page.getByTestId("book-walk-failure")).toContainText(twice);
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("$4,200 of Cash debt is liquidatable right now, across 1 account.");
   await expect(page.getByTestId("book-verdict-dek")).toHaveText(
-    `1 position could not be computed this batch and is counted, not hidden. The walk was served an account twice (${twice}); pages that repeat an account do not partition the book, so no figure here is a total or a lower bound.`,
+    `1 position has no verdict in this batch and is counted, not hidden. The walk was served an account twice (${twice}); pages that repeat an account do not partition the book, so no figure here is a total or a lower bound.`,
   );
   // Counted once: the account's debt is never doubled, in the tile, the bar or the table.
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("$4,200");
@@ -783,6 +791,9 @@ test("an unreadable computed row blocks every all-clear: counted in the headline
   await expect(rows.first()).toContainText("Unreadable");
   await expect(rows.first()).not.toContainText("Not computed");
   await expect(rows.first()).toHaveClass(/dim/);
+  // Its debt was served and failed the guard: the cell says so and names the fault — never the dash of a debt not served.
+  await expect(rows.first().locator("td").nth(2)).toHaveText("unreadable");
+  await expect(rows.first().locator("td").nth(2).locator("[title]")).toHaveAttribute("title", DEBT_UNREADABLE);
   // The walk itself completed: nothing is busy, and no walk failure is claimed.
   await expect(page.locator("[aria-busy='true']")).toHaveCount(0);
   await expect(page.getByTestId("book-walk-failure")).toHaveCount(0);
