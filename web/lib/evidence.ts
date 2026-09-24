@@ -14,7 +14,7 @@
 
 import type { Batch, PriceInput, RefinedLeg, RefinedPosition, Stamp } from "@solvent/client";
 import type { components } from "@solvent/client";
-import { EM_DASH, formatBlock, renderNullableDecimal } from "./format";
+import { EM_DASH, formatBlock, renderNullableDecimal, shortHex } from "./format";
 import { readWirePopulation, readWireScale } from "./wireGuard";
 import { classifyFactorPrice } from "./factorPriceGuard";
 import { liqBonusEvidenceValue, paramPercent, paramScaleNote } from "./params-format";
@@ -22,7 +22,8 @@ import { noPricePathTitle } from "./liq-distance";
 import { engineName } from "./inspector-headline";
 import { groupInt, plural } from "./prose";
 
-export type EvidenceTone = "default" | "ok" | "warn" | "crit" | "dim";
+/** A row's tone: a verdict's, the refused register's secondary ink, a caption's dim ink, or ink (a record). */
+export type EvidenceTone = "default" | "ok" | "warn" | "crit" | "refused" | "dim";
 
 export interface EvidenceRow {
   label: string;
@@ -36,13 +37,13 @@ export interface EvidenceSection {
 }
 
 export interface EvidenceDescriptor {
-  /** Drawer heading, e.g. "EXPLAIN · HEALTH FACTOR". */
+  /** Drawer heading, in sentence case, e.g. "Health factor". */
   title: string;
   /** The number as rendered on the surface that opened the drawer. */
   subject: string;
   /** The engine's comparator statement, verbatim — never a shared formula. */
   comparator: string;
-  /** Operational (LIVE · WATERMARKED) vs proven (PROOF · EXACT @ PIN). */
+  /** Operational (live, watermarked) vs proven (proof exact @ pin). */
   marker: "operational" | "proven";
   markerNote: string;
   sections: EvidenceSection[];
@@ -81,7 +82,7 @@ export function priceVerdictTone(verdict: string): EvidenceTone {
 
 function reorgPostureRow(stamp: Stamp | undefined): EvidenceRow {
   if (stamp === undefined) {
-    return { label: "reorg posture", value: "no watermark for this engine on the batch", tone: "crit" };
+    return { label: "Reorg posture", value: "no watermark for this engine on the batch", tone: "crit" };
   }
   // Both epoch stamps pass the population guard BEFORE the subtraction
   // whose result renders as the reorg disclosure.
@@ -89,9 +90,9 @@ function reorgPostureRow(stamp: Stamp | undefined): EvidenceRow {
   const acked = readWirePopulation(stamp.acked_epoch, "acked_epoch");
   const unacked = maxEpoch - acked;
   return unacked <= 0
-    ? { label: "reorg posture", value: "none unacked", tone: "ok" }
+    ? { label: "Reorg posture", value: "None unacked" }
     : {
-        label: "reorg posture",
+        label: "Reorg posture",
         value: `${plural(unacked, "unacked epoch")} at compute · acked ${String(acked)} of ${String(maxEpoch)}`,
         tone: "crit",
       };
@@ -102,16 +103,16 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
   const stamp = batch.watermarks.find((w) => w.engine === position.engine);
 
   const batchSection: EvidenceSection = {
-    title: "BATCH · MATERIALIZATION",
+    title: "Batch · materialization",
     rows: [
-      { label: "batch", value: String(readWirePopulation(batch.id, "batch.id")) },
-      { label: "computed_at", value: batch.computed_at },
-      { label: "producer · status", value: `${batch.producer} · ${batch.status}` },
+      { label: "Batch", value: String(readWirePopulation(batch.id, "batch.id")) },
+      { label: "Computed at", value: batch.computed_at },
+      { label: "Producer · status", value: `${batch.producer} · ${batch.status}` },
       ...(batch.supersession.superseded
-        ? [{ label: "supersession", value: "SUPERSEDED · the flag is the contract", tone: "warn" as const }]
+        ? [{ label: "Supersession", value: "Superseded · the flag is the contract", tone: "warn" as const }]
         : []),
       {
-        label: "engine watermark",
+        label: "Engine watermark",
         value:
           stamp === undefined
             ? "absent"
@@ -120,7 +121,7 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
       },
       reorgPostureRow(stamp),
       {
-        label: "materialization key",
+        label: "Materialization key",
         value: "not served on this surface · published by /v1/evidence (Verification)",
         tone: "dim",
       },
@@ -129,29 +130,30 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
 
   const asOf = position.as_of;
   const asOfSection: EvidenceSection = {
-    title: "INPUT AS-OFS",
+    title: "Input as-ofs",
+    // An as-of block is a record, not a passed check: it prints in ink.
     rows: [
-      { label: "balances", value: `block ${formatBlock(asOf.balances_block)}`, tone: "ok" },
-      { label: "params", value: `block ${formatBlock(asOf.params_block)}`, tone: "ok" },
+      { label: "Balances", value: `block ${formatBlock(asOf.balances_block)}` },
+      { label: "Params", value: `block ${formatBlock(asOf.params_block)}` },
       position.engine === "debt_manager"
-        ? { label: "sweep", value: `block ${formatBlock(asOf.sweep_block)}`, tone: "ok" }
-        : { label: "sweep", value: "n/a · engine has no sweeper", tone: "dim" },
+        ? { label: "Sweep", value: `block ${formatBlock(asOf.sweep_block)}` }
+        : { label: "Sweep", value: "n/a · engine has no sweeper", tone: "dim" },
       {
-        label: "oldest price input",
+        label: "Oldest price input",
         value: asOf.oldest_price_input ?? "none",
         tone: asOf.oldest_price_input === null ? "dim" : "default",
       },
       asOf.stale_price_inputs
-        ? { label: "stale price inputs", value: "YES · flagged, and the flag propagates", tone: "warn" }
-        : { label: "stale price inputs", value: "none", tone: "ok" },
+        ? { label: "Stale price inputs", value: "Yes · flagged, and the flag propagates", tone: "warn" }
+        : { label: "Stale price inputs", value: "None" },
     ],
   };
 
   const priceSection: EvidenceSection = {
-    title: "PRICE INPUTS · PROVENANCE + BUDGET VERDICTS",
+    title: "Price inputs · provenance and budget verdicts",
     rows:
       position.price_inputs.length === 0
-        ? [{ label: "price inputs", value: "none on this position", tone: "dim" }]
+        ? [{ label: "Price inputs", value: "none on this position", tone: "dim" }]
         : position.price_inputs.map((input) => ({
             label: input.source,
             value:
@@ -165,24 +167,24 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
   const flagRows: EvidenceRow[] = [];
   if (position.refusal !== null) {
     flagRows.push({
-      label: "refusal",
+      label: "Refusal",
       value: `${position.refusal.code}: ${position.refusal.detail}`,
       tone: "crit",
     });
   }
   for (const flag of position.flags) {
-    flagRows.push({ label: "flag", value: flag, tone: "warn" });
+    flagRows.push({ label: "Flag", value: flag, tone: "warn" });
   }
   if (flagRows.length === 0) {
-    flagRows.push({ label: "flags / refusals", value: "none", tone: "ok" });
+    flagRows.push({ label: "Flags / refusals", value: "None" });
   }
 
-  return [batchSection, asOfSection, priceSection, { title: "FLAGS · REFUSALS", rows: flagRows }];
+  return [batchSection, asOfSection, priceSection, { title: "Flags · refusals", rows: flagRows }];
 }
 
 const OPERATIONAL_NOTE =
-  "LIVE · WATERMARKED, served from the newest servable batch under its per-input watermark " +
-  "vector. PROOF · EXACT @ PIN (numbers covered by the pinned reconcile run) is published by /v1/evidence, not asserted here.";
+  "Live, watermarked: served from the newest servable batch under its per-input watermark " +
+  "vector. Proof exact @ pin (numbers covered by the pinned reconcile run) is published by /v1/evidence, not asserted here.";
 
 /** Assemble a full descriptor: the number's own rows + the shared position chain. */
 export function positionNumberEvidence(
@@ -196,7 +198,7 @@ export function positionNumberEvidence(
     comparator: comparatorFor(position.engine),
     marker: "operational",
     markerNote: OPERATIONAL_NOTE,
-    sections: [{ title: "THIS NUMBER", rows: focus.rows }, ...positionSections(position, batch)],
+    sections: [{ title: "This number", rows: focus.rows }, ...positionSections(position, batch)],
   };
 }
 
@@ -208,15 +210,15 @@ export function hfEvidence(position: RefinedPosition, batch: Batch, subject: str
   const hf = position.health_factor;
   const rows: EvidenceRow[] =
     hf === null
-      ? [{ label: "health factor", value: "not published (refused, or the engine has none)", tone: "dim" }]
+      ? [{ label: "Health factor", value: "not published (refused, or the engine has none)", tone: "dim" }]
       : [
           { label: "hf_wad (18-dec)", value: hf.wad ?? EM_DASH },
-          { label: "numerator Σ(Cᵢ·LTᵢ)", value: hf.num ?? EM_DASH },
-          { label: "denominator D (debt)", value: hf.den ?? EM_DASH },
-          { label: "infinite", value: hf.infinite ? "true · no debt" : "false" },
-          { label: "contract note", value: hf.note, tone: "dim" },
+          { label: "Numerator Σ(Cᵢ·LTᵢ)", value: hf.num ?? EM_DASH },
+          { label: "Denominator D (debt)", value: hf.den ?? EM_DASH },
+          { label: "Infinite", value: hf.infinite ? "true · no debt" : "false" },
+          { label: "Contract note", value: hf.note, tone: "dim" },
         ];
-  return positionNumberEvidence(position, batch, { title: "EXPLAIN · HEALTH FACTOR", subject, rows });
+  return positionNumberEvidence(position, batch, { title: "Health factor", subject, rows });
 }
 
 export function totalEvidence(
@@ -243,7 +245,7 @@ export function totalEvidence(
       ? position.total_collateral_base
       : position.total_debt_base;
   return positionNumberEvidence(position, batch, {
-    title: which === "collateral" ? "EXPLAIN · TOTAL COLLATERAL" : "EXPLAIN · TOTAL DEBT",
+    title: which === "collateral" ? "Total collateral" : "Total debt",
     subject,
     rows: [
       {
@@ -252,9 +254,9 @@ export function totalEvidence(
         tone: raw === null ? "dim" : "default",
       },
       // A scale printed as its own caption passes the scale guard.
-      { label: "value decimals", value: String(readWireScale(position.value_decimals, "value_decimals")) },
+      { label: "Value decimals", value: String(readWireScale(position.value_decimals, "value_decimals")) },
       {
-        label: "unit",
+        label: "Unit",
         value:
           position.engine === "debt_manager"
             ? "USD, 6-dec (the engine's own unit)"
@@ -273,7 +275,7 @@ export function dmComparandEvidence(
 ): EvidenceDescriptor {
   const raw = which === "borrowings" ? position.borrowings : position.max_borrow_lt;
   return positionNumberEvidence(position, batch, {
-    title: which === "borrowings" ? "EXPLAIN · DEBT (BORROWINGS)" : "EXPLAIN · MAX BORROW (LT)",
+    title: which === "borrowings" ? "Debt (borrowings)" : "Max borrow (LT)",
     subject,
     rows: [
       {
@@ -281,8 +283,8 @@ export function dmComparandEvidence(
         value: raw ?? `${EM_DASH} (null, not established, and never rendered as 0)`,
         tone: raw === null ? "dim" : "default",
       },
-      { label: "comparator side", value: which === "borrowings" ? "left (debt)" : "right (threshold)" },
-      { label: "unit", value: "USD, 6-dec (the engine's own unit)", tone: "dim" },
+      { label: "Comparator side", value: which === "borrowings" ? "left (debt)" : "right (threshold)" },
+      { label: "Unit", value: "USD, 6-dec (the engine's own unit)", tone: "dim" },
     ],
   });
 }
@@ -325,13 +327,13 @@ export function liquidationPriceEvidence(
     first !== undefined && first.ok && first.entry.lowest_healthy_price !== null;
   const rows: EvidenceRow[] =
     lp === null
-      ? [{ label: "health boundary price", value: "not published for this position", tone: "dim" }]
+      ? [{ label: "Health boundary price", value: "not published for this position", tone: "dim" }]
       : [
           ...classifiedPrices.map(
             (classified, index): EvidenceRow =>
               classified.ok
                 ? {
-                    label: `lowest_healthy_price · ${classified.entry.asset.slice(0, 10)}…`,
+                    label: `lowest_healthy_price · ${shortHex(classified.entry.asset)}`,
                     value:
                       `${renderNullableDecimal(classified.entry.lowest_healthy_price, { decimals: classified.entry.price_decimals })} ` +
                       `(current ${renderNullableDecimal(classified.entry.current_price, { decimals: classified.entry.price_decimals })})`,
@@ -346,7 +348,7 @@ export function liquidationPriceEvidence(
             ? lp.boundary_is_healthy
               ? [
                   {
-                    label: "ceil disclosure",
+                    label: "Ceil disclosure",
                     value:
                       "ceil(P*): at exactly this price the position is still HEALTHY, and liquidation begins strictly below it.",
                     tone: "dim" as const,
@@ -354,7 +356,7 @@ export function liquidationPriceEvidence(
                 ]
               : [
                   {
-                    label: "ceil disclosure",
+                    label: "Ceil disclosure",
                     value:
                       "withheld — the wire does not certify health at exactly this boundary " +
                       "(boundary_is_healthy: false), so no exact-price health claim is made.",
@@ -364,7 +366,7 @@ export function liquidationPriceEvidence(
             : first !== undefined && !first.ok
               ? [
                   {
-                    label: "boundary",
+                    label: "Boundary",
                     value:
                       `unreadable — the served entry is malformed (${first.fields.join(", ")}), ` +
                       "so its numbers are not read and no exact-price health claim is made" +
@@ -376,23 +378,23 @@ export function liquidationPriceEvidence(
                 ]
               : [
                   {
-                    label: "boundary",
+                    label: "Boundary",
                     value:
                       "not established — the solve published no boundary price on this axis" +
                       (lp.reason !== undefined && lp.reason !== "" ? ` · ${lp.reason}` : ""),
                     tone: "dim" as const,
                   },
                 ]),
-          { label: "axis", value: lp.axis },
+          { label: "Axis", value: lp.axis },
           {
-            label: "solve",
+            label: "Solve",
             value: lp.diagnostic
-              ? "DIAGNOSTIC · single-asset ceteris-paribus variant (other counted collateral held)"
+              ? "Diagnostic · single-asset ceteris-paribus variant (other counted collateral held)"
               : "factor-level closed form · all assets on the axis move together",
             tone: lp.diagnostic ? "warn" : "default",
           },
           ...(lp.already_breached
-            ? [{ label: "already breached", value: "true · the boundary is behind the current price", tone: "crit" as const }]
+            ? [{ label: "Already breached", value: "true · the boundary is behind the current price", tone: "crit" as const }]
             : []),
           // The WIRE FIELD name (this is the evidence register — the field
           // is what the reader came to check), with the axis-scoped statement
@@ -407,7 +409,7 @@ export function liquidationPriceEvidence(
               ]
             : []),
         ];
-  return positionNumberEvidence(position, batch, { title: "EXPLAIN · HEALTH BOUNDARY PRICE", subject, rows });
+  return positionNumberEvidence(position, batch, { title: "Health boundary price", subject, rows });
 }
 
 export function priceInputEvidence(
@@ -417,26 +419,26 @@ export function priceInputEvidence(
   subject: string,
 ): EvidenceDescriptor {
   return positionNumberEvidence(position, batch, {
-    title: "EXPLAIN · PRICE INPUT",
+    title: "Price input",
     subject,
     rows: [
-      { label: "source", value: input.source },
-      { label: "provenance class", value: input.provenance },
+      { label: "Source", value: input.source },
+      { label: "Provenance class", value: input.provenance },
       {
-        label: "value",
+        label: "Value",
         value: renderNullableDecimal(input.value, input.decimals === null ? {} : { decimals: input.decimals }),
       },
       {
-        label: "chain-asserted as-of",
+        label: "Chain-asserted as-of",
         value: input.source_as_of ?? "none · DB insert time is never substituted",
         tone: input.source_as_of === null ? "warn" : "default",
       },
       {
-        label: "anchor block",
+        label: "Anchor block",
         value: input.block_number === null ? EM_DASH : formatBlock(input.block_number),
       },
       {
-        label: "budget verdict",
+        label: "Budget verdict",
         value: `${input.verdict} (budget ${String(
           readWirePopulation(input.budget_seconds, "budget_seconds"),
         )}s, age ${
@@ -446,7 +448,7 @@ export function priceInputEvidence(
         })`,
         tone: priceVerdictTone(input.verdict),
       },
-      { label: "contract note", value: input.note, tone: "dim" },
+      { label: "Contract note", value: input.note, tone: "dim" },
     ],
   });
 }
@@ -458,28 +460,28 @@ export function legEvidence(
   subject: string,
 ): EvidenceDescriptor {
   return positionNumberEvidence(position, batch, {
-    title: `EXPLAIN · LEG ${leg.symbol ?? leg.asset}`,
+    title: `Leg · ${leg.symbol ?? leg.asset}`,
     subject,
     rows: [
-      { label: "asset", value: leg.asset },
+      { label: "Asset", value: leg.asset },
       {
-        label: "live collateral (raw)",
+        label: "Live collateral (raw)",
         value: leg.live_collateral ?? EM_DASH,
         tone: leg.live_collateral === null ? "dim" : "default",
       },
-      { label: "live debt (raw)", value: leg.live_debt ?? EM_DASH, tone: leg.live_debt === null ? "dim" : "default" },
+      { label: "Live debt (raw)", value: leg.live_debt ?? EM_DASH, tone: leg.live_debt === null ? "dim" : "default" },
       {
-        label: "collateral use",
+        label: "Collateral use",
         value: leg.collateral_use,
         tone: leg.collateral_use === "unknowable" ? "dim" : "default",
       },
       {
-        label: "debt index as-of",
+        label: "Debt index as-of",
         value: leg.debt_index_block === null ? `${EM_DASH} (no debt leg)` : `block ${formatBlock(leg.debt_index_block)}`,
         tone: "dim",
       },
       {
-        label: "collateral index as-of",
+        label: "Collateral index as-of",
         value:
           leg.collateral_index_block === null
             ? `${EM_DASH} (no collateral leg)`
@@ -491,7 +493,7 @@ export function legEvidence(
       // raw wire value stays beside the percentage — this is the evidence
       // register, where the exact integer is the point.
       {
-        label: `liq threshold (${paramScaleNote(position.engine)})`,
+        label: `Liq threshold (${paramScaleNote(position.engine)})`,
         value:
           leg.liq_threshold === null
             ? EM_DASH
@@ -503,7 +505,7 @@ export function legEvidence(
       // of the two encodings that integer is — the reader never has to guess
       // which engine's convention produced the digits.
       {
-        label: `liq bonus (${paramScaleNote(position.engine)})`,
+        label: `Liq bonus (${paramScaleNote(position.engine)})`,
         value: liqBonusEvidenceValue(leg.liq_bonus, position.engine),
       },
     ],
@@ -633,7 +635,7 @@ export function proofSubjectStatus(manifest: EvidenceManifest): ProofSubjectStat
     return derived;
   }
   const contradiction =
-    `CONTRADICTION · the wire's proof_subject.status "${wire.status}" contradicts the ` +
+    `Contradiction · the wire's proof_subject.status "${wire.status}" contradicts the ` +
     `receipt's own conjunction "${derived.kind}"; refusing the proof badge and rendering ` +
     `the contradiction`;
   if (derived.kind === "unavailable") {
@@ -678,14 +680,14 @@ export function liveSubjectStatus(manifest: EvidenceManifest): LiveSubjectStatus
     return {
       kind: "no-batch",
       reason:
-        `CONTRADICTION · the wire's live_subject.status "${wire.status}" contradicts a ` +
+        `Contradiction · the wire's live_subject.status "${wire.status}" contradicts a ` +
         `non-null substrate; refusing to claim a serving batch under a contradictory manifest`,
     };
   }
   return {
     kind: "no-batch",
     reason:
-      `CONTRADICTION · the wire claims "serving" while substrate is null; ` +
+      `Contradiction · the wire claims "serving" while substrate is null; ` +
       `refusing to claim a serving batch (derived reason: ${derived.reason})`,
   };
 }
@@ -823,7 +825,7 @@ export function proofTakeaway(manifest: EvidenceManifest): string {
 }
 
 const PROOF_COMPARATOR =
-  "PROOF · EXACT @ PIN ⇔ the committed reconcile receipt's OWN verdict: result \"pass\", " +
+  "Proof exact @ pin ⇔ the committed reconcile receipt's OWN verdict: result \"pass\", " +
   "exit code 0, gated_exact == gated_rows, gated_drift == 0, and every per-engine weld " +
   "rows_exact == rows_compared. This surface republishes the committed receipt and recomputes " +
   "nothing, and the pin is the receipt's comparison sha.";
@@ -834,33 +836,33 @@ const LIVE_COMPARATOR =
   "against the proof; exactness claims live ONLY on the proof subject, at its pin.";
 
 const PROVEN_NOTE =
-  "PROOF · EXACT @ PIN: numbers covered by the reconcile at the receipt's pinned run. The proof " +
-  "speaks for its pin and ONLY its pin: the currently-serving batch is the LIVE subject " +
+  "Proof exact @ pin: numbers covered by the reconcile at the receipt's pinned run. The proof " +
+  "speaks for its pin and only its pin: the currently-serving batch is the live subject " +
   "and does not inherit this exactness.";
 
 const LIVE_NOTE =
-  "LIVE · WATERMARKED: the currently-serving batch under its per-input watermark vector. " +
-  "It does NOT inherit the proof subject's exactness: the reconcile covers the receipt's " +
+  "Live, watermarked: the currently-serving batch under its per-input watermark vector. " +
+  "It does not inherit the proof subject's exactness: the reconcile covers the receipt's " +
   "pinned run, not this batch.";
 
 function buildIdentitySection(manifest: EvidenceManifest): EvidenceSection {
   const service = manifest.service;
   return {
-    title: "BUILD · CONFIG IDENTITY",
+    title: "Build · config identity",
     rows: [
       {
-        label: "commit",
+        label: "Commit",
         value: manifest.commit ?? `${EM_DASH} (no build stamp, and never guessed)`,
         tone: manifest.commit === null ? "dim" : "default",
       },
-      { label: "service", value: `${service.name} · ${service.version}` },
-      { label: "schema version", value: String(readWirePopulation(service.schema_version, "schema_version")) },
+      { label: "Service", value: `${service.name} · ${service.version}` },
+      { label: "Schema version", value: String(readWirePopulation(service.schema_version, "schema_version")) },
       {
-        label: "algorithm revision",
+        label: "Algorithm revision",
         value: String(readWirePopulation(service.algorithm_revision, "algorithm_revision")),
       },
-      { label: "scenario config", value: service.scenario_config_version },
-      { label: "seizure model", value: service.seizure_model, tone: "dim" },
+      { label: "Scenario config", value: service.scenario_config_version },
+      { label: "Seizure model", value: service.seizure_model, tone: "dim" },
     ],
   };
 }
@@ -872,7 +874,7 @@ function buildIdentitySection(manifest: EvidenceManifest): EvidenceSection {
 // ---------------------------------------------------------------------------
 
 /** The status row of a receipt accepted over at least one checked row. */
-export const RECEIPT_ACCEPTED_STATUS = "ACCEPTED · every checked row matched the chain exactly";
+export const RECEIPT_ACCEPTED_STATUS = "Accepted · every checked row matched the chain exactly";
 
 /** The receipt's tally row: its noun, its label, and its value — exact of rows, and the drift counted. */
 export const CHECKED_ROW = "checked row";
@@ -882,7 +884,7 @@ export function checkedRowsTally(exact: number, rows: number, drift: number): st
 }
 
 /** The wire's term, kept once in the drawer beside its gloss. */
-export const GATED_GLOSS: EvidenceRow = { label: "gated", value: "checked rows — the rows that must match for the run to pass", tone: "dim" };
+export const GATED_GLOSS: EvidenceRow = { label: "Gated", value: "checked rows — the rows that must match for the run to pass", tone: "dim" };
 
 /** What a weld counts — one comparison per account row — in the noun every page prints beside a weld's tally. */
 export const ACCOUNT_COMPARISON = "account comparison";
@@ -920,7 +922,7 @@ export const WELDS_NOTE: EvidenceRow = {
 /** The feeds registry's identity row: its label, and its value when the registry's fingerprint is the service's, or when it is not. */
 export const REGISTRY_LABEL = "feeds registry";
 export const REGISTRY_MATCH = "identical to the service's registry fingerprint, by construction";
-export const REGISTRY_MISMATCH = "MISMATCH against the service's registry fingerprint, which the contract says are identical by construction";
+export const REGISTRY_MISMATCH = "Mismatch against the service's registry fingerprint, which the contract says are identical by construction";
 
 /**
  * The feeds registry's rows. The registry matching the service's fingerprint
@@ -932,14 +934,14 @@ function feedsRegistrySection(manifest: EvidenceManifest, vacuous: boolean): Evi
   const feeds = manifest.feeds_registry;
   const matched = feeds.registry_fingerprint === manifest.service.registry_fingerprint;
   return {
-    title: "FEEDS REGISTRY",
+    title: "Feeds registry",
     rows: [
-      { label: "path", value: feeds.path },
-      { label: "registry fingerprint", value: feeds.registry_fingerprint },
-      { label: "file sha256", value: feeds.file_sha256 },
+      { label: "Path", value: feeds.path },
+      { label: "Registry fingerprint", value: feeds.registry_fingerprint },
+      { label: "File sha256", value: feeds.file_sha256 },
       matched
-        ? { label: REGISTRY_LABEL, value: REGISTRY_MATCH, tone: vacuous ? "default" : "ok" }
-        : { label: REGISTRY_LABEL, value: REGISTRY_MISMATCH, tone: "crit" },
+        ? { label: sentenceLabel(REGISTRY_LABEL), value: REGISTRY_MATCH, tone: vacuous ? "default" : "ok" }
+        : { label: sentenceLabel(REGISTRY_LABEL), value: REGISTRY_MISMATCH, tone: "crit" },
     ],
   };
 }
@@ -950,52 +952,66 @@ function feedsRegistrySection(manifest: EvidenceManifest, vacuous: boolean): Evi
  */
 export const RECEIPT_CHECKED_NONE = "the run checked no rows";
 /** The status row's words for that receipt: the pass is vacuous, so the row refuses the finding and says why. */
-export const RECEIPT_EMPTY_STATUS = `NOTHING PROVEN · ${RECEIPT_CHECKED_NONE}`;
+export const RECEIPT_EMPTY_STATUS = `Nothing proven · ${RECEIPT_CHECKED_NONE}`;
 /** The pill's words for the same receipt. */
-export const RECEIPT_EMPTY_PILL = "RECEIPT CHECKED NO ROWS";
+export const RECEIPT_EMPTY_PILL = "Receipt checked no rows";
+
+/** A shared noun as a row's label: sentence case, while the sentences that share it keep it lower case. */
+const sentenceLabel = (words: string): string => `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+
+/**
+ * A rejected receipt's tone, as the Verification page's one map gives it: a verdict that passed while its own tallies
+ * disagree is warn; a failed verdict, or a wire that contradicts a receipt, is crit.
+ */
+function rejectedTone(manifest: EvidenceManifest, reconcile: ManifestReconcile): EvidenceTone {
+  if (deriveProofSubjectStatus(manifest).kind !== "rejected") return "crit";
+  return reconcile.result === "pass" && readWirePopulation(reconcile.exit_code, "exit_code") === 0 ? "warn" : "crit";
+}
 
 /** The proof subject's full chain, drawer-ready. Marker "proven" ONLY on an unqualified pass over at least one gated row. */
 export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescriptor {
   const status = proofSubjectStatus(manifest);
   const vacuous = status.kind === "accepted" && receiptCheckedNothing(status.reconcile);
   const proven = status.kind === "accepted" && !vacuous;
+  // A row that did not match wears the receipt's fault tone, as the status row does.
+  const fault: EvidenceTone = status.kind === "rejected" ? rejectedTone(manifest, status.reconcile) : "crit";
 
   const statusRow: EvidenceRow =
     status.kind === "accepted"
       ? vacuous
-        ? { label: "status", value: RECEIPT_EMPTY_STATUS, tone: "warn" }
-        : { label: "status", value: RECEIPT_ACCEPTED_STATUS, tone: "ok" }
+        ? { label: "Status", value: RECEIPT_EMPTY_STATUS, tone: "refused" }
+        : { label: "Status", value: RECEIPT_ACCEPTED_STATUS, tone: "ok" }
       : status.kind === "rejected"
-        ? { label: "status", value: `REJECTED · ${status.detail}`, tone: "crit" }
-        : { label: "status", value: `UNAVAILABLE · ${status.reason}`, tone: "crit" };
+        ? { label: "Status", value: `Rejected · ${status.detail}`, tone: rejectedTone(manifest, status.reconcile) }
+        : { label: "Status", value: `No committed receipt · ${status.reason}`, tone: "refused" };
 
-  const sections: EvidenceSection[] = [{ title: "THIS SUBJECT", rows: [statusRow] }];
+  const sections: EvidenceSection[] = [{ title: "This subject", rows: [statusRow] }];
 
   if (status.kind !== "unavailable") {
     const reconcile = status.reconcile;
     sections.push({
-      title: "RECEIPT · COMMITTED ARTIFACT",
+      title: "Receipt · committed artifact",
       rows: [
-        { label: "schema", value: reconcile.schema, tone: "dim" },
+        { label: "Schema", value: reconcile.schema, tone: "dim" },
         // Receipt tallies pass the population guard at the read.
         {
-          label: "result · exit",
+          label: "Result · exit",
           value: `${reconcile.result} · ${String(readWirePopulation(reconcile.exit_code, "exit_code"))}`,
         },
-        { label: "finished_at", value: reconcile.finished_at },
+        { label: "Finished at", value: reconcile.finished_at },
         {
-          label: CHECKED_ROWS_LABEL,
+          label: sentenceLabel(CHECKED_ROWS_LABEL),
           value: checkedRowsTally(
             readWirePopulation(reconcile.gated_exact, "gated_exact"),
             readWirePopulation(reconcile.gated_rows, "gated_rows"),
             readWirePopulation(reconcile.gated_drift, "gated_drift"),
           ),
           // A tally of no rows is not a clean tally: it wears no verdict's colour.
-          tone: vacuous ? "dim" : readWirePopulation(reconcile.gated_drift, "gated_drift") === 0 ? "ok" : "crit",
+          tone: vacuous ? "dim" : readWirePopulation(reconcile.gated_drift, "gated_drift") === 0 ? "ok" : fault,
         },
         { ...GATED_GLOSS },
         {
-          label: "advisory rows",
+          label: "Advisory rows",
           value: String(readWirePopulation(reconcile.advisory_rows, "advisory_rows")),
           tone: "dim",
         },
@@ -1011,13 +1027,13 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
               : readWirePopulation(weld.rows_exact, "rows_exact") ===
                   readWirePopulation(weld.rows_compared, "rows_compared")
                 ? "ok"
-                : "crit",
+                : fault,
           }),
         ),
-        ...(reconcile.welds.length > 0 ? [{ ...WELDS_NOTE }] : []),
-        { label: "comparison sha256", value: reconcile.comparison_sha256 },
-        { label: "artifact", value: reconcile.artifact_path },
-        { label: "receipt note", value: reconcile.note, tone: "dim" },
+        ...(reconcile.welds.length > 0 ? [{ ...WELDS_NOTE, label: sentenceLabel(WELDS_NOTE.label) }] : []),
+        { label: "Comparison sha256", value: reconcile.comparison_sha256 },
+        { label: "Artifact", value: reconcile.artifact_path },
+        { label: "Receipt note", value: reconcile.note, tone: "dim" },
       ],
     });
   }
@@ -1025,22 +1041,22 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
   sections.push(buildIdentitySection(manifest), feedsRegistrySection(manifest, vacuous));
 
   return {
-    title: "EXPLAIN · PROOF SUBJECT",
+    title: "Proof subject",
     subject:
       status.kind === "accepted"
         ? vacuous
           ? RECEIPT_EMPTY_PILL
-          : `PROOF · EXACT @ ${proofPin(status.reconcile)}`
+          : `Proof exact @ ${proofPin(status.reconcile)}`
         : status.kind === "rejected"
-          ? `RECEIPT REJECTED · ${status.detail}`
-          : "NO COMMITTED RECEIPT",
+          ? `Receipt rejected · ${status.detail}`
+          : "No committed receipt",
     comparator: PROOF_COMPARATOR,
     marker: proven ? "proven" : "operational",
     markerNote:
       proven
         ? PROVEN_NOTE
-        : "NOT PROVEN: no unqualified committed receipt backs this deployment; nothing here may " +
-          "wear the PROOF · EXACT badge, and the deployment identity above stays operational.",
+        : "Not proven: no unqualified committed receipt backs this deployment; nothing here may " +
+          "wear the proof exact badge, and the deployment identity above stays operational.",
     sections,
   };
 }
@@ -1053,37 +1069,38 @@ export function liveSubjectEvidence(manifest: EvidenceManifest): EvidenceDescrip
     status.kind === "serving"
       ? [
           {
-            title: "THIS SUBJECT",
-            rows: [{ label: "status", value: "SERVING · newest servable batch", tone: "ok" }],
+            title: "This subject",
+            // Serving is posture, never a passed check: it prints in ink.
+            rows: [{ label: "Status", value: "Serving · newest servable batch" }],
           },
           {
-            title: "SERVING BATCH · IDENTITY",
+            title: "Serving batch · identity",
             rows: [
               {
-                label: "batch",
-                value: `#${String(readWirePopulation(status.substrate.batch_id, "batch_id"))}`,
+                label: "Batch",
+                value: groupInt(readWirePopulation(status.substrate.batch_id, "batch_id")),
               },
-              { label: "materialization key", value: status.substrate.materialization_key },
+              { label: "Materialization key", value: status.substrate.materialization_key },
               {
-                label: "substrate digest",
+                label: "Substrate digest",
                 value:
                   status.substrate.substrate_digest === ""
                     ? `${EM_DASH} (predates substrate-digest custody, so this is an honest gap rather than a digest)`
                     : status.substrate.substrate_digest,
                 tone: status.substrate.substrate_digest === "" ? "dim" : "default",
               },
-              { label: "digest note", value: status.substrate.note, tone: "dim" },
+              { label: "Digest note", value: status.substrate.note, tone: "dim" },
             ],
           },
         ]
       : [
           {
-            title: "THIS SUBJECT",
+            title: "This subject",
             rows: [
-              { label: "status", value: "NO SERVABLE BATCH", tone: "crit" },
-              { label: "reason", value: status.reason, tone: "crit" },
+              { label: "Status", value: "No servable batch", tone: "refused" },
+              { label: "Reason", value: status.reason },
               {
-                label: "materialization key",
+                label: "Materialization key",
                 value: `${EM_DASH} · no batch, no key; never fabricated`,
                 tone: "dim",
               },
@@ -1092,11 +1109,11 @@ export function liveSubjectEvidence(manifest: EvidenceManifest): EvidenceDescrip
         ];
 
   return {
-    title: "EXPLAIN · LIVE SUBJECT",
+    title: "Live subject",
     subject:
       status.kind === "serving"
-        ? `batch #${String(readWirePopulation(status.substrate.batch_id, "batch_id"))} · LIVE · WATERMARKED`
-        : "NO SERVABLE BATCH",
+        ? `Batch ${groupInt(readWirePopulation(status.substrate.batch_id, "batch_id"))} · live, watermarked`
+        : "No servable batch",
     comparator: LIVE_COMPARATOR,
     marker: "operational",
     markerNote: LIVE_NOTE,

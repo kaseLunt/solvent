@@ -579,7 +579,7 @@ test.describe("p1a-6 · the styleguide is the living canon", () => {
     const toggle = page.getByTestId("sg-table-toggle");
     await expect(toggle).toHaveAttribute("role", "switch");
     await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await expect(toggle).toHaveText("Show 2 small & dust positions ($75.75)");
+    await expect(toggle).toHaveText("Show 2 accounts under $100 ($75.75)");
     await expect(table.locator("tbody tr")).toHaveCount(4);
     await expect(page.getByTestId("sg-table-row-small-2")).toHaveCount(0);
 
@@ -848,7 +848,7 @@ test.describe("p1a-9 · the codex round", () => {
 
   // ---- F3: the feed live strip — hasBase threaded, no green ----------------
 
-  test("F3: a proven feed connection is ACCENT 'streaming' — the ok token is not on this strip", async ({
+  test("F3: a proven feed connection is ACCENT 'Streaming' — the ok token is not on this strip", async ({
     page,
   }) => {
     await page.route("**/v1/events*", (route) => appbarJson(route, FEED_CROSS_PAGE_1));
@@ -858,7 +858,7 @@ test.describe("p1a-9 · the codex round", () => {
       async () => {
         await page.goto("/feed");
         const chip = page.getByTestId("activity-live-state");
-        await expect(chip).toHaveText("streaming");
+        await expect(chip).toHaveText("Streaming");
         const color = await chip.evaluate((el) => getComputedStyle(el).color);
         // ACCENT — connection is posture, not health (the appbar's own law,
         // now held by the strip that used to contradict it one viewport down).
@@ -869,7 +869,7 @@ test.describe("p1a-9 · the codex round", () => {
     );
   });
 
-  test("F3: open WITHOUT a base frame is 'awaiting base' — unknown register, nothing pretended", async ({
+  test("F3: open WITHOUT a base frame is 'Awaiting first batch' — unknown register, nothing pretended", async ({
     page,
   }) => {
     await page.route("**/v1/events*", (route) => appbarJson(route, FEED_CROSS_PAGE_1));
@@ -878,9 +878,9 @@ test.describe("p1a-9 · the codex round", () => {
     await withHeldOpenStream(page, ": heartbeat 1753783205\n\n", async () => {
       await page.goto("/feed");
       const chip = page.getByTestId("activity-live-state");
-      // THE MUTATION KILL: a strip that ignores hasBase renders "streaming"
+      // THE MUTATION KILL: a strip that ignores hasBase renders "Streaming"
       // over this connection and dies here.
-      await expect(chip).toHaveText("awaiting base");
+      await expect(chip).toHaveText("Awaiting first batch");
       const color = await chip.evaluate((el) => getComputedStyle(el).color);
       expect(color).toBe(await resolveAppbarToken(page, "--ink-2"));
       // And the batch line pretends nothing: no base means no batch strip.

@@ -101,7 +101,7 @@ export const TONE_VOCABULARIES = {
   livePill: { live: "live", warn: "warn", dim: "neutral" } satisfies Record<LivePillWords["tone"], GrammarTone>,
   livePillAge: { neutral: "neutral", warn: "warn", crit: "crit", dim: "neutral" } satisfies Record<LivePillWords["ageTone"], GrammarTone>,
   /** A tick is a check that passed; a check still in flight is no answer yet, never a failure. */
-  trustCheck: { ok: "ok", warn: "warn", refused: "refused", dim: "neutral", pending: "refused" } satisfies Record<
+  trustCheck: { ok: "ok", warn: "warn", crit: "crit", refused: "refused", dim: "neutral", pending: "refused" } satisfies Record<
     TrustCheckItem["state"],
     GrammarTone
   >,

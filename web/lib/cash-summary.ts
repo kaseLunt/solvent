@@ -13,6 +13,7 @@ import {
   type SizedCashRow,
 } from "./cash-rows";
 import { humanUsd } from "./human-usd";
+import type { StateRegister } from "./kit";
 import { MATERIAL_LINE_USD, partitionByMateriality, type MaterialityPartition } from "./materiality";
 import { groupInt, plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
@@ -172,7 +173,10 @@ export function noneComputed(summary: Pick<CashSummary, "whole" | "computed" | "
 }
 
 /** What a tile says in place of a figure over a book the engine computed none of. */
-export const NONE_COMPUTED_SUB = "no account computed";
+export const NONE_COMPUTED_SUB = "No account computed";
+
+/** The state word of the engine-refused population — the tile, the row's pill and the dek say the same two words. */
+export const NO_VERDICT = "No verdict";
 
 /** The liquidatable tile's label: the material line it headlines, from the one constant that places it. */
 export const liquidatableTileLabel = `Liquidatable · ≥ $${MATERIAL_LINE_USD.toString()}`;
@@ -201,11 +205,47 @@ export type TileTone = "neutral" | "crit" | "warn" | "refused";
 
 /** A tile as the Book prints it: decided here, printed by the component as given. */
 export interface TileView {
+  /** The figure; empty where the tile states an absence instead. */
   readonly value: string;
   readonly sub: string;
   readonly tone: TileTone;
   /** The figure is still being read: the tile shows its busy mark in place of the value. */
   readonly pending: boolean;
+  /**
+   * The tile has no figure, and says which absence it is (lib/kit STATE_REGISTERS): the register draws the frame and
+   * the value slot prints its word — never a dash, never a zero.
+   */
+  readonly state?: StateRegister;
+  /** The lib's own word for that absence ("No verdict", "Withheld"); absent, the register's word prints. */
+  readonly stateWord?: string;
+}
+
+/**
+ * The tone a tile with no figure carries: the refused and unreadable registers are the grammar's refused row; an
+ * unavailable, pending or not-served figure refused nothing, and carries none of it.
+ */
+export function stateTone(state: StateRegister): TileTone {
+  return state === "refused" || state === "unreadable" ? "refused" : "neutral";
+}
+
+/** The tile over a book the engine computed none of: no figure; the population's word, and why. */
+export const NONE_COMPUTED_TILE: TileView = { value: "", sub: NONE_COMPUTED_SUB, tone: "refused", pending: false, state: "refused", stateWord: NO_VERDICT };
+
+/**
+ * The register of a tile that declines its figure short of a book read whole: the walk ended short of it — stopped,
+ * past its census, or served an account twice — so the figure is unavailable; or it landed a row this page could not
+ * read, so the figure is unreadable. A dash is never the answer.
+ */
+function declinedState(register: Exclude<WalkRegister, "whole" | "running">): StateRegister {
+  return register === "unreadable" ? "unreadable" : "unavailable";
+}
+
+/** What a tile with no figure says of the walk short of a book read whole, in a sub line's own words. */
+function declinedSub(register: Exclude<WalkRegister, "whole" | "running">, unreadable: number): string {
+  if (register === "over") return "Walk ran past its census";
+  if (register === "duplicate") return "Walk served an account twice";
+  if (register === "unreadable") return `${rowsWord(unreadable)} unreadable`;
+  return "Walk stopped";
 }
 
 /** How a walk-derived tile is decided: the sum it prints, the register a counted sum wears, its sub line, and when it is busy. */
@@ -218,36 +258,37 @@ interface WalkTileRule {
 }
 
 /**
- * A walk-derived tile over one of the summary's sums, in every register. No summary: the absence's own word, refused.
- * A counted sum is printed in the tile's own register beside the bound note of the walk's register: a lower bound
- * while the walk runs, after it stopped, or beside a row this page could not read; neither a total nor a bound after a
- * walk ran past its census or was served an account twice; unqualified only over a book read whole. A zero is a
- * finding only over a book read whole, and never over one the engine computed none of: while the walk runs the tile
- * is busy, a walk that ended short of whole prints a dash in the refused register, and a book the engine computed none
- * of prints a dash and says that no account was computed.
+ * A walk-derived tile over one of the summary's sums, in every register. (No summary is the view's to word: the tile
+ * then states the absence the view decided.) A counted sum is printed in the tile's own register beside the bound note
+ * of the walk's register: a lower bound while the walk runs, after it stopped, or beside a row this page could not
+ * read; neither a total nor a bound after a walk ran past its census or was served an account twice; unqualified only
+ * over a book read whole. A zero is a finding only over a book read whole, and never over one the engine computed none
+ * of: while the walk runs the tile is busy; a walk that ended short of whole prints no figure — the unavailable
+ * register, or the unreadable one beside a row this page could not read; and a book the engine computed none of prints
+ * the population's word, "No verdict", and says that no account was computed.
  */
-function walkTile(summary: CashSummary | null, absentWord: string, rule: WalkTileRule): TileView {
-  if (summary === null) return { value: "—", sub: absentWord, tone: "refused", pending: false };
+function walkTile(summary: CashSummary, rule: WalkTileRule): TileView {
+  if (noneComputed(summary)) return NONE_COMPUTED_TILE;
   const boundNote = tileBoundNote(summary);
-  if (noneComputed(summary)) return { value: "—", sub: `${NONE_COMPUTED_SUB}${boundNote}`, tone: "refused", pending: false };
   const register = registerOf(summary);
   const { sum, count } = rule.figure(summary);
-  return {
-    value: count > 0 || register === "whole" ? humanUsd(sum, summary.decimals) : "—",
-    sub: rule.sub(summary, boundNote),
-    tone: count > 0 ? rule.foundTone : register === "whole" || register === "running" ? "neutral" : "refused",
-    pending: register === "running" && (rule.busy === "while-walking" || count === 0),
-  };
+  const sub = rule.sub(summary, boundNote);
+  if (count > 0 || register === "whole") {
+    return { value: humanUsd(sum, summary.decimals), sub, tone: count > 0 ? rule.foundTone : "neutral", pending: register === "running" && rule.busy === "while-walking" };
+  }
+  if (register === "running") return { value: "", sub, tone: "neutral", pending: true };
+  const state = declinedState(register);
+  return { value: "", sub, tone: stateTone(state), pending: false, state };
 }
 
 /** The liquidatable tile: the material sum in the crit register, over the partition's counts. */
-export function liquidatableTile(summary: CashSummary | null, absentWord: string): TileView {
-  return walkTile(summary, absentWord, { figure: (s) => s.material, foundTone: "crit", sub: liquidatableTileSub, busy: "until-counted" });
+export function liquidatableTile(summary: CashSummary): TileView {
+  return walkTile(summary, { figure: (s) => s.material, foundTone: "crit", sub: liquidatableTileSub, busy: "until-counted" });
 }
 
 /** The near-cap tile: the debt within 10% of the cap in the warn register, over its accounts. */
-export function nearCapTile(summary: CashSummary | null, absentWord: string): TileView {
-  return walkTile(summary, absentWord, {
+export function nearCapTile(summary: CashSummary): TileView {
+  return walkTile(summary, {
     figure: (s) => s.nearCap,
     foundTone: "warn",
     sub: (s, boundNote) => `${plural(s.nearCap.count, "account")}${boundNote}`,
@@ -256,21 +297,29 @@ export function nearCapTile(summary: CashSummary | null, absentWord: string): Ti
 }
 
 /**
- * The median-room tile: the lower median of the room the walk read, beside its 10th percentile, busy while the walk
- * runs. No summary: the absence's own word, refused. A stopped walk says so in place of a figure. Over a book the
- * engine computed none of no room was read: a dash in the refused register, saying that no account was computed —
- * never the neutral dash of a book with no account in it.
+ * The median-room tile: the lower median of the room the walk read, beside its 10th percentile, at one fixed decimal,
+ * busy while the walk runs. (No summary is the view's to word.) A walk that ended short of whole says so in place of a
+ * figure. Over a book the engine computed none of no room was read: the population's word, "No verdict". An empty book
+ * refused nothing and holds no room to measure: it says so, in ink — never a dash.
  */
-export function medianRoomTile(summary: CashSummary | null, absentWord: string): TileView {
-  if (summary === null) return { value: "—", sub: absentWord, tone: "refused", pending: false };
-  if (summary.stopped !== null) return { value: "—", sub: "walk stopped", tone: "refused", pending: false };
-  if (noneComputed(summary)) return { value: "—", sub: NONE_COMPUTED_SUB, tone: "refused", pending: false };
+export function medianRoomTile(summary: CashSummary): TileView {
+  const register = registerOf(summary);
+  if (register === "stopped" || register === "over" || register === "duplicate") {
+    return { value: "", sub: declinedSub(register, summary.unreadable), tone: "neutral", pending: false, state: "unavailable" };
+  }
+  if (noneComputed(summary)) return NONE_COMPUTED_TILE;
   const { median, p10 } = summary.percentiles;
+  if (median === null) {
+    if (register === "running") return { value: "", sub: "Of borrow cap", tone: "neutral", pending: true };
+    if (register === "whole") return { value: "No accounts", sub: "No room to measure", tone: "neutral", pending: false };
+    const state = declinedState(register);
+    return { value: "", sub: declinedSub(register, summary.unreadable), tone: stateTone(state), pending: false, state };
+  }
   return {
-    value: median ?? "—",
-    sub: p10 === null ? "of borrow cap" : `of borrow cap · 10th pct ${p10}`,
+    value: median,
+    sub: p10 === null ? "Of borrow cap" : `Of borrow cap · 10th pct ${p10}`,
     tone: "neutral",
-    pending: registerOf(summary) === "running",
+    pending: register === "running",
   };
 }
 
@@ -336,19 +385,22 @@ function zeroStateOf(register: Exclude<WalkRegister, "whole">, unreadable: numbe
 export function bandsFinding(
   summary: Pick<
     CashSummary,
-    "bands" | "decimals" | "settled" | "whole" | "stopped" | "stopKind" | "unreadable" | "computed" | "notComputed"
+    "bands" | "decimals" | "settled" | "whole" | "stopped" | "stopKind" | "unreadable" | "computed" | "notComputed" | "belowLine"
   >,
 ): BandsFinding {
   const lead = "Cash debt grouped by room under the borrow cap · bars are dollars, counts printed · ";
   if (noneComputed(summary)) {
-    return { lead, figure: "—", rest: ` within 10% of the cap: ${NONE_COMPUTED_SUB}`, barsNote: BARS_NONE_COMPUTED };
+    return { lead, figure: "—", rest: " within 10% of the cap: no account computed", barsNote: BARS_NONE_COMPUTED };
   }
   const near = summary.bands.filter((b) => NEAR_CAP_BAND_IDS.has(b.id));
   const sum = near.reduce((s, b) => s + b.debt, 0n);
   const count = near.reduce((c, b) => c + b.count, 0);
   const register = registerOf(summary);
   if (register === "whole") {
-    return { lead, figure: humanUsd(sum, summary.decimals), rest: " sits within 10% of the cap", barsNote: null };
+    // The over-cap bar holds every liquidatable account; the headline counts the material ones: the clause reconciles the two.
+    const below = summary.belowLine.count;
+    const reconcile = below === 0 ? "" : ` · the over-cap bar includes the ${plural(below, "account")} under $${MATERIAL_LINE_USD.toString()}`;
+    return { lead, figure: humanUsd(sum, summary.decimals), rest: ` sits within 10% of the cap${reconcile}`, barsNote: null };
   }
   const barsNote = barsNoteOf(register, summary.unreadable);
   if (count === 0) {
@@ -392,6 +444,32 @@ export function bandsSoFar(summary: Pick<CashSummary, "bands" | "whole" | "compu
   }));
 }
 
+/** A bar of the Book's distance chart: the band's name, its figure and count (null where the walk cannot yet say), its tone. */
+export interface BookBar {
+  readonly id: string;
+  readonly label: string;
+  readonly count: number | null;
+  readonly value: bigint | null;
+  readonly tone: "crit" | "warn" | "neutral";
+}
+
+/** The Book's names for the bands its bars stand for; a band not named here keeps the headroom vocabulary's label. */
+const BOOK_BAND_LABEL: Readonly<Record<string, string>> = { breached: "Over cap", "0-2": "< 2% room", "50-plus": "≥ 50% room" };
+
+/**
+ * The Book's bars: the bands as `bandsSoFar` prints them, each named — the breached band is "Over cap", the band's
+ * name — and toned: over cap crit, within 10% of the cap warn, the rest ink.
+ */
+export function bookBars(summary: Pick<CashSummary, "bands" | "whole" | "computed" | "notComputed">): BookBar[] {
+  return bandsSoFar(summary).map((b) => ({
+    id: b.id,
+    label: BOOK_BAND_LABEL[b.id] ?? b.label,
+    count: b.count,
+    value: b.debt,
+    tone: b.id === "breached" ? "crit" : NEAR_CAP_BAND_IDS.has(b.id) ? "warn" : "neutral",
+  }));
+}
+
 /**
  * The attention table's line when it shows no row. "No account needs
  * attention" is a negative over the book: it is said only over a book read
@@ -407,7 +485,7 @@ export function attentionEmptyText(
   if (summary.unreadable > 0) return `${rowsWord(summary.unreadable)} could not be read; no account is cleared.`;
   const n = summary.belowLine.count;
   if (n > 0) {
-    return `Nothing material needs attention; ${String(n)} liquidatable position${n === 1 ? "" : "s"} under $${MATERIAL_LINE_USD.toString()} (${humanUsd(summary.belowLine.sum, summary.decimals)}) ${n === 1 ? "is" : "are"} behind the small & dust toggle.`;
+    return `Nothing material needs attention; ${plural(n, "liquidatable account")} under $${MATERIAL_LINE_USD.toString()} (${humanUsd(summary.belowLine.sum, summary.decimals)}) ${n === 1 ? "is" : "are"} folded under the toggle below.`;
   }
   return "No account needs attention.";
 }
@@ -421,9 +499,30 @@ export function nearCapToggleLabel(hidden: readonly SizedCashRow[], decimals: nu
   return `Show ${groupInt(n)} more near-cap account${n === 1 ? "" : "s"} (${humanUsd(sumDebt(hidden), decimals)})`;
 }
 
-/** The small & dust fold's label: the positions under the line the table hides, and their debt together. */
+/** The fold under the materiality line: the accounts under it the table hides, and their debt together. */
 export function belowLineToggleLabel(count: number, sum: bigint, decimals: number): string {
-  return `Show ${groupInt(count)} small & dust position${count === 1 ? "" : "s"} (${humanUsd(sum, decimals)})`;
+  return `Show ${plural(count, "account")} under $${MATERIAL_LINE_USD.toString()} (${humanUsd(sum, decimals)})`;
+}
+
+/**
+ * The Overview's live line: one line of facts over a book read whole, its clauses joined with " · " and each omitted
+ * when zero — the accounts under the $100 line, those within 10% of their cap, those with no verdict. Null short of a
+ * whole read, over a book the engine computed none of, and when every clause is zero: the headline's dek speaks then.
+ */
+export function overviewLiveLine(summary: CashSummary): string | null {
+  if (!summary.whole || noneComputed(summary)) return null;
+  const money = (sum: bigint): string => humanUsd(sum, summary.decimals);
+  const below = summary.belowLine;
+  const near = summary.nearCap;
+  const line = `$${MATERIAL_LINE_USD.toString()} line`;
+  const clauses = [
+    below.count === 0
+      ? null
+      : `${groupInt(below.count)} ${summary.material.count > 0 ? "more" : "liquidatable"} under the ${line} (${money(below.sum)}${below.count === 1 ? "" : " together"})`,
+    near.count === 0 ? null : `${plural(near.count, "account")} within 10% of ${near.count === 1 ? "its" : "their"} cap (${money(near.sum)})`,
+    summary.notComputed === 0 ? null : `${groupInt(summary.notComputed)} with no verdict`,
+  ].filter((clause): clause is string => clause !== null);
+  return clauses.length === 0 ? null : clauses.join(" · ");
 }
 
 /**
@@ -453,7 +552,7 @@ export function unreadableHeadline(fault: string): Headline {
   const named = fault.trim();
   return {
     variant: "refused",
-    tone: "refused",
+    tone: "absent",
     emphasis: "The Cash book's answer could not be read.",
     rest: "",
     dek: named.length === 0 ? `${answered}.` : asSentence(`${answered}: ${named}`, `${answered}.`),
@@ -464,7 +563,7 @@ export function unreadableHeadline(fault: string): Headline {
 export function unavailableHeadline(reason: string): Headline {
   return {
     variant: "refused",
-    tone: "refused",
+    tone: "absent",
     emphasis: "The Cash book could not be loaded.",
     rest: "",
     dek: asSentence(reason, "The service gave no reason."),

@@ -16,25 +16,30 @@
 //     mystery and not a server error. A height bound is also CHAIN-scoped,
 //     so changing engine drops it (same number, different chain, different
 //     meaning) — with a visible notice, never silently re-meant;
-//   - a refused page (400 — e.g. a cursor minted for the other mode) says the
-//     envelope's own words ONCE, in the header's dek; the strip names the
-//     refusal and carries the one way forward — an honest restart from page
-//     one. A refused walk offers no "Load more": its cursor was refused, and
-//     re-sending it can only be refused again.
+//   - a refused page (400 — e.g. a cursor minted for the other mode) and a
+//     fetch that failed are two states: each has its own card, with the
+//     service's own words disclosed once, and its one way forward — the
+//     restart for a refusal (a refused walk offers no "Load more": its cursor
+//     was refused, and re-sending it can only be refused again), the retry
+//     for a failure.
 //
 // The walk's state machine below is the Feed surface's, unchanged in law; the
 // words the page prints are lib/activity-view's, derived once per render.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { KpiTile, SectionHead, VerdictHeader } from "@/components/kit";
+import { KpiTile, SectionHead, StateCard, VerdictHeader } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import {
+  ACTIVITY_COPY,
   ACTIVITY_LIST_TITLE,
+  CLEAR_FILTER,
   END_OF_FEED,
   activityScales,
   deriveActivityView,
   notABlockNumberNotice,
   sinceBlockDroppedNotice,
+  type ActivityFailure,
+  type ActivityTile,
 } from "@/lib/activity-view";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import {
@@ -70,6 +75,28 @@ interface Refusal {
   status: number;
   code: string | null;
   message: string;
+}
+
+/** A failed fetch as the view model reads it: the status when the service answered at all, and the failure's own words. */
+function failureOf(error: Error): ActivityFailure {
+  return error instanceof InspectorFetchError
+    ? { status: error.status, code: error.code, message: error.message }
+    : { status: null, code: null, message: error.message };
+}
+
+/** A tile in its register: pending while the first page loads, the state's frame when it has no count. */
+function Tile({ tile, pending, testId }: { tile: ActivityTile; pending: boolean; testId: string }) {
+  return (
+    <KpiTile
+      testId={testId}
+      label={tile.label}
+      value={tile.value}
+      sub={tile.sub === "" ? undefined : tile.sub}
+      pending={pending}
+      state={tile.state ?? undefined}
+      stateWord={tile.stateWord ?? undefined}
+    />
+  );
 }
 
 export function ActivitySurface() {
@@ -220,6 +247,16 @@ export function ActivitySurface() {
     restartWalk();
   };
 
+  /** Back to every action of every engine from any block: one new walk, every narrowing dropped at once. */
+  const clearFilter = () => {
+    setEngine(null);
+    setView("all");
+    setTypes([]);
+    setSinceBlock(null);
+    setSinceDraft("");
+    restartWalk();
+  };
+
   const activity = deriveActivityView({
     rows,
     mode,
@@ -230,7 +267,7 @@ export function ActivitySurface() {
     sinceBlock,
     envelope,
     refusal,
-    error: error === null ? null : error.message,
+    failure: error === null ? null : failureOf(error),
     valueDecimals,
   });
   const pending = activity.state === "loading";
@@ -251,26 +288,21 @@ export function ActivitySurface() {
         tone={activity.headline.tone}
         dek={activity.headline.dek}
         chips={activity.chips}
-        actions={<ActivityDrawer doctrine={activity.doctrine} />}
+        actions={
+          <>
+            {activity.clearFilter && (
+              <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={clearFilter} data-testid="activity-clear-filter">
+                {CLEAR_FILTER}
+              </button>
+            )}
+            <ActivityDrawer doctrine={activity.doctrine} notes={activity.notes} />
+          </>
+        }
       />
 
-      <div className={styles.tiles}>
-        <KpiTile
-          testId="activity-kpi-rows"
-          label="Rows loaded"
-          value={activity.tiles.rows.value}
-          sub={activity.tiles.rows.sub}
-          tone={activity.tiles.rows.tone}
-          pending={pending}
-        />
-        <KpiTile
-          testId="activity-kpi-liquidations"
-          label="Liquidations"
-          value={activity.tiles.liquidations.value}
-          sub={activity.tiles.liquidations.sub}
-          tone={activity.tiles.liquidations.tone}
-          pending={pending}
-        />
+      <div className={`${kit.kpis} ${kit.kpis4} ${styles.tiles}`}>
+        <Tile tile={activity.tiles.liquidations} pending={pending} testId="activity-kpi-liquidations" />
+        <Tile tile={activity.tiles.deficits} pending={pending} testId="activity-kpi-deficits" />
       </div>
 
       <FeedLiveStrip />
@@ -300,59 +332,71 @@ export function ActivitySurface() {
       )}
 
       {notice !== null && (
-        <div className={`${styles.strip} ${styles.stripWarn}`} role="status" data-testid="activity-notice">
-          <b>NOTICE</b>
+        <div className={kit.strip} role="status" data-testid="activity-notice">
+          <b>{ACTIVITY_COPY.notice}</b>
           <span>{notice}</span>
         </div>
       )}
 
-      {/* The refusal's strip: its head (the state, under the code the service stated) and the restart. The service's
-          words are the dek's, said once — the strip does not repeat them. */}
-      {activity.refusalHead !== null && (
-        <div className={`${styles.strip} ${styles.stripRefused}`} role="alert" data-testid="activity-refusal">
-          <b>{activity.refusalHead}</b>
-          <button
-            type="button"
-            className={`${kit.btn} ${kit.btnGhost}`}
-            data-testid="activity-restart"
-            onClick={restartWalk}
-          >
-            restart from page one
-          </button>
+      {activity.refusal !== null && (
+        <div role="alert">
+          <StateCard
+            state="refused"
+            testId="activity-refusal"
+            title={activity.refusal.title}
+            cause={activity.refusal.cause}
+            serviceSaid={activity.refusal.serviceSaid ?? undefined}
+            action={
+              <button type="button" className={`${kit.btn} ${kit.btnGhost}`} data-testid="activity-restart" onClick={restartWalk}>
+                {activity.refusal.action}
+              </button>
+            }
+          />
         </div>
       )}
 
-      {error !== null && refusal === null && (
-        <div className={`${styles.strip} ${styles.stripWarn}`} role="alert" data-testid="activity-error">
-          <b>PAGE FETCH FAILED</b>
-          <span>{error.message}</span>
-          <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={loadMore} data-testid="activity-retry">
-            retry
-          </button>
+      {activity.failure !== null && (
+        <div role="alert">
+          <StateCard
+            state="unavailable"
+            testId="activity-error"
+            title={activity.failure.title}
+            cause={activity.failure.cause}
+            serviceSaid={activity.failure.serviceSaid ?? undefined}
+            action={
+              <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={loadMore} data-testid="activity-retry">
+                {activity.failure.action}
+              </button>
+            }
+          />
         </div>
       )}
 
       {/* A hazard never collapses: the drift alert stands on its own, outside any fold. */}
       {activity.drift !== null && (
-        <div className={`${styles.strip} ${styles.stripRefused}`} role="alert" data-testid="activity-drift">
-          {activity.drift}
+        <div className={`${kit.strip} ${kit.stripWarn}`} role="alert" data-testid="activity-drift">
+          <b>{activity.drift.head}</b>
+          <span>{activity.drift.body}</span>
         </div>
       )}
 
-      <ActivityTable rows={activity.rows} emptyText={activity.emptyText} />
+      <ActivityTable rows={activity.rows} emptyText={activity.emptyText} alignAmounts={activity.alignAmounts} bonusNote={activity.bonusNote} />
 
       {/* What the foot offers is the view model's: the next page, the end, or — behind a refusal — nothing. */}
       <div className={styles.foot} data-testid="activity-foot" data-foot={activity.foot}>
         {activity.foot === "more" && (
-          <button
-            type="button"
-            className={`${kit.btn} ${kit.btnGhost}`}
-            onClick={loadMore}
-            disabled={loading}
-            data-testid="activity-load-more"
-          >
-            {loading ? "Loading…" : "Load more"}
-          </button>
+          <>
+            <button
+              type="button"
+              className={`${kit.btn} ${kit.btnGhost}`}
+              onClick={loadMore}
+              disabled={loading}
+              data-testid="activity-load-more"
+            >
+              {loading ? ACTIVITY_COPY.loadingMore : ACTIVITY_COPY.loadMore}
+            </button>
+            {activity.pageSize !== null && <span data-testid="activity-page-size">{activity.pageSize}</span>}
+          </>
         )}
         {activity.foot === "end" && <span data-testid="activity-end">{END_OF_FEED}</span>}
       </div>

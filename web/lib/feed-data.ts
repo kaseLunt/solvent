@@ -52,7 +52,8 @@ type WireEngine = NonNullable<
   NonNullable<operations["getEvents"]["parameters"]["query"]>["engine"]
 >;
 
-export const FEED_ENGINES = ["aave_v3_etherfi", "debt_manager"] as const satisfies readonly WireEngine[];
+/** Both engines, Cash first: the product's book, and the order every engine list on the page reads in. One per view, never combined. */
+export const FEED_ENGINES = ["debt_manager", "aave_v3_etherfi"] as const satisfies readonly WireEngine[];
 export type FeedEngine = (typeof FEED_ENGINES)[number];
 
 /**

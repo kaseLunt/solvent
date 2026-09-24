@@ -11,11 +11,13 @@ import {
 } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { useAddressLookup } from "@/lib/address-lookup";
-import { isAddress, truncateAddress } from "@/lib/format";
+import { isAddress } from "@/lib/format";
 import { humanAge } from "@/lib/freshness";
-import { deriveInspectorView } from "@/lib/inspector-view";
+import { ADDRESS_HINT, deriveInspectorView, PROJECTION_TITLE, PROJECTION_WORD } from "@/lib/inspector-view";
 import { CASH } from "@/lib/inspector-position";
 import { addressWorkspace, rowOutcome } from "@/lib/lab-address";
+import { compareHeadline } from "@/lib/lab-compare";
+import { scenarioName } from "@/lib/lab-library";
 import {
   conflictNotice,
   deepLinkDecision,
@@ -23,15 +25,30 @@ import {
   unlistedScenarioNotice,
 } from "@/lib/lab-deep-link";
 import { useLabReading } from "@/lib/lab-reading";
-import { ASSUMPTIONS_BUTTON, compareControl, deriveLabView, type LabChip } from "@/lib/lab-view";
+import {
+  addressKicker,
+  ASSUMPTIONS_BUTTON,
+  COMPARE_KICKER,
+  compareChips,
+  compareControl,
+  deriveLabView,
+  LIBRARY_EMPTY,
+  LIBRARY_LOADING,
+  libraryFootnote,
+  runLabel,
+  tileAbsence,
+  type LabChip,
+  type LabKicker,
+} from "@/lib/lab-view";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { useMetaConstants } from "@/lib/meta";
 import { resultReceipt } from "@/lib/resultIdentity";
 import { AddressWorkspace } from "./AddressWorkspace";
 import { AssumptionsDrawer } from "./AssumptionsDrawer";
-import { CompareCard } from "./CompareCard";
+import { CompareCard, comparedViews, plotRowsOf } from "./CompareCard";
 import styles from "./lab.module.css";
 import { LabTiles } from "./LabTiles";
+import { LegacyCompare } from "./LegacyCompare";
 import { LegacyResult } from "./LegacyResult";
 import { MoversTable } from "./MoversTable";
 import { StaleBanner } from "./StaleBanner";
@@ -41,9 +58,22 @@ type Mode = "book" | "address";
 
 const PROJECTION = (
   <span data-testid="lab-projection">
-    <StatusPill tone="projection">PROJECTION</StatusPill>
+    <StatusPill tone="projection" title={PROJECTION_TITLE}>
+      {PROJECTION_WORD}
+    </StatusPill>
   </span>
 );
+
+/** A kicker whose scenario name keeps its own case (weETH, sETHFI) under the kicker's capitals. */
+function kickerOf(k: LabKicker): ReactNode {
+  return k.name === null ? (
+    k.scope
+  ) : (
+    <>
+      <span className={kit.kickCase}>{k.name}</span> · {k.scope}
+    </>
+  );
+}
 
 function askedIds(raw: string | null): string[] {
   return raw === null
@@ -99,6 +129,9 @@ export function LabSurface() {
   }));
   // Whether the reader has selected a scenario since the page opened: only then does the bar follow the subject shown.
   const [readerSelected, setReaderSelected] = useState(false);
+  // Which answer the page leads with: the selected scenario's run, or the comparison. Asking for a comparison — the
+  // Compare button, or a link that names a set — leads with it; selecting or running a scenario leads with that run.
+  const [focus, setFocus] = useState<"single" | "compare">(() => (params.get("scenarios") !== null && params.get("scenario") === null ? "compare" : "single"));
 
   const view = deriveLabView(reading, { selectedId, checked });
   const compareButton = compareControl(view);
@@ -116,7 +149,7 @@ export function LabSurface() {
   // nothing, and with no name there is nothing to disclose a fallback from.
   const named =
     selectedId !== null && definition !== null && definition.id === selectedId
-      ? { id: definition.id, label: definition.label }
+      ? { id: definition.id, label: scenarioName(definition) }
       : null;
   const space = addressWorkspace({
     address,
@@ -184,8 +217,8 @@ export function LabSurface() {
       : [];
   const shownLabel =
     mode === "book"
-      ? (definition?.label ?? null)
-      : (space.selected?.label ?? null);
+      ? (definition === null ? null : scenarioName(definition))
+      : (space.selected?.name ?? null);
   const notice =
     decision === null
       ? null
@@ -232,23 +265,29 @@ export function LabSurface() {
       ? book.chips
       : [...book.chips.slice(0, 2), computed, ...book.chips.slice(2)];
   const running = book.state === "running";
-  const runLabel = definition === null ? "Run" : `Run ${definition.label}`;
+  const name = definition === null ? null : scenarioName(definition);
+  const run = () => {
+    if (definition === null) return;
+    setFocus("single");
+    reading.run(definition.id);
+  };
+  const account = addressKicker(space.address);
   const kicker: ReactNode = (
     <>
       {mode === "book" ? (
-        book.kicker
+        kickerOf(book.kicker)
       ) : (
         <>
-          Account{" "}
-          <span className={kit.kickAddr}>
-            {space.address === "" ? "—" : truncateAddress(space.address)}
-          </span>{" "}
-          · Cash
+          {account.lead} {account.address !== null && <span className={kit.kickAddr}>{account.address}</span>} · {account.scope}
         </>
       )}{" "}
       {PROJECTION}
     </>
   );
+  // The comparison leads the page only once a set has settled: while one runs, the single run's answer stays above its card.
+  const settledSet = comparedViews(view.compare);
+  const compared = focus === "compare" ? settledSet : null;
+  const compareAnswer = compared === null ? null : compareHeadline(compared.cash);
   const busy =
     mode === "book"
       ? running || book.state === "listing-loading"
@@ -273,6 +312,7 @@ export function LabSurface() {
       data-mode={mode}
       data-state={mode === "book" ? book.state : space.state}
       data-banner={book.banner ?? undefined}
+      data-view={mode === "book" && compared !== null ? "compare" : "single"}
       aria-busy={busy ? "true" : undefined}
     >
       <div className={styles.libCol}>
@@ -290,6 +330,7 @@ export function LabSurface() {
           onSelect={(id) => {
             setSelectedId(id);
             setReaderSelected(true);
+            setFocus("single");
             // The address bar names the subject on screen, so a reload or a shared link opens the scenario the
             // reader was looking at — never the one the page was opened with. One URL names one scenario or a set,
             // never both (a link naming both runs nothing), so the selection takes the set's place in it.
@@ -311,7 +352,7 @@ export function LabSurface() {
               <AddressField
                 testId="lab-address"
                 initial={address}
-                hint="any 0x address"
+                hint={ADDRESS_HINT}
                 onInspect={(addr) => {
                   setAddress(addr);
                   const next = new URLSearchParams(params.toString());
@@ -324,11 +365,9 @@ export function LabSurface() {
           run={
             mode === "book"
               ? {
-                  label: runLabel,
+                  label: runLabel(name),
                   disabled: definition === null || running,
-                  onRun: () => {
-                    if (definition !== null) reading.run(definition.id);
-                  },
+                  onRun: run,
                 }
               : undefined
           }
@@ -336,19 +375,22 @@ export function LabSurface() {
             mode === "book"
               ? {
                   ...compareButton,
-                  onCompare: () => reading.runSet(view.checked),
+                  onCompare: () => {
+                    setFocus("compare");
+                    reading.runSet(view.checked);
+                  },
                 }
               : null
           }
           emptyText={
             book.state === "listing-loading"
-              ? "Loading the committed scenarios…"
+              ? LIBRARY_LOADING
               : book.state === "listing-unavailable" ||
                   book.state === "listing-unreadable"
                 ? book.headline.emphasis
-                : "No committed scenarios are listed."
+                : LIBRARY_EMPTY
           }
-          footnote={`Committed, versioned scenarios${view.configVersion === null ? "" : ` (config ${view.configVersion})`}. No sliders — every result is reproducible.`}
+          footnote={libraryFootnote(view.configVersion)}
         />
       </div>
       <div className={styles.workspace}>
@@ -359,6 +401,26 @@ export function LabSurface() {
         )}
         {mode === "address" ? (
           <AddressWorkspace space={space} kicker={kicker} />
+        ) : compared !== null && compareAnswer !== null ? (
+          <>
+            {/* The comparison's answer: its own identity — the set run's batch, config and computed instant, never the single run's. */}
+            <VerdictHeader
+              testId="lab-verdict"
+              kicker={
+                <>
+                  {kickerOf(COMPARE_KICKER)} {PROJECTION}
+                </>
+              }
+              emphasis={compareAnswer.emphasis}
+              rest={compareAnswer.rest}
+              tone={compareAnswer.tone}
+              dek={compareAnswer.dek}
+              chips={compareChips(compared.cash)}
+            />
+            <CompareCard state={view.compare} />
+            {/* The legacy market's shares: its own fold, after all Cash content, on its own axis. */}
+            {compared.legacy.rows.length > 0 && <LegacyCompare rows={plotRowsOf(compared.legacy)} />}
+          </>
         ) : (
           <>
             <VerdictHeader
@@ -370,15 +432,18 @@ export function LabSurface() {
               dek={book.headline.dek}
               chips={chips}
               actions={
-                book.run !== null ? (
-                  <button
-                    type="button"
-                    className={`${kit.btn} ${kit.btnGhost}`}
-                    onClick={() => setDrawerOpen(true)}
-                    data-testid="lab-drawer"
-                  >
-                    {ASSUMPTIONS_BUTTON}
-                  </button>
+                definition !== null ? (
+                  <>
+                    {/* Served and not run: the way to run it stands beside the sentence that asks for it. */}
+                    {book.state === "not-run" && (
+                      <button type="button" className={`${kit.btn} ${kit.btnPrimary}`} onClick={run} data-testid="lab-header-run">
+                        {runLabel(name)}
+                      </button>
+                    )}
+                    <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={() => setDrawerOpen(true)} data-testid="lab-drawer">
+                      {ASSUMPTIONS_BUTTON}
+                    </button>
+                  </>
                 ) : undefined
               }
             />
@@ -390,24 +455,24 @@ export function LabSurface() {
                 failure={book.rerunFailure}
                 heldCondition={book.heldCondition}
                 retained={book.retained}
-                onRerun={() => reading.run(definition.id)}
+                onRerun={run}
                 rerunDisabled={running}
               />
             )}
-            <LabTiles
-              reading={book.cash}
-              pending={running}
-              testPrefix="lab-kpi"
-            />
+            <LabTiles reading={book.cash} absence={tileAbsence(book, book.cash)} testPrefix="lab-kpi" />
             <TransitionCard reading={book.cash} engine={CASH} />
             {cashResult !== null && <MoversTable table={cashResult.movers} engine={CASH} />}
             {(view.compare.kind !== "idle" || view.checked.length >= 2) && (
               <CompareCard state={view.compare} />
             )}
-            {book.legacy !== null && <LegacyResult reading={book.legacy} />}
+            {book.legacy !== null && <LegacyResult reading={book.legacy} book={book} />}
+            {/* The set's legacy shares never vanish when the focus returns to the run: they follow all Cash content, after the run's own legacy fold. */}
+            {settledSet !== null && settledSet.legacy.rows.length > 0 && <LegacyCompare rows={plotRowsOf(settledSet.legacy)} />}
             <AssumptionsDrawer
               open={drawerOpen}
               onClose={() => setDrawerOpen(false)}
+              definition={definition}
+              notRun={book.state === "not-run"}
               run={book.run}
               cash={cashResult}
             />

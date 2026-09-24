@@ -27,7 +27,7 @@ test("roomBoundLabel: the exact room a health-factor edge means, in basis points
 test("the demo table merges into seven room bands with the true converted labels, and every count is a sum of the wire's cells", () => {
   const v = ok(laneReading(cashEngine(DEMO_CASH_TABLE), { merge: true }));
   expect(v.merged).toBe(true);
-  expect(v.bands.map((b) => b.label)).toEqual(["over cap", "< 4.76%", "4.76% – 9.09%", "9.09% – 20%", "≥ 20%", "no debt", "not measured"]);
+  expect(v.bands.map((b) => b.label)).toEqual(["Over cap", "< 4.76%", "4.76% – 9.09%", "9.09% – 20%", "≥ 20%", "No debt", "Not measured"]);
   expect(v.bands[0]?.lanes).toEqual([0, 1]);
   expect(v.bands[4]?.lanes).toEqual([5, 6, 7]);
   expect(v.totalRows).toBe(1412);
@@ -70,7 +70,7 @@ test("the legacy engine is never merged: the wire's own eight bucket labels plus
   const v = ok(laneReading(legacyEngine({ 5: { 3: 2 }, 7: { 7: 1 } }), { merge: false }));
   expect(v.merged).toBe(false);
   expect(v.bands).toHaveLength(10);
-  expect(v.bands.map((b) => b.label)).toEqual(["< 0.90", "0.90 – 1.00", "1.00 – 1.05", "1.05 – 1.10", "1.10 – 1.25", "1.25 – 1.50", "1.50 – 2.00", ">= 2.00", "no debt (unbounded)", "not measured"]);
+  expect(v.bands.map((b) => b.label)).toEqual(["< 0.90", "0.90 – 1.00", "1.00 – 1.05", "1.05 – 1.10", "1.10 – 1.25", "1.25 – 1.50", "1.50 – 2.00", ">= 2.00", "No debt (unbounded)", "Not measured"]);
   expect(v.nearLabel).toBeNull();
   expect(v.cells.find((c) => c.from === 5 && c.to === 3)?.movement).toBe("worse");
 });

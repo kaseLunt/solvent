@@ -1,4 +1,3 @@
-import { REFUSED_DEBT_UNSERVED } from "./cash-rows";
 import { humanUsd } from "./human-usd";
 import { belowLineSentence } from "./materiality";
 
@@ -12,7 +11,7 @@ export interface BookHeadlineInput {
   readonly material: Sum;
   readonly belowLine: Sum;
   readonly nearCap: Sum;
-  /** Positions the batch refused, from the book's own aggregate. */
+  /** Accounts the batch refused, from the book's own aggregate (one Cash position is one account). */
   readonly notComputed: number;
   /**
    * At least one refused row has landed and none carries a debt figure. Absent means nothing is said about their
@@ -50,7 +49,12 @@ export type WalkStopKind = "before-end" | "at-end" | "over" | "duplicate";
 
 export interface Headline {
   readonly variant: "material" | "quiet" | "refused" | "pending";
-  readonly tone: "crit" | "ok" | "refused";
+  /**
+   * `refused` when the engine declined to answer; `absent` when there is simply no answer to show yet or here — a read
+   * in flight, a fetch that failed, a walk that stopped, an answer this page could not read. One look, two words: a
+   * fetch failure is never a refusal.
+   */
+  readonly tone: "crit" | "ok" | "refused" | "absent";
   readonly emphasis: string;
   readonly rest: string;
   readonly dek: string;
@@ -77,28 +81,26 @@ export function nearCapSentence(nearCap: Sum, decimals: number, complete = true)
 }
 
 /**
- * The refused positions' sentence, true of every refusal code: a cause may be permanent, so it says what the batch
- * holds — no verdict — and never that the positions "could not be computed this batch". Where no refused row carries a
- * debt figure it says their debt is not known, so a column of dashes cannot read as a table still loading; it is
- * never a zero and never a sum.
+ * The no-verdict sentence, true of every refusal code: a cause may be permanent, so it says what the batch holds — no
+ * verdict — and never that the accounts "could not be computed this batch". Where no refused row carries a debt
+ * figure it says their debt is not known, so a column of dashes cannot read as a table still loading; it is never a
+ * zero and never a sum. It states facts only: that these accounts are counted, never hidden, is said once, in the
+ * Methodology drawer.
  */
 export function notComputedSentence(n: number, debtUnserved = false): string | null {
   if (n === 0) return null;
   const one = n === 1;
-  const counted = `${plural(n, "position")} ${one ? "has" : "have"} no verdict in this batch and ${one ? "is" : "are"} counted, not hidden.`;
-  if (!debtUnserved) return counted;
-  const unserved = `${REFUSED_DEBT_UNSERVED.charAt(0).toUpperCase()}${REFUSED_DEBT_UNSERVED.slice(1)}`;
-  return `${counted} ${unserved}, so ${one ? "its" : "their"} debt is not known.`;
+  const noVerdict = `${plural(n, "account")} ${one ? "has" : "have"} no verdict in this batch`;
+  return debtUnserved ? `${noVerdict}; ${one ? "its" : "their"} debt is not known.` : `${noVerdict}.`;
 }
 
 /**
- * The unreadable rows' sentence. The engine computed these positions and refused nothing: what failed is this page's
- * reading of them, and the sentence says so — counted beside the refused positions, never among them.
+ * The unreadable rows' sentence. The engine computed these accounts and refused nothing: what failed is this page's
+ * reading of them, and the sentence says so — never among the refused accounts.
  */
 export function unreadableSentence(n: number): string | null {
   if (n === 0) return null;
-  const one = n === 1;
-  return `${plural(n, "position")} the engine calls computed could not be read by this page and ${one ? "is" : "are"} counted, not cleared.`;
+  return `${plural(n, "account")} the engine calls computed could not be read by this page.`;
 }
 
 /** A stop cause as parenthetical words: trimmed, unterminated, or the fallback when the wire gave none. */
@@ -183,7 +185,7 @@ function joinSentences(parts: readonly (string | null)[]): string {
 /**
  * The Book's headline. A positive finding stands as soon as it is read (the
  * walk lands the least room first); a negative — nothing material, no
- * position liquidatable, no account near cap — is claimed only over the
+ * account liquidatable, no account near cap — is claimed only over the
  * computed accounts of a complete walk whose every row this page could read.
  * An unfinished walk is pending, a stopped one is named, refused accounts are
  * never inside a negative — and one unreadable row withholds them all: the
@@ -213,7 +215,7 @@ export function bookHeadline(input: BookHeadlineInput): Headline {
     if (input.stopped === null) {
       return {
         variant: "pending",
-        tone: "refused",
+        tone: "absent",
         emphasis: "Walking the Cash book…",
         rest: "",
         dek: joinSentences([readSoFar, "The verdict settles when the walk ends.", below, notComputed, unread]),
@@ -221,7 +223,7 @@ export function bookHeadline(input: BookHeadlineInput): Headline {
     }
     return {
       variant: "refused",
-      tone: "refused",
+      tone: "absent",
       emphasis: "The Cash book could not be fully read this batch.",
       rest: "",
       dek: joinSentences([
@@ -238,7 +240,7 @@ export function bookHeadline(input: BookHeadlineInput): Headline {
     // The walk is complete and a row on it could not be read: no all-clear, in any of its forms, is said over it.
     return {
       variant: "refused",
-      tone: "refused",
+      tone: "absent",
       emphasis: "The Cash book could not be fully read this batch.",
       rest: "",
       dek: joinSentences([unread, `No verdict is claimed over ${unreadable === 1 ? "it" : "them"}.`, below, near, notComputed]),
@@ -254,7 +256,7 @@ export function bookHeadline(input: BookHeadlineInput): Headline {
     };
   }
   // Refused accounts are counted beside the negative, never inside it.
-  const negative = input.notComputed > 0 ? "No computed position is liquidatable." : "No position is liquidatable.";
+  const negative = input.notComputed > 0 ? "No computed account is liquidatable." : "No account is liquidatable.";
   return {
     variant: "quiet",
     tone: "ok",

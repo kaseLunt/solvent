@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { Drawer } from "@/components/Drawer";
+import { METHODOLOGY_LABEL, NO_VERDICT_METHOD } from "@/lib/book-copy";
 import { asSentence } from "@/lib/book-headline";
 import type { BookResponse } from "@/lib/cash-book";
 import { CASH_ENGINE_MISSING, NO_BATCH_LOADED, NO_REFUSALS, withheldBookSentence, type WholeRefusal } from "@/lib/cash-refusal";
 import { MATERIAL_LINE_USD, SMALL_LINE_USD } from "@/lib/materiality";
 import { plainCause } from "@/lib/refusal-phrasebook";
 import { readWirePopulation } from "@/lib/wireGuard";
-import styles from "./book.module.css";
 
 export interface BookMethodologyProps {
   open: boolean;
@@ -21,12 +21,15 @@ export interface BookMethodologyProps {
   withheld: WholeRefusal | null;
 }
 
-/** The one place the doctrine lives (spec §3.1): comparators, the materiality line, refusals, identity, evidence links. */
+/**
+ * The one place the doctrine lives (spec §3.1): comparators, the materiality line, refusals and what a row with no
+ * verdict means, identity, evidence links. The drawer's own body sets the prose rhythm; this adds none.
+ */
 export function BookMethodology({ open, onClose, book, withheld }: BookMethodologyProps) {
   const cash = book?.engines.find((e) => e.engine === "debt_manager") ?? null;
   return (
-    <Drawer open={open} onClose={onClose} title="Methodology & evidence">
-      <div className={styles.method} data-testid="book-methodology-body">
+    <Drawer open={open} onClose={onClose} title={METHODOLOGY_LABEL}>
+      <div data-testid="book-methodology-body">
         <h3>Engines</h3>
         <p>
           <b>Cash</b> is the Debt Manager engine (<code>debt_manager</code>, OP Mainnet). An account is liquidatable
@@ -45,6 +48,7 @@ export function BookMethodology({ open, onClose, book, withheld }: BookMethodolo
           Sub-cent values print as <code>&lt;$0.01</code>.
         </p>
         <h3>Refusals on this batch</h3>
+        <p>{NO_VERDICT_METHOD}</p>
         {book === null ? (
           <p>{NO_BATCH_LOADED}</p>
         ) : cash === null ? (

@@ -13,10 +13,11 @@
 // in: a caption read as the sort order must be the sort order.
 import type { components } from "@solvent/client";
 import { hfDisplayFromWad } from "./book-format";
-import { humanUsdFull } from "./human-price";
+import { headroomTenths } from "./headroom";
 import { CASH, LEGACY } from "./inspector-position";
 import { materialityTier, type MaterialityTier } from "./materiality";
-import { formatTenths, percentTenths } from "./percent";
+import { accountMoneyColumn } from "./money";
+import { formatTenths } from "./percent";
 import { groupInt } from "./prose";
 import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
@@ -35,6 +36,9 @@ export interface MoverRow {
   readonly account: string;
   readonly roomBefore: string;
   readonly roomAfter: string;
+  /** Each side over its cap — the room negative — so its cell wears the crit ink. */
+  readonly overBefore: boolean;
+  readonly overAfter: boolean;
   readonly hfBefore: string | null;
   readonly hfAfter: string | null;
   readonly debt: bigint | null;
@@ -61,13 +65,25 @@ export interface MoversTable {
  */
 export const MOVERS_CAP = 20;
 
-/** The room a cap ÷ debt ratio means, floored to tenths. */
+/** A cell that could not be read, in the cell's own sentence case. */
+const UNREADABLE_CELL = "Unreadable";
+
+/**
+ * The room a cap ÷ debt ratio means, as a table's room column prints it: one unit in every row, a signed percent of
+ * the cap at a fixed tenth, over the cap negative. Floored, the Book's headroom rule — an over-cap room is never
+ * friendlier than it is, and a sliver over the cap is never cut to a zero that reads as "at cap". A zero cap over debt
+ * has no percent to print, and says so in words; a side with no debt is a knowable no-room.
+ */
 export function roomFromRatio(num: bigint, den: bigint): string {
-  if (den === 0n) return "no debt";
-  if (num === den) return "at cap";
-  if (num < den) return "over cap";
-  const tenths = percentTenths(num - den, num);
-  return tenths === null ? "unreadable" : formatTenths(tenths);
+  if (den === 0n) return "No debt";
+  const tenths = headroomTenths(num, den);
+  if (tenths === null) return num < den ? "Over cap" : UNREADABLE_CELL;
+  return formatTenths(tenths, { fixed: true });
+}
+
+/** A readable ratio pair over the cap: the cap below the debt. */
+function overCap(num: string | null, den: string | null): boolean {
+  return isWireDecimal(num) && isWireDecimal(den) && BigInt(num) < BigInt(den);
 }
 
 function ratio(num: string | null, den: string | null, at: string, unreadable: string[]): string {
@@ -79,7 +95,7 @@ function ratio(num: string | null, den: string | null, at: string, unreadable: s
   const d = isWireDecimal(den);
   if (!n) unreadable.push(`${at}_num`);
   if (!d) unreadable.push(`${at}_den`);
-  if (!n || !d) return "unreadable";
+  if (!n || !d) return UNREADABLE_CELL;
   return roomFromRatio(BigInt(num), BigInt(den));
 }
 
@@ -87,7 +103,7 @@ function wad(value: string | null, at: string, unreadable: string[]): string | n
   if (value === null) return null;
   if (!isWireDecimal(value)) {
     unreadable.push(at);
-    return "unreadable";
+    return UNREADABLE_CELL;
   }
   return hfDisplayFromWad(value);
 }
@@ -105,14 +121,12 @@ export function moversTable(engine: MoverEngine): MoversTable {
     const hfBefore = wad(m.hf_before_wad, `${at}.hf_before_wad`, unreadable);
     const hfAfter = wad(m.hf_after_wad, `${at}.hf_after_wad`, unreadable);
     let debt: bigint | null = null;
-    let debtText = "—";
+    let debtUnreadable = false;
     if (m.debt_usd !== null) {
-      if (isWireDecimal(m.debt_usd)) {
-        debt = BigInt(m.debt_usd);
-        debtText = humanUsdFull(debt, decimals);
-      } else {
+      if (isWireDecimal(m.debt_usd)) debt = BigInt(m.debt_usd);
+      else {
         unreadable.push(`${at}.debt_usd`);
-        debtText = "unreadable";
+        debtUnreadable = true;
       }
     }
     let key: bigint | null = null;
@@ -121,19 +135,26 @@ export function moversTable(engine: MoverEngine): MoversTable {
       if (isWireDecimal(m.hf_drop_wad)) key = BigInt(m.hf_drop_wad);
       else unreadable.push(`${at}.hf_drop_wad`);
     }
-    const row: MoverRow = {
+    const row = {
       account: m.account,
       roomBefore,
       roomAfter,
+      overBefore: overCap(m.hf_before_num, m.hf_before_den),
+      overAfter: overCap(m.hf_after_num, m.hf_after_den),
       hfBefore,
       hfAfter,
       debt,
-      debtText,
+      debtUnreadable,
       tier: debt === null ? null : materialityTier(debt, decimals),
       becomesLiquidatable: m.became_eligible,
     };
     return { row, key };
   });
+  // One precision for the whole Debt column, picked once from its own figures.
+  const money = accountMoneyColumn(
+    ranked.map((r) => r.row.debt),
+    decimals,
+  );
   // Largest key first; a row with no readable key goes last. The sort is
   // stable, so equal keys keep the order they arrived in, which is the
   // service's own tie-break.
@@ -142,7 +163,7 @@ export function moversTable(engine: MoverEngine): MoversTable {
     if (b.key === null) return -1;
     return a.key === b.key ? 0 : a.key > b.key ? -1 : 1;
   });
-  const rows = ranked.map((r) => r.row);
+  const rows: MoverRow[] = ranked.map(({ row: { debtUnreadable, ...row } }) => ({ ...row, debtText: debtUnreadable ? UNREADABLE_CELL : money(row.debt) }));
   let total: number | null = engine.movers_total;
   if (!isWirePopulation(engine.movers_total)) {
     unreadable.push("movers_total");
@@ -151,7 +172,18 @@ export function moversTable(engine: MoverEngine): MoversTable {
   return { rows, shown: rows.length, total, note: engine.movers_note, decimals, unreadable };
 }
 
+/** The wire fields the table could not read, named after the caption; empty when every field read. */
+export function unreadableNote(t: MoversTable): string {
+  return t.unreadable.length > 0 && !t.unreadable.includes("usd_decimals") ? ` · unreadable: ${t.unreadable.join(", ")}` : "";
+}
+
+/** The caption under the table: a standalone line, so it starts with a capital. */
 export function moversCaption(t: MoversTable, engine: "debt_manager" | "aave_v3_etherfi"): string {
+  const words = captionWords(t, engine);
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+function captionWords(t: MoversTable, engine: "debt_manager" | "aave_v3_etherfi"): string {
   // A table refused for its scale states no count: "0 accounts" would be a
   // claim about the book, and the truth is that the scale could not be read.
   if (t.unreadable.includes("usd_decimals")) return "not readable: unreadable scale";

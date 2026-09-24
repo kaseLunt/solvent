@@ -2,7 +2,7 @@
 
 import type { components } from "@solvent/client";
 import { useEffect, useRef, useState } from "react";
-import { KitTable, SectionHead, VerdictHeader, type KitRow } from "@/components/kit";
+import { KitTable, SectionHead, StateCard, VerdictHeader, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import type { EvidenceDescriptor } from "@/lib/evidence";
@@ -74,13 +74,14 @@ export function VerificationSurface() {
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
         if (cause instanceof ProofFetchError) {
-          setState({ phase: "error", message: cause.message, retryAfterSeconds: cause.retryAfterSeconds });
+          setState({ phase: "error", message: cause.message, retryAfterSeconds: cause.retryAfterSeconds, status: cause.status });
           return;
         }
         setState({
           phase: "error",
           message: cause instanceof Error ? cause.message : String(cause),
           retryAfterSeconds: null,
+          status: null,
         });
       });
     getSolventClient()
@@ -161,24 +162,33 @@ export function VerificationSurface() {
         dek={view.headline.dek}
         chips={view.chips}
         actions={
-          <>
-            {view.state === "unavailable" && (
-              <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={retry} data-testid="verification-retry">
-                {VERIFICATION_COPY.retry}
-              </button>
-            )}
-            <button
-              type="button"
-              className={`${kit.btn} ${kit.btnGhost}`}
-              onClick={() => setDrawer({ open: true, descriptor: null })}
-              data-testid="verification-drawer"
-            >
-              {VERIFICATION_COPY.drawerButton}
-            </button>
-          </>
+          <button
+            type="button"
+            className={`${kit.btn} ${kit.btnGhost}`}
+            onClick={() => setDrawer({ open: true, descriptor: null })}
+            data-testid="verification-drawer"
+          >
+            {VERIFICATION_COPY.drawerButton}
+          </button>
         }
       />
       <VerificationArchitecture steps={view.steps} receipt={view.receipt} receiptLine={view.receiptLine} />
+      {view.stateCard !== null && (
+        // The two subjects' place, when the manifest could not be read: a failed read, in its own solid register — never
+        // a refusal — with the service's own words disclosed, and the one way forward.
+        <StateCard
+          state="unavailable"
+          testId="verification-unavailable"
+          title={view.stateCard.title}
+          cause={view.stateCard.cause}
+          serviceSaid={view.stateCard.serviceSaid ?? undefined}
+          action={
+            <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={retry} data-testid="verification-retry">
+              {VERIFICATION_COPY.retry}
+            </button>
+          }
+        />
+      )}
       {manifest !== null && (
         <>
           <VerificationSubjects manifest={manifest} onExplain={(descriptor) => setDrawer({ open: true, descriptor })} />

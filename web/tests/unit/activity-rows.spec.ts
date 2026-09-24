@@ -6,23 +6,30 @@ import {
   UNTIMED_WHEN_TITLE,
   actionLabel,
   activityEmptyText,
+  activityFailureCard,
   activityFailureText,
   activityRows,
   activityTakeaway,
 } from "../../lib/activity-rows";
+import { ACTIVITY_WHEN_HEADER, SERVICE_SAID } from "../../lib/activity-view";
 import { EVENT_DISPLAY_TYPES } from "../../lib/feed-data";
 import { RAW_UNITS_TAG, RECORD_ONLY_TITLE, RECORD_ONLY_WORD, liquidationRepaid, typeLabel } from "../../lib/feed-view";
-import { truncateAddress } from "../../lib/format";
+import { shortHex, truncateAddress } from "../../lib/format";
 
 // A page failure beside loaded rows is its own line: the table's empty words print only with no rows, so a
-// refused "Load more" folded into them would never show. The rows stand; the failure speaks in its own words.
-test("activityEmptyText and activityFailureText: the load phase, the failure's own words, the proven-empty sentence; a failure beside rows keeps the rows", () => {
+// refused "Load more" folded into them would never show. The rows stand; the service's own words are disclosed
+// beneath the line (SERVICE_SAID), never the line itself.
+test("activityEmptyText and activityFailureText: the state's word, never the service's raw words; the proven-empty sentence; a failure beside rows keeps the rows", () => {
   const error = new Error("503 unavailable: no complete risk batch is available (http://x/v1/events?cursor=p2)");
-  expect(activityEmptyText(true, null)).toBe("Loading activity…");
-  expect(activityEmptyText(true, error)).toBe("Loading activity…");
-  expect(activityEmptyText(false, error)).toBe(`Activity unavailable: ${error.message}`);
+  expect(activityEmptyText(true, null)).toBe("Loading…");
+  expect(activityEmptyText(true, error)).toBe("Loading…");
+  expect(activityEmptyText(false, error)).toBe("Unavailable");
   expect(activityEmptyText(false, null)).toBe("No chain actions for this account.");
-  expect(activityFailureText(error)).toBe(`More activity could not be loaded: ${error.message}. The rows above stand; nothing beyond them was read.`);
+  expect(activityFailureText()).toBe("More activity could not be loaded; the rows above stand, and nothing beyond them was read.");
+  expect(SERVICE_SAID).toBe("What the service said");
+  // The card a failed read stands in: nothing read, or the rows already loaded still standing.
+  expect(activityFailureCard(0)).toEqual({ title: "Activity unavailable", cause: "The request for this account's chain actions did not succeed, so none is shown." });
+  expect(activityFailureCard(6)).toEqual({ title: "More activity unavailable", cause: activityFailureText() });
 });
 
 test("rows: a custodied time renders; a null block_time falls back to the block number and is untimed", () => {
@@ -32,16 +39,19 @@ test("rows: a custodied time renders; a null block_time falls back to the block 
   expect(rows[0]?.action).toBe("Liquidation");
   expect(rows[1]?.timed).toBe(false);
   expect(rows[1]?.when).toContain("154,796,490");
+  // Every When cell carries its exact layer as its title: the wire's own ISO, or what the block number standing in means.
+  expect(rows[0]?.whenTitle).toBe(EVENTS.events[0]?.block_time);
+  expect(rows[1]?.whenTitle).toBe(UNTIMED_WHEN_TITLE);
   expect(rows[1]?.action).toBe("Borrow");
   expect(rows[1]?.asset).toBe("USDC");
   expect(rows[1]?.tx.url).toBe(`https://optimistic.etherscan.io/tx/${EVENTS.events[1]?.tx_hash ?? ""}`);
   expect(rows[0]?.tx.url).toBe(`https://etherscan.io/tx/${EVENTS.events[0]?.tx_hash ?? ""}`);
-  expect(rows[0]?.tx.short).toBe(`${(EVENTS.events[0]?.tx_hash ?? "").slice(0, 10)}…`);
+  expect(rows[0]?.tx.short).toBe(shortHex(EVENTS.events[0]?.tx_hash ?? ""));
 });
 
 test("a liquidation row carries its extract in the Activity page's words: liquidator, debt repaid, seized — the figures exact, never truncated", () => {
   const liq = activityRows(EVENTS.events)[0];
-  expect(liq?.detail).toBe("liquidator 0xBBbB…0002 · debt repaid 2,500 USDC · seized 0.65625 weETH");
+  expect(liq?.detail).toBe("Liquidator 0xBBbB…0002 · debt repaid 2,500 USDC · seized 0.65625 weETH");
 });
 
 test("amounts come from the feed's own vocabulary; a record-only event prints a dash with the Activity page's word beside it", () => {
@@ -68,7 +78,7 @@ test("a normalized figure is never followed by a bare symbol: the value alone, t
   // No licensed scale: the raw integer with the raw word beside it in the Amount cell, and the same unit words — said
   // once: the unit words never repeat the raw word, and the symbol never touches the digits.
   const raw = activityRows(DEMO_EVENTS_NEAR.events);
-  expect(raw[0]).toMatchObject({ amount: "622000000", amountTag: RAW_UNITS_TAG, unit: "· normalized debt · USDC" });
+  expect(raw[0]).toMatchObject({ amount: "622,000,000", amountTag: RAW_UNITS_TAG, unit: "· normalized debt · USDC" });
   for (const row of raw) expect(row.unit).not.toContain(RAW_UNITS_TAG);
 });
 
@@ -88,8 +98,8 @@ test("the wire's own scale places the decimal and raw units are named; empty sei
   expect(detailOf({ ...first, liquidation: { ...liq, seized: [] } })).toMatch(/seized — \(no seizure legs carried\)$/);
   // The one repaid figure both surfaces print (liquidationRepaid): unscaled, the raw digits and the raw word — no
   // currency or token beside them, on either engine.
-  expect(detailOf({ ...first, liquidation: { ...liq, debt_decimals: null } })).toContain(`debt repaid 2500000000 ${RAW_UNITS_TAG} · seized`);
-  expect(detailOf({ ...first, engine: "debt_manager", liquidation: { ...liq, debt_decimals: null } })).toContain(`debt repaid 2500000000 ${RAW_UNITS_TAG} · seized`);
+  expect(detailOf({ ...first, liquidation: { ...liq, debt_decimals: null } })).toContain(`debt repaid 2,500,000,000 ${RAW_UNITS_TAG} · seized`);
+  expect(detailOf({ ...first, engine: "debt_manager", liquidation: { ...liq, debt_decimals: null } })).toContain(`debt repaid 2,500,000,000 ${RAW_UNITS_TAG} · seized`);
   expect(detailOf({ ...first, liquidation: { ...liq, debt_repaid: null } })).toContain("debt repaid — · seized");
   expect(detailOf({ ...first, liquidation: { ...liq, debt_repaid: "1.5" } })).toContain("debt repaid unreadable · seized");
   expect(detailOf({ ...first, liquidation: { ...liq, debt_repaid: "1e6", debt_decimals: null } })).toContain("debt repaid unreadable · seized");
@@ -108,7 +118,7 @@ test("the wire's own scale places the decimal and raw units are named; empty sei
   // A seizure leg the guards refuse: never scaled, never truncated, never a unit on raw digits.
   const leg = liq.seized[0];
   if (leg === undefined) throw new Error("fixture: one seizure leg");
-  expect(detailOf({ ...first, liquidation: { ...liq, seized: [{ ...leg, decimals: -1 }] } })).toMatch(new RegExp(`seized ${leg.amount} ${RAW_UNITS_TAG} \\(weETH\\)$`));
+  expect(detailOf({ ...first, liquidation: { ...liq, seized: [{ ...leg, decimals: -1 }] } })).toMatch(new RegExp(`seized 656,250,000,000,000,000 ${RAW_UNITS_TAG} \\(weETH\\)$`));
   expect(detailOf({ ...first, liquidation: { ...liq, seized: [{ ...leg, amount: "6.5e17" }] } })).toMatch(/seized unreadable \(weETH\)$/);
 
   expect(activityRows([{ ...first, tx_hash: "0xabc" }])[0]?.tx.short).toBe("0xabc");
@@ -160,8 +170,9 @@ test.describe("activityTakeaway", () => {
   // The card and the Activity page name the same rows alike: chain actions, ordered by block time. The builder's
   // custody word never reaches a reader on any of the card's lines, the hover included.
   test("the card speaks Activity's one vocabulary: chain actions and a block time on every line, never the custody word", () => {
-    expect(ACTIVITY_CARD_QUALIFIER).toBe("this account's chain actions · newest first, by block time");
-    expect(UNTIMED_WHEN_TITLE).toBe("no block time yet — the block number stands in");
+    expect(ACTIVITY_CARD_QUALIFIER).toBe("Newest first · by block time");
+    expect(UNTIMED_WHEN_TITLE).toBe("No block time yet: the block number stands in, never an invented time.");
+    expect(ACTIVITY_WHEN_HEADER).toBe("When (UTC)");
     const lines = [
       ACTIVITY_CARD_QUALIFIER,
       UNTIMED_WHEN_TITLE,
@@ -171,7 +182,8 @@ test.describe("activityTakeaway", () => {
       activityTakeaway(0, 2, false),
     ];
     for (const line of lines) expect(line).not.toMatch(/custod/i);
-    for (const line of [ACTIVITY_CARD_QUALIFIER, activityEmptyText(false, null), activityTakeaway(5, 1, false)]) expect(line).toContain("chain action");
+    for (const line of [activityEmptyText(false, null), activityTakeaway(5, 1, false)]) expect(line).toContain("chain action");
+    expect(ACTIVITY_CARD_QUALIFIER).toContain("by block time");
   });
 
   test("no timed rows: NO newest-first claim survives anywhere in the sentence", () => {

@@ -1,10 +1,10 @@
 "use client";
 
 // History: one engine's durable record in the Console register — the verdict
-// header, the four newest-point tiles, the kept SVG in its card, the bucket
-// record, the doctrine in the drawer. GET /v1/observatory/series arrives
-// through lib/observatory-data; lib/history-view decides every sentence once
-// and this surface prints it.
+// header, the engine switch, the four newest-point tiles, the kept SVG in its
+// card, the hour record, the doctrine in the drawer. GET
+// /v1/observatory/series arrives through lib/observatory-data; lib/history-view
+// decides every sentence once and this surface prints it.
 //
 // Laws carried here:
 //   - ENGINE SEPARATION IS VISUAL LAW: one engine per view, an explicit
@@ -16,23 +16,27 @@
 //   - a series answers for the engine that was ASKED: a body naming another
 //     engine is refused by name before it is committed, so one engine's
 //     figures never stand under the other's name;
-//   - the degraded mode is FIRST-CLASS: a deployment whose database predates
-//     the observatory rollup serves the contract's `unavailable` envelope,
-//     and it renders as a NAMED state — never an empty chart;
+//   - a record the page cannot draw is a NAMED state in the chart's place —
+//     not served on this deployment (the contract's `unavailable` envelope
+//     of a database that predates the rollup), a fetch that failed (never a
+//     refusal), or an answer the page cannot read — each with its own card,
+//     never an empty chart;
 //   - no governance gating exists on this surface.
 //
 // The app shell owns the live pill and the degradation banner; neither is
 // duplicated here.
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ChartCard, VerdictHeader } from "@/components/kit";
+import { ChartCard, StateCard, ToggleGroup, VerdictHeader, type ToggleOption } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { solventBaseUrl } from "@/lib/api";
-import { deriveHistoryView, foreignSeries, HISTORY_ENGINES, type HistoryReading } from "@/lib/history-view";
+import { deriveHistoryView, foreignSeries, HISTORY_COPY, HISTORY_ENGINES, type HistoryReading } from "@/lib/history-view";
 import { engineName } from "@/lib/inspector-headline";
 import {
   fetchObservatorySeries,
   isRollupUnavailable,
+  ObservatoryFetchError,
   type ObservatoryEngine,
   type ObservatorySeriesResponse,
 } from "@/lib/observatory-data";
@@ -43,27 +47,45 @@ import { HistoryDrawer } from "./HistoryDrawer";
 import { HistoryPoint } from "./HistoryPoint";
 import { HistoryTiles } from "./HistoryTiles";
 
+/** A read that did not answer with a series: its own words for the card's disclosure, and the status it answered with. */
+interface Failure {
+  message: string;
+  serviceSaid: string | null;
+  status: number | null;
+}
+
 type SeriesState =
   | { phase: "loading" }
   | { phase: "ok"; response: ObservatorySeriesResponse; axis: BucketAxis }
-  | { phase: "degraded"; message: string }
-  | { phase: "foreign"; message: string }
-  | { phase: "error"; message: string };
+  | ({ phase: "degraded" | "error" } & Failure)
+  | { phase: "foreign"; message: string };
+
+const ENGINE_OPTIONS: readonly ToggleOption<ObservatoryEngine>[] = HISTORY_ENGINES.map((engine) => ({ value: engine, label: engineName(engine) }));
 
 export function HistorySurface() {
   const [engine, setEngine] = useState<ObservatoryEngine>(HISTORY_ENGINES[0]);
-  // Keyed by engine: switching engines REMOUNTS the view, so state resets to
-  // loading without a synchronous setState inside the effect, and no stale
-  // engine's data can bleed across the switch.
-  return <EngineHistory key={engine} engine={engine} onEngine={setEngine} />;
+  // Each retry is a new read of the same engine.
+  const [attempt, setAttempt] = useState(0);
+  // Keyed by engine and attempt: switching engines (or retrying) REMOUNTS the view, so state resets to loading
+  // without a synchronous setState inside the effect, and no stale engine's data can bleed across the switch.
+  return (
+    <EngineHistory
+      key={`${engine}:${String(attempt)}`}
+      engine={engine}
+      onEngine={setEngine}
+      onRetry={() => setAttempt((current) => current + 1)}
+    />
+  );
 }
 
 function EngineHistory({
   engine,
   onEngine,
+  onRetry,
 }: {
   engine: ObservatoryEngine;
   onEngine: (engine: ObservatoryEngine) => void;
+  onRetry: () => void;
 }) {
   const [series, setSeries] = useState<SeriesState>({ phase: "loading" });
   const [metric, setMetric] = useState<BucketMetric>("debt_usd");
@@ -94,10 +116,16 @@ function EngineHistory({
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
         if (isRollupUnavailable(cause)) {
-          setSeries({ phase: "degraded", message: cause.serverMessage });
+          setSeries({ phase: "degraded", message: cause.serverMessage, serviceSaid: cause.message, status: cause.status });
           return;
         }
-        setSeries({ phase: "error", message: cause instanceof Error ? cause.message : String(cause) });
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setSeries({
+          phase: "error",
+          message,
+          serviceSaid: message,
+          status: cause instanceof ObservatoryFetchError ? cause.status : null,
+        });
       });
     return () => {
       controller.abort();
@@ -109,7 +137,9 @@ function EngineHistory({
       ? { engine, metric, phase: "ok", response: series.response, message: null }
       : series.phase === "loading"
         ? { engine, metric, phase: "loading", response: null, message: null }
-        : { engine, metric, phase: series.phase, response: null, message: series.message };
+        : series.phase === "foreign"
+          ? { engine, metric, phase: "foreign", response: null, message: series.message }
+          : { engine, metric, phase: series.phase, response: null, message: series.message, serviceSaid: series.serviceSaid, status: series.status };
   const view = deriveHistoryView(reading);
   // The chart and the record render only for a series the view could read: a scale outside the contract is the
   // view's own refusal, and nothing below the header is drawn at it.
@@ -118,6 +148,7 @@ function EngineHistory({
     answered !== null && selected !== null && selected >= 0 && selected < answered.axis.entries.length
       ? answered.axis.entries[selected]
       : undefined;
+  const card = view.stateCard;
 
   return (
     <div
@@ -138,27 +169,42 @@ function EngineHistory({
         actions={<HistoryDrawer doctrine={view.doctrine} />}
       />
 
-      <div className={styles.controls} role="group" aria-label="engine">
-        {HISTORY_ENGINES.map((candidate) => (
-          <button
-            key={candidate}
-            type="button"
-            className={`${kit.btn} ${kit.btnGhost}`}
-            aria-pressed={candidate === engine}
-            data-testid={`history-engine-${candidate}`}
-            onClick={() => onEngine(candidate)}
-          >
-            {engineName(candidate)}
-          </button>
-        ))}
-      </div>
+      <ToggleGroup
+        label={HISTORY_COPY.engine}
+        options={ENGINE_OPTIONS}
+        isPressed={(candidate) => candidate === engine}
+        onToggle={onEngine}
+        testId="history-engine"
+        optionTestId={(candidate) => `history-engine-${candidate}`}
+      />
 
-      <HistoryTiles tiles={view.tiles} pending={view.state === "loading"} />
+      <HistoryTiles engine={engine} tiles={view.tiles} pending={view.state === "loading"} />
+
+      {card !== null && (
+        <StateCard
+          state={card.state}
+          testId="history-state"
+          title={card.title}
+          cause={card.cause}
+          serviceSaid={card.serviceSaid ?? undefined}
+          action={
+            card.action === "book" ? (
+              <Link href="/book" data-testid="history-state-book">
+                {HISTORY_COPY.openBook}
+              </Link>
+            ) : card.action === "retry" ? (
+              <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={onRetry} data-testid="history-retry">
+                {HISTORY_COPY.retry}
+              </button>
+            ) : undefined
+          }
+        />
+      )}
 
       {answered !== null && (
         <>
           <ChartCard
-            title="How the book moved"
+            title={HISTORY_COPY.chartTitle}
             testId="history-chart"
             finding={
               <div className={styles.findingRow}>
@@ -177,7 +223,9 @@ function EngineHistory({
               onSelect={setSelected}
             />
           </ChartCard>
-          {selectedEntry !== undefined && <HistoryPoint entry={selectedEntry} response={answered.response} />}
+          {selectedEntry !== undefined && (
+            <HistoryPoint entry={selectedEntry} response={answered.response} latest={selected === answered.axis.entries.length - 1} />
+          )}
         </>
       )}
     </div>

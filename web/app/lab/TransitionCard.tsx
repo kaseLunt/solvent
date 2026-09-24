@@ -1,37 +1,19 @@
 import { ChartCard, Heatmap, type HeatCellView } from "@/components/kit";
-import { engineName } from "@/lib/inspector-headline";
 import { heatIntensity } from "@/lib/lab-geometry";
 import type { HeatmapView } from "@/lib/lab-transitions";
-import { MOVERS_LINK, transitionFinding, type EngineReading } from "@/lib/lab-view";
-import { groupInt } from "@/lib/prose";
+import { HEAT_COLS, HEAT_ROWS, heatCellTitle, MOVERS_LINK, NO_GRID, NO_RESULT_YET, transitionWords, type EngineReading } from "@/lib/lab-view";
 import styles from "./lab.module.css";
-import { bookMoney } from "./money";
 
 export function cellsOf(view: HeatmapView): HeatCellView[] {
-  const money = bookMoney(view.decimals);
   return view.cells.map((c) => ({
     from: c.from,
     to: c.to,
     count: c.rows,
-    title: `${groupInt(c.rows)} account${c.rows === 1 ? "" : "s"} · ${view.bands[c.from]?.label ?? ""} → ${view.bands[c.to]?.label ?? ""} · debt ${money(c.debtBefore)}`,
+    title: heatCellTitle(view, c),
     movement: c.movement,
+    // One maximum for the whole grid, so one opacity means one count in every movement class.
     intensity: heatIntensity(c.rows, view.maxRows),
   }));
-}
-
-function words(reading: EngineReading | null, engine: string): string {
-  if (reading === null) return "Run a scenario to see where accounts move.";
-  switch (reading.kind) {
-    case "result":
-      return transitionFinding(reading.result.heat);
-    case "withheld":
-      return `Withheld: ${engineName(engine)} was not computed under this scenario.`;
-    case "not-covered":
-      return `This scenario does not model ${engineName(engine)}.`;
-    case "contradictory":
-    case "unreadable":
-      return "Not drawn: the result contradicts itself.";
-  }
 }
 
 /** Where accounts move (spec §5.4): the transition heatmap, or the state's own word. */
@@ -53,31 +35,21 @@ export function TransitionCard({
     <ChartCard
       title="Where accounts move"
       testId={testId}
-      link={
-        r === null
-          ? undefined
-          : { href: "#movers", label: MOVERS_LINK }
-      }
-      finding={
-        <span data-testid={`${testId}-finding`}>{words(reading, engine)}</span>
-      }
+      link={r === null ? undefined : { href: "#movers", label: MOVERS_LINK }}
+      finding={<span data-testid={`${testId}-finding`}>{transitionWords(reading, engine)}</span>}
     >
       {heat !== null ? (
         <Heatmap
           bands={heat.bands}
           cells={cellsOf(heat)}
-          rowsLabel="today"
-          colsLabel="after"
+          rowsLabel={HEAT_ROWS}
+          colsLabel={HEAT_COLS}
           merged={heat.merged}
           testId={gridTestId}
           cellTestIdPrefix={`${gridTestId}-cell`}
         />
       ) : (
-        <p className={styles.dim}>
-          {reading === null
-            ? "No result yet."
-            : "No grid: nothing here is a count."}
-        </p>
+        <p className={styles.dim}>{reading === null ? NO_RESULT_YET : NO_GRID}</p>
       )}
     </ChartCard>
   );

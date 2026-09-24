@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 import type { components } from "@solvent/client";
 import { SCENARIOS } from "../fixtures/lab-book";
 import { DEMO_SCENARIOS } from "../fixtures/demo";
-import { SCENARIO_GISTS, SCENARIO_NAMES, scenarioGist, scenarioName, shockWord } from "../../lib/scenario-name";
+import { SCENARIO_GISTS, SCENARIO_NAMES, scenarioGist, scenarioName, scenarioTitle, shockWord } from "../../lib/scenario-name";
 
 type ScenarioDefinition = components["schemas"]["ScenarioDefinition"];
 
@@ -109,22 +109,46 @@ test.describe("scenarioName — one name per scenario, built from its definition
 });
 
 test.describe("scenarioGist — one line under the name", () => {
-  test("a listed gist is at most 70 characters", () => {
-    for (const [id, gist] of Object.entries(SCENARIO_GISTS)) expect(gist.length, id).toBeLessThanOrEqual(70);
+  test("a listed gist is at most 70 characters, starts with a capital and ends a sentence", () => {
+    for (const [id, gist] of Object.entries(SCENARIO_GISTS)) {
+      expect(gist.length, id).toBeLessThanOrEqual(70);
+      expect(gist, id).toMatch(/^[A-Z]/);
+      expect(gist, id).toMatch(/\.$/);
+    }
+  });
+
+  test("every committed scenario's one line is at most 70 characters", () => {
+    for (const def of COMMITTED) expect(scenarioGist(def).length, def.id).toBeLessThanOrEqual(70);
   });
 
   test("the four library scenarios take their gist", () => {
-    expect(scenarioGist(listed("eth_minus_30"))).toBe("All ETH-linked collateral, instantaneous mark");
-    expect(scenarioGist(listed("weeth_market_depeg_oracles_held"))).toBe("Market price 5% under redemption; oracles unchanged");
-    expect(scenarioGist(listed("dm_rate_horizon_plus_200bps"))).toBe("Closed-form horizon projection; prices held flat");
-    expect(scenarioGist(listed("ethfi_minus_50"))).toBe("Own-ecosystem token shock; sETHFI moves with it");
+    expect(scenarioGist(listed("eth_minus_30"))).toBe("All ETH-linked collateral, instantaneous mark.");
+    expect(scenarioGist(listed("weeth_market_depeg_oracles_held"))).toBe("Market price 5% under redemption; oracles unchanged.");
+    expect(scenarioGist(listed("dm_rate_horizon_plus_200bps"))).toBe("Closed-form horizon projection; prices held flat.");
+    expect(scenarioGist(listed("ethfi_minus_50"))).toBe("Own-ecosystem token shock; sETHFI moves with it.");
+  });
+
+  test("a committed scenario whose first sentence runs long, or reads in another voice, takes a gist true to its definition", () => {
+    expect(scenarioGist(committed("btc_leg_minus_20"))).toBe("BTC collateral: liquidBTC and eBTC move together on one axis.");
+    expect(scenarioGist(committed("dm_composition_census"))).toBe("Each previously unclaimed Cash asset held at its mark, on purpose.");
+    expect(scenarioGist(committed("stable_depeg_099_boundary"))).toBe("Cash stables exactly 1% below par, at the band's open edge: no snap.");
+    expect(scenarioGist(committed("stable_depeg_098_unsnapped"))).toBe("Cash stables 2% below par, outside the snap band: they re-price.");
+    expect(scenarioGist(committed("stable_depeg_0995_in_band"))).toBe("Cash stables 0.5% below par, inside the snap band: nothing moves.");
   });
 
   test("any other scenario takes the first sentence of its own description — a decimal point is not a sentence end", () => {
     expect(scenarioGist(committed("eth_minus_20"))).toBe("Factor shock on ETH/USD.");
-    expect(scenarioGist(committed("stable_depeg_0995_in_band"))).toBe("Every configured Debt Manager stable is marked 0.5 percent below par.");
+    expect(scenarioGist(committed("weeth_rate_minus_5"))).toBe("The slashing / exploit counterfactual.");
     const def = listed("eth_minus_30");
+    expect(scenarioGist({ ...def, id: "x", description: "A stable is marked at 0.95 today. Then more." })).toBe("A stable is marked at 0.95 today.");
     expect(scenarioGist({ ...def, id: "x", description: "No full stop here" })).toBe("No full stop here");
     expect(scenarioGist({ ...def, id: "x", description: "" })).toBe("");
+  });
+});
+
+test.describe("scenarioTitle — the wire's own identity behind a name", () => {
+  test("the wire label, id and version, verbatim", () => {
+    const def = listed("eth_minus_30");
+    expect(scenarioTitle(def.label, def.id, def.version)).toBe(`${def.label} · ${def.id} · ${def.version}`);
   });
 });

@@ -30,13 +30,14 @@ import {
   WELDS_NOTE,
   type EvidenceDescriptor,
 } from "./evidence";
-import { EM_DASH } from "./format";
-import { humanUtc } from "./human-utc";
+import { EM_DASH, shortHex } from "./format";
+import { exactUtc, humanUtc } from "./human-utc";
+import type { StateRegister } from "./kit";
 import { CASH, LEGACY } from "./inspector-position";
-import { refused, sentence, terminated, type LabHeadline } from "./lab-headline";
+import { sentence, terminated, type LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
 import { publishable, type EvidenceResponse } from "./proof-data";
-import { groupInt, plural } from "./prose";
+import { groupInt, PIPELINE_STEPS, plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import { isWirePopulation, readWirePopulation } from "./wireGuard";
 
@@ -143,33 +144,36 @@ export const VERIFICATION_INTRO =
   "What this deployment is, exactly: the pinned proof of its last reconcile and the identity of the batch it serves now. Nothing here is measured on request: every field is carried by the build or persisted by a batch.";
 /** The non-inheritance law that binds the two subjects, verbatim. */
 export const VERIFICATION_SPLIT =
-  "TWO SUBJECTS, NEVER ONE. The proof speaks for its pinned run; the live batch serves under its watermark vector. A green receipt does not make the live batch exact, and a serving batch does not refresh the proof.";
+  "Two subjects, never one. The proof speaks for its pinned run; the live batch serves under its watermark vector. A green receipt does not make the live batch exact, and a serving batch does not refresh the proof.";
 const PROOF_CAPTION =
-  "Proof subject — the pinned, exactly-reproducible acceptance evidence: the committed reconcile receipt and the build it speaks for. Never the live batch.";
+  "Proof subject: the pinned, exactly-reproducible acceptance evidence — the committed reconcile receipt and the build it speaks for. Never the live batch.";
 const LIVE_CAPTION =
-  "Live subject — the currently-serving batch's identity: watermarked, operational, and NOT covered by the reconcile run. Exactness lives on the proof subject, at its pin.";
-const NO_SUBSTITUTE = "Nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.";
+  "Live subject: the currently-serving batch's identity — watermarked, operational, and not covered by the reconcile run. Exactness lives on the proof subject, at its pin.";
+/** When the manifest could not be read: what stands in for it — nothing. */
+export const NO_SUBSTITUTE = "Nothing is substituted for it: no cached proof, no assumed batch, no fabricated key.";
 
 /** The page's chrome, every word of it: what the components print between the view's figures. */
 export const VERIFICATION_COPY = {
   drawerButton: "Methodology & evidence",
   drawerTitle: "Methodology & evidence",
   doctrineHeading: "Methodology",
-  thisNumber: "this number",
+  thisNumber: "This number",
   comparatorHeading: "Comparator · verbatim",
   markerHeading: "Operational vs proven",
   architectureTitle: "Architecture & verification",
-  architectureQualifier: "Index · Compute · Verify · Serve",
+  architectureLabel: "How this deployment is built and checked, in four steps",
   probesTitle: "Committed probe records",
-  probesLink: "the contract and its samples → API",
+  probesLink: "API →",
   rawShow: "Raw JSON",
   rawHide: "Hide raw JSON",
-  retry: "Retry",
+  retry: "Try again",
+  explain: "Explain",
+  serviceSaid: "What the service said",
 } as const;
 
-/** The marker line beneath a subject's comparator: OPERATIONAL or PROVEN, then the descriptor's own note. */
+/** The marker line beneath a subject's comparator: Operational or Proven, then the descriptor's own note. */
 export function markerLine(descriptor: Pick<EvidenceDescriptor, "marker" | "markerNote">): string {
-  return `${descriptor.marker === "operational" ? "OPERATIONAL" : "PROVEN"} · ${descriptor.markerNote}`;
+  return `${descriptor.marker === "operational" ? "Operational" : "Proven"} · ${descriptor.markerNote}`;
 }
 
 const UNAVAILABLE = "unavailable";
@@ -186,8 +190,9 @@ function pub(text: string): string {
   return checked.ok ? checked.text : checked.refusal;
 }
 
+/** When the service said to try again, in the reader's words; nothing when it did not say. */
 function retryWords(seconds: number | null): string {
-  return typeof seconds === "number" ? `Retry after ${String(seconds)}s.` : "The service did not say when to retry.";
+  return typeof seconds === "number" ? `Try again after ${String(seconds)}s.` : "";
 }
 
 // ---------------------------------------------------------------------------
@@ -223,12 +228,33 @@ export function receiptState(manifest: EvidenceResponse): ReceiptState {
 
 /**
  * What the page draws for the receipt: the judge's answer once the manifest
- * has answered, and `pending` while its read is in flight. A read in flight
- * has no receipt state — `none` is the manifest's own absence, and a page
- * that wore it before the manifest answered would state an absence nobody
- * served.
+ * has answered, `pending` while its read is in flight, and `unavailable` when
+ * the read failed. A read in flight has no receipt state — `none` is the
+ * manifest's own absence, and a page that wore it before the manifest
+ * answered would state an absence nobody served; a read that failed is not a
+ * refusal either, so it has a register of its own.
  */
-export type ReceiptRegister = ReceiptState | "pending";
+export type ReceiptRegister = ReceiptState | "pending" | "unavailable";
+
+/** The receipt's one tone, as every surface that speaks the receipt wears it: a row of the tone grammar, or a state register. */
+export type ReceiptTone = "ok" | "warn" | "crit" | "refused" | "unavailable" | "pending";
+
+/**
+ * ONE verdict, ONE tone: the headline's finding, the Verify step, the Receipt chip, the receipt strip and the proof
+ * card's rule and status rows all read this map. An unqualified pass is ok; a verdict that passed while its own tallies
+ * disagree is warn; a failed receipt is crit; a receipt that checked no rows, and a manifest with no receipt, are the
+ * refused register — a finding withheld, an absence the wire stated; a manifest that could not be read is unavailable,
+ * never refused; a read in flight is pending.
+ */
+export const RECEIPT_TONE: Readonly<Record<ReceiptRegister, ReceiptTone>> = {
+  exact: "ok",
+  drift: "warn",
+  failed: "crit",
+  empty: "refused",
+  none: "refused",
+  unavailable: "unavailable",
+  pending: "pending",
+};
 
 type ManifestReconcile = NonNullable<EvidenceResponse["reconcile"]>;
 
@@ -256,36 +282,34 @@ export interface PipelineLine {
 
 export interface PipelineStep {
   readonly key: "index" | "compute" | "verify" | "serve";
+  /** "Index" — the step's name, the shared vocabulary's (lib/prose PIPELINE_STEPS). */
   readonly label: string;
-  /** "01 · INDEX" — the step's ordinal, as both pages head it. */
+  /** "01" — the step's ordinal, the shared vocabulary's. */
   readonly ordinal: string;
-  /** The tile's value: the step's number, or the dash when there is none to print. */
+  /** The step's number, or the dash when there is none to print — its `state` then says which absence it is. */
   readonly value: string;
-  /** Beside a number, "unit · context"; beside the dash, the refused word — "unavailable" for a read that failed, the absence the wire stated otherwise; "pending" while the read is in flight. */
+  /** Beside a number, "unit · context"; beside the dash, the state's word — "unavailable" for a read that failed, the absence the wire stated otherwise; "pending" while the read is in flight. */
   readonly sub: string;
-  readonly tone: "neutral" | "ok" | "warn" | "refused";
+  /** The tone of the step's figure: a verdict's (the receipt's) or ink; `refused` beside a figure whose census was refused. */
+  readonly tone: "neutral" | "ok" | "warn" | "crit" | "refused";
   /** The step's read is in flight: the tile prints the pending mark in place of `value`, and nothing about the step is refused yet. */
   readonly pending: boolean;
+  /**
+   * With no figure, which absence the step states (lib/kit STATE_REGISTERS): pending in flight, unavailable after a read
+   * that failed, refused where the wire itself stated the absence. Undefined when the step has its figure.
+   */
+  readonly state?: StateRegister;
+  /** The state's own word, in sentence case, where it has one beyond the register's ("No committed receipt"); undefined in flight. */
+  readonly stateWord?: string;
   readonly sentence: string;
   readonly line: PipelineLine;
 }
 
-const ORDINAL: Record<PipelineStep["key"], string> = {
-  index: "01 · INDEX",
-  compute: "02 · COMPUTE",
-  verify: "03 · VERIFY",
-  serve: "04 · SERVE",
-};
+/** The state of a step whose read is in flight, failed, or answered with the wire's own absence. */
+const noFigure = (pending: boolean, unread: boolean): StateRegister => (pending ? "pending" : unread ? "unavailable" : "refused");
 
-/**
- * Verification's tile label: the step's number folded into its name —
- * "01 · Index" — so a step is headed once, by its tile. The number is the
- * ordinal's own, read from it; the Overview heads its steps with `ordinal`,
- * which does not move.
- */
-export function stepTileLabel(step: Pick<PipelineStep, "ordinal" | "label">): string {
-  return `${step.ordinal.slice(0, step.ordinal.indexOf(" · "))} · ${step.label}`;
-}
+/** A no-figure step's word: its sub, opening its line; none while the read is in flight (the register's own mark). */
+const wordOf = (pending: boolean, sub: string): string | undefined => (pending ? undefined : `${sub.charAt(0).toUpperCase()}${sub.slice(1)}`);
 
 /** Each engine's indexer cursor is its `last_block` on `/v1/meta` (the watermark vector). */
 const INDEX_SENTENCE = "Latest block indexed for each engine, ahead of every batch.";
@@ -323,18 +347,31 @@ const rowsWord = (count: number): string => (count === 1 ? "row" : "rows");
 /**
  * The Verify step's sentence under a receipt that did not pass clean. The
  * manifest carries the receipt's tallies and never its rows, so a drifted row
- * is counted here and named only where it is recorded: the committed drift
- * report, by its path when that path is publishable. A drift of zero is never
+ * is counted here; where the rows are recorded — the committed drift report,
+ * by its path — is the drawer's (`driftReportLine`). A drift of zero is never
  * printed as the fault — the proof card's status row names the conjunct that
  * failed.
  */
 function shortReceiptSentence(receipt: ManifestReconcile): string {
   const tally = `${n(receipt.gated_exact)} of ${n(receipt.gated_rows)} checked rows matched the chain exactly`;
   if (receipt.gated_drift === 0) return `${tally}, and the receipt still did not pass clean; the proof subject names the conjunct that failed.`;
-  const artifact = publishable(receipt.artifact_path);
-  const where = artifact.ok ? `the committed drift report, ${artifact.text}` : "the committed drift report";
-  return `${tally}; ${n(receipt.gated_drift)} ${rowsWord(receipt.gated_drift)} drifted. This manifest carries the tallies, not the rows: they are recorded in ${where}.`;
+  return `${tally}; ${n(receipt.gated_drift)} ${rowsWord(receipt.gated_drift)} drifted. The manifest carries the tallies, not the rows.`;
 }
+
+/**
+ * Where a drifted receipt's rows are recorded — the drawer's line, never a tile's or the strip's: the committed drift
+ * report, by its path when that path is publishable. Null when nothing drifted.
+ */
+function driftReportLine(receipt: ManifestReconcile): string | null {
+  if (receipt.gated_drift === 0) return null;
+  const artifact = publishable(receipt.artifact_path);
+  return artifact.ok
+    ? `The drifted rows are recorded in the committed drift report, ${artifact.text}.`
+    : "The drifted rows are recorded in the committed drift report.";
+}
+
+/** The compute step's opening: the batch and when it was computed, in the reader's words. */
+const computedWhen = (book: BookResponse): string => `Batch ${n(book.batch.id)}, computed ${humanUtc(book.batch.computed_at, book.served_at)}`;
 
 /**
  * The Overview's four numbers, unchanged in law: the OP block, the batch, the
@@ -359,19 +396,21 @@ export function pipelineSteps(
     dm === null
       ? {
           key: "index",
-          label: "Index",
-          ordinal: ORDINAL.index,
+          label: PIPELINE_STEPS.index.name,
+          ordinal: PIPELINE_STEPS.index.ordinal,
           value: EM_DASH,
           sub: metaPending ? PENDING : meta === null ? UNAVAILABLE : "no OP Mainnet watermark",
-          tone: metaPending ? "neutral" : "refused",
+          tone: metaPending || meta === null ? "neutral" : "refused",
           pending: metaPending,
+          state: noFigure(metaPending, meta === null),
+          stateWord: wordOf(metaPending, metaPending ? PENDING : meta === null ? UNAVAILABLE : "no OP Mainnet watermark"),
           sentence: INDEX_SENTENCE,
           line: { before: "OP block ", figure: UNAVAILABLE, after: ` · Ethereum block ${ethBlock}` },
         }
       : {
           key: "index",
-          label: "Index",
-          ordinal: ORDINAL.index,
+          label: PIPELINE_STEPS.index.name,
+          ordinal: PIPELINE_STEPS.index.ordinal,
           value: n(dm.last_block),
           sub: `OP block · Ethereum block ${ethBlock}`,
           tone: "neutral",
@@ -387,12 +426,14 @@ export function pipelineSteps(
     book === null || census === null
       ? {
           key: "compute",
-          label: "Compute",
-          ordinal: ORDINAL.compute,
+          label: PIPELINE_STEPS.compute.name,
+          ordinal: PIPELINE_STEPS.compute.ordinal,
           value: EM_DASH,
           sub: bookPending ? PENDING : reading.phase === "no-batch" ? "no servable batch" : UNAVAILABLE,
-          tone: bookPending ? "neutral" : "refused",
+          tone: bookPending || reading.phase !== "no-batch" ? "neutral" : "refused",
           pending: bookPending,
+          state: noFigure(bookPending, reading.phase !== "no-batch"),
+          stateWord: wordOf(bookPending, reading.phase === "no-batch" ? "no servable batch" : UNAVAILABLE),
           sentence: bookPending ? COMPUTE_PENDING : reading.phase === "no-batch" ? COMPUTE_ABSENT : COMPUTE_UNREAD,
           line: { before: "", figure: UNAVAILABLE, after: "" },
         }
@@ -400,28 +441,28 @@ export function pipelineSteps(
         ? {
             // The batch is computed and printed; the census it would count is refused by name — never "0", never neutral.
             key: "compute",
-            label: "Compute",
-            ordinal: ORDINAL.compute,
+            label: PIPELINE_STEPS.compute.name,
+            ordinal: PIPELINE_STEPS.compute.ordinal,
             value: n(book.batch.id),
             sub: `batch · ${CENSUS_REFUSED[census.reason]}`,
             tone: "refused",
             pending: false,
             sentence:
               census.reason === "withheld"
-                ? `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; the Cash book is withheld this batch (${census.cause}).`
-                : `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; ${census.cause}.`,
-            line: { before: "batch ", figure: n(book.batch.id), after: ` · ${CENSUS_REFUSED[census.reason]}` },
+                ? `${computedWhen(book)}; the Cash book is withheld this batch (${census.cause}).`
+                : `${computedWhen(book)}; ${census.cause}.`,
+            line: { before: "Batch ", figure: n(book.batch.id), after: ` · ${CENSUS_REFUSED[census.reason]}` },
           }
         : {
             key: "compute",
-            label: "Compute",
-            ordinal: ORDINAL.compute,
+            label: PIPELINE_STEPS.compute.name,
+            ordinal: PIPELINE_STEPS.compute.ordinal,
             value: n(book.batch.id),
             sub: `batch · ${n(census.accounts)} Cash accounts`,
             tone: "neutral",
             pending: false,
-            sentence: `Batch ${n(book.batch.id)} computed at ${book.batch.computed_at}; ${COMPUTE_EXACT}.`,
-            line: { before: "batch ", figure: n(book.batch.id), after: ` · ${n(census.accounts)} Cash accounts` },
+            sentence: `${computedWhen(book)}: ${COMPUTE_EXACT}.`,
+            line: { before: "Batch ", figure: n(book.batch.id), after: ` · ${n(census.accounts)} Cash accounts` },
           };
 
   const recon = evidence?.reconcile ?? null;
@@ -432,12 +473,14 @@ export function pipelineSteps(
     evidence === null || recon === null
       ? {
           key: "verify",
-          label: "Verify",
-          ordinal: ORDINAL.verify,
+          label: PIPELINE_STEPS.verify.name,
+          ordinal: PIPELINE_STEPS.verify.ordinal,
           value: EM_DASH,
           sub: evidencePending ? PENDING : evidence === null ? UNAVAILABLE : "no committed receipt",
-          tone: evidencePending ? "neutral" : "refused",
+          tone: evidencePending || evidence === null ? "neutral" : "refused",
           pending: evidencePending,
+          state: noFigure(evidencePending, evidence === null),
+          stateWord: wordOf(evidencePending, evidence === null ? UNAVAILABLE : "no committed receipt"),
           sentence: evidencePending ? VERIFY_PENDING : evidence === null ? VERIFY_UNREAD : VERIFY_ABSENT,
           line: { before: "", figure: UNAVAILABLE, after: " checked rows exact" },
         }
@@ -445,8 +488,8 @@ export function pipelineSteps(
         ? {
             // A run that checked no rows proves nothing. Its "0/0" is the wire's own count, printed under the refused register with its cause — never as a tally of exact rows.
             key: "verify",
-            label: "Verify",
-            ordinal: ORDINAL.verify,
+            label: PIPELINE_STEPS.verify.name,
+            ordinal: PIPELINE_STEPS.verify.ordinal,
             value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
             sub: "checked rows · nothing proven",
             tone: "refused",
@@ -456,12 +499,13 @@ export function pipelineSteps(
           }
         : {
             key: "verify",
-            label: "Verify",
-            ordinal: ORDINAL.verify,
+            label: PIPELINE_STEPS.verify.name,
+            ordinal: PIPELINE_STEPS.verify.ordinal,
             value: `${n(recon.gated_exact)}/${n(recon.gated_rows)}`,
-            // One word on both pages: the tile, the Overview's line and the headline all count "checked rows", and a drift is counted, never named.
+            // One word on both pages: the step, the Overview's line and the headline all count "checked rows", and a drift is counted, never named.
             sub: `checked rows exact · ${drifted(recon.gated_drift)}`,
-            tone: receipt === "exact" ? "ok" : "warn",
+            // One receipt, one tone: a receipt the judge could not read is printed as it came, under warn.
+            tone: receipt === null ? "warn" : receipt === "failed" ? "crit" : receipt === "exact" ? "ok" : "warn",
             pending: false,
             sentence: receipt === "exact" ? VERIFY_EXACT : shortReceiptSentence(recon),
             line: {
@@ -474,8 +518,8 @@ export function pipelineSteps(
   const endpoints = String(PUBLIC_ENDPOINTS.length);
   const serve: PipelineStep = {
     key: "serve",
-    label: "Serve",
-    ordinal: ORDINAL.serve,
+    label: PIPELINE_STEPS.serve.name,
+    ordinal: PIPELINE_STEPS.serve.ordinal,
     value: endpoints,
     sub: "endpoints · typed TypeScript client",
     tone: "neutral",
@@ -491,7 +535,8 @@ export function pipelineSteps(
 // The two subjects — every word of both cards.
 // ---------------------------------------------------------------------------
 
-export type CardTone = "default" | "ok" | "warn" | "crit" | "dim";
+/** A row's tone: a verdict's, the refused register's secondary ink, a caption's dim ink, or ink. */
+export type CardTone = "default" | "ok" | "warn" | "crit" | "refused" | "dim";
 
 export interface CardRow {
   readonly label: string;
@@ -501,6 +546,8 @@ export interface CardRow {
   readonly id?: string;
   /** The value is an identifier copied whole; this is the copy affordance's accessible name. */
   readonly copy?: string;
+  /** The value's exact layer on hover (a wire ISO under a typeset instant). */
+  readonly title?: string;
 }
 
 export interface CardSection {
@@ -515,7 +562,12 @@ export interface CardSection {
  */
 export interface SubjectCard {
   readonly title: string;
-  readonly status: { readonly text: string; readonly tone: "ok" | "crit" | "refused" };
+  readonly status: { readonly text: string; readonly tone: "ok" | "warn" | "crit" | "refused" | "live" };
+  /**
+   * The card's top rule. The proof card wears the receipt's one tone (RECEIPT_TONE); the live card wears the live
+   * accent, always — the batch it serves is posture, never health, and it never borrows the proof's verdict.
+   */
+  readonly rule: "ok" | "warn" | "crit" | "refused" | "live";
   /** The explain affordance's accessible name; it opens the drawer on this subject's evidence chain. */
   readonly explain: string;
   readonly takeaway: string | null;
@@ -528,8 +580,21 @@ function foldOf(sections: readonly CardSection[]): SubjectCard["fold"] {
   return count === 0 ? null : { summary: plural(count, "provenance row"), sections };
 }
 
+/** A card row's label in sentence case: the shared nouns stay lower case inside the sentences that also use them. */
+const label = (words: string): string => `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+
+/** The receipt's tone as a row wears it: the verdict rows of the map, the refused register for a withheld finding. */
+const rowTone = (register: ReceiptRegister): CardTone => {
+  const tone = RECEIPT_TONE[register];
+  return tone === "ok" || tone === "warn" || tone === "crit" ? tone : "refused";
+};
+
 function proofCard(manifest: EvidenceResponse): SubjectCard {
   const status = proofSubjectStatus(manifest);
+  const receipt = receiptState(manifest);
+  const tone = rowTone(receipt);
+  // A row that did not match wears the receipt's fault tone: warn under a drifted receipt, crit under a failed one.
+  const fault: CardTone = tone === "warn" ? "warn" : "crit";
   const service = manifest.service;
   const feeds = manifest.feeds_registry;
   const matched = feeds.registry_fingerprint === service.registry_fingerprint;
@@ -541,71 +606,72 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
   const receiptNote = reconcile === null ? null : publishable(reconcile.note);
   const feedsPath = publishable(feeds.path);
 
+  // The status row reads the receipt's one tone: never a leftover warn for a withheld finding, never crit for an absence.
   const rows: CardRow[] = [
     status.kind === "accepted"
       ? vacuous
-        ? { label: "status", value: RECEIPT_EMPTY_STATUS, tone: "warn" }
-        : { label: "status", value: RECEIPT_ACCEPTED_STATUS, tone: "ok" }
+        ? { label: "Status", value: RECEIPT_EMPTY_STATUS, tone }
+        : { label: "Status", value: RECEIPT_ACCEPTED_STATUS, tone }
       : status.kind === "rejected"
-        ? { label: "status", value: `REJECTED · ${status.detail}`, tone: "crit" }
-        : { label: "status", value: `UNAVAILABLE · ${pub(status.reason)}`, tone: "crit" },
+        ? { label: "Status", value: `Rejected · ${status.detail}`, tone }
+        : { label: "Status", value: `No committed receipt · ${pub(status.reason)}`, tone },
   ];
   if (reconcile !== null) {
     rows.push({
-      label: CHECKED_ROWS_LABEL,
+      label: label(CHECKED_ROWS_LABEL),
       value: checkedRowsTally(reconcile.gated_exact, reconcile.gated_rows, reconcile.gated_drift),
-      tone: vacuous ? "dim" : reconcile.gated_drift === 0 ? "ok" : "crit",
+      tone: vacuous ? "dim" : reconcile.gated_drift === 0 ? "ok" : fault,
     });
     for (const weld of reconcile.welds) {
       rows.push({
         label: weldLabel(weld.engine),
         value: `${String(weld.rows_exact)}/${String(weld.rows_compared)} exact`,
-        tone: vacuous ? "dim" : weld.rows_exact === weld.rows_compared ? "ok" : "crit",
+        tone: vacuous ? "dim" : weld.rows_exact === weld.rows_compared ? "ok" : fault,
         id: `weld-${weld.engine}`,
       });
     }
     // The welds are account comparisons counted whatever each row's gate, not a split of the checked tally: the card states that counting rule once, in the dim register, beneath them.
-    if (reconcile.welds.length > 0) rows.push({ label: WELDS_NOTE.label, value: WELDS_NOTE.value, tone: "dim", id: "welds-note" });
+    if (reconcile.welds.length > 0) rows.push({ label: label(WELDS_NOTE.label), value: WELDS_NOTE.value, tone: "dim", id: "welds-note" });
   }
   rows.push({
-    label: REGISTRY_LABEL,
+    label: label(REGISTRY_LABEL),
     value: matched ? REGISTRY_MATCH : REGISTRY_MISMATCH,
     tone: matched ? (vacuous ? "default" : "ok") : "crit",
   });
-  if (artifact !== null && !artifact.ok) rows.push({ label: "artifact", value: artifact.refusal, tone: "warn", id: "proof-artifact-refused" });
-  if (receiptNote !== null && !receiptNote.ok) rows.push({ label: "receipt note", value: receiptNote.refusal, tone: "warn", id: "proof-note-refused" });
-  if (!feedsPath.ok) rows.push({ label: "feeds registry path", value: feedsPath.refusal, tone: "warn", id: "feeds-path-refused" });
+  if (artifact !== null && !artifact.ok) rows.push({ label: "Artifact", value: artifact.refusal, tone: "warn", id: "proof-artifact-refused" });
+  if (receiptNote !== null && !receiptNote.ok) rows.push({ label: "Receipt note", value: receiptNote.refusal, tone: "warn", id: "proof-note-refused" });
+  if (!feedsPath.ok) rows.push({ label: "Feeds registry path", value: feedsPath.refusal, tone: "warn", id: "feeds-path-refused" });
 
   const sections: CardSection[] = [];
   if (reconcile !== null) {
     const receiptRows: CardRow[] = [
-      { label: "result · exit", value: `${reconcile.result} · ${String(reconcile.exit_code)}`, tone: "default" },
-      { label: "finished_at", value: reconcile.finished_at, tone: "default" },
-      { label: "advisory rows", value: String(reconcile.advisory_rows), tone: "dim" },
-      { label: "comparison sha256", value: reconcile.comparison_sha256, tone: "default", copy: "copy comparison sha256" },
+      { label: "Result · exit", value: `${reconcile.result} · ${String(reconcile.exit_code)}`, tone: "default" },
+      { label: "Finished at", value: exactUtc(reconcile.finished_at), tone: "default", title: reconcile.finished_at },
+      { label: "Advisory rows", value: String(reconcile.advisory_rows), tone: "dim" },
+      { label: "Comparison sha256", value: reconcile.comparison_sha256, tone: "default", copy: "Copy comparison sha256" },
     ];
-    if (artifact?.ok === true) receiptRows.push({ label: "artifact", value: artifact.text, tone: "default" });
-    if (receiptNote?.ok === true) receiptRows.push({ label: "receipt note", value: receiptNote.text, tone: "dim" });
+    if (artifact?.ok === true) receiptRows.push({ label: "Artifact", value: artifact.text, tone: "default" });
+    if (receiptNote?.ok === true) receiptRows.push({ label: "Receipt note", value: receiptNote.text, tone: "dim" });
     sections.push({ title: "Receipt · committed artifact", rows: receiptRows });
   }
   sections.push({
     title: "Build · config identity",
     rows: [
       manifest.commit === null
-        ? { label: "commit", value: `${EM_DASH} (no build stamp, and never guessed)`, tone: "dim" }
-        : { label: "commit", value: manifest.commit, tone: "default", copy: "copy commit" },
-      { label: "service", value: `${service.name} · ${service.version}`, tone: "default" },
-      { label: "schema version", value: String(service.schema_version), tone: "default" },
-      { label: "algorithm revision", value: String(service.algorithm_revision), tone: "default" },
-      { label: "scenario config", value: service.scenario_config_version, tone: "default" },
-      { label: "seizure model", value: service.seizure_model, tone: "dim" },
+        ? { label: "Commit", value: `${EM_DASH} (no build stamp, and never guessed)`, tone: "dim" }
+        : { label: "Commit", value: manifest.commit, tone: "default", copy: "Copy commit" },
+      { label: "Service", value: `${service.name} · ${service.version}`, tone: "default" },
+      { label: "Schema version", value: String(service.schema_version), tone: "default" },
+      { label: "Algorithm revision", value: String(service.algorithm_revision), tone: "default" },
+      { label: "Scenario config", value: service.scenario_config_version, tone: "default" },
+      { label: "Seizure model", value: service.seizure_model, tone: "dim" },
     ],
   });
   const feedsRows: CardRow[] = [];
-  if (feedsPath.ok) feedsRows.push({ label: "path", value: feedsPath.text, tone: "default" });
+  if (feedsPath.ok) feedsRows.push({ label: "Path", value: feedsPath.text, tone: "default" });
   feedsRows.push(
-    { label: "registry fingerprint", value: feeds.registry_fingerprint, tone: "default", copy: "copy registry fingerprint" },
-    { label: "file sha256", value: feeds.file_sha256, tone: "default", copy: "copy feeds file sha256" },
+    { label: "Registry fingerprint", value: feeds.registry_fingerprint, tone: "default", copy: "Copy registry fingerprint" },
+    { label: "File sha256", value: feeds.file_sha256, tone: "default", copy: "Copy feeds file sha256" },
   );
   sections.push({ title: "Feeds registry", rows: feedsRows });
 
@@ -615,11 +681,12 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
       status.kind === "accepted"
         ? vacuous
           ? { text: RECEIPT_EMPTY_PILL, tone: "refused" }
-          : { text: `PROOF · EXACT @ ${proofPin(status.reconcile)}`, tone: "ok" }
+          : { text: `Proof exact @ ${proofPin(status.reconcile)}`, tone: "ok" }
         : status.kind === "rejected"
-          ? { text: "RECEIPT REJECTED", tone: "crit" }
-          : { text: "NO COMMITTED RECEIPT", tone: "refused" },
-    explain: "explain proof subject",
+          ? { text: "Receipt rejected", tone: receipt === "drift" ? "warn" : "crit" }
+          : { text: "No committed receipt", tone: "refused" },
+    rule: tone === "default" || tone === "dim" ? "refused" : tone,
+    explain: "Explain the proof subject",
     takeaway: null,
     rows,
     fold: foldOf(sections),
@@ -631,12 +698,13 @@ function liveCard(manifest: EvidenceResponse): SubjectCard {
   if (status.kind === "no-batch") {
     return {
       title: "Live subject",
-      status: { text: "NO SERVABLE BATCH", tone: "crit" },
-      explain: "explain live subject",
+      status: { text: "No servable batch", tone: "refused" },
+      rule: "live",
+      explain: "Explain the live subject",
       takeaway: null,
       rows: [
-        { label: "reason", value: pub(status.reason), tone: "crit" },
-        { label: "materialization key", value: `${EM_DASH} · no batch, no key; never fabricated`, tone: "dim", id: "key" },
+        { label: "Reason", value: pub(status.reason), tone: "default" },
+        { label: "Materialization key", value: `${EM_DASH} · no batch, no key; never fabricated`, tone: "dim", id: "key" },
       ],
       fold: null,
     };
@@ -646,25 +714,26 @@ function liveCard(manifest: EvidenceResponse): SubjectCard {
   // The digest's predates-custody gap and a refused identity note are hazards: answer rows, never fold rows.
   const digestGap = substrate.substrate_digest === "";
   const rows: CardRow[] = [
-    { label: "materialization key", value: substrate.materialization_key, tone: "default", id: "key", copy: "copy materialization key" },
+    { label: "Materialization key", value: substrate.materialization_key, tone: "default", id: "key", copy: "Copy materialization key" },
   ];
   if (digestGap) {
     rows.push({
-      label: "substrate digest",
+      label: "Substrate digest",
       value: `${EM_DASH} (predates substrate-digest custody, so this is an honest gap rather than a digest)`,
       tone: "dim",
       id: "live-digest-gap",
     });
   }
-  if (!note.ok) rows.push({ label: "identity note", value: note.refusal, tone: "warn", id: "live-note-refused" });
+  if (!note.ok) rows.push({ label: "Identity note", value: note.refusal, tone: "warn", id: "live-note-refused" });
   const foldRows: CardRow[] = [];
-  if (!digestGap) foldRows.push({ label: "substrate digest", value: substrate.substrate_digest, tone: "default", copy: "copy substrate digest" });
-  if (note.ok) foldRows.push({ label: "identity note", value: note.text, tone: "dim" });
+  if (!digestGap) foldRows.push({ label: "Substrate digest", value: substrate.substrate_digest, tone: "default", copy: "Copy substrate digest" });
+  if (note.ok) foldRows.push({ label: "Identity note", value: note.text, tone: "dim" });
   return {
     title: "Live subject",
-    status: { text: "SERVING · WATERMARKED", tone: "ok" },
-    explain: "explain live subject",
-    takeaway: `serving batch ${n(substrate.batch_id)} · stamped with the chain blocks it was read at; operational, never the proof`,
+    status: { text: "Serving · watermarked", tone: "live" },
+    rule: "live",
+    explain: "Explain the live subject",
+    takeaway: `Serving batch ${n(substrate.batch_id)}, stamped with the chain blocks it was read at: operational, never the proof.`,
     rows,
     fold: foldOf([{ title: null, rows: foldRows }]),
   };
@@ -693,12 +762,12 @@ export const PROBE_COLUMNS = [
 
 /** An empty probe list is a statement about the deployment, never a hidden zero. */
 export const PROBES_EMPTY =
-  "none named by this deployment's manifest — a statement about the deployment, not an absence to hide.";
+  "None named by this deployment's manifest — a statement about the deployment, not an absence to hide.";
 
-/** The count is the takeaway: "{n} committed probe records" and, when any, "· {m} manifest notes" — each noun in its own number. */
+/** The count is the qualifier: "{n} probe records" and, when any, "· {m} manifest notes" — each noun in its own number. */
 export function probesSummary(manifest: EvidenceResponse): string {
   const notes = manifest.notes.length > 0 ? ` · ${plural(manifest.notes.length, "manifest note")}` : "";
-  return `${plural(manifest.probe_records.length, "committed probe record")}${notes}`;
+  return `${plural(manifest.probe_records.length, "probe record")}${notes}`;
 }
 
 function probeRows(manifest: EvidenceResponse): readonly ProbeRow[] {
@@ -716,7 +785,7 @@ function probeRows(manifest: EvidenceResponse): readonly ProbeRow[] {
     return {
       key: `note:${String(index)}`,
       dim: !checked.ok,
-      cells: { path: "manifest note", note: checked.ok ? checked.text : checked.refusal },
+      cells: { path: "Manifest note", note: checked.ok ? checked.text : checked.refusal },
     };
   });
   return [...records, ...notes];
@@ -726,20 +795,13 @@ function probeRows(manifest: EvidenceResponse): readonly ProbeRow[] {
 // The header's chips, the receipt line, the identity line.
 // ---------------------------------------------------------------------------
 
-const RECEIPT_CHIP_TONE: Record<ReceiptState, NonNullable<LabChip["tone"]>> = {
-  exact: "ok",
-  empty: "refused",
-  drift: "warn",
-  failed: "crit",
-  none: "refused",
+/** The Receipt chip's tone: a verdict's, or the dashed refused chip for a withheld finding or an absent receipt. */
+const chipTone = (register: ReceiptRegister): LabChip["tone"] => {
+  const tone = RECEIPT_TONE[register];
+  return tone === "ok" || tone === "warn" || tone === "crit" || tone === "refused" ? tone : undefined;
 };
 
 const RECEIPT_EMPTY_TITLE = `${RECEIPT_CHECKED_NONE}, so nothing is proven`;
-
-/** A 64-hex key at chip width: its first eight and last six characters; the whole key is the chip's title. */
-function shortKey(key: string): string {
-  return key.length > 16 ? `${key.slice(0, 8)}…${key.slice(-6)}` : key;
-}
 
 function chips(manifest: EvidenceResponse, receipt: ReceiptState): LabChip[] {
   const proof = proofSubjectStatus(manifest);
@@ -762,13 +824,13 @@ function chips(manifest: EvidenceResponse, receipt: ReceiptState): LabChip[] {
   const receiptChip: LabChip = {
     label: "Receipt",
     value: receipt === "none" ? "none" : `${receipt}${tally}`,
-    tone: RECEIPT_CHIP_TONE[receipt],
+    tone: chipTone(receipt),
     title: proof.kind === "rejected" ? proof.detail : proof.kind === "unavailable" ? pub(proof.reason) : receipt === "empty" ? RECEIPT_EMPTY_TITLE : undefined,
   };
   const key: LabChip =
     live.kind === "serving"
-      ? { label: "Batch key", value: shortKey(live.substrate.materialization_key), title: live.substrate.materialization_key }
-      : { label: "Batch key", value: EM_DASH, tone: "refused", title: "no batch, no key; never fabricated" };
+      ? { label: "Batch key", value: shortHex(live.substrate.materialization_key), title: live.substrate.materialization_key }
+      : { label: "Batch key", value: "none", tone: "refused", title: "no batch, no key; never fabricated" };
   return [pinned, liveBatch, receiptChip, key];
 }
 
@@ -777,37 +839,46 @@ function pendingChips(): LabChip[] {
   return ["Proof pin", "Live batch", "Receipt", "Batch key"].map((label) => ({ label, value: PENDING }));
 }
 
-/** Every chip refused: the manifest could not be read, and nothing is invented in its place. */
-function unknownChips(): LabChip[] {
+/**
+ * The manifest could not be read: each chip says so in a word — a failed read is never a refusal, so no chip is
+ * dashed — and nothing is invented in its place. The live batch is the one exception the page can still name: the
+ * batch `/v1/book` served, when it answered.
+ */
+function unavailableChips(reading: BookReading): LabChip[] {
+  const served = reading.phase === "ok" && reading.book !== null ? n(reading.book.batch.id) : UNAVAILABLE;
   return [
-    { label: "Proof pin", value: EM_DASH, tone: "refused" },
-    { label: "Live batch", value: EM_DASH, tone: "refused" },
-    { label: "Receipt", value: "unknown", tone: "refused" },
-    { label: "Batch key", value: EM_DASH, tone: "refused" },
+    { label: "Proof pin", value: UNAVAILABLE },
+    { label: "Live batch", value: served },
+    { label: "Receipt", value: UNAVAILABLE },
+    { label: "Batch key", value: UNAVAILABLE },
   ];
 }
 
+/**
+ * The receipt strip, one plain sentence: what the reconcile found, counted. The receipt's own verdict detail — its
+ * result word and exit code — and where drifted rows are recorded are the drawer's, never the strip's.
+ */
 function receiptLine(manifest: EvidenceResponse, receipt: ReceiptState): string {
   const proof = proofSubjectStatus(manifest);
-  if (proof.kind === "unavailable") return `No reconcile receipt: ${pub(proof.reason)}`;
+  if (proof.kind === "unavailable") return `No reconcile receipt: ${terminated(pub(proof.reason))}`;
   const r = proof.reconcile;
   const exact = n(r.gated_exact);
   const rows = n(r.gated_rows);
-  // The status's detail names the violated conjunct in the page's own words: the checked rows' tally, or a short weld by its engine's name.
+  const drift = typeof r.gated_drift === "number" ? n(r.gated_drift) : UNAVAILABLE;
   switch (receipt) {
     case "exact":
-      return `Reconcile receipt: ${exact} checked rows exact, ${drifted(r.gated_drift)}`;
+      return `Reconcile passed: ${exact} of ${rows} checked rows matched the chain exactly, ${drift} drifted.`;
     case "empty":
-      return `Reconcile receipt: ${RECEIPT_CHECKED_NONE} — nothing proven, the proof badge refused`;
+      return `Reconcile receipt: ${RECEIPT_CHECKED_NONE}, so nothing is proven.`;
     case "drift":
-      // A weld short with no drift names its fault; otherwise the drift is the fault — counted, never "named": the manifest carries no row to name.
-      return r.gated_drift === 0 && proof.kind === "rejected"
-        ? `Reconcile receipt: ${exact} of ${rows} checked rows exact, ${drifted(r.gated_drift)} — ${proof.detail}, the proof badge refused`
-        : `Reconcile receipt: ${exact} of ${rows} checked rows exact, ${n(r.gated_drift)} ${rowsWord(r.gated_drift)} drifted — the proof badge refused`;
+      // A fault beyond the checked tally (a weld short) is named; a tally short is its own fault, counted — never "named": the manifest carries no row to name.
+      return r.gated_drift === 0 && r.gated_exact === r.gated_rows && proof.kind === "rejected"
+        ? `Reconcile receipt: ${exact} of ${rows} checked rows matched, 0 drifted, but ${proof.detail}; no proof badge.`
+        : `Reconcile receipt: ${exact} of ${rows} checked rows matched, ${drift} drifted; no proof badge.`;
     case "failed":
-      return `Reconcile receipt failed: ${proof.kind === "rejected" ? proof.detail : "the receipt did not pass"} — ${exact} of ${rows} checked rows exact, ${drifted(r.gated_drift)}`;
+      return `Reconcile failed: ${exact} of ${rows} checked rows matched, ${drift} drifted.`;
     case "none":
-      return `No reconcile receipt: ${pub(manifest.reconcile_unavailable_reason ?? "no reason served")}`;
+      return `No reconcile receipt: ${terminated(pub(manifest.reconcile_unavailable_reason ?? "no reason served"))}`;
   }
 }
 
@@ -815,11 +886,18 @@ function receiptLine(manifest: EvidenceResponse, receipt: ReceiptState): string 
 function identityLine(manifest: EvidenceResponse): string {
   const live = liveSubjectStatus(manifest);
   const r = manifest.reconcile;
-  const batch = live.kind === "serving" ? `#${n(live.substrate.batch_id)}` : `${EM_DASH} (no servable batch, and nothing fabricated)`;
+  const batch = live.kind === "serving" ? n(live.substrate.batch_id) : `${EM_DASH} (no servable batch, and nothing fabricated)`;
   const key = live.kind === "serving" ? live.substrate.materialization_key : EM_DASH;
   const commit = manifest.commit ?? `${EM_DASH} (no build stamp, and never guessed)`;
   const receipt = r === null ? "absent" : `${r.result} · ${n(r.gated_exact)}/${n(r.gated_rows)}`;
-  return `Batch ${batch} · key ${key} · commit ${commit} · receipt ${receipt}`;
+  return `Batch ${batch} · key ${key} · commit ${commit} · receipt ${receipt}.`;
+}
+
+/** Why the proof subject was rejected, in the receipt's own detail, for the drawer: what the strip and the headline leave to it. Null unless rejected. */
+function receiptDetailLine(manifest: EvidenceResponse): string | null {
+  const proof = proofSubjectStatus(manifest);
+  if (proof.kind !== "rejected") return null;
+  return `The proof subject was rejected: ${terminated(proof.detail)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -828,7 +906,7 @@ function identityLine(manifest: EvidenceResponse): string {
 
 export type EvidenceState =
   | { phase: "loading" }
-  | { phase: "error"; message: string; retryAfterSeconds: number | null }
+  | { phase: "error"; message: string; retryAfterSeconds: number | null; status?: number | null }
   | { phase: "ok"; manifest: EvidenceResponse };
 
 export interface VerificationInput {
@@ -839,6 +917,13 @@ export interface VerificationInput {
   readonly book: BookReading;
 }
 
+/** The two subjects' place when the manifest could not be read: which absence it is, and the service's own words. */
+export interface VerificationStateCard {
+  readonly title: string;
+  readonly cause: string;
+  readonly serviceSaid: { readonly label: string; readonly text: string } | null;
+}
+
 export interface VerificationView {
   readonly state: "loading" | "unavailable" | "ok";
   readonly receipt: ReceiptRegister;
@@ -847,10 +932,12 @@ export interface VerificationView {
   /** Proof pin · Live batch · Receipt · Batch key. */
   readonly chips: LabChip[];
   readonly steps: readonly PipelineStep[];
-  /** "Reconcile receipt: N checked rows exact, M drifted", or the failing / absent / pending words. Null when the record could not be fetched: the header says so once, and no strip says it again. */
+  /** The receipt strip's one sentence, or the pending words. Null when the record could not be fetched: the header says so once, and no strip says it again. */
   readonly receiptLine: string | null;
   readonly probes: readonly ProbeRow[];
-  /** The intro, the split, both subjects' captions and the identity line, verbatim — the drawer's doctrine. */
+  /** The card standing where the two subjects would, when the manifest could not be read; null otherwise. */
+  readonly stateCard: VerificationStateCard | null;
+  /** The intro, the split, both subjects' captions, the receipt's own verdict and where drifted rows are recorded, the identity line — the drawer's doctrine. */
   readonly doctrine: readonly string[];
 }
 
@@ -891,6 +978,22 @@ export function verificationDek(manifest: EvidenceResponse): string {
   return proven ? `${first} ${batch}, and it does not inherit that result.` : `${first} ${batch}.`;
 }
 
+/** The headline's tone for the receipt: its verdict's, or — for a finding withheld — the refused register. */
+function headlineTone(receipt: ReceiptState): LabHeadline["tone"] {
+  const tone = RECEIPT_TONE[receipt];
+  return tone === "ok" || tone === "warn" || tone === "crit" ? tone : "refused";
+}
+
+/** What a manifest read that failed says at reader altitude: only what failed — step 02 still shows the batch the book served. */
+function unavailableDek(status: number | null | undefined, retryAfterSeconds: number | null): string {
+  const said =
+    typeof status === "number"
+      ? `The service did not answer the proof request (HTTP ${String(status)}), so there is no proof to show.`
+      : "The proof request did not reach the service, so there is no proof to show.";
+  const retry = retryWords(retryAfterSeconds);
+  return retry === "" ? said : `${said} ${retry}`;
+}
+
 export function deriveVerificationView(input: VerificationInput): VerificationView {
   const { state, meta, metaInFlight, book } = input;
   const evidence = state.phase === "ok" ? state.manifest : null;
@@ -901,44 +1004,53 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
       state: "loading",
       receipt: "pending",
       kicker: VERIFICATION_KICKER,
-      headline: refused("Loading this deployment's verification record…", VERIFICATION_LOADING_DEK),
+      headline: { emphasis: "Loading this deployment's verification record…", rest: "", tone: "absent", dek: VERIFICATION_LOADING_DEK },
       chips: pendingChips(),
       steps,
       receiptLine: "Reading the reconcile receipt…",
       probes: [],
+      stateCard: null,
       doctrine,
     };
   }
   if (state.phase === "error") {
-    const retry = retryWords(state.retryAfterSeconds);
     const emphasis = "The verification record could not be fetched.";
-    // The cause is the fetch's own words, then when to retry, then the law: nothing stands in for an unread manifest. The failure is said here and nowhere else on the page — the receipt strip stands down rather than repeat it.
-    const dek = [sentence(state.message), retry, NO_SUBSTITUTE].filter((part) => part !== "").join(" ");
+    // The failure is said once, in the header, in reader words; the fetch's own words move under the card's
+    // disclosure, and what stands in for the unread manifest — nothing — is the drawer's.
     return {
       state: "unavailable",
-      receipt: "none",
+      receipt: "unavailable",
       kicker: VERIFICATION_KICKER,
-      headline: refused(emphasis, dek),
-      chips: unknownChips(),
+      headline: { emphasis, rest: "", tone: "absent", dek: unavailableDek(state.status, state.retryAfterSeconds) },
+      chips: unavailableChips(book),
       steps,
       receiptLine: null,
       probes: [],
-      doctrine: [...doctrine, `${emphasis} ${dek}`],
+      stateCard: {
+        title: "Proof record unavailable",
+        cause: "Neither subject is shown: nothing stands in for a manifest that was not read.",
+        serviceSaid: state.message.trim() === "" ? null : { label: VERIFICATION_COPY.serviceSaid, text: state.message },
+      },
+      doctrine: [...doctrine, NO_SUBSTITUTE],
     };
   }
   const manifest = state.manifest;
   const receipt = receiptState(manifest);
   const arms = proofTakeawayArms(manifest);
+  const reconcile = manifest.reconcile;
+  const driftLine = reconcile === null ? null : driftReportLine(reconcile);
+  const detailLine = receiptDetailLine(manifest);
   return {
     state: "ok",
     receipt,
     kicker: VERIFICATION_KICKER,
-    // The proof's finding is the only verdict on the page, so it alone wears a tone, and only the receipt's: ok for an unqualified pass, warn for a receipt that fell short or is absent, the refused register for one that checked no rows — a finding withheld, not a finding. The scope is ink, and the live batch — named in the dek — never wears the proof's colour, present or absent.
-    headline: { emphasis: arms.proof, rest: arms.scope, tone: receipt === "exact" ? "ok" : receipt === "empty" ? "refused" : "warn", dek: verificationDek(manifest) },
+    // The proof's finding is the only verdict on the page, so it alone wears a tone, and only the receipt's (RECEIPT_TONE). The scope is ink, and the live batch — named in the dek — never wears the proof's colour, present or absent.
+    headline: { emphasis: arms.proof, rest: arms.scope, tone: headlineTone(receipt), dek: verificationDek(manifest) },
     chips: chips(manifest, receipt),
     steps,
     receiptLine: receiptLine(manifest, receipt),
     probes: probeRows(manifest),
-    doctrine: [...doctrine, identityLine(manifest)],
+    stateCard: null,
+    doctrine: [...doctrine, ...(detailLine === null ? [] : [detailLine]), ...(driftLine === null ? [] : [driftLine]), identityLine(manifest)],
   };
 }

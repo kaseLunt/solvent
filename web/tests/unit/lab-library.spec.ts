@@ -1,5 +1,5 @@
-// The library's rows: the wire's own labels, one outcome word per run record,
-// and the definition-skew law.
+// The library's rows: one name per scenario built from its definition, its one-line gist, one outcome word per run
+// record, and the definition-skew law.
 import { expect, test } from "@playwright/test";
 import { readEngine } from "../../lib/lab-engine";
 import { definitionSkew, libraryRows, outcomeLine, type RunRecord } from "../../lib/lab-library";
@@ -8,13 +8,16 @@ import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, t
 
 const settled = (outcome: Extract<RunRecord, { phase: "settled" }>["outcome"]): RunRecord => ({ phase: "settled", outcome, at: 1, atMonotonicMs: 1, held: null });
 
-test("rows come from the listing verbatim, in wire order, engines as human names, selection and checks carried", () => {
+test("rows come from the listing in wire order, named from their definitions, engines Cash first, selection and checks carried", () => {
   const rows = libraryRows(SCENARIOS, new Map(), "ethfi_minus_50", new Set(["eth_minus_30"]));
   expect(rows.map((r) => r.id)).toEqual(SCENARIOS.scenarios.map((s) => s.id));
   const eth = rows[0]!;
-  expect(eth.label).toBe("ETH -30 percent");
-  expect(eth.description).toBe(SCENARIOS.scenarios[0]!.description);
-  expect(eth.engines).toBe("Aave v3 market (legacy) and Cash");
+  expect(eth.label).toBe("ETH −30%");
+  // The wire's own label, id and version stay on the row as the name's title.
+  expect(eth.title).toBe(`ETH -30 percent · eth_minus_30 · ${SCENARIOS.scenarios[0]!.version}`);
+  expect(eth.description).toBe("All ETH-linked collateral, instantaneous mark.");
+  expect(eth.engines).toBe("Cash and Aave v3 market (legacy)");
+  expect(rows.find((r) => r.id === "dm_rate_horizon_plus_200bps")?.label).toBe("Cash borrow APY +200 bps");
   expect(eth.coversCash).toBe(true);
   expect(eth.checked).toBe(true);
   expect(eth.selected).toBe(false);
@@ -41,11 +44,15 @@ test("outcome lines: running, a Cash result in the Book's tiers, no band change,
   expect(outcomeLine(settled({ kind: "ok", response: contradictory }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Contradictory", tone: "refused" });
   const unreadable = runBookOf([cashEngine({ 2: { 2: 1 } }, { eligible_debt_delta_usd: "1e6", newly_eligible_accounts: 1 })]);
   expect(outcomeLine(settled({ kind: "ok", response: unreadable }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
-  expect(outcomeLine(settled({ kind: "not-served" }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Not served", tone: "refused" });
-  expect(outcomeLine(settled({ kind: "no-batch", message: "m", retryAfterSeconds: null }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "No batch", tone: "refused" });
-  expect(outcomeLine(settled({ kind: "rate-limited", retryAfterSeconds: 3 }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Rate limited", tone: "refused" });
-  expect(outcomeLine(settled({ kind: "unreachable", message: "m" }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Unreachable", tone: "refused" });
-  expect(outcomeLine(settled({ kind: "failed", status: 502, message: "m" }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Failed 502", tone: "refused" });
+  // A read that did not complete is never the refused register — the header's and the tiles' own rule: solid, ink-2.
+  expect(outcomeLine(settled({ kind: "not-served" }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Not served", tone: "dim" });
+  expect(outcomeLine(settled({ kind: "no-batch", message: "m", retryAfterSeconds: null }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "No batch", tone: "dim" });
+  expect(outcomeLine(settled({ kind: "rate-limited", retryAfterSeconds: 3 }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Rate limited", tone: "dim" });
+  expect(outcomeLine(settled({ kind: "unreachable", message: "m" }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Unreachable", tone: "dim" });
+  expect(outcomeLine(settled({ kind: "failed", status: 502, message: "m" }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Failed 502", tone: "dim" });
+  // A request the service declined, or the page would not send, is a refusal.
+  expect(outcomeLine(settled({ kind: "failed", status: 400, message: "m" }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Failed 400", tone: "refused" });
+  expect(outcomeLine(settled({ kind: "refused-locally", message: "m" }), def, SCENARIOS.scenario_config_version)).toEqual({ key: "failed", text: "Not sent", tone: "refused" });
 });
 
 test("the row's word is the workspace's reading: a field only the classifier catches reads Unreadable in both", () => {
@@ -74,10 +81,10 @@ test("outcomeLine speaks for a held result through a failed re-run, but never fo
   const held = { response: demo, at: 1, atMonotonicMs: 1 };
   const failedOver = (h: typeof held | null): RunRecord => ({ phase: "settled", outcome: { kind: "not-served" }, at: 2, atMonotonicMs: 2, held: h });
   expect(outcomeLine(failedOver(held), def, cfg)).toEqual({ key: "result", text: "+$1.2M liquidatable · 118 accounts", tone: "crit" });
-  expect(outcomeLine(failedOver(null), def, cfg)).toEqual({ key: "failed", text: "Not served", tone: "refused" });
+  expect(outcomeLine(failedOver(null), def, cfg)).toEqual({ key: "failed", text: "Not served", tone: "dim" });
   const otherVersion = runBookOf([cashEngine(DEMO_CASH_TABLE, { newly_eligible_accounts: 118, eligible_debt_delta_usd: "1280000000000" })], { ...DEFINITION_ETH, version: "v2" });
   expect(outcomeLine(settled({ kind: "ok", response: otherVersion }), def, cfg)).toEqual({ key: "definition-changed", text: "Definition changed", tone: "refused" });
-  expect(outcomeLine(failedOver({ ...held, response: otherVersion }), def, cfg)).toEqual({ key: "failed", text: "Not served", tone: "refused" });
+  expect(outcomeLine(failedOver({ ...held, response: otherVersion }), def, cfg)).toEqual({ key: "failed", text: "Not served", tone: "dim" });
 });
 
 test("the row's word for a net at or below zero: the net beside the crossings the lanes show, with the true minus; a net without crossings alone", () => {

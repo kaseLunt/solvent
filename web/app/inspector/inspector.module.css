@@ -1,6 +1,6 @@
 /* The Inspector's page-local layout. Everything visual is the kit's; this file only places it. */
 .page { display: flex; flex-direction: column; gap: 14px; }
-.toolbar { margin: 18px 0 8px; }
+.toolbar { margin: 4px 0 8px; }
 .landing { max-width: 860px; }
 .note { color: var(--ink-2); font-size: var(--type-body); margin: 12px 0 0; }
 .dim { color: var(--ink-3); font-size: var(--type-small); margin: 10px 0 0; }
@@ -9,14 +9,8 @@
 .capLabel { color: var(--ink-2); }
 .spark, .frame { width: 100%; }
 .sparkHead { margin-top: 14px; }
-.spark { height: 54px; margin-top: 8px; border-bottom: 1px solid var(--line); position: relative; }
-.sparkLabel { position: absolute; right: 0; top: -2px; font-size: var(--type-floor); color: var(--ink-3); }
-.legacy { margin-top: 6px; }
-.legacy summary { cursor: pointer; font-size: var(--type-h2); font-weight: var(--w-semibold); color: var(--ink); }
-.legacyBody { margin-top: 12px; }
+.spark { height: 54px; margin-top: 8px; border-bottom: 1px solid var(--line); }
 .recent { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 8px 0 0; padding: 0; list-style: none; }
 .detail { display: block; color: var(--ink-3); font-size: var(--type-floor); white-space: normal; }
-.method h3 { font-size: var(--type-card); font-weight: var(--w-semibold); margin: 18px 0 6px; color: var(--ink); }
-.method p, .method li { font-size: var(--type-body); color: var(--ink-2); margin: 6px 0; }
-.method b { color: var(--ink); font-weight: var(--w-medium); }
-.method code { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink); }
+/* A room over its cap: the crit ink on the cell's own figure. */
+.over { color: var(--crit-text); }

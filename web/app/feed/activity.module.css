@@ -1,16 +1,17 @@
-/* Activity: the paged record set in the Console register. Page-local rules only — the header, tiles, table, pills
- * and buttons are the kit's; these are the walk's own controls (engine · view · type · since-block), the live strip
- * (a separate instrument, labelled as such), the honest state strips, the table's unit and tx cells, and the foot.
- * Every sentence on the page is lib/activity-view.ts's or the surface's own state machine's; the styling only
- * sets it. */
-.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 28px 0 24px; }
-.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+/* Activity: the paged record set in the Console register. Page-local rules only — the header, tiles, strips, state
+ * cards, toggle groups, table, and buttons are the kit's; these are the page grid, the since-block bound, the live
+ * strip's label and state chip (a separate instrument, labelled as such), the table's type, amount, unit and tx cells,
+ * the footnote and the foot. Every sentence on the page is lib/activity-view.ts's or the surface's own state
+ * machine's; the styling only sets it. The shell owns the page's top offset. */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 0 0 24px; }
+/* The page grid spaces its blocks; the kit's tile row carries no second offset of its own here. */
+.tiles { margin-top: 0; }
 
-/* ---- the live strip: the CURRENT connection only, never a record. One plain line: prose in the page's sans,
- * mono for ids and numbers alone; the label and the state chip keep the small-caps form of the group labels below. ---- */
-.live { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: var(--type-body); color: var(--ink-2); }
-.liveLabel { font-size: var(--type-small); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
-.liveChip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--type-small); letter-spacing: 0.06em; text-transform: uppercase; }
+/* ---- the live strip: the CURRENT connection only, never a record. One plain line on the kit's strip: prose in the
+ * page's sans, mono for ids and numbers alone. ---- */
+.live { color: var(--ink-2); }
+.liveLabel { font-size: var(--type-small); color: var(--ink-2); }
+.liveChip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--type-small); font-weight: var(--w-medium); }
 .liveChip i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block; }
 /* A proven connection is ACCENT — connection is posture, not health, and no socket is green. */
 .liveAccent { color: var(--accent-text); }
@@ -31,53 +32,38 @@
 .liveDown { color: var(--crit-text); }
 .live b { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink); font-weight: var(--w-semibold); }
 
-/* ---- controls: the kit's ghost buttons at chip size. The pressed look is the kit's one toggle grammar; the resting
- * ink is set only on an unpressed button, so it never outranks that rule. ---- */
-.controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-.groupLabel { font-size: var(--type-small); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); margin-right: 4px; }
-.controls .chipBtn { padding: 4px 10px; font-size: var(--type-small); }
-.controls .chipBtn:not([aria-pressed="true"]) { color: var(--ink-2); }
-.controls .chipBtn:hover { border-color: var(--accent); color: var(--accent-text); }
-.sinceInput { font-family: var(--mono); font-size: var(--type-mono-sm); width: 130px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+/* ---- controls: two rows of the kit's toggle groups; the since-block bound beside the engine it belongs to ---- */
+.controls { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+.since { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sinceLabel { font-size: var(--type-small); color: var(--ink-2); }
+.sinceInput { font-family: var(--mono); font-size: var(--type-mono-sm); width: 130px; height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
 .sinceInput::placeholder { color: var(--ink-3); }
-.applied { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-3); }
-/* A stated impossibility (since-block with no single engine, in short form) or the ledger's pinned type — dim, not an error. */
-.impossible { font-size: var(--type-small); color: var(--ink-3); max-width: 520px; }
+.apply { padding: 4px 12px; font-size: var(--type-small); }
+.applied { font-size: var(--type-small); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+/* A stated impossibility (since-block with no single engine, in short form) or the ledger's pinned type — a caption, not an error. */
+.impossible { font-size: var(--type-small); color: var(--ink-2); max-width: 520px; }
 
 /* ---- the untimed tail's notice above the table, only when a tail is loaded ---- */
-.order { margin: 0; font-size: var(--type-small); color: var(--ink-3); }
+.order { margin: 0; font-size: var(--type-small); color: var(--ink-2); }
 
-/* ---- honest state strips: a notice and a failed fetch warn; a refusal is dashed ---- */
-.strip { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 8px 12px; border-radius: 8px; font-size: var(--type-body); color: var(--ink); }
-.strip b { letter-spacing: 0.04em; font-weight: var(--w-semibold); }
-.stripWarn { border: 1px solid var(--warn); background: var(--warn-bg); }
-.stripWarn b { color: var(--warn-text); }
-.stripRefused { border: 1px dashed var(--crit); background: var(--refused-bg); }
-.stripRefused b { color: var(--crit-text); }
-
-/* ---- the table's cells: the unit in its own quiet column beside the amount, the type word, the liquidation extract, the tx link ---- */
+/* ---- the table's cells: the type word (a key record set apart by weight, never a verdict's colour), the amount and
+ * its raw word, the unit in its own quiet column, the liquidation extract, the tx link ---- */
+.typeKey { font-weight: var(--w-semibold); color: var(--ink); }
+/* One digit axis, while one engine is chosen: the digits right-set in a fixed measure, the raw word after them. */
+.num { display: inline-block; min-width: 12ch; text-align: right; }
+.tagSlot { display: inline-block; min-width: 9ch; padding-left: 6px; text-align: left; font-size: var(--type-floor); color: var(--ink-3); }
 .unit { font-size: var(--type-floor); color: var(--ink-3); }
 /* The raw word beside unscaled digits, in the Amount cell itself: the quiet register of the unit column, never a pill. */
 .amountTag { font-size: var(--type-floor); color: var(--ink-3); white-space: nowrap; }
-.type { font-size: var(--type-small); color: var(--ink-2); }
-/* The extract stacks beneath the pill and wraps inside the nowrap cell, so an em dash is read, not hovered for. */
+/* The extract stacks beneath the type and wraps inside the nowrap cell, so a dash is read, not hovered for. */
 .detail { display: block; max-width: 44ch; margin-top: 4px; white-space: normal; line-height: 1.5; font-size: var(--type-floor); color: var(--ink-2); }
-.detail b { font-family: var(--mono); font-weight: var(--w-medium); color: var(--ink); font-variant-numeric: tabular-nums; }
-/* The wire's note is the extract's last line: page text, not a hover, at the extract's own size and measure. */
-.detailNote { display: block; margin-top: 2px; }
-/* A field name the note quotes is set as code, in the page's mono, at the note's own ink. */
-.detailNote code { font-family: var(--mono); font-size: var(--type-mono-sm); }
+.detail b { font-weight: var(--w-medium); color: var(--ink); font-variant-numeric: tabular-nums; }
 /* In the untimed tail the row is dim, and its extract dims with it: the cell's ink, figures included. */
 .detailDim, .detailDim b { color: inherit; }
-.tx { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-3); text-decoration: none; }
+.tx { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-2); text-decoration: none; white-space: nowrap; }
 .tx:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
+/* The one footnote under the table: what a marked dash means, said once. */
+.footnote { margin: 8px 0 0; max-width: 800px; font-size: var(--type-small); color: var(--ink-2); }
 
-/* ---- foot: the walk's continuation or its end ---- */
-.foot { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; padding: 4px 2px; font-size: var(--type-small); color: var(--ink-3); }
-
-/* ---- drawer body: the doctrine, paragraph by paragraph ---- */
-.method { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--type-body); color: var(--ink); }
-.method p { margin: 0; }
-
-@media (max-width: 640px) { .tiles { grid-template-columns: 1fr; } }
+/* ---- foot: the walk's continuation and its page size, or its end ---- */
+.foot { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 4px 2px; font-size: var(--type-small); color: var(--ink-2); }

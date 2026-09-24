@@ -194,7 +194,7 @@ test.describe("the header's tones — a record is ink, only a verdict wears tone
       refused: false,
       absent: false,
     };
-    expect(Object.keys(wearsVerdictColor)).toEqual(["crit", "warn", "ok", "neutral", "refused"]);
+    expect(Object.keys(wearsVerdictColor)).toEqual(["crit", "warn", "ok", "neutral", "refused", "absent"]);
 
     const record: LabHeadline = { emphasis: "50 chain actions loaded,", rest: "more exist beyond these.", tone: "neutral", dek: "" };
     const tone: VerdictHeaderProps["tone"] = record.tone;
@@ -290,14 +290,14 @@ test.describe("the styleguide's Book specimen — one number in three places, by
     expect(SPECIMEN_CRIT_HEADLINE.emphasis.startsWith(SPECIMEN_EXACT.human)).toBe(true);
     // The toggle names what it hides: the below-the-line rows' count and sum, which the header's dek states too.
     const below = SPECIMEN_BELOW_LINE_ROWS.reduce((sum, row) => sum + row.debt, 0n);
-    expect(SPECIMEN_TOGGLE_LABEL).toBe(`Show ${String(SPECIMEN_BELOW_LINE_ROWS.length)} small & dust positions (${humanUsd(below, SPECIMEN_DECIMALS)})`);
-    expect(SPECIMEN_TOGGLE_LABEL).toBe("Show 2 small & dust positions ($75.75)");
+    expect(SPECIMEN_TOGGLE_LABEL).toBe(`Show ${String(SPECIMEN_BELOW_LINE_ROWS.length)} accounts under $100 (${humanUsd(below, SPECIMEN_DECIMALS)})`);
+    expect(SPECIMEN_TOGGLE_LABEL).toBe("Show 2 accounts under $100 ($75.75)");
     // The label is the Book's own fold label over the rows, and its words have one owner: the specimen composes none —
     // read as text, so a label re-spelled beside the Book's function is caught even while the two agree.
     expect(SPECIMEN_TOGGLE_LABEL).toBe(belowLineToggleLabel(SPECIMEN_BELOW_LINE_ROWS.length, below, SPECIMEN_DECIMALS));
     const specimen = readFileSync(path.join(here, "..", "..", "app", "styleguide", "specimen-book.ts"), "utf8");
     expect(specimen).toContain("belowLineToggleLabel(");
-    expect(specimen).not.toContain("small & dust position");
+    expect(specimen).not.toContain("accounts under $");
     expect(SPECIMEN_CRIT_HEADLINE.dek).toContain(`— ${humanUsd(below, SPECIMEN_DECIMALS)} together`);
     // The ok specimen is a HEALTH verdict in the Book's words — never a record, and never a sentence about holes.
     expect(SPECIMEN_OK_HEADLINE.tone).toBe("ok");

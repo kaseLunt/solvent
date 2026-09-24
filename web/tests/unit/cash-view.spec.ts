@@ -8,12 +8,19 @@ import { expect, test } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
 import type { CashBookReading } from "../../lib/cash-book";
 import { readCashRow } from "../../lib/cash-rows";
-import { deriveCashView, deriveLegacyView, LEGACY_BANDS_NONE_COMPUTED, moneyText, readWireMoney } from "../../lib/cash-view";
+import { cashBookKicker, deriveCashView, deriveLegacyView, LEGACY_BANDS_NONE_COMPUTED, moneyText, readWireMoney, type BookTile, type CashView } from "../../lib/cash-view";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import { BOOK, BOOK_ENGINE_REFUSED, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { DEMO_BOOK } from "../fixtures/demo";
 
 const rows = POSITIONS_DM_PAGE_1.positions.map((p) => readCashRow(refinePositionSummary(p)));
+
+/** One of the Book's six tiles, by its id. */
+function tile(v: CashView, id: BookTile["id"]): BookTile {
+  const hit = v.tiles.find((t) => t.id === id);
+  if (hit === undefined) throw new Error(`the view prints no ${id} tile`);
+  return hit;
+}
 const cashEngine = BOOK.engines.find((e) => e.engine === "debt_manager") ?? null;
 const cashBadDebt = BOOK.bad_debt.find((e) => e.engine === "debt_manager") ?? null;
 if (cashEngine === null || cashBadDebt === null) throw new Error("fixture invariant: the committed book serves the Cash engine");
@@ -48,15 +55,48 @@ test("the committed page derives the material headline, tier-toned chips, and a 
   expect(v.walking).toBe(false);
   expect(v.walkStopped).toBeNull();
   expect(v.refusedTiles).toBe(false);
-  expect(v.chips.map((c) => c.label)).toEqual(["Batch", "Snapshot", "Coverage", "Current"]);
-  expect(v.chips[1]).toMatchObject({ value: "42s · fresh", tone: "ok" });
+  expect(v.chips.map((c) => c.label)).toEqual(["Batch", "Snapshot", "Coverage", "Current, not projected"]);
+  // A fresh batch is a fact of record, in ink: green is a health verdict only.
+  expect(v.chips[1]).toMatchObject({ value: "42s · fresh", tone: "neutral" });
+  // The label-only chip says the whole phrase and bolds none of it.
+  expect(v.chips[3]).toEqual({ label: "Current, not projected", value: "" });
+  // The Overview's live strip carries the mockup's three — no "Current" chip.
+  expect(v.liveChips.map((c) => c.label)).toEqual(["Batch", "Snapshot", "Coverage"]);
   expect(v.chips[2]).toMatchObject({ value: "1 / 2 computed" });
   expect(v.debt).toEqual({ kind: "value", value: 4_200_000_000n, text: "$4,200" });
   expect(v.badDebt).toEqual({ reading: { kind: "value", value: 239_603_961n, text: "$239.60" }, insolvent: 1, cause: null });
   expect(v.bookEntryLine).toBe("$0 within 10% of cap");
   // The sixth tile: the aggregate's refused count under its own cause — nothing unreadable, so nothing added to either.
-  expect(v.notComputedTile).toEqual({ value: "1", sub: "collateral never read" });
+  expect(tile(v, "notcomputed")).toEqual({ id: "notcomputed", label: "No verdict", value: "1", sub: "Collateral never read", tone: "refused", pending: false });
+  expect(v.tiles.map((t) => t.label)).toEqual(["Debt outstanding", "Liquidatable · ≥ $100", "Near cap · <10% room", "Median room", "Standing bad debt", "No verdict"]);
+  expect(tile(v, "baddebt")).toMatchObject({ value: "$239.60", sub: "1 account", tone: "warn" });
   expect(v.chips).toHaveLength(4);
+  expect(v.liveStats).toEqual([
+    { id: "debt", label: "Cash debt outstanding", text: "$4,200", absent: false },
+    { id: "collateral", label: "Collateral", text: "$4,000", absent: false },
+    { id: "accounts", label: "Accounts", text: "2", absent: false },
+  ]);
+  expect(v.liveLine).toBe("1 with no verdict");
+});
+
+test("the Overview's live strip: '…' while the read is in flight, the absence's own word once it failed or was withheld — never a bare dash; its one line falls back to the headline's dek", () => {
+  const unread = { book: null, cash: { engine: null, rows: [] } } as const;
+  const loading = deriveCashView(reading({ phase: "loading", ...unread }), TIER_FALLBACK);
+  expect(loading.liveStats.map((stat) => stat.text)).toEqual(["…", "…", "…"]);
+  expect(loading.liveLine).toBeNull();
+  const failed = deriveCashView(reading({ phase: "error", failure: { message: "Failed to fetch", retryAfterSeconds: null, unreadable: false }, ...unread }), TIER_FALLBACK);
+  expect(failed.liveStats.map((stat) => stat.text)).toEqual(["Unavailable", "Unavailable", "Unavailable"]);
+  expect(failed.liveStats.every((stat) => stat.absent)).toBe(true);
+  expect(failed.liveLine).toBe("Failed to fetch.");
+  const withheld = deriveCashView(reading({ cash: { refusedWhole: { code: "SWEEP_FAILED", detail: "" }, rows: [] } }), TIER_FALLBACK);
+  expect(withheld.liveStats.map((stat) => stat.text)).toEqual(["Withheld", "Withheld", "Withheld"]);
+  expect(withheld.liveLine).toBe("Collateral sweep failed.");
+  const malformed = deriveCashView(reading({ cash: { engine: { ...cashEngine, total_debt: "" } } }), TIER_FALLBACK);
+  expect(malformed.liveStats[0]).toEqual({ id: "debt", label: "Cash debt outstanding", text: "Unreadable", absent: true });
+  for (const v of [loading, failed, withheld, malformed]) for (const stat of v.liveStats) expect(stat.text).not.toMatch(/^—$|^\$0$/);
+  // A walk short of whole: the dek, which names the walk's state, is the line.
+  const walking = deriveCashView(reading({ cash: { walkComplete: false } }), TIER_FALLBACK);
+  expect(walking.liveLine).toBe(walking.headline.dek);
 });
 
 test("a stale batch wears the stale tier on the snapshot chip — never the fresh colour", () => {
@@ -144,13 +184,16 @@ test("a stopped walk is named on the view: not walking, not settled, the cause c
 
 test("the preview line: the ETH −30% line, or the withheld preview named — never ordinary copy over a refusal", () => {
   const v = deriveCashView(reading({}), TIER_FALLBACK);
-  expect(v.previewLine).toBe("ETH −30% → no new liquidatable debt · bad debt $1,427");
+  expect(v.previewLine).toBe("ETH −30%: no new liquidatable debt · bad debt +$1,188, to $1,427");
+  // A projected line wears the PROJECTION badge; a withheld preview is no projection and wears none.
+  expect(v.previewProjected).toBe(true);
   if (BOOK.waterfall === null) throw new Error("fixture invariant");
   const excluded = {
     ...BOOK,
     waterfall: { ...BOOK.waterfall, excluded_engines: [{ engine: "debt_manager", code: "SWEEP_FAILED", detail: "", note: "" }] },
   };
   expect(deriveCashView(reading({ book: excluded }), TIER_FALLBACK).previewLine).toBe("Preview withheld: collateral sweep failed");
+  expect(deriveCashView(reading({ book: excluded }), TIER_FALLBACK).previewProjected).toBe(false);
   const nonMonotone = {
     ...BOOK,
     waterfall: { ...BOOK.waterfall, monotonicity: { ok: false, engine: "debt_manager", detail: "eligible debt fell between grid points 1 and 2" } },
@@ -159,6 +202,7 @@ test("the preview line: the ETH −30% line, or the withheld preview named — n
     "Preview withheld: eligible debt fell between grid points 1 and 2",
   );
   expect(deriveCashView(reading({ book: { ...BOOK, waterfall: null } }), TIER_FALLBACK).previewLine).toBe("Committed scenarios");
+  expect(deriveCashView(reading({ book: { ...BOOK, waterfall: null } }), TIER_FALLBACK).previewProjected).toBe(false);
 });
 
 test("a waterfall served with no points is a refusal — 'no points published' — never an engine absent from the grid and never 'no stress grid'", () => {
@@ -215,7 +259,8 @@ test("a scale the guard refuses throws by name before any figure is formatted at
 test("loading, failure, and an absent engine each refuse rather than default to zero", () => {
   const loading = deriveCashView(reading({ phase: "loading", book: null, cash: { engine: null, rows: [] } }), TIER_FALLBACK);
   expect(loading.headline.emphasis).toBe("Loading the Cash book…");
-  expect(loading.chips).toEqual([{ label: "Identity", value: "pending", tone: "refused" }]);
+  // A read in flight refused nothing: its identity chip is drawn solid, never in the refused register.
+  expect(loading.chips).toEqual([{ label: "Identity", value: "pending", tone: "neutral" }]);
   const failed = deriveCashView(
     reading({ phase: "no-batch", book: null, failure: { message: "no servable batch", retryAfterSeconds: 30, unreadable: false }, cash: { engine: null, rows: [] } }),
     TIER_FALLBACK,
@@ -229,7 +274,7 @@ test("loading, failure, and an absent engine each refuse rather than default to 
   expect(absent.positions).toBeNull();
   expect(absent.refusedPositions).toBeNull();
   expect(absent.summary).toBeNull();
-  expect(absent.chips[2]).toMatchObject({ value: "unavailable", tone: "refused" });
+  expect(absent.chips[2]).toMatchObject({ value: "unavailable", tone: "neutral" });
 });
 
 test("the legacy view: a withheld engine names its cause and prints no population, debt or histogram; a served one reads whole", () => {
@@ -252,13 +297,13 @@ test("the legacy view: a withheld engine names its cause and prints no populatio
     refused: null,
     bands: null,
     debt: { kind: "absent" },
-    summaryLine: "Legacy · Aave v3 market — withheld this batch: collateral-flag custody unproven",
+    summary: "Withheld this batch: collateral-flag custody unproven",
   });
 
   const legacy = { engine: find(BOOK.engines), badDebt: find(BOOK.bad_debt), histogram: find(BOOK.hf_histogram.engines), refusedWhole: null };
   const served = deriveLegacyView(legacy);
   // The line is the market's own finding over its computed positions; the refused one is a count of its own.
-  expect(served?.summaryLine).toBe("Legacy · Aave v3 market — 0 of 1 computed position is liquidatable · $6,000 debt · 1 refused");
+  expect(served?.summary).toBe("0 of 1 computed position is liquidatable · $6,000 debt · 1 refused");
   expect(served?.bands?.map((b) => b.count)).toEqual([0, 0, 0, 1, 0, 0, 0, 0]);
   expect(served?.eligibleDebt).toEqual({ kind: "value", value: 0n, text: "$0" });
   // A fractional bucket count refuses by name before it can weigh a bar.
@@ -271,7 +316,7 @@ test("the legacy view: a withheld engine names its cause and prints no populatio
   const refusedHistogram = { ...legacy.histogram, refused: true, refusal: { engine: "aave_v3_etherfi", code: "SWEEP_FAILED", detail: "", note: "" } };
   expect(deriveLegacyView({ ...legacy, histogram: refusedHistogram })).toMatchObject({ bands: null, histogramWithheld: "collateral sweep failed" });
   // A malformed legacy debt is named, never "$0 debt".
-  expect(deriveLegacyView({ ...legacy, engine: { ...legacy.engine, total_debt: "" } })?.summaryLine).toContain("debt unreadable");
+  expect(deriveLegacyView({ ...legacy, engine: { ...legacy.engine, total_debt: "" } })?.summary).toContain("debt unreadable");
   expect(deriveLegacyView({ engine: null, badDebt: null, histogram: null, refusedWhole: null })).toBeNull();
 });
 
@@ -300,15 +345,19 @@ test("a withheld Cash engine's census is never a count: all three populations ar
   expect(() => deriveCashView(reading({ cash: { engine: { ...cashEngine, positions: -0 } } }), TIER_FALLBACK)).toThrow(/engines\[debt_manager\]\.positions/);
 });
 
-test("why the figures are absent is decided here: a read in flight is loading, an unread book is unavailable, a withheld engine is not computed — a fetch failure is never worded as an engine's refusal", () => {
+test("why the figures are absent is decided here: a read in flight is pending, an unread book is unavailable, a withheld engine is withheld — a fetch failure is never worded as an engine's refusal, nor drawn in its register", () => {
   const unread = { book: null, cash: { engine: null, rows: [] } } as const;
   const loading = deriveCashView(reading({ phase: "loading", ...unread }), TIER_FALLBACK);
-  expect(loading.absence).toEqual({ kind: "loading", word: "loading…", line: "Loading…" });
+  expect(loading.absence).toEqual({ kind: "loading", state: "pending", word: "…", line: "Loading…" });
+  // A read in flight is busy, never failed: every tile is pending.
+  for (const t of loading.tiles) expect(t).toMatchObject({ pending: true, value: "" });
   expect(loading.sectionQualifier).toBe("Debt Manager engine · OP Mainnet · accounts loading…");
   const failed = deriveCashView(reading({ phase: "error", failure: { message: "Failed to fetch", retryAfterSeconds: null, unreadable: false }, ...unread }), TIER_FALLBACK);
   const noBatch = deriveCashView(reading({ phase: "no-batch", failure: { message: "no servable batch", retryAfterSeconds: 30, unreadable: false }, ...unread }), TIER_FALLBACK);
   for (const v of [failed, noBatch]) {
-    expect(v.absence).toEqual({ kind: "unavailable", word: "unavailable", line: "Unavailable." });
+    expect(v.absence).toEqual({ kind: "unavailable", state: "unavailable", word: "Unavailable", line: "Unavailable." });
+    // The unavailable register — solid, never the refused one — on every tile, and no dash stands for a figure.
+    for (const t of v.tiles) expect(t).toMatchObject({ state: "unavailable", tone: "neutral", value: "", pending: false });
     expect(v.refusedTiles).toBe(true);
     expect(v.sectionQualifier).toBe("Debt Manager engine · OP Mainnet · accounts unavailable");
     expect(`${v.absence?.word ?? ""} ${v.absence?.line ?? ""}`).not.toMatch(/computed/i);
@@ -319,7 +368,10 @@ test("why the figures are absent is decided here: a read in flight is loading, a
   expect(missing.headline.dek).toBe("The Cash engine is missing from this batch.");
   // An engine's refusal keeps the engine's word.
   const withheld = deriveCashView(reading({ cash: { refusedWhole: { code: "SWEEP_FAILED", detail: "" } } }), TIER_FALLBACK);
-  expect(withheld.absence).toEqual({ kind: "not-computed", word: "not computed", line: "Not computed." });
+  expect(withheld.absence).toEqual({ kind: "withheld", state: "refused", word: "Withheld", line: "Withheld." });
+  for (const t of withheld.tiles) expect(t).toMatchObject({ state: "refused", stateWord: "Withheld", value: "" });
+  // The engine's cause rides the sixth tile.
+  expect(tile(withheld, "notcomputed").sub).toBe("Collateral sweep failed");
   // A served book has no absence to word.
   expect(deriveCashView(reading({}), TIER_FALLBACK).absence).toBeNull();
 });
@@ -330,14 +382,14 @@ test("an answer that is not a book is UNREADABLE — never 'unavailable' (the se
     reading({ phase: "error", book: null, failure: { message: fault, retryAfterSeconds: null, unreadable: true }, cash: { engine: null, badDebt: null, rows: [] } }),
     TIER_FALLBACK,
   );
-  expect(v.absence).toEqual({ kind: "unreadable", word: "unreadable", line: "Unreadable." });
+  expect(v.absence).toEqual({ kind: "unreadable", state: "unreadable", word: "Unreadable", line: "Unreadable." });
   expect(v.refusedTiles).toBe(true);
   expect(v.summary).toBeNull();
   expect(v.headline.emphasis).toBe("The Cash book's answer could not be read.");
   expect(v.headline.dek).toBe("The service answered, and the body is not a book: engines is not a list (got null).");
   expect(v.sectionQualifier).toBe("Debt Manager engine · OP Mainnet · accounts unreadable");
   expect(v.chips).toEqual([{ label: "Identity", value: "unreadable", tone: "refused" }]);
-  expect(v.notComputedTile).toEqual({ value: "—", sub: "unreadable" });
+  expect(tile(v, "notcomputed")).toMatchObject({ value: "", state: "unreadable", stateWord: "Unreadable" });
   expect(v.debt).toEqual({ kind: "absent" });
   expect(`${v.headline.emphasis} ${v.headline.dek} ${v.absence?.word ?? ""} ${v.sectionQualifier}`).not.toMatch(/unavailable|not computed|could not be loaded/i);
   // A read that FAILED keeps its own word: the two are never one state.
@@ -346,8 +398,9 @@ test("an answer that is not a book is UNREADABLE — never 'unavailable' (the se
     TIER_FALLBACK,
   );
   expect(failed.absence?.kind).toBe("unavailable");
-  expect(failed.chips).toEqual([{ label: "Identity", value: "unavailable", tone: "refused" }]);
-  expect(failed.notComputedTile).toEqual({ value: "—", sub: "unavailable" });
+  // A fetch failure is never the refused register: the chip is drawn solid.
+  expect(failed.chips).toEqual([{ label: "Identity", value: "unavailable", tone: "neutral" }]);
+  expect(tile(failed, "notcomputed")).toMatchObject({ value: "", state: "unavailable", stateWord: "Unavailable" });
 });
 
 test("a later answer that could not be read never replaced the book: every figure stands from the book that was readable, and the identity strip says so with the fault on hover", () => {
@@ -357,17 +410,19 @@ test("a later answer that could not be read never replaced the book: every figur
   expect(standing.chips[4]).toEqual({ label: "Re-read", value: "unreadable · this batch stands", tone: "warn", title: "batch is not an object (got null)" });
   expect(clean.chips.map((c) => c.label)).not.toContain("Re-read");
   // Nothing else moves: the verdict, the tiles and the summary are the standing book's.
-  expect({ ...standing, chips: null }).toEqual({ ...clean, chips: null });
+  expect({ ...standing, chips: null, liveChips: null }).toEqual({ ...clean, chips: null, liveChips: null });
+  // The live strip keeps the re-read chip too: a fault is never folded away on the front door.
+  expect(standing.liveChips.map((c) => c.label)).toEqual(["Batch", "Snapshot", "Coverage", "Re-read"]);
 });
 
-test("the sixth tile counts what has no verdict here — the engine's refused positions and the rows this page could not read, each in its own word; a withheld engine and an unread book print no count", () => {
+test("the sixth tile counts what has no verdict here — the engine's refused accounts and the rows this page could not read, each in its own word; a withheld engine and an unread book print no count", () => {
   const first = POSITIONS_DM_PAGE_1.positions[0];
   if (first === undefined) throw new Error("fixture invariant: the committed page serves a row");
   const bad = readCashRow(refinePositionSummary({ ...first, account: "0xbad", total_debt: "1e6" }));
   const clean = { ...cashEngine, refused_positions: 0, refusals: [] };
   // The engine refused nothing and one row is unreadable: the tile is never "0 · nothing refused" alone.
   const one = deriveCashView(reading({ cash: { engine: clean, rows: [bad] } }), TIER_FALLBACK);
-  expect(one.notComputedTile).toEqual({ value: "1", sub: "nothing refused · 1 unreadable" });
+  expect(tile(one, "notcomputed")).toMatchObject({ value: "1", sub: "Nothing refused · 1 unreadable" });
   expect(one.refusedPositions).toBe(0);
   expect(one.summary?.unreadable).toBe(1);
   expect(one.headline.emphasis).toBe("The Cash book could not be fully read this batch.");
@@ -375,18 +430,18 @@ test("the sixth tile counts what has no verdict here — the engine's refused po
   expect(one.settled).toBe(true);
   // Beside the engine's own refusals: the sum, and both words.
   const both = deriveCashView(reading({ cash: { rows: [...rows, bad, bad] } }), TIER_FALLBACK);
-  expect(both.notComputedTile).toEqual({ value: "3", sub: "collateral never read · 2 unreadable" });
+  expect(tile(both, "notcomputed")).toMatchObject({ value: "3", sub: "Collateral never read · 2 unreadable" });
   // Mid-walk the unreadable count is what has landed so far.
   const walking = deriveCashView(reading({ cash: { engine: clean, rows: [bad], walkComplete: false } }), TIER_FALLBACK);
-  expect(walking.notComputedTile).toEqual({ value: "1", sub: "nothing refused · 1 unreadable so far" });
+  expect(tile(walking, "notcomputed")).toMatchObject({ value: "1", sub: "Nothing refused · 1 unreadable so far" });
   // A refused count the wire itemises no cause for, and a served book that refused nothing.
-  expect(deriveCashView(reading({ cash: { engine: { ...cashEngine, refusals: [] } } }), TIER_FALLBACK).notComputedTile).toEqual({ value: "1", sub: "cause not stated" });
-  expect(deriveCashView(reading({ cash: { engine: clean, rows: [] } }), TIER_FALLBACK).notComputedTile).toEqual({ value: "0", sub: "nothing refused" });
+  expect(tile(deriveCashView(reading({ cash: { engine: { ...cashEngine, refusals: [] } } }), TIER_FALLBACK), "notcomputed")).toMatchObject({ value: "1", sub: "Cause not stated" });
+  expect(tile(deriveCashView(reading({ cash: { engine: clean, rows: [] } }), TIER_FALLBACK), "notcomputed")).toMatchObject({ value: "0", sub: "Nothing refused" });
   // No census, no count: the withheld engine's cause, and the absence's own word.
   const withheld = deriveCashView(reading({ cash: { refusedWhole: { code: "SWEEP_FAILED", detail: "" }, rows: [] } }), TIER_FALLBACK);
-  expect(withheld.notComputedTile).toEqual({ value: "—", sub: "collateral sweep failed" });
+  expect(tile(withheld, "notcomputed")).toMatchObject({ value: "", sub: "Collateral sweep failed", state: "refused", stateWord: "Withheld" });
   const loading = deriveCashView(reading({ phase: "loading", book: null, cash: { engine: null, rows: [] } }), TIER_FALLBACK);
-  expect(loading.notComputedTile).toEqual({ value: "—", sub: "loading…" });
+  expect(tile(loading, "notcomputed")).toMatchObject({ value: "", pending: true });
 });
 
 const DEMO_LEGACY = DEMO_BOOK.engines.find((e) => e.engine === "aave_v3_etherfi");
@@ -413,52 +468,61 @@ function legacyWith(c: { positions: number; computed: number; liquidatable: numb
 }
 
 test("the legacy fold's line is the market's own finding over computed positions; never a negative over nothing computed", () => {
-  expect(deriveLegacyView(legacyWith({ positions: 8552, computed: 8552, liquidatable: 46, refused: 0, debt: DEMO_LEGACY_DEBT }))?.summaryLine)
-    .toBe("Legacy · Aave v3 market — 46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
+  expect(deriveLegacyView(legacyWith({ positions: 8552, computed: 8552, liquidatable: 46, refused: 0, debt: DEMO_LEGACY_DEBT }))?.summary)
+    .toBe("46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
   // The aggregate sums debt over computed positions only, so with none computed the wire serves a zero that is no
   // position's debt: the line names the debt as not computed and never prints that zero.
-  const zero = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }))?.summaryLine ?? "";
-  expect(zero).toBe("Legacy · Aave v3 market — 3 positions · debt not computed · 3 refused");
+  const zero = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }))?.summary ?? "";
+  expect(zero).toBe("3 positions · debt not computed · 3 refused");
   expect(zero).not.toContain("$0");
   // Nothing computed: no "0 of 0", no "0 liquidatable" — the liquidatable clause is omitted, the population and refusals stand.
-  const none = deriveLegacyView(legacyWith({ positions: 1, computed: 0, liquidatable: 0, refused: 1, debt: null }))?.summaryLine ?? "";
-  expect(none).toBe("Legacy · Aave v3 market — 1 position · debt not computed · 1 refused");
+  const none = deriveLegacyView(legacyWith({ positions: 1, computed: 0, liquidatable: 0, refused: 1, debt: null }))?.summary ?? "";
+  expect(none).toBe("1 position · debt not computed · 1 refused");
   expect(none).not.toMatch(/liquidatable|\b0 of\b/);
   // One computed position is said in the singular; counts are grouped.
-  expect(deriveLegacyView(legacyWith({ positions: 1, computed: 1, liquidatable: 1, refused: 0 }))?.summaryLine).toBe(
-    "Legacy · Aave v3 market — 1 of 1 computed position is liquidatable · $1.9M debt · 0 refused",
+  expect(deriveLegacyView(legacyWith({ positions: 1, computed: 1, liquidatable: 1, refused: 0 }))?.summary).toBe(
+    "1 of 1 computed position is liquidatable · $1.9M debt · 0 refused",
   );
-  expect(deriveLegacyView(legacyWith({ positions: 12_000, computed: 10_500, liquidatable: 1_046, refused: 1_500 }))?.summaryLine).toBe(
-    "Legacy · Aave v3 market — 1,046 of 10,500 computed positions are liquidatable · $1.9M debt · 1,500 refused",
+  expect(deriveLegacyView(legacyWith({ positions: 12_000, computed: 10_500, liquidatable: 1_046, refused: 1_500 }))?.summary).toBe(
+    "1,046 of 10,500 computed positions are liquidatable · $1.9M debt · 1,500 refused",
   );
   // The demo book as served: the same line, and no Cash figure in it.
   const demo = deriveLegacyView({ engine: DEMO_LEGACY, badDebt: null, histogram: null, refusedWhole: null });
-  expect(demo?.summaryLine).toBe("Legacy · Aave v3 market — 46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
+  expect(demo?.summary).toBe("46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
 });
 
 test("the Debt tile is the view's decision: the figure against its collateral, a malformed field named, an absence in its own word", () => {
-  expect(deriveCashView(reading({}), TIER_FALLBACK).debtTile).toEqual({ value: "$4,200", sub: "against $4,000 collateral", tone: "neutral", pending: false });
+  const debt = (v: CashView): BookTile => tile(v, "debt");
+  const D = { id: "debt", label: "Debt outstanding" } as const;
+  expect(debt(deriveCashView(reading({}), TIER_FALLBACK))).toEqual({ ...D, value: "$4,200", sub: "Against $4,000 collateral", tone: "neutral", pending: false });
   const withheld = deriveCashView(reading({ cash: { refusedWhole: { code: "FLAG_CUSTODY_UNPROVEN", detail: "" } } }), TIER_FALLBACK);
-  expect(withheld.debtTile).toEqual({ value: "—", sub: "not computed", tone: "refused", pending: false });
+  expect(debt(withheld)).toEqual({ ...D, value: "", sub: "", tone: "refused", pending: false, state: "refused", stateWord: "Withheld" });
   const loading = deriveCashView(reading({ phase: "loading", book: null, cash: { engine: null, rows: [] } }), TIER_FALLBACK);
-  expect(loading.debtTile).toEqual({ value: "—", sub: "loading…", tone: "refused", pending: false });
-  expect(deriveCashView(reading({ cash: { engine: { ...cashEngine, total_debt: "" } } }), TIER_FALLBACK).debtTile).toEqual({
-    value: "—",
+  expect(debt(loading)).toEqual({ ...D, value: "", sub: "", tone: "neutral", pending: true });
+  expect(debt(deriveCashView(reading({ cash: { engine: { ...cashEngine, total_debt: "" } } }), TIER_FALLBACK))).toEqual({
+    ...D,
+    value: "",
     sub: "engines[debt_manager].total_debt is not a wire decimal",
     tone: "refused",
     pending: false,
+    state: "unreadable",
   });
-  expect(deriveCashView(reading({ cash: { engine: { ...cashEngine, total_collateral: "" } } }), TIER_FALLBACK).debtTile).toEqual({
+  expect(debt(deriveCashView(reading({ cash: { engine: { ...cashEngine, total_collateral: "" } } }), TIER_FALLBACK))).toEqual({
+    ...D,
     value: "$4,200",
-    sub: "collateral unreadable: engines[debt_manager].total_collateral is not a wire decimal",
+    sub: "Collateral unreadable: engines[debt_manager].total_collateral is not a wire decimal",
     tone: "neutral",
     pending: false,
   });
-  expect(deriveCashView(reading({ cash: { engine: { ...cashEngine, total_debt: null } } }), TIER_FALLBACK).debtTile).toEqual({
-    value: "—",
-    sub: "against $4,000 collateral",
-    tone: "refused",
+  // A served book whose engine card carries no total: the figure was not reported — no dash, no zero.
+  expect(debt(deriveCashView(reading({ cash: { engine: { ...cashEngine, total_debt: null } } }), TIER_FALLBACK))).toEqual({
+    ...D,
+    value: "",
+    sub: "Against $4,000 collateral",
+    tone: "neutral",
     pending: false,
+    state: "not-served",
+    stateWord: "Not reported",
   });
 });
 
@@ -474,23 +538,25 @@ test("over a census the engine computed none of, the aggregate's zeros sum no po
   expect(v.collateral).toEqual({ kind: "absent" });
   expect(moneyText(v.debt)).toBe("—");
   expect(moneyText(v.collateral)).toBe("—");
-  expect(v.debtTile).toEqual({ value: "—", sub: "no account computed", tone: "refused", pending: false });
+  expect(tile(v, "debt")).toMatchObject({ value: "", sub: "No account computed", tone: "refused", state: "refused", stateWord: "No verdict" });
+  // The Overview's live stats say the same, in words: never a dash, never "$0".
+  expect(v.liveStats.map((stat) => stat.text)).toEqual(["No verdict", "No verdict", "1"]);
   expect(v.bookEntryLine).toBe("No account could be computed this batch");
   // The census still stands as served: one account, refused, counted on its own.
   expect(v.positions).toBe(1);
-  expect(v.notComputedTile.value).toBe("1");
+  expect(tile(v, "notcomputed").value).toBe("1");
   // An empty book refused nothing: its zero is the book's own finding, as the server totals it.
   const emptyEngine = { ...cashEngine, positions: 0, computed_positions: 0, refused_positions: 0, liquidatable_positions: 0, total_debt: "0", total_collateral: "0", refusals: [] };
   const empty = deriveCashView(reading({ cash: { engine: emptyEngine, rows: [] } }), TIER_FALLBACK);
   expect(empty.debt).toEqual({ kind: "value", value: 0n, text: "$0" });
-  expect(empty.debtTile).toEqual({ value: "$0", sub: "against $0 collateral", tone: "neutral", pending: false });
+  expect(tile(empty, "debt")).toMatchObject({ value: "$0", sub: "Against $0 collateral", tone: "neutral", pending: false });
   expect(empty.bookEntryLine).toBe("$0 within 10% of cap");
 });
 
 test("the legacy fold reads one decision over nothing computed — its line, its Debt tile and its Liquidatable tile print no zero; an empty market's zero is its own", () => {
   // Every position refused: the wire's zero debt and zero liquidatable count are sums over nothing computed.
   const none = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }));
-  expect(none?.summaryLine).toBe("Legacy · Aave v3 market — 3 positions · debt not computed · 3 refused");
+  expect(none?.summary).toBe("3 positions · debt not computed · 3 refused");
   expect(none?.debt).toEqual({ kind: "absent" });
   expect(none?.liquidatable).toBeNull();
   expect(none?.positions).toBe(3);
@@ -498,7 +564,7 @@ test("the legacy fold reads one decision over nothing computed — its line, its
   // A market with no positions refused nothing: "not computed" would name a failure that did not happen, so its zero
   // debt is the market's own finding, as the server totals an empty book.
   const empty = deriveLegacyView(legacyWith({ positions: 0, computed: 0, liquidatable: 0, refused: 0, debt: "0" }));
-  expect(empty?.summaryLine).toBe("Legacy · Aave v3 market — 0 positions · $0 debt · 0 refused");
+  expect(empty?.summary).toBe("0 positions · $0 debt · 0 refused");
   expect(empty?.debt).toEqual({ kind: "value", value: 0n, text: "$0" });
   expect(empty?.liquidatable).toBe(0);
   // Computed positions: the count stands, zero included.
@@ -521,7 +587,7 @@ test("the legacy fold's words are the view's: every tile's label, figure, sub li
     positions: { label: "Positions", value: "2", sub: "1 computed", tone: "neutral" },
     debt: { label: "Debt", value: "$6,000", tone: "neutral" },
     liquidatable: { label: "Liquidatable", value: "0", sub: "$0 eligible debt", tone: "neutral" },
-    notComputed: { label: "Not computed", value: "1", tone: "refused" },
+    notComputed: { label: "No verdict", value: "1", tone: "refused" },
   });
   // A liquidatable count stands in the crit register; with no bad-debt row served, the sum's place says withheld.
   const counted = deriveLegacyView(legacyWith({ positions: 8552, computed: 8552, liquidatable: 46, refused: 0 }));
@@ -530,13 +596,21 @@ test("the legacy fold's words are the view's: every tile's label, figure, sub li
   // A malformed eligible debt is named unreadable — never a refusal the wire did not make, never "$0".
   const malformed = deriveLegacyView({ ...legacy, badDebt: { ...legacy.badDebt, eligible_debt_usd: "" } });
   expect(malformed?.tiles.liquidatable).toEqual({ label: "Liquidatable", value: "0", sub: "Σ unreadable", tone: "neutral" });
-  // Nothing computed: the debt and the liquidatable count are sums over nothing — dashes in the refused register.
+  // Nothing computed: the debt and the liquidatable count are sums over nothing — no figure, the population's word.
   const none = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }));
   expect(none?.tiles).toEqual({
     positions: { label: "Positions", value: "3", sub: "0 computed", tone: "neutral" },
-    debt: { label: "Debt", value: "—", tone: "refused" },
-    liquidatable: { label: "Liquidatable", value: "—", sub: "not computed", tone: "refused" },
-    notComputed: { label: "Not computed", value: "3", tone: "refused" },
+    debt: { label: "Debt", value: "", sub: "No position computed", tone: "refused", state: "refused", stateWord: "No verdict" },
+    liquidatable: { label: "Liquidatable", value: "", sub: "No position computed", tone: "refused", state: "refused", stateWord: "No verdict" },
+    notComputed: { label: "No verdict", value: "3", tone: "refused" },
+  });
+  // A malformed legacy debt is named unreadable, the field on the sub line.
+  expect(deriveLegacyView({ ...legacy, engine: { ...legacy.engine, total_debt: "" } })?.tiles.debt).toEqual({
+    label: "Debt",
+    value: "",
+    sub: "engines[aave_v3_etherfi].total_debt is not a wire decimal",
+    tone: "refused",
+    state: "unreadable",
   });
   // A histogram withheld on its own is said in the fold's sentence, with its cause.
   const refusedHistogram = { ...legacy.histogram, refused: true, refusal: { engine: "aave_v3_etherfi", code: "SWEEP_FAILED", detail: "", note: "" } };
@@ -554,11 +628,12 @@ test("the legacy fold's words are the view's: every tile's label, figure, sub li
     histogramWithheldNote: null,
     withheldNote: "The engine withheld its whole book this batch: collateral-flag custody unproven. Its populations, debt and histogram are not computed.",
   });
+  const held = { value: "", tone: "refused", state: "refused", stateWord: "Withheld" } as const;
   expect(withheld?.tiles).toEqual({
-    positions: { label: "Positions", value: "—", sub: "not computed", tone: "refused" },
-    debt: { label: "Debt", value: "—", tone: "refused" },
-    liquidatable: { label: "Liquidatable", value: "—", sub: "not computed", tone: "refused" },
-    notComputed: { label: "Not computed", value: "—", tone: "refused" },
+    positions: { label: "Positions", ...held },
+    debt: { label: "Debt", ...held },
+    liquidatable: { label: "Liquidatable", ...held },
+    notComputed: { label: "No verdict", ...held },
   });
 });
 
@@ -592,4 +667,14 @@ test("over nothing computed the legacy histogram draws no bar — its buckets co
   const computed = deriveLegacyView({ ...legacyWith({ positions: 2, computed: 1, liquidatable: 0, refused: 1 }), histogram: servedHistogram });
   expect(computed?.bands?.map((b) => b.count)).toEqual([0, 0, 0, 1, 0, 0, 0, 0]);
   expect(computed?.bandsNote).toBeNull();
+});
+
+test("one kicker for the Cash book on both pages: the book right now, and which walk state stands", () => {
+  expect(cashBookKicker(deriveCashView(reading({}), TIER_FALLBACK))).toBe("Cash book · right now");
+  expect(cashBookKicker(deriveCashView(reading({ cash: { walkComplete: false } }), TIER_FALLBACK))).toBe("Cash book · right now · walking");
+  const stopped = deriveCashView(
+    reading({ cash: { rows: [], walkComplete: false, walkFailure: { register: "transport", message: "Failed to fetch" }, walkStop: "before-end" } }),
+    TIER_FALLBACK,
+  );
+  expect(cashBookKicker(stopped)).toBe("Cash book · right now · walk stopped");
 });

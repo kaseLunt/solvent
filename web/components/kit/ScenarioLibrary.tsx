@@ -12,6 +12,8 @@ export type LibraryOutcomeTone = "crit" | "warn" | "ok" | "refused" | "dim";
 export interface LibraryItem {
   readonly id: string;
   readonly label: string;
+  /** The wire's own label, id and version, carried as the name's hover. */
+  readonly title?: string;
   readonly description: string;
   readonly engines: string;
   readonly outcome: {
@@ -127,7 +129,7 @@ export function ScenarioLibrary({
                 onClick={() => onSelect(item.id)}
                 aria-pressed={item.selected}
               >
-                <span className={styles.libName}>{item.label}</span>
+                <span className={styles.libName} title={item.title}>{item.label}</span>
                 <span className={styles.libDesc}>{item.description}</span>
                 <span className={styles.libEngines}>{item.engines}</span>
                 <span

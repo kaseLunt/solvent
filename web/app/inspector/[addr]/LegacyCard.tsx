@@ -1,40 +1,35 @@
-import { positionVerdict, type RefinedPosition } from "@solvent/client";
-import { KpiTile, StatusPill } from "@/components/kit";
+import type { RefinedPosition } from "@solvent/client";
+import { KpiTile, LegacyFold, StatusPill } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { displayHf } from "@/lib/history-series";
+import { legacyWords } from "@/lib/inspector-view";
+import { LEGACY_FOLD_TITLE } from "@/lib/prose";
 import styles from "../inspector.module.css";
-import { wireMoney } from "./money";
 
-/** Only when the address holds a legacy Aave v3 position. HF-based, labeled legacy, never beside a Cash sum. */
+/** Only when the address holds a legacy Aave v3 position: its own fold, judged by its own health factor, never beside a Cash sum. */
 export function LegacyCard({ position }: { position: RefinedPosition }) {
-  // The legacy market is judged by ITS OWN comparator — the health factor, on the wad — never by the Cash engine's
-  // boolean, which the wire leaves null on Aave by contract. Only a null or refused health factor is "not computed".
-  const verdict = positionVerdict(position);
-  const hf = position.health_factor === null ? null : displayHf(position.health_factor);
-  const stale = position.flags.includes("stale_price");
-  const status = verdict === "liquidatable" ? "Liquidatable" : verdict === "unknowable" ? "Not computed" : "Healthy";
-  const tone = verdict === "liquidatable" ? "crit" : verdict === "unknowable" ? "refused" : "ok";
+  const words = legacyWords(position);
   return (
-    <details className={styles.legacy} data-testid="inspector-legacy">
-      <summary>Legacy · Aave v3 market position</summary>
-      <div className={`${kit.kpis} ${kit.kpis4} ${styles.legacyBody}`}>
-        <KpiTile
-          testId="inspector-legacy-hf"
-          label="Health factor"
-          value={hf ?? "—"}
-          sub="liquidatable strictly below 1.0"
-          tone={verdict === "liquidatable" ? "crit" : verdict === "unknowable" ? "refused" : "neutral"}
-        />
-        <KpiTile label="Collateral" value={wireMoney(position.total_collateral_base, position.value_decimals)} sub="legacy market · own unit" />
-        <KpiTile label="Debt" value={wireMoney(position.total_debt_base, position.value_decimals)} sub="never added to Cash" />
-        <KpiTile testId="inspector-legacy-status" label="Status" value={status} sub={stale ? "stale price input" : "own health factor"} tone={tone} />
+    <LegacyFold title={LEGACY_FOLD_TITLE} summary={words.summary} testId="inspector-legacy">
+      <div className={`${kit.kpis} ${kit.kpis4}`}>
+        {words.tiles.map((tile) => (
+          <KpiTile
+            key={tile.key}
+            testId={tile.key === "hf" || tile.key === "status" ? `inspector-legacy-${tile.key}` : undefined}
+            label={tile.label}
+            value={tile.value}
+            sub={tile.sub}
+            tone={tile.tone}
+            state={tile.state}
+            stateWord={tile.state === undefined ? undefined : tile.value}
+          />
+        ))}
       </div>
-      {stale && (
+      {words.stale !== null && (
         <p className={styles.note}>
-          <StatusPill tone="warn">stale price</StatusPill> a price input behind this position is older than its budget; the figure is computed and flagged.
+          <StatusPill tone={words.stale.tone}>{words.stale.word}</StatusPill> {words.stale.note}
         </p>
       )}
-      <p className={styles.dim}>The legacy market is judged by its own health factor. The two books are never added together.</p>
-    </details>
+      <p className={styles.dim}>{words.footnote}</p>
+    </LegacyFold>
   );
 }

@@ -24,6 +24,7 @@ import {
   DEMO_SCENARIOS,
   DEMO_STRESS_NEAR,
 } from "../fixtures/demo";
+import { scenarioName } from "../../lib/scenario-name";
 
 const CORS = { "access-control-allow-origin": "*" };
 /** The set route is cross-origin and preflighted; the OPTIONS leg is answered here and never counted as a run. */
@@ -449,7 +450,7 @@ test("scenarios · Enter on a focused row button selects that scenario: the row 
   const headline = tab.getByTestId("lab-verdict-headline");
   await expect(libraryRow(tab, from.id)).toHaveAttribute("data-selected", "true");
   await expect(libraryRow(tab, to.id)).not.toHaveAttribute("data-selected", "true");
-  await expect(headline).not.toContainText(to.label);
+  await expect(headline).not.toContainText(scenarioName(to));
   const subjectBefore = await headline.textContent();
 
   const button = libraryRow(tab, to.id).getByRole("button");
@@ -463,9 +464,9 @@ test("scenarios · Enter on a focused row button selects that scenario: the row 
   await expect(libraryRow(tab, from.id).getByRole("button")).toHaveAttribute("aria-pressed", "false");
   // The surface is about the pressed scenario now: not yet run, named in the headline, the Run control its own.
   await expect(tab.getByTestId("lab-surface")).toHaveAttribute("data-state", "not-run");
-  await expect(headline).toContainText(to.label);
+  await expect(headline).toContainText(scenarioName(to));
   expect(await headline.textContent()).not.toBe(subjectBefore);
-  await expect(tab.getByTestId("lab-run")).toHaveText(`Run ${to.label}`);
+  await expect(tab.getByTestId("lab-run")).toHaveText(`Run ${scenarioName(to)}`);
   // The key stays where it was pressed, and selecting ran no set.
   await expect(button).toBeFocused();
   expect(counts.sets()).toBe(0);

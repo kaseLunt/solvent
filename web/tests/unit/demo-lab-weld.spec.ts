@@ -199,6 +199,7 @@ test("the set run carries the four committed scenarios; the eth row IS the run-b
     ["eth_minus_30", "point", "+4.5%"],
     ["ethfi_minus_50", "point", "<0.1%"],
     ["weeth_market_depeg_oracles_held", "point", "0%"],
-    ["dm_rate_horizon_plus_200bps", "point", "0%"],
+    // The rate horizon ran no spot pass: its zeros are the unshocked book, never a measured "no change".
+    ["dm_rate_horizon_plus_200bps", "projection", "—"],
   ]);
 });

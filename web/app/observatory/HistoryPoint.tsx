@@ -1,16 +1,19 @@
-// The selected bucket's FULL record: a card, not a list. Every sentence is
-// the lib's (`pointRecord`): this component prints the rows, keeps each hazard
-// row outside the counted fold exactly when the record puts it in the answer,
-// sets a clause in the ink the record names for it (a caption is dim; a state
-// never is), and draws the rate snapshot as the kit's table inside its own
-// scroll container. Nothing here decides a word.
+// The selected hour's FULL record: a card, not a list. Every sentence is the
+// lib's (`pointRecord`): this component prints the rows — each a name on the
+// left and its value on the right, one hairline between them, the record
+// pattern Verification's subject cards share — keeps each hazard row outside
+// the counted fold exactly when the record puts it in the answer, sets a
+// clause in the ink the record names for it (a caption is dim; a state never
+// is), offers the exact string's copy action where the record names one, and
+// draws the rate snapshot as the kit's table inside its own scroll container.
+// Nothing here decides a word.
 
-import { Fragment } from "react";
 import { KitTable, StatusPill, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { HISTORY_RATE_COLUMNS, pointRecord, type PointRecord, type RecordRow } from "@/lib/history-view";
 import type { ObservatorySeriesResponse } from "@/lib/observatory-data";
 import type { BucketEntry } from "@/lib/observatory-series";
+import { CopyChip } from "../proof/CopyChip";
 import styles from "./history.module.css";
 
 const RATE_COLUMNS: KitColumn[] = HISTORY_RATE_COLUMNS.map((column) => ({
@@ -22,8 +25,8 @@ const RATE_COLUMNS: KitColumn[] = HISTORY_RATE_COLUMNS.map((column) => ({
 /** One record renders at a time, so one id names its heading. */
 const TITLE_ID = "history-point-title";
 
-export function HistoryPoint({ entry, response }: { entry: BucketEntry; response: ObservatorySeriesResponse }) {
-  const record = pointRecord(entry, response);
+export function HistoryPoint({ entry, response, latest }: { entry: BucketEntry; response: ObservatorySeriesResponse; latest: boolean }) {
+  const record = pointRecord(entry, response, latest);
   return (
     // The card is named BY its heading: the accessible name is the visible title and the hour it belongs to, one
     // node — so the two cannot differ in case or in words, and a reader of either knows which hour's record this is.
@@ -35,8 +38,8 @@ export function HistoryPoint({ entry, response }: { entry: BucketEntry; response
       aria-labelledby={TITLE_ID}
     >
       <div className={kit.cardT}>
-        <h3 id={TITLE_ID}>
-          {record.title} <span className={styles.mono}>{record.bucket}</span>
+        <h3 id={TITLE_ID} title={record.bucket}>
+          {record.title}
         </h3>
       </div>
       <p className={styles.takeaway} data-testid="history-point-takeaway">
@@ -59,19 +62,28 @@ export function HistoryPoint({ entry, response }: { entry: BucketEntry; response
 
 function Rows({ rows, code }: { rows: readonly RecordRow[]; code: string | null }) {
   return (
-    <dl className={styles.kv}>
+    <dl className={styles.rows}>
       {rows.map((row) => (
-        <Fragment key={row.key}>
-          <dt>{row.label}</dt>
-          <dd data-testid={row.testId ?? undefined}>
+        <div key={row.key} className={styles.row}>
+          <dt className={styles.k}>{row.label}</dt>
+          <dd className={styles.v} data-testid={row.testId ?? undefined}>
             {row.tone === "refused" ? (
               <StatusPill tone="refused" title={code ?? undefined}>
                 {row.value}
               </StatusPill>
             ) : (
-              <span className={[row.mono ? styles.mono : "", row.tone === "crit" ? styles.crit : ""].filter(Boolean).join(" ") || undefined}>
+              <span
+                className={[row.mono ? styles.mono : "", row.tone === "crit" ? styles.crit : ""].filter(Boolean).join(" ") || undefined}
+                title={row.title ?? undefined}
+              >
                 {row.value}
               </span>
+            )}
+            {row.copy !== null && (
+              <>
+                {" "}
+                <CopyChip text={row.copy.text} label={row.copy.label} />
+              </>
             )}
             {row.note !== null && (
               <span className={row.noteTone === "state" ? styles.stateNote : styles.dim} data-note={row.noteTone}>
@@ -79,7 +91,7 @@ function Rows({ rows, code }: { rows: readonly RecordRow[]; code: string | null 
               </span>
             )}
           </dd>
-        </Fragment>
+        </div>
       ))}
     </dl>
   );
@@ -108,13 +120,13 @@ function Rates({ record }: { record: PointRecord }) {
           {rate.scaleStated ? rate.scale : <span className={styles.dim}>{rate.scale}</span>}
         </span>
       ),
-      block: <span className={styles.mono}>{rate.block}</span>,
+      block: rate.block,
       note: <span className={styles.dim}>{rate.note}</span>,
     },
   }));
   return (
     <div className={styles.rates}>
-      <KitTable testId="history-point-rates" columns={RATE_COLUMNS} rows={rows} />
+      <KitTable testId="history-point-rates" columns={RATE_COLUMNS} rows={rows} label={record.title} />
     </div>
   );
 }

@@ -5,9 +5,8 @@ import { Drawer } from "@/components/Drawer";
 import type { AddressReading } from "@/lib/address-lookup";
 import { blockTimeTitle, formatBlock } from "@/lib/format";
 import { isComputedCash, sourceDisplay, symbolFor } from "@/lib/inspector-position";
-import { drawerEmptyText, drawerSweepBlock, type InspectorView } from "@/lib/inspector-view";
+import { drawerEmptyText, drawerSweepBlock, HISTORY_GAP_METHOD, INSPECTOR_DRAWER_TITLE, type InspectorView } from "@/lib/inspector-view";
 import { plainCause } from "@/lib/refusal-phrasebook";
-import styles from "../inspector.module.css";
 import { wireExact, wirePrice } from "./money";
 
 /** Inputs · Calculation · Provenance — the formula with this account's numbers substituted, every input's source and age, the exact wire values. */
@@ -21,8 +20,8 @@ export function InspectorDrawer({ open, onClose, view, reading }: { open: boolea
   const batch = reading.lookup.phase === "ready" ? reading.lookup.value.response.batch : null;
   const servedAt = reading.lookup.phase === "ready" ? reading.lookup.value.response.served_at : null;
   return (
-    <Drawer open={open} onClose={onClose} title="Inputs · Calculation · Provenance">
-      <div className={styles.method} data-testid="inspector-drawer-body">
+    <Drawer open={open} onClose={onClose} title={INSPECTOR_DRAWER_TITLE}>
+      <div data-testid="inspector-drawer-body">
         {p === null || cash === null ? (
           <p data-testid="inspector-drawer-empty">{drawerEmptyText(view)}</p>
         ) : (
@@ -66,6 +65,7 @@ export function InspectorDrawer({ open, onClose, view, reading }: { open: boolea
               {drawerSweepBlock(p)}
             </p>
             <h3>Provenance</h3>
+            <p>{HISTORY_GAP_METHOD}</p>
             {batch !== null && (
               <p>
                 Batch <code>{String(batch.id)}</code> computed <code>{batch.computed_at}</code> by <code>{batch.producer}</code>; served <code>{servedAt ?? ""}</code>.

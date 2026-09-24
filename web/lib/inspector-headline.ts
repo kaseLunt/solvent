@@ -21,9 +21,14 @@ export type InspectorVariant =
   | "unavailable"
   | "invalid";
 
+/**
+ * A headline that states an answer is ink or its verdict's tone — a definitive empty answer ("No Cash or Aave
+ * position") included. One that states there is no answer is the absent register, whole line: `refused` when the
+ * engine or the service withheld or refused it, `absent` when there is simply none here (in flight, a failed lookup).
+ */
 export interface InspectorHeadline {
   readonly variant: InspectorVariant;
-  readonly tone: "crit" | "warn" | "ok" | "refused";
+  readonly tone: "crit" | "warn" | "ok" | "neutral" | "refused" | "absent";
   readonly emphasis: string;
   readonly rest: string;
   readonly dek: string;
@@ -59,7 +64,7 @@ export function cashHeadline(p: ComputedCash, extras: { streak: Streak | null; f
       tone: "crit",
       emphasis: `Liquidatable now — ${money(p.debt)} against a ${money(p.cap)} cap.`,
       rest: "",
-      dek: `${base} ${money(-p.room)} over the line: the strict rule is debt > cap.${floor}`,
+      dek: `${base} Over cap by ${money(-p.room)}: the strict rule is debt > cap.${floor}`,
     };
   }
   if (p.status === "near") {
@@ -89,7 +94,7 @@ export function cashHeadline(p: ComputedCash, extras: { streak: Streak | null; f
 export function noPositionHeadline(batchId: number): InspectorHeadline {
   return {
     variant: "no-position",
-    tone: "refused",
+    tone: "neutral",
     emphasis: `No Cash or Aave position in batch ${groupInt(batchId)}.`,
     rest: "",
     dek: "The lookup was complete: every engine was available to be asked and none withheld its book, so this is a definitive answer for this batch.",
@@ -137,7 +142,7 @@ export function otherEngineHeadline(batchId: number, engines: readonly string[])
           : `Positions on ${joinAnd(foreign)} are not read here.`;
     return {
       variant: "other-engine",
-      tone: "refused",
+      tone: "neutral",
       emphasis: `${where}; a legacy Aave v3 position exists.`,
       rest: "",
       dek: paragraph(LEGACY_DEK, also),
@@ -145,11 +150,11 @@ export function otherEngineHeadline(batchId: number, engines: readonly string[])
   }
   if (foreign.length === 0) {
     // Unreachable by the client's invariant (a found lookup names at least one engine); defensive.
-    return { variant: "other-engine", tone: "refused", emphasis: `${where}.`, rest: "", dek: FOREIGN_DEK };
+    return { variant: "other-engine", tone: "neutral", emphasis: `${where}.`, rest: "", dek: FOREIGN_DEK };
   }
   return {
     variant: "other-engine",
-    tone: "refused",
+    tone: "neutral",
     emphasis: `${where}; ${foreign.length === 1 ? "a position exists" : "positions exist"} on ${joinAnd(foreign)}, which this page does not read.`,
     rest: "",
     dek: FOREIGN_DEK,
@@ -159,12 +164,12 @@ export function otherEngineHeadline(batchId: number, engines: readonly string[])
 export function unavailableLookupHeadline(message: string): InspectorHeadline {
   return {
     variant: "unavailable",
-    tone: "refused",
+    tone: "absent",
     emphasis: "The lookup could not be completed.",
     rest: "",
     dek: paragraph(sentence(message), "This is neither “no position” nor a position — an error is not an answer."),
   };
 }
 
-export const LOADING_HEADLINE: InspectorHeadline = { variant: "loading", tone: "refused", emphasis: "Looking up this address…", rest: "", dek: "Fetching the newest batch." };
+export const LOADING_HEADLINE: InspectorHeadline = { variant: "loading", tone: "absent", emphasis: "Looking up this address…", rest: "", dek: "Fetching the newest batch." };
 export const INVALID_HEADLINE: InspectorHeadline = { variant: "invalid", tone: "refused", emphasis: "Not an address.", rest: "", dek: INVALID_ADDRESS_COPY };

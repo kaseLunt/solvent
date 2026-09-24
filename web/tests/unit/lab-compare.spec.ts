@@ -4,7 +4,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { compareRows, setMembership, shareTenths, type RunBookSetResponse, type SetRunEngineSummary, type SetRunScenarioResult } from "../../lib/lab-compare";
+import { compareHeadline, compareRows, setMembership, shareTenths, type RunBookSetResponse, type SetRunEngineSummary, type SetRunScenarioResult } from "../../lib/lab-compare";
+import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
 
 const BASE = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/run-book-set.json", import.meta.url)), "utf8")) as RunBookSetResponse;
 const TEMPLATE_ENGINE = BASE.results[0]!.engines[0]!;
@@ -45,6 +46,10 @@ test("points are ranked by |share|, the words carry sign and tier, every non-ans
     result("zero_book", "Empty book", { engines: [summary({ eligible_debt_delta_usd: "5", total_debt_usd_before: "0" })] }),
     result("bad", "Bad wire", { engines: [summary({ eligible_debt_delta_usd: "1e6" })] }),
     result("rate", "Rate step", { engines: [summary({ eligible_debt_delta_usd: "-2000000000", total_debt_usd_before: "27828808216758", flipped_to_eligible: null })] }),
+    result("horizon", "Rate horizon", {
+      shock_reach: { ...TEMPLATE_RESULT.shock_reach, reach: "projection_no_spot_pass" },
+      engines: [summary({ eligible_debt_delta_usd: "0", total_debt_usd_before: "27828808216758", flipped_to_eligible: 0 })],
+    }),
   ]);
   const v = compareRows(set, "debt_manager");
   expect(v.engine).toBe("debt_manager");
@@ -61,6 +66,8 @@ test("points are ranked by |share|, the words carry sign and tier, every non-ans
     ["absent", "unmeasurable"],
     ["zero_book", "no-denominator"],
     ["bad", "unreadable"],
+    // A projection with no spot pass has no spot figure to rank: it is its own kind, never a measured zero at zero.
+    ["horizon", "projection"],
   ]);
   const eth = v.rows[0]!;
   expect(eth.shareTenths).toBe(45n);
@@ -74,13 +81,15 @@ test("points are ranked by |share|, the words carry sign and tier, every non-ans
   expect(v.rows[2]?.deltaText).toBe("−$2,000");
   expect(v.rows[2]?.newly).toBeNull();
   expect(v.rows[3]?.shareText).toBe("0%");
-  expect(v.rows[3]?.deltaText).toBe("+$0");
+  // A zero carries no sign.
+  expect(v.rows[3]?.deltaText).toBe("$0");
   expect(v.rows[4]?.reason).toBe("withheld");
   expect(v.rows[5]?.reason).toBe("not modelled");
   expect(v.rows[6]?.reason).toBe("no_positions_in_batch");
   expect(v.rows[7]?.reason).toBe("no denominator");
   expect(v.rows[7]?.deltaText).toBe("+<$0.01");
   expect(v.rows[8]?.reason).toContain("eligible_debt_delta_usd");
+  expect([v.rows[9]?.deltaUsd, v.rows[9]?.plotTenths, v.rows[9]?.tone]).toEqual([null, null, null]);
   for (const r of v.rows.slice(4)) expect(r.shareTenths).toBeNull();
 });
 
@@ -234,4 +243,74 @@ test("a dot's tone is the sign of the UNROUNDED delta and a nonzero change is ne
   }
   // A row that is no point draws no dot: no place, no tone.
   expect([row("held").tone, row("held").plotTenths]).toEqual([null, null]);
+});
+
+/** The demo set answering an ask: its results for the asked ids, the echo the ask itself, the evaluated count agreeing. */
+const demoSetFor = (ids: readonly string[]): RunBookSetResponse => {
+  const results = DEMO_RUN_BOOK_SET.results.filter((r) => ids.includes(r.scenario_id));
+  return { ...DEMO_RUN_BOOK_SET, requested_scenario_ids: [...ids], results, evaluation: { ...DEMO_RUN_BOOK_SET.evaluation, scenarios_evaluated: results.length } };
+};
+const edit = (set: RunBookSetResponse, id: string, change: (r: SetRunScenarioResult) => SetRunScenarioResult): RunBookSetResponse => ({
+  ...set,
+  results: set.results.map((r) => (r.scenario_id === id ? change(r) : r)),
+});
+const cashDelta = (delta: string) => (r: SetRunScenarioResult): SetRunScenarioResult => ({
+  ...r,
+  engines: r.engines.map((e) => (e.engine === "debt_manager" ? { ...e, eligible_debt_delta_usd: delta } : e)),
+});
+const withheldCash = (r: SetRunScenarioResult): SetRunScenarioResult => ({ ...r, withheld_engines: ["debt_manager"], engines: r.engines.filter((e) => e.engine !== "debt_manager") });
+const TWO = ["eth_minus_30", "ethfi_minus_50"];
+const ALL = DEMO_RUN_BOOK_SET.results.map((r) => r.scenario_id);
+
+test("the rows are named from their own definitions, the wire's label kept for the title", () => {
+  const v = compareRows(demoSetFor(ALL), "debt_manager");
+  expect(v.rows.map((r) => r.label)).toEqual(["ETH −30%", "ETHFI −50%", "weETH depeg to 0.95, oracles held", "Cash borrow APY +200 bps"]);
+  expect(v.rows[0]?.wireLabel).toBe("ETH -30 percent");
+  expect(v.computedAt).toBe(DEMO_RUN_BOOK_SET.batch.computed_at);
+});
+
+test("compareHeadline: the leader named with its money phrase, every other scenario one clause of the dek, a projection never ranked on spot liquidatability", () => {
+  const all = compareHeadline(compareRows(demoSetFor(ALL), "debt_manager"));
+  expect(all).toEqual({
+    emphasis: "ETH −30% moves the most:",
+    rest: "$1.2M more Cash debt becomes liquidatable, 4.5% of the book.",
+    tone: "crit",
+    dek: "ETHFI −50%: +$9,800, under 0.1% of the book. weETH depeg to 0.95, oracles held: no change. Cash borrow APY +200 bps is a projection with no spot pass, so it is not ranked on spot liquidatability.",
+  });
+  expect(compareHeadline(compareRows(demoSetFor(TWO), "debt_manager")).dek).toBe("ETHFI −50%: +$9,800, under 0.1% of the book.");
+});
+
+test("compareHeadline: a tie names every leader; a set where nothing moves says so; a fall leads by its size in ink", () => {
+  const tie = compareHeadline(compareRows(edit(demoSetFor(TWO), "ethfi_minus_50", cashDelta("1280000000000")), "debt_manager"));
+  expect(tie.emphasis).toBe("ETH −30% and ETHFI −50% move the most:");
+  expect(tie.rest).toBe("$1.2M more Cash debt becomes liquidatable under each, 4.5% of the book.");
+  expect(tie.tone).toBe("crit");
+  const still = compareHeadline(compareRows(edit(edit(demoSetFor(TWO), "eth_minus_30", cashDelta("0")), "ethfi_minus_50", cashDelta("0")), "debt_manager"));
+  expect(still).toEqual({ emphasis: "No scenario in this set makes more Cash debt liquidatable.", rest: "", tone: "neutral", dek: "ETH −30% and ETHFI −50% leave it unchanged." });
+  const falling = compareHeadline(compareRows(edit(demoSetFor(TWO), "eth_minus_30", cashDelta("-4500000000000")), "debt_manager"));
+  expect(falling).toEqual({
+    emphasis: "ETH −30% moves the most:",
+    rest: "$4.5M less Cash debt is liquidatable, 16.1% of the book.",
+    tone: "neutral",
+    dek: "ETHFI −50%: +$9,800, under 0.1% of the book.",
+  });
+});
+
+test("compareHeadline: a refused or withheld member is left out of the ranking and named in the dek; a set with nothing to rank says so", () => {
+  const withheld = compareHeadline(compareRows(edit(demoSetFor(TWO), "ethfi_minus_50", withheldCash), "debt_manager"));
+  expect(withheld.emphasis).toBe("ETH −30% moves the most:");
+  expect(withheld.dek).toBe("ETHFI −50% could not be evaluated: withheld.");
+  const none = compareHeadline(compareRows(edit(edit(demoSetFor(TWO), "eth_minus_30", withheldCash), "ethfi_minus_50", withheldCash), "debt_manager"));
+  expect(none).toEqual({
+    emphasis: "No scenario in this set could be ranked for the Cash book.",
+    rest: "",
+    tone: "refused",
+    dek: "ETH −30% could not be evaluated: withheld. ETHFI −50% could not be evaluated: withheld.",
+  });
+  // A set of projections alone has no answer on spot liquidatability, and is no refusal either.
+  const projectionOnly = compareHeadline(compareRows(demoSetFor(["dm_rate_horizon_plus_200bps"]), "debt_manager"));
+  expect(projectionOnly.tone).toBe("absent");
+  expect(projectionOnly.dek).toBe("Cash borrow APY +200 bps is a projection with no spot pass, so it is not ranked on spot liquidatability.");
+  const empty = compareRows(demoSetFor(TWO), "debt_manager");
+  expect(compareHeadline({ ...empty, rows: [] })).toEqual({ emphasis: "No scenario was compared.", rest: "", tone: "absent", dek: "" });
 });

@@ -1,8 +1,15 @@
 import { bookHeadlineRefused, type Headline } from "./book-headline";
 import type { CashBookReading } from "./cash-book";
-import { CASH_ENGINE_MISSING } from "./cash-refusal";
+import { BAD_DEBT_NOT_REPORTED, CASH_ENGINE_MISSING } from "./cash-refusal";
 import {
-  NONE_COMPUTED_SUB,
+  liquidatableTile,
+  liquidatableTileLabel,
+  medianRoomTile,
+  nearCapTile,
+  NO_VERDICT,
+  NONE_COMPUTED_TILE,
+  overviewLiveLine,
+  stateTone,
   summarizeCash,
   unavailableHeadline,
   unreadableHeadline,
@@ -14,6 +21,8 @@ import {
 import { humanAge } from "./freshness";
 import { freshnessTier, type FreshnessTier, type TierConstants } from "./freshnessTiers";
 import { humanUsd } from "./human-usd";
+import type { StateRegister } from "./kit";
+import { plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import { stressPreview, type StressPreview } from "./stress-preview";
 import { readWirePopulation, readWireScale, wireBigInt } from "./wireGuard";
@@ -21,6 +30,7 @@ import { readWirePopulation, readWireScale, wireBigInt } from "./wireGuard";
 /** A chip on the identity strip; structurally the kit's IdentityChip, kept out of the component layer. */
 export interface ViewChip {
   readonly label: string;
+  /** The chip's value; empty for a label-only chip, which states its whole phrase and bolds none of it. */
   readonly value: string;
   readonly tone?: "neutral" | "ok" | "warn" | "crit" | "refused";
   /** The chip's hover text: the detail its few words stand for. */
@@ -47,11 +57,17 @@ export function readWireMoney(value: unknown, decimals: number, field: string): 
   return { kind: "value", value: big, text: humanUsd(big, decimals) };
 }
 
-/** What a tile or stat prints for a money reading: the figure, or the dash. Never a coerced zero. */
+/** A money reading as a sentence prints it: the figure, or the dash. Never a coerced zero. */
 export const moneyText = (m: MoneyReading): string => (m.kind === "value" ? m.text : "—");
 
 /** The sub line that names a malformed money field. */
 export const malformedSub = (field: string): string => `${field} is not a wire decimal`;
+
+/** A standalone line starts with a capital; the words the wire and the phrasebook give are mid-sentence words. */
+const sentenceCase = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+
+/** The word a figure's place prints when the book served no figure there, and no refusal said why. */
+const NOT_REPORTED = "Not reported";
 
 export interface BadDebtView {
   readonly reading: MoneyReading;
@@ -66,34 +82,51 @@ export interface BadDebtView {
  * failed; a book that could not be fetched (or that does not list the engine)
  * refused nothing and computed nothing; an answer that is not a book is here
  * and cannot be read — "unreadable", never "unavailable"; an engine that
- * withheld its book did answer, and "not computed" is its word alone. A fetch
- * failure is never worded as an engine's refusal.
+ * withheld its book did answer, and "withheld" is its word alone. A fetch
+ * failure is never worded as an engine's refusal, nor drawn in its register.
  */
 export interface CashAbsence {
-  readonly kind: "loading" | "unavailable" | "unreadable" | "not-computed";
-  /** A tile's sub line. */
+  readonly kind: "loading" | "unavailable" | "unreadable" | "withheld";
+  /** The register a tile with no figure is drawn in (lib/kit STATE_REGISTERS). */
+  readonly state: StateRegister;
+  /** What a figure's place prints: the register's word, or "…" while the read is in flight. */
   readonly word: string;
   /** A card's one line. */
   readonly line: string;
 }
 
-const ABSENCE_LOADING: CashAbsence = { kind: "loading", word: "loading…", line: "Loading…" };
-const ABSENCE_UNAVAILABLE: CashAbsence = { kind: "unavailable", word: "unavailable", line: "Unavailable." };
-const ABSENCE_UNREADABLE: CashAbsence = { kind: "unreadable", word: "unreadable", line: "Unreadable." };
-const ABSENCE_NOT_COMPUTED: CashAbsence = { kind: "not-computed", word: "not computed", line: "Not computed." };
+const ABSENCE_LOADING: CashAbsence = { kind: "loading", state: "pending", word: "…", line: "Loading…" };
+const ABSENCE_UNAVAILABLE: CashAbsence = { kind: "unavailable", state: "unavailable", word: "Unavailable", line: "Unavailable." };
+const ABSENCE_UNREADABLE: CashAbsence = { kind: "unreadable", state: "unreadable", word: "Unreadable", line: "Unreadable." };
+const ABSENCE_WITHHELD: CashAbsence = { kind: "withheld", state: "refused", word: "Withheld", line: "Withheld." };
 
 /** The census clause for each absence: the count's place is never left to a zero. */
 const CENSUS_WORDS: Record<CashAbsence["kind"], string> = {
   loading: "accounts loading…",
   unavailable: "accounts unavailable",
   unreadable: "accounts unreadable",
-  "not-computed": "accounts withheld",
+  withheld: "accounts withheld",
 };
 
-/** The sixth tile as the Book prints it: the positions with no verdict here, and why. */
-export interface NotComputedTile {
-  readonly value: string;
-  readonly sub: string;
+/** A tile with no figure, in the absence's register: busy while the read is in flight, the absence's word once it is not. */
+function absentTile(absence: CashAbsence, sub = ""): TileView {
+  if (absence.kind === "loading") return { value: "", sub, tone: "neutral", pending: true };
+  return { value: "", sub, tone: stateTone(absence.state), pending: false, state: absence.state, stateWord: absence.word };
+}
+
+/** One of the Book's six tiles: its figure, sub line and register decided here, its label named here. */
+export interface BookTile extends TileView {
+  /** The tile's place, which its test id carries. */
+  readonly id: "debt" | "liquidatable" | "near" | "median" | "baddebt" | "notcomputed";
+  readonly label: string;
+}
+
+/** One of the Overview live strip's three figures: what it prints, and whether that is an absence rather than a figure. */
+export interface LiveStat {
+  readonly id: "debt" | "collateral" | "accounts";
+  readonly label: string;
+  readonly text: string;
+  readonly absent: boolean;
 }
 
 /**
@@ -129,8 +162,11 @@ export interface CashView {
   /** Null while loading, on failure, when the engine is absent, and when it is withheld. */
   readonly summary: CashSummary | null;
   readonly headline: Headline;
+  /** The Book's identity strip. */
   readonly chips: ViewChip[];
-  /** Tiles render in the refused register (dashed, "—"): exactly when `absence` is not null. */
+  /** The Overview live strip's: the mockup's Batch · Snapshot · Coverage, and any fault the reading carries — no "Current" chip. */
+  readonly liveChips: ViewChip[];
+  /** Tiles state an absence rather than a figure: exactly when `absence` is not null. */
   readonly refusedTiles: boolean;
   /** Why the book's figures are absent, in the words every tile and card prints; null when they are served. */
   readonly absence: CashAbsence | null;
@@ -146,31 +182,41 @@ export interface CashView {
   /** The aggregate's debt; absent under an absence, and over a census the engine computed none of (its zero sums nothing). */
   readonly debt: MoneyReading;
   readonly collateral: MoneyReading;
-  /** The Book's Debt tile: the figure against its collateral, a malformed field by name, or why there is no figure. */
-  readonly debtTile: TileView;
   /** Null when the book is unloaded, the engine withheld or absent, or the wire reports no bad-debt row. */
   readonly badDebt: BadDebtView | null;
   /**
-   * The "Not computed" tile. Its count is the engine's refused positions PLUS the rows the engine calls computed that
-   * this page could not read — each in its own word in the sub line, because the engine refused none of the latter;
-   * a dash where there is no census to count.
+   * The Book's six tiles, in order: debt, liquidatable, near cap, median room, standing bad debt, and the accounts with
+   * no verdict — the engine's refused accounts PLUS the rows the engine calls computed that this page could not read,
+   * each in its own word in the sub line, because the engine refused none of the latter. A tile with no figure states
+   * its absence in its register's word, never a dash.
    */
-  readonly notComputedTile: NotComputedTile;
+  readonly tiles: readonly BookTile[];
+  /** The bad-debt card's finding: the standing figure in a sentence, or why there is none. */
+  readonly badDebtFinding: string;
+  /** The Overview live strip's three figures, each the figure or its absence's word — "…" in flight, never a bare dash. */
+  readonly liveStats: readonly LiveStat[];
+  /** The live strip's one line: facts over a book read whole, else the headline's dek; null while the read is in flight. */
+  readonly liveLine: string | null;
   /** The Book entry card's micro-stat: a figure only over a book read whole. */
   readonly bookEntryLine: string;
   /** The Scenarios entry card's micro-stat: the ETH −30% line, or the withheld preview named. */
   readonly previewLine: string;
+  /** The micro-stat is a projected figure, so it wears the PROJECTION badge; a withheld preview projects nothing. */
+  readonly previewProjected: boolean;
 }
 
 const LOADING: Headline = {
   variant: "refused",
-  tone: "refused",
+  tone: "absent",
   emphasis: "Loading the Cash book…",
   rest: "",
   dek: "Fetching the newest batch.",
 };
 
 const n = (value: number): string => value.toLocaleString("en-US");
+
+/** The ETH −30% line leads the Scenarios entry card: the front door's own question. */
+const ENTRY_SHOCK = "ETH −30%";
 
 export function deriveCashView(reading: CashBookReading, constants: TierConstants): CashView {
   const cash = reading.cash;
@@ -199,7 +245,7 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
           ? ABSENCE_UNREADABLE
           : ABSENCE_UNAVAILABLE
         : withheld !== null
-          ? ABSENCE_NOT_COMPUTED
+          ? ABSENCE_WITHHELD
           : engineAbsent
             ? ABSENCE_UNAVAILABLE
             : null;
@@ -240,20 +286,25 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
 
   const ageSeconds = reading.age.unresolved ? null : reading.age.seconds;
   const tier = ageSeconds === null ? null : freshnessTier(ageSeconds, constants);
+  // A fresh batch is a fact of record, in ink; the age speaks in colour only once it ages.
   const tierTone = (t: FreshnessTier | null): ViewChip["tone"] =>
-    t === null ? "refused" : t === "fresh" ? "ok" : t === "aging" ? "warn" : "crit";
+    t === null ? "refused" : t === "fresh" ? "neutral" : t === "aging" ? "warn" : "crit";
+  // Withheld is the engine's refusal, drawn in its register; unavailable is no refusal, and is drawn solid.
   const coverage: ViewChip =
-    computedPositions === null || positions === null
-      ? { label: "Coverage", value: withheld !== null ? "withheld" : "unavailable", tone: "refused" }
-      : { label: "Coverage", value: `${n(computedPositions)} / ${n(positions)} computed`, tone: "neutral" };
+    computedPositions !== null && positions !== null
+      ? { label: "Coverage", value: `${n(computedPositions)} / ${n(positions)} computed`, tone: "neutral" }
+      : withheld !== null
+        ? { label: "Coverage", value: "withheld", tone: "refused" }
+        : { label: "Coverage", value: "unavailable", tone: "neutral" };
   // A later answer that could not be read did not replace this book: the strip says so, and names the fault on hover.
   const standing: ViewChip[] =
     reading.repairFault === null
       ? []
       : [{ label: "Re-read", value: "unreadable · this batch stands", tone: "warn", title: reading.repairFault }];
-  const chips: ViewChip[] =
+  const current: ViewChip = { label: "Current, not projected", value: "" };
+  const identity: ViewChip[] | null =
     reading.book === null
-      ? [{ label: "Identity", value: reading.phase === "loading" ? "pending" : unreadableAnswer ? "unreadable" : "unavailable", tone: "refused" }]
+      ? null
       : [
           { label: "Batch", value: n(reading.book.batch.id) },
           {
@@ -262,9 +313,15 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
             tone: tierTone(tier),
           },
           coverage,
-          { label: "Current", value: "not projected" },
-          ...standing,
         ];
+  // An answer that could not be read is the dashed register; a read in flight or a fetch that failed refused nothing.
+  const missing: ViewChip[] = [
+    unreadableAnswer
+      ? { label: "Identity", value: "unreadable", tone: "refused" }
+      : { label: "Identity", value: reading.phase === "loading" ? "pending" : "unavailable", tone: "neutral" },
+  ];
+  const chips: ViewChip[] = identity === null ? missing : [...identity, current, ...standing];
+  const liveChips: ViewChip[] = identity === null ? missing : [...identity, ...standing];
   const censusWords = positions !== null ? `${n(positions)} borrowing accounts` : CENSUS_WORDS[(absence ?? ABSENCE_UNAVAILABLE).kind];
 
   const walking = summary !== null && !cash.walkComplete && cash.walkFailure === null;
@@ -282,21 +339,24 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
   const unsummed = refusedTiles || engine === null || censusNoneComputed;
   const debt = unsummed ? ABSENT : readWireMoney(engine.total_debt, decimals, "engines[debt_manager].total_debt");
   const collateral = unsummed ? ABSENT : readWireMoney(engine.total_collateral, decimals, "engines[debt_manager].total_collateral");
-  const debtTile: TileView = refusedTiles
-    ? { value: "—", sub: absence?.word ?? "", tone: "refused", pending: false }
-    : censusNoneComputed
-      ? { value: "—", sub: NONE_COMPUTED_SUB, tone: "refused", pending: false }
-      : {
-          value: moneyText(debt),
-          sub:
-            debt.kind === "malformed"
-              ? malformedSub(debt.field)
-              : collateral.kind === "malformed"
-                ? `collateral unreadable: ${malformedSub(collateral.field)}`
-                : `against ${moneyText(collateral)} collateral`,
-          tone: debt.kind === "value" ? "neutral" : "refused",
-          pending: false,
-        };
+  const debtTile: TileView =
+    absence !== null
+      ? absentTile(absence)
+      : censusNoneComputed
+        ? NONE_COMPUTED_TILE
+        : debt.kind === "malformed"
+          ? { value: "", sub: malformedSub(debt.field), tone: "refused", pending: false, state: "unreadable" }
+          : {
+              ...(debt.kind === "value"
+                ? { value: debt.text, tone: "neutral" as const, pending: false }
+                : { value: "", tone: "neutral" as const, pending: false, state: "not-served" as const, stateWord: NOT_REPORTED }),
+              sub:
+                collateral.kind === "malformed"
+                  ? `Collateral unreadable: ${malformedSub(collateral.field)}`
+                  : collateral.kind === "absent"
+                    ? "Collateral not reported"
+                    : `Against ${collateral.text} collateral`,
+            };
   const badDebtWire = refusedTiles ? null : cash.badDebt;
   const badDebt: BadDebtView | null =
     badDebtWire === null
@@ -313,6 +373,7 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
               : readWirePopulation(badDebtWire.insolvent_positions, "bad_debt[debt_manager].insolvent_positions"),
           cause: badDebtWire.refused ? plainCause(badDebtWire.refusal?.code ?? "", badDebtWire.refusal?.detail ?? "") : null,
         };
+  const badDebtTile = badDebtTileOf(badDebt, absence);
 
   // A walk-derived figure is the entry card's micro-stat only over a book read whole; short of that the card says what happened to the walk.
   const bookEntryLine = summary === null ? "Live figures" : walkEntryLine(summary);
@@ -322,26 +383,54 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
   const refusalKey = engine?.refusals[0]?.key;
   const unread = summary?.unreadable ?? 0;
   const refusedSub =
-    refusedPositions === null
-      ? (absence?.word ?? "")
-      : refusalKey !== undefined
-        ? plainCause(refusalKey)
-        : refusedPositions === 0
-          ? "nothing refused"
-          : "cause not stated";
+    refusalKey !== undefined ? sentenceCase(plainCause(refusalKey)) : refusedPositions === 0 ? "Nothing refused" : "Cause not stated";
   const unreadSub = unread === 0 ? "" : ` · ${String(unread)} unreadable${walking ? " so far" : ""}`;
-  const notComputedTile: NotComputedTile = {
-    value: refusedPositions === null ? "—" : String(refusedPositions + unread),
-    sub: withheldCause ?? `${refusedSub}${refusedPositions === null ? "" : unreadSub}`,
-  };
+  const noVerdictTile: TileView =
+    refusedPositions === null
+      ? absentTile(absence ?? ABSENCE_UNAVAILABLE, withheldCause === null ? "" : sentenceCase(withheldCause))
+      : { value: String(refusedPositions + unread), sub: `${refusedSub}${unreadSub}`, tone: "refused", pending: false };
+  const walkTileOf = (derive: (s: CashSummary) => TileView): TileView =>
+    summary === null ? absentTile(absence ?? ABSENCE_UNAVAILABLE) : derive(summary);
+  const tiles: BookTile[] = [
+    { id: "debt", label: "Debt outstanding", ...debtTile },
+    { id: "liquidatable", label: liquidatableTileLabel, ...walkTileOf(liquidatableTile) },
+    { id: "near", label: "Near cap · <10% room", ...walkTileOf(nearCapTile) },
+    { id: "median", label: "Median room", ...walkTileOf(medianRoomTile) },
+    { id: "baddebt", label: "Standing bad debt", ...badDebtTile },
+    { id: "notcomputed", label: NO_VERDICT, ...noVerdictTile },
+  ];
+
+  const previewText =
+    preview !== null && preview.kind === "view"
+      ? (preview.lines.find((l) => l.shock === ENTRY_SHOCK)?.text ?? preview.lines[0]?.text ?? null)
+      : null;
   const previewLine =
-    preview === null
-      ? "Committed scenarios"
-      : preview.kind === "view"
-        ? (preview.lines.find((l) => l.shock === "ETH −30%")?.text ?? preview.lines[0]?.text ?? "Committed scenarios")
+    previewText !== null
+      ? previewText
+      : preview === null || preview.kind === "view"
+        ? "Committed scenarios"
         : preview.kind === "refused"
           ? `Preview withheld: ${preview.reason}`
           : "Preview withheld: the Cash engine is not on this batch's stress grid";
+
+  const moneyStat = (m: MoneyReading): Pick<LiveStat, "text" | "absent"> =>
+    absence !== null
+      ? { text: absence.word, absent: true }
+      : m.kind === "value"
+        ? { text: m.text, absent: false }
+        : m.kind === "malformed"
+          ? { text: ABSENCE_UNREADABLE.word, absent: true }
+          : { text: censusNoneComputed ? NO_VERDICT : NOT_REPORTED, absent: true };
+  const liveStats: LiveStat[] = [
+    { id: "debt", label: "Cash debt outstanding", ...moneyStat(debt) },
+    { id: "collateral", label: "Collateral", ...moneyStat(collateral) },
+    {
+      id: "accounts",
+      label: "Accounts",
+      ...(positions === null ? { text: (absence ?? ABSENCE_UNAVAILABLE).word, absent: true } : { text: n(positions), absent: false }),
+    },
+  ];
+  const liveLine = reading.phase === "loading" ? null : ((summary === null ? null : overviewLiveLine(summary)) ?? headline.dek);
 
   return {
     decimals,
@@ -355,6 +444,7 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
     summary,
     headline,
     chips,
+    liveChips,
     refusedTiles,
     absence,
     walking,
@@ -365,12 +455,49 @@ export function deriveCashView(reading: CashBookReading, constants: TierConstant
     preview,
     debt,
     collateral,
-    debtTile,
     badDebt,
-    notComputedTile,
+    tiles,
+    badDebtFinding: badDebtFindingOf(badDebt, absence),
+    liveStats,
+    liveLine,
     bookEntryLine,
     previewLine,
+    previewProjected: previewText !== null,
   };
+}
+
+/**
+ * The standing bad-debt tile. No row for the engine: the absence's word, or — over a served book — "Not reported"; a
+ * figure the decimal guard refuses is unreadable, by field; a figure the wire withheld names its cause; a figure served
+ * stands in the warn register once it is not zero, beside the insolvent accounts it counts.
+ */
+function badDebtTileOf(badDebt: BadDebtView | null, absence: CashAbsence | null): TileView {
+  if (badDebt === null) {
+    return absence !== null ? absentTile(absence) : { value: "", sub: "", tone: "neutral", pending: false, state: "not-served", stateWord: NOT_REPORTED };
+  }
+  const { reading, insolvent, cause } = badDebt;
+  if (reading.kind === "malformed") return { value: "", sub: malformedSub(reading.field), tone: "refused", pending: false, state: "unreadable" };
+  if (reading.kind === "absent") {
+    return cause === null
+      ? { value: "", sub: "", tone: "neutral", pending: false, state: "not-served", stateWord: NOT_REPORTED }
+      : { value: "", sub: sentenceCase(cause), tone: "refused", pending: false, state: "refused", stateWord: "Withheld" };
+  }
+  return {
+    value: reading.text,
+    sub: cause !== null ? sentenceCase(cause) : insolvent === null ? "Accounts unknown" : plural(insolvent, "account"),
+    tone: reading.value > 0n ? "warn" : "neutral",
+    pending: false,
+  };
+}
+
+/** The bad-debt card's finding: the standing figure in a sentence of record, or why there is none — never a zero. */
+function badDebtFindingOf(badDebt: BadDebtView | null, absence: CashAbsence | null): string {
+  if (badDebt === null) return absence !== null ? absence.line : BAD_DEBT_NOT_REPORTED;
+  const { reading, insolvent, cause } = badDebt;
+  if (reading.kind === "malformed") return `Standing bad debt is unreadable: ${malformedSub(reading.field)}.`;
+  if (reading.kind === "absent") return cause === null ? BAD_DEBT_NOT_REPORTED : `Standing bad debt withheld: ${cause}.`;
+  const across = insolvent === null ? "an unknown number of accounts" : plural(insolvent, "account");
+  return `${reading.text} of debt is no longer covered by collateral, across ${across}.`;
 }
 
 export interface LegacyBand {
@@ -382,10 +509,15 @@ export interface LegacyBand {
 /** A tile of the legacy fold as the fold prints it: decided here, printed by the component as given. */
 export interface LegacyTile {
   readonly label: string;
+  /** The figure; empty where the tile states an absence instead. */
   readonly value: string;
   /** Absent where the tile carries no sub line. */
   readonly sub?: string;
   readonly tone: TileTone;
+  /** The tile has no figure, and says which absence it is (lib/kit STATE_REGISTERS) — never a dash. */
+  readonly state?: StateRegister;
+  /** The lib's own word for that absence ("Withheld", "No verdict"). */
+  readonly stateWord?: string;
 }
 
 /** The legacy Aave v3 section, derived once: a withheld engine names its cause and prints no population, no debt, no histogram. */
@@ -410,8 +542,8 @@ export interface LegacyView {
   readonly bandsNote: string | null;
   /** The histogram alone is withheld, with this plain cause. */
   readonly histogramWithheld: string | null;
-  /** The collapsed section's one line. */
-  readonly summaryLine: string;
+  /** The collapsed fold's summary beside its title (lib/prose LEGACY_FOLD_TITLE): the market's own finding, or why there is none. */
+  readonly summary: string;
   /** Why the market is shown at all, and that it is never added to the Cash book. */
   readonly note: string;
   /** The whole-book withholding in the fold's own sentence; null unless the engine withheld its book. */
@@ -432,39 +564,51 @@ const LEGACY_NOTE =
   "The ether.fi Aave v3 market is being wound down. Its figures are shown for completeness and are never added to the Cash book.";
 const LEGACY_BANDS_CAPTION = "Positions by health factor · liquidation at 1.00 · counts, not dollars";
 
-/** A legacy population as a tile prints it: grouped, or the dash where there is no count. */
-const legacyCount = (value: number | null): string => (value === null ? "—" : n(value));
+/** A legacy tile with no figure because the engine withheld its whole book. */
+const LEGACY_WITHHELD = { value: "", tone: "refused", state: "refused", stateWord: "Withheld" } as const;
+
+/** A legacy tile with no figure because the engine computed none of the market: the population's word, and why. */
+const LEGACY_NONE_COMPUTED = { value: "", sub: "No position computed", tone: "refused", state: "refused", stateWord: NO_VERDICT } as const;
 
 /**
- * The fold's four tiles from the view's own decisions. A withheld engine prints no population; a count over nothing
- * computed is a dash in the refused register; the eligible debt beside the liquidatable count is the figure, or why it
- * is not there — withheld where the wire serves none, unreadable where it serves one the decimal guard refuses.
+ * The fold's four tiles from the view's own decisions. A withheld engine prints no population — each tile says
+ * "Withheld"; a count or a sum over nothing computed prints no figure, the population's word "No verdict" in its place;
+ * a malformed debt is unreadable, by field; the eligible debt beside the liquidatable count is the figure, or why it is
+ * not there — withheld where the wire serves none, unreadable where it serves one the decimal guard refuses.
  */
 function legacyTiles(
   v: Pick<LegacyView, "withheld" | "positions" | "computed" | "liquidatable" | "refused" | "debt" | "eligibleDebt">,
 ): LegacyView["tiles"] {
-  const withheld = v.withheld !== null;
+  if (v.withheld !== null || v.positions === null || v.computed === null || v.refused === null) {
+    return {
+      positions: { label: "Positions", ...LEGACY_WITHHELD },
+      debt: { label: "Debt", ...LEGACY_WITHHELD },
+      liquidatable: { label: "Liquidatable", ...LEGACY_WITHHELD },
+      notComputed: { label: NO_VERDICT, ...LEGACY_WITHHELD },
+    };
+  }
   const eligible =
     v.eligibleDebt.kind === "value"
       ? `${v.eligibleDebt.text} eligible debt`
       : v.eligibleDebt.kind === "absent"
         ? "Σ withheld"
         : "Σ unreadable";
+  const debt: LegacyTile =
+    v.debt.kind === "value"
+      ? { label: "Debt", value: v.debt.text, tone: "neutral" }
+      : v.debt.kind === "malformed"
+        ? { label: "Debt", value: "", sub: malformedSub(v.debt.field), tone: "refused", state: "unreadable" }
+        : v.computed === 0 && v.refused > 0
+          ? { label: "Debt", ...LEGACY_NONE_COMPUTED }
+          : { label: "Debt", value: "", tone: "neutral", state: "not-served", stateWord: NOT_REPORTED };
   return {
-    positions: {
-      label: "Positions",
-      value: legacyCount(v.positions),
-      sub: withheld ? "not computed" : `${legacyCount(v.computed)} computed`,
-      tone: withheld ? "refused" : "neutral",
-    },
-    debt: { label: "Debt", value: moneyText(v.debt), tone: v.debt.kind === "value" ? "neutral" : "refused" },
-    liquidatable: {
-      label: "Liquidatable",
-      value: legacyCount(v.liquidatable),
-      sub: v.liquidatable === null ? "not computed" : eligible,
-      tone: v.liquidatable === null ? "refused" : v.liquidatable > 0 ? "crit" : "neutral",
-    },
-    notComputed: { label: "Not computed", value: legacyCount(v.refused), tone: "refused" },
+    positions: { label: "Positions", value: n(v.positions), sub: `${n(v.computed)} computed`, tone: "neutral" },
+    debt,
+    liquidatable:
+      v.liquidatable === null
+        ? { label: "Liquidatable", ...LEGACY_NONE_COMPUTED }
+        : { label: "Liquidatable", value: n(v.liquidatable), sub: eligible, tone: v.liquidatable > 0 ? "crit" : "neutral" },
+    notComputed: { label: NO_VERDICT, value: n(v.refused), tone: "refused" },
   };
 }
 
@@ -486,7 +630,7 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
       bands: null,
       bandsNote: null,
       histogramWithheld: null,
-      summaryLine: `Legacy · Aave v3 market — withheld this batch: ${withheld}`,
+      summary: `Withheld this batch: ${withheld}`,
       note: LEGACY_NOTE,
       withheldNote: `The engine withheld its whole book this batch: ${withheld}. Its populations, debt and histogram are not computed.`,
       tiles: legacyTiles(counts),
@@ -550,11 +694,16 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
     bands,
     bandsNote,
     histogramWithheld,
-    summaryLine: `Legacy · Aave v3 market — ${finding} · ${debtWord} · ${n(refused)} refused`,
+    summary: `${finding} · ${debtWord} · ${n(refused)} refused`,
     note: LEGACY_NOTE,
     withheldNote: null,
     tiles: legacyTiles(counts),
     histogramWithheldNote: histogramWithheld === null ? null : `Histogram withheld: ${histogramWithheld}.`,
     bandsCaption: LEGACY_BANDS_CAPTION,
   };
+}
+
+/** The Cash book's kicker, one on both pages: the book right now, and — while the walk runs, or once it stopped — which. */
+export function cashBookKicker(view: Pick<CashView, "walking" | "walkStopped">): string {
+  return `Cash book · right now${view.walking ? " · walking" : view.walkStopped !== null ? " · walk stopped" : ""}`;
 }

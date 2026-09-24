@@ -2,9 +2,13 @@
 import { expect, test } from "@playwright/test";
 import { dotPlotScale, heatIntensity } from "../../lib/lab-geometry";
 
-test("heatIntensity: a share of the largest cell in [0, 1]; an empty, absent or absurd max is 0, never NaN", () => {
+test("heatIntensity: the square root of a share of the largest cell, in [0, 1]; an empty, absent or absurd max is 0, never NaN", () => {
   expect(heatIntensity(10, 10)).toBe(1);
-  expect(heatIntensity(5, 10)).toBe(0.5);
+  expect(heatIntensity(5, 10)).toBeCloseTo(Math.SQRT1_2, 12);
+  // Over one global maximum, so one opacity means one count in every movement class: 18 and 135 against the 932 held
+  // cell read apart, where a linear share left both near the floor.
+  expect(heatIntensity(18, 932)).toBeCloseTo(0.139, 3);
+  expect(heatIntensity(135, 932)).toBeCloseTo(0.381, 3);
   expect(heatIntensity(0, 10)).toBe(0);
   expect(heatIntensity(3, 0)).toBe(0);
   expect(heatIntensity(30, 10)).toBe(1);

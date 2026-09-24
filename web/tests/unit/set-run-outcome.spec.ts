@@ -96,7 +96,8 @@ test.describe("the set-run's refusal register dispatches on the CODE", () => {
       maxInFlight: outcome.maxInFlight,
     });
     expect(sentence.emphasis).toBe("The evaluator is busy.");
-    expect(sentence.tone).toBe("refused");
+    // A busy slot is a read that did not complete, never the refused register.
+    expect(sentence.tone).toBe("absent");
     expect(sentence.dek).toContain("The service did not state its capacity.");
     expect(sentence.dek).not.toMatch(/\b0 of 0\b/);
     expect(sentence.dek).not.toMatch(/\b0 are running/);

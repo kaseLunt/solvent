@@ -1,7 +1,20 @@
 import { ChartCard, SectionHead } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { historyFinding, type InspectorView } from "@/lib/inspector-view";
-import { groupInt } from "@/lib/prose";
+import {
+  batchAxisLabel,
+  HISTORY_CAPTION,
+  HISTORY_QUALIFIER,
+  HISTORY_TITLE,
+  historyFinding,
+  LEGACY_CHART_ARIA,
+  LEGACY_CHART_FINDING,
+  LEGACY_CHART_TITLE,
+  LIQUIDATION_LINE_LABEL,
+  NEAR_LINE_LABEL,
+  ROOM_CHART_ARIA,
+  ROOM_CHART_TITLE,
+  type InspectorView,
+} from "@/lib/inspector-view";
 import { NEAR_LINE_TENTHS } from "@/lib/room-history";
 import styles from "../inspector.module.css";
 import { MeasuredSparkline } from "./MeasuredSparkline";
@@ -18,15 +31,12 @@ export function HistoryCard({ view }: { view: InspectorView }) {
   // The axis is labelled with real batches or not at all: an empty series has no first batch, and none is manufactured.
   const first = room?.points[0];
   const xLabels =
-    room !== null && first !== undefined && room.newest !== null
-      ? { start: `batch ${groupInt(first.batchId)}`, end: `batch ${groupInt(room.newest.batchId)}` }
-      : undefined;
-  const finding = historyFinding(view);
+    room !== null && first !== undefined && room.newest !== null ? { start: batchAxisLabel(first.batchId), end: batchAxisLabel(room.newest.batchId) } : undefined;
   return (
     <section data-testid="inspector-history">
-      <SectionHead title="History" qualifier="room % across batches · gaps drawn as gaps" />
+      <SectionHead title={HISTORY_TITLE} qualifier={HISTORY_QUALIFIER} />
       <div className={legacySeries === null ? undefined : kit.grid}>
-        <ChartCard title="Room under the borrow cap" finding={finding}>
+        <ChartCard title={ROOM_CHART_TITLE} finding={historyFinding(view)}>
           {room !== null && (
             <MeasuredSparkline
               min={320}
@@ -35,15 +45,18 @@ export function HistoryCard({ view }: { view: InspectorView }) {
               values={room.values}
               pointTitles={room.titles}
               referenceValue={Number(NEAR_LINE_TENTHS) / 10}
+              referenceTone="warn"
+              referenceLabel={NEAR_LINE_LABEL}
               height={140}
-              label="room as a percent of the borrow cap, per batch; the dashed line is the 10% near-cap line"
+              label={ROOM_CHART_ARIA}
               xLabels={xLabels}
               newestLabel={newestLabel}
             />
           )}
         </ChartCard>
         {legacySeries !== null && (
-          <ChartCard title="Legacy · Aave v3 health factor" finding="Judged by its own health factor; liquidatable strictly below 1.0 · dashed line: 1.0" testId="inspector-history-legacy">
+          <ChartCard title={LEGACY_CHART_TITLE} finding={LEGACY_CHART_FINDING} testId="inspector-history-legacy">
+            {/* A health factor of 1.0 IS the liquidation boundary: its line wears crit, never the near-cap warn. */}
             <MeasuredSparkline
               min={240}
               max={1600}
@@ -51,15 +64,15 @@ export function HistoryCard({ view }: { view: InspectorView }) {
               values={legacySeries.values}
               pointTitles={legacySeries.titles}
               referenceValue={1}
+              referenceTone="crit"
+              referenceLabel={LIQUIDATION_LINE_LABEL}
               height={140}
-              label="health factor per batch (legacy Aave v3 market); the dashed line is 1.0"
+              label={LEGACY_CHART_ARIA}
             />
           </ChartCard>
         )}
       </div>
-      <p className={styles.dim}>
-        Cash room per batch is the engine’s own cap ÷ borrowings for that batch. A refused, withheld or missing batch is a gap; the line never draws across it.
-      </p>
+      <p className={styles.dim}>{HISTORY_CAPTION}</p>
     </section>
   );
 }

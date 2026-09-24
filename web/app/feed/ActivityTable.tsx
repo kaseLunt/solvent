@@ -1,35 +1,21 @@
 import Link from "next/link";
 import { Fragment } from "react";
-import { KitTable, StatusPill, type KitColumn, type KitRow } from "@/components/kit";
+import { KitTable, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { ACTIVITY_AMOUNT_HEADER, type ActivityLiquidation, type ActivityRow, type NotePart } from "@/lib/activity-view";
+import {
+  ACTIVITY_AMOUNT_HEADER,
+  ACTIVITY_LIST_TITLE,
+  ACTIVITY_WHEN_HEADER,
+  type ActivityLiquidation,
+  type ActivityRow,
+} from "@/lib/activity-view";
 import { truncateAddress } from "@/lib/format";
 import styles from "./activity.module.css";
 
-/** The wire's note with its markers read: code as code, bold as bold, every word as it came. */
-function NoteText({ parts }: { parts: readonly NotePart[] }) {
-  return (
-    <>
-      {parts.map((part, index) =>
-        part.kind === "code" ? (
-          <code key={index}>{part.text}</code>
-        ) : part.kind === "strong" ? (
-          <strong key={index}>
-            <NoteText parts={part.parts} />
-          </strong>
-        ) : (
-          <Fragment key={index}>{part.text}</Fragment>
-        ),
-      )}
-    </>
-  );
-}
-
 /**
- * The liquidation's typed extract, visible beneath the pill in every view: the liquidator opens the Inspector, the
- * amounts are the extract's own, an unestablished bonus is the em dash the lib gave it — never behind a fold or a
- * hover. The wire's note is the one sentence that says what a dash here means, so it is page text too — a title
- * is out of reach of a keyboard and of a touch screen. In the untimed tail the extract dims with its row.
+ * The liquidation's typed extract, visible beneath the type in every view: the liquidator opens the Inspector, the
+ * amounts are the extract's own, an unestablished bonus is the marked dash the lib gave it — explained once, in the
+ * footnote under the table, never behind a fold or a hover. In the untimed tail the extract dims with its row.
  */
 function LiquidationLine({ detail, dim }: { detail: ActivityLiquidation; dim: boolean }) {
   return (
@@ -49,17 +35,12 @@ function LiquidationLine({ detail, dim }: { detail: ActivityLiquidation; dim: bo
           <Fragment key={index}>{part.text}</Fragment>
         ),
       )}
-      {detail.note.length > 0 && (
-        <span className={styles.detailNote} data-testid="activity-liquidation-note">
-          <NoteText parts={detail.note} />
-        </span>
-      )}
     </span>
   );
 }
 
 const COLUMNS: KitColumn[] = [
-  { key: "when", header: "When" },
+  { key: "when", header: ACTIVITY_WHEN_HEADER },
   { key: "engine", header: "Engine" },
   { key: "type", header: "Type" },
   { key: "account", header: "Account" },
@@ -68,35 +49,44 @@ const COLUMNS: KitColumn[] = [
   { key: "tx", header: "Tx" },
 ];
 
+export interface ActivityTableProps {
+  rows: readonly ActivityRow[];
+  emptyText: string;
+  /** One engine chosen: the digits align on one axis. Across engines they never share one. */
+  alignAmounts: boolean;
+  /** The footnote that explains the marked bonus dashes, once; null when no row prints one. */
+  bonusNote: string | null;
+}
+
 /**
  * The paged record as the kit's table: every loaded row in WIRE ORDER (the service orders, the page discloses),
- * the untimed tail dim with its block number where the time would be, the type in the page's words with the wire's
- * word as its title, a liquidation's pill crit with its typed extract visible beneath it, the account opening the
- * Inspector, the amount in its right-aligned column — placed only by a scale the wire licensed, otherwise the wire's
- * integer verbatim with the raw word beside it in the same cell, so an unscaled figure is never read against a
- * scaled one — with its unit named in the quiet column beside it, the tx on its chain's explorer. A record-only
- * row's dash is a statement, not a value, and is set as one; its word stands in the unit column. Every cell is the
- * view model's word; nothing is decided here.
+ * the untimed tail dim with its block number where the time would be, the time a typeset instant with the wire's ISO
+ * as its title, the type in the page's words with the wire's word as its title — a key record set apart by weight,
+ * never by a verdict's colour — a liquidation's typed extract beneath it, the account opening the Inspector, the
+ * amount in its right-aligned column — placed only by a scale the wire licensed, otherwise the wire's integer grouped
+ * with the raw word beside it in the same cell — with its unit named in the quiet column beside it, the tx on its
+ * chain's explorer. A record-only row's dash is a statement, not a value, and is set as one. Every cell is the view
+ * model's word; nothing is decided here.
  */
-export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[]; emptyText: string }) {
+export function ActivityTable({ rows, emptyText, alignAmounts, bonusNote }: ActivityTableProps) {
+  // One digit axis needs one tag slot on every row, empty or not, so a tagged row's digits do not step left.
+  const tagSlot = alignAmounts && rows.some((row) => row.amountTag !== null);
   const kitRows: KitRow[] = rows.map((row) => ({
     key: row.key,
     testId: `activity-row-${row.key}`,
     dim: row.dim,
     cells: {
-      when: <span className={kit.addr}>{row.when}</span>,
+      when: (
+        <span title={row.whenTitle} data-testid="activity-when">
+          {row.when}
+        </span>
+      ),
       engine: row.engine,
       type: (
         <>
-          {row.tone === "crit" ? (
-            <StatusPill tone="crit" title={row.type}>
-              {row.typeLabel}
-            </StatusPill>
-          ) : (
-            <span className={styles.type} title={row.type}>
-              {row.typeLabel}
-            </span>
-          )}
+          <span className={row.tone === "key" ? styles.typeKey : undefined} title={row.type} data-tone={row.tone} data-testid="activity-type">
+            {row.typeLabel}
+          </span>
           {row.detail !== null && <LiquidationLine detail={row.detail} dim={row.dim} />}
         </>
       ),
@@ -105,9 +95,20 @@ export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[
           {truncateAddress(row.account)}
         </Link>
       ),
-      amount: (
+      amount: alignAmounts ? (
         <>
-          <span className={row.recordOnly ? kit.sub : kit.addr} data-testid="activity-amount">
+          <span className={row.recordOnly ? `${styles.num} ${kit.sub}` : styles.num} data-testid="activity-amount">
+            {row.amount}
+          </span>
+          {tagSlot && (
+            <span className={styles.tagSlot} data-testid={row.amountTag === null ? undefined : "activity-amount-tag"}>
+              {row.amountTag ?? ""}
+            </span>
+          )}
+        </>
+      ) : (
+        <>
+          <span className={row.recordOnly ? kit.sub : undefined} data-testid="activity-amount">
             {row.amount}
           </span>
           {row.amountTag !== null && (
@@ -138,5 +139,14 @@ export function ActivityTable({ rows, emptyText }: { rows: readonly ActivityRow[
         ),
     },
   }));
-  return <KitTable testId="activity-table" columns={COLUMNS} rows={kitRows} emptyText={emptyText} />;
+  return (
+    <div>
+      <KitTable testId="activity-table" columns={COLUMNS} rows={kitRows} emptyText={emptyText} label={ACTIVITY_LIST_TITLE} />
+      {bonusNote !== null && (
+        <p className={styles.footnote} data-testid="activity-bonus-note">
+          {bonusNote}
+        </p>
+      )}
+    </div>
+  );
 }

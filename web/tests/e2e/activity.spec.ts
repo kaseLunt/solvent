@@ -9,31 +9,34 @@
 //
 // What this pins: the verdict header IS feedTakeaway's two parts in ink (the
 // neutral tone — a record is never the health green), with the scope in the
-// kicker, the dek's computed facts and the five chips (Newest carrying the
-// exact instant the headline speaks); before the first page answers nothing
-// is counted; the two tiles; every loaded row in wire order with the untimed
-// tail dim and its block number where the time would be; the amount alone in
-// its right-aligned column with its unit in the column beside it; the ledger
-// view pinning the type; since-block impossible with no single engine (short
-// form, the sentence in its title), real with one, removed with a notice when
-// the engine changes, and no cursor ever crossing a mode; a 400 refusal named
-// under the dashed tone with the service's own words said ONCE (the dek), an
-// honest restart and no "Load more" — with rows loaded and with none; a
-// liquidation's extract with the wire's note as page text, dimming with its
-// row in the untimed tail;
-// load more appending and the tiles counting; degraded envelopes and the
-// empty filter as real answers; amount units named or raw, never a dollar —
-// a Cash figure placed by the book's own value_decimals, raw and tagged in its
-// own cell when no source licenses a scale (/v1/book is routed explicitly
-// wherever an amount is asserted); a liquidation's repaid unit named and its
-// note's code spans read as code; the three raw enum
-// types and the applied filter said in words;
-// the live strip as its own instrument, one plain line naming no roadmap;
-// a broken ordering as a standing alert; the doctrine in the drawer; answer
-// before evidence.
+// kicker, the dek's computed facts and the chips that never restate a control
+// (Newest in reader words with the wire's ISO as its title, the order key
+// always, the loaded count, a Filter chip only while a filter narrows the
+// list); before the first page answers nothing is counted; the two tiles;
+// every loaded row in wire order with the untimed tail dim and its block
+// number where the time would be, the When column headed "When (UTC)" with the
+// wire's ISO as every cell's title; a liquidation or bad-debt realization a key
+// record set apart by weight, never a crit pill; the amount alone in its
+// right-aligned column with its unit in the column beside it; the ledger view
+// pinning the type; since-block impossible with no single engine (short form,
+// the sentence in its title), real with one, removed with a notice when the
+// engine changes, and no cursor ever crossing a mode; a 400 refusal in the
+// refused register with the service's own words disclosed ONCE in its card, an
+// honest restart and no "Load more" — with rows loaded and with none; a failed
+// fetch in its own register, never a refusal; a liquidation's extract with its
+// marked bonus dashes explained once under the table, dimming with its row in
+// the untimed tail; load more appending and the chips counting; the empty
+// filter as a real, scoped answer with the way to clear it; amount units named
+// or raw (grouped, never scaled), never a dollar — a Cash figure placed by the
+// book's own value_decimals, raw and tagged in its own cell when no source
+// licenses a scale (/v1/book is routed explicitly wherever an amount is
+// asserted); the types said in words; the live strip as its own instrument,
+// one plain line naming no roadmap; a broken ordering as a standing alert; the
+// doctrine and the service's notes in the drawer; answer before evidence.
 import { expect, test, type Page, type Route } from "@playwright/test";
 import {
   ACTIVITY_AMOUNT_HEADER,
+  ACTIVITY_CLEAR_FILTER_DEK,
   ACTIVITY_EXHAUSTED_DEK,
   ACTIVITY_FORENSICS,
   ACTIVITY_INTRO,
@@ -42,14 +45,18 @@ import {
   ACTIVITY_LIVE_LAW,
   ACTIVITY_LIVE_NOTE,
   ACTIVITY_LOADING_DEK,
-  ACTIVITY_METHOD,
   ACTIVITY_SINCE_FULL,
   ACTIVITY_SINCE_NOTE,
   ACTIVITY_SINCE_SHORT,
   ACTIVITY_TAIL_NOTE,
   ACTIVITY_TAIL_NOTICE,
   ACTIVITY_TAIL_NOTICE_UNORDERED,
-  FILTER_APPLIED_LABEL,
+  ACTIVITY_WHEN_HEADER,
+  END_OF_FEED,
+  FILTER_LABEL,
+  LIQUIDATION_NOTES_HEADING,
+  SERVICE_SAID,
+  UNTIMED_WHEN,
 } from "../../lib/activity-view";
 import { inlineParts } from "../../lib/api-view";
 import { RAW_UNITS_TAG, RECORD_ONLY_TITLE, feedTakeaway, type FeedTakeawayScope } from "../../lib/feed-view";
@@ -141,7 +148,7 @@ const rows = (page: Page) => page.locator('[data-testid^="activity-row-"]');
 const chip = (page: Page, label: string) => page.getByTestId("activity-verdict").locator(`[data-chip="${label}"]`);
 const headline = (page: Page) => page.getByTestId("activity-verdict-headline");
 
-test("cold load: the demo page — 50 rows in wire order, the headline IS feedTakeaway's sentence and the H1 in ink, the scope in the kicker, the dek's computed facts, five chips with the exact newest instant, two tiles, the amount column aligned with its unit beside it, state ok", async ({ page }) => {
+test("cold load: the demo page — 50 rows in wire order, the headline IS feedTakeaway's sentence and the H1 in ink, the scope in the kicker, the dek's computed facts, the chips (Newest in reader words over its ISO title, the order key, the count), two tiles, every When cell's title the wire's ISO, the amount column with its unit beside it, state ok", async ({ page }) => {
   await muteStream(page);
   await routeBook(page, DEMO_BOOK);
   await mockEvents(page, demoWalk);
@@ -159,36 +166,43 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   // The finding's core is the emphasis; a record is ink — the neutral tone, never the health green.
   await expect(headline(page).locator("b")).toHaveText("3 liquidations among the 50 chain actions loaded,");
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "neutral");
-  await expect(page.getByTestId("activity-verdict")).toContainText("Activity · all engines");
+  await expect(page.getByTestId("activity-verdict")).toContainText("Activity · All engines");
   await expect(page.getByTestId("activity-verdict-dek")).toHaveText(
     "1 of them records bad debt being realized. 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
   );
 
-  await expect(chip(page, "Scope")).toContainText("all engines");
-  await expect(chip(page, "View")).toContainText("all actions");
+  // The chips never restate a control: the scope is the kicker's, the view the toggle's; the order key always stays.
+  await expect(page.getByTestId("activity-verdict").locator("[data-chip]")).toHaveCount(3);
+  for (const gone of ["Scope", "View", "Filter applied", FILTER_LABEL, "Rows"]) await expect(chip(page, gone)).toHaveCount(0);
   await expect(chip(page, "Order")).toContainText("by block time");
-  // The exact layer of the spoken instant: the wire's own string, verbatim. The row count is the tile's, said once.
-  await expect(chip(page, "Newest")).toContainText("2026-08-08T20:21:05Z");
-  await expect(chip(page, "Rows")).toHaveCount(0);
-  // The service's echo of the filter it applied, in words: no engine chosen is the Scope chip's own word beside it,
-  // "any" for every other null constraint — the dash means refused here.
-  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("all engines · all types · any block · 50 per page");
-  await expect(chip(page, FILTER_APPLIED_LABEL)).not.toContainText("any engine");
-  await expect(chip(page, "Filter echo")).toHaveCount(0);
+  // The spoken instant in reader words; its exact layer, the wire's own string, is the title.
+  await expect(chip(page, "Newest")).toContainText(nb("Aug 8, 20:21 UTC"));
+  await expect(chip(page, "Newest")).toHaveAttribute("title", "2026-08-08T20:21:05Z");
+  await expect(chip(page, "Loaded")).toContainText("50 · more available");
 
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("50");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("more available");
   await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("3");
-  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("among the loaded rows");
+  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("among the 50 loaded");
+  await expect(page.getByTestId("activity-kpi-deficits")).toContainText("Bad debt realized");
+  await expect(page.getByTestId("activity-kpi-deficits")).toContainText("1");
+  await expect(page.getByTestId("activity-kpi-deficits")).toContainText("among the 50 loaded");
 
   // The row's id is its own chain coordinates; the head row carries its custodied time and opens the Inspector.
   const first = DEMO_FEED_PAGE_1.events[0];
   if (first === undefined) throw new Error("fixture: the demo page has rows");
   const head = page.getByTestId(`activity-row-10·${first.tx_hash}·38·0`);
   await expect(head).toBeVisible();
-  // The When cell is the exact instant typeset: every wire field, the T a no-break space, no zone word.
+  // The When cell is the exact instant typeset: every wire field, the T a no-break space, no zone word — the header
+  // names the zone once, and the cell's title is the wire's own ISO.
   expect(first.block_time).toBe("2026-08-08T20:21:05Z");
   await expect(head.locator("td").first()).toHaveText(nb("2026-08-08 20:21:05"));
+  await expect(head.getByTestId("activity-when")).toHaveAttribute("title", "2026-08-08T20:21:05Z");
+  // Every When cell carries a title: the ISO, or what the block number standing in means.
+  const titles = await page.getByTestId("activity-when").evaluateAll((cells) => cells.map((cell) => cell.getAttribute("title")));
+  expect(titles).toHaveLength(50);
+  expect(titles.every((title) => title !== null && title !== "")).toBe(true);
+  expect(titles.slice(48)).toEqual([UNTIMED_WHEN, UNTIMED_WHEN]);
+  // The When cell is a record's instant in plain tabular sans, never the address mono.
+  await expect(head.getByTestId("activity-when")).not.toHaveClass(/addr/);
   // The account link opens the Inspector; the tx link is the chain's explorer — two 0x… links, each its own id.
   await expect(head.getByTestId("activity-account")).toHaveAttribute("href", `/inspector/${first.account}`);
   await expect(head.getByTestId("activity-tx")).toHaveAttribute("href", `https://optimistic.etherscan.io/tx/${first.tx_hash}`);
@@ -198,7 +212,8 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   // stream is muted, so the book is the one scale source), carrying no raw word — and its unit sits in the quiet
   // column beside it, not upper-cased.
   const headCells = page.getByTestId("activity-table").locator("thead th");
-  await expect(headCells).toHaveText(["When", "Engine", "Type", "Account", ACTIVITY_AMOUNT_HEADER, "Unit", "Tx"]);
+  await expect(headCells).toHaveText([ACTIVITY_WHEN_HEADER, "Engine", "Type", "Account", ACTIVITY_AMOUNT_HEADER, "Unit", "Tx"]);
+  expect(ACTIVITY_WHEN_HEADER).toBe("When (UTC)");
   expect(first.amount).toBe("252733333");
   await expect(head.locator("td").nth(4)).toHaveText("252.733333");
   await expect(head.locator("td").nth(4)).toHaveCSS("text-align", "right");
@@ -210,7 +225,9 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   // holds scaled Cash figures and raw legacy integers, so the raw word sits IN the Amount cell, beside the digits, in
   // the quiet register — and the unit cell does not say it twice.
   const legacy = DEMO_FEED_PAGE_1.events.findIndex((event) => event.engine === "aave_v3_etherfi" && event.amount !== null);
-  const legacyAmount = DEMO_FEED_PAGE_1.events[legacy]?.amount ?? "NEVER";
+  // The wire's digits grouped for reading, never scaled: 180771428 is the wire's own integer.
+  expect(DEMO_FEED_PAGE_1.events[legacy]?.amount).toBe("180771428");
+  const legacyAmount = "180,771,428";
   await expect(rows(page).nth(legacy).locator("td").nth(4)).toHaveText(`${legacyAmount} ${RAW_UNITS_TAG}`);
   await expect(rows(page).nth(legacy).locator("td").nth(4).getByTestId("activity-amount")).toHaveText(legacyAmount);
   await expect(rows(page).nth(legacy).locator("td").nth(4).getByTestId("activity-amount-tag")).toHaveText(RAW_UNITS_TAG);
@@ -231,7 +248,7 @@ test("no licensed scale: a book that states no value_decimals, or a book read th
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
   await expect(rows(page)).toHaveCount(50);
-  await expect(head().locator("td").nth(4)).toHaveText(`252733333 ${RAW_UNITS_TAG}`);
+  await expect(head().locator("td").nth(4)).toHaveText(`252,733,333 ${RAW_UNITS_TAG}`);
   await expect(head().getByTestId("activity-amount-tag")).toHaveText(RAW_UNITS_TAG);
   await expect(head().getByTestId("activity-unit")).toHaveText("normalized debt · USDC");
 
@@ -241,7 +258,7 @@ test("no licensed scale: a book that states no value_decimals, or a book read th
   await page.goto("/feed");
   await expect(rows(page)).toHaveCount(50);
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
-  await expect(head().locator("td").nth(4)).toHaveText(`252733333 ${RAW_UNITS_TAG}`);
+  await expect(head().locator("td").nth(4)).toHaveText(`252,733,333 ${RAW_UNITS_TAG}`);
   await expect(head().getByTestId("activity-unit")).toHaveText("normalized debt · USDC");
   await expect(page.getByTestId("activity-error")).toHaveCount(0);
   await expect(page.getByTestId("activity-refusal")).toHaveCount(0);
@@ -260,7 +277,7 @@ const typedWalk = (params: URLSearchParams, route: Route): Promise<void> => {
   });
 };
 
-test("the three raw enum words print plain: the type buttons, the Type cells and the headline say them in words with the wire's word as the title, and pressing one still asks the service in its own word", async ({ page }) => {
+test("types print in sentence case: the type buttons and the Type cells say them in words with the wire's word as the title, the headline in lower case inside its sentence, and pressing one still asks the service in its own word; a key record is set apart by weight, never a crit pill", async ({ page }) => {
   await muteStream(page);
   await routeBook(page, DEMO_BOOK);
   const requests: URLSearchParams[] = [];
@@ -269,22 +286,28 @@ test("the three raw enum words print plain: the type buttons, the Type cells and
   await expect(rows(page)).toHaveCount(50);
 
   for (const [wire, word] of [
-    ["collateral_enabled", "collateral enabled"],
-    ["collateral_disabled", "collateral disabled"],
-    ["deficit_created", "bad debt realized"],
-    ["borrow", "borrow"],
+    ["collateral_enabled", "Collateral enabled"],
+    ["collateral_disabled", "Collateral disabled"],
+    ["deficit_created", "Bad debt realized"],
+    ["borrow", "Borrow"],
   ] as const) {
     await expect(page.getByTestId(`activity-type-${wire}`)).toHaveText(word);
     await expect(page.getByTestId(`activity-type-${wire}`)).toHaveAttribute("title", wire);
   }
   await expect(page.getByTestId("activity-types")).not.toContainText("_");
-  // The write-off's crit pill says what happened; its wire word rides the title.
+  // The write-off is a key record: ink set apart by weight, its wire word the title — never a verdict's crit pill.
   const deficit = DEMO_FEED_PAGE_1.events.findIndex((event) => event.type === "deficit_created");
-  const pill = rows(page).nth(deficit).locator('[data-tone="crit"]');
-  await expect(pill).toHaveText("bad debt realized");
-  await expect(pill).toHaveAttribute("title", "deficit_created");
+  const key = rows(page).nth(deficit).locator('[data-tone="key"]');
+  await expect(key).toHaveText("Bad debt realized");
+  await expect(key).toHaveAttribute("title", "deficit_created");
+  await expect(page.getByTestId("activity-table").locator('[data-tone="crit"]')).toHaveCount(0);
+  const weight = (locator: typeof key) => locator.evaluate((el) => Number(getComputedStyle(el).fontWeight));
   const enabled = DEMO_FEED_PAGE_1.events.findIndex((event) => event.type === "collateral_enabled");
-  await expect(rows(page).nth(enabled).locator("td").nth(2)).toHaveText("collateral enabled");
+  expect(await weight(key)).toBeGreaterThan(await weight(rows(page).nth(enabled).getByTestId("activity-type")));
+  // Ink, the table's own: a record is never a verdict's colour.
+  const ink = (locator: typeof key) => locator.evaluate((el) => getComputedStyle(el).color);
+  expect(await ink(key)).toBe(await ink(rows(page).nth(enabled).getByTestId("activity-type")));
+  await expect(rows(page).nth(enabled).locator("td").nth(2)).toHaveText("Collateral enabled");
   await expect(rows(page).nth(enabled).locator("td").nth(2).locator("[title]")).toHaveAttribute("title", "collateral_enabled");
   await expect(page.getByTestId("activity-table").locator("tbody")).not.toContainText(/collateral_|deficit_/);
 
@@ -298,7 +321,8 @@ test("the three raw enum words print plain: the type buttons, the Type cells and
   const one = takeawayText(of("deficit_created"), "cross-engine", false, asServed(served, { types: ["deficit_created"] }));
   expect(one).toBe(`1 chain action loaded, bad debt realized, at ${nb("Aug 8, 20:06 UTC")}; that is the only action matching this filter.`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(one);
-  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("all engines · bad debt realized · any block · 50 per page");
+  // A filter narrows the list now: its chip names it, in the sentence's lower-case words.
+  await expect(chip(page, FILTER_LABEL)).toContainText("bad debt realized");
 
   await page.getByTestId("activity-type-collateral_enabled").click();
   await expect(rows(page)).toHaveCount(4);
@@ -328,12 +352,13 @@ test("the untimed tail: the two rows without header time are last and dim, their
   await expect(rows(page).nth(47)).not.toHaveClass(/dim/);
   await expect(page.locator('[data-testid^="activity-row-"][class*="dim"]')).toHaveCount(2);
   await expect(page.getByTestId("activity-drift")).toHaveCount(0);
-  // The list's head says the order in short form with the envelope's page size; the tail's notice stands above the table.
-  await expect(page.getByTestId("activity-order")).toContainText("newest first, by block time · loads 50 at a time");
+  // The list's head says the order in short form; the envelope's page size is the foot's, beside the next page.
+  await expect(page.getByTestId("activity-order")).toContainText("Newest first · by block time");
+  await expect(page.getByTestId("activity-page-size")).toHaveText("Loads 50 at a time");
   await expect(page.getByTestId("activity-tail")).toHaveText(ACTIVITY_TAIL_NOTICE);
 });
 
-test("the ledger view pins the type to liquidation: the request says so, three rows each a crit pill with its extract behind it, the chips and the note say so, the walk restarts cursor-less", async ({ page }) => {
+test("the ledger view pins the type to liquidation: the request says so, three key rows each with its extract beneath it, the bonus dashes explained once under the table, the note and the tiles say so, the walk restarts cursor-less", async ({ page }) => {
   await muteStream(page);
   await routeBook(page, DEMO_BOOK);
   const requests: URLSearchParams[] = [];
@@ -352,24 +377,27 @@ test("the ledger view pins the type to liquidation: the request says so, three r
   expect(requests.some((params) => params.get("types") === "liquidation")).toBe(true);
   for (const params of requests) expect(params.get("cursor")).toBeNull();
 
-  await expect(chip(page, "View")).toContainText("liquidations ledger");
-  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("all engines · liquidation · any block · 50 per page");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("3");
+  // The view is the toggle's word, not a chip's; the pinned type is the view's, not a filter.
+  await expect(chip(page, "View")).toHaveCount(0);
+  await expect(chip(page, FILTER_LABEL)).toHaveCount(0);
+  await expect(chip(page, "Loaded")).toContainText("3 · end of the list");
   await expect(page.getByTestId("activity-types")).toHaveCount(0);
-  await expect(page.getByTestId("activity-types-note")).toContainText("pinned to liquidation");
+  await expect(page.getByTestId("activity-types-note")).toContainText("liquidations only");
   await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("3");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("end of the filtered feed");
+  // The ledger excludes bad-debt realizations: its count is filtered out, never the chain's zero.
+  await expect(page.getByTestId("activity-kpi-deficits")).toContainText("Filtered out");
+  await expect(page.getByTestId("activity-kpi-deficits")).not.toContainText("0");
 
-  const pills = page.getByTestId("activity-table").locator('[data-tone="crit"]');
-  await expect(pills).toHaveCount(3);
-  await expect(pills).toHaveText(["liquidation", "liquidation", "liquidation"]);
-  // The typed extract is VISIBLE beneath every pill — no click, no hover: an unestablished bonus is an em dash
+  const keys = page.getByTestId("activity-table").locator('[data-tone="key"]');
+  await expect(keys).toHaveCount(3);
+  await expect(keys).toHaveText(["Liquidation", "Liquidation", "Liquidation"]);
+  // The typed extract is VISIBLE beneath every type — no click, no hover: an unestablished bonus is a marked em dash
   // read on the page, never an estimate; the configured figure is the wire's bps; the liquidator opens the Inspector.
   const extracts = page.getByTestId("activity-liquidation");
   await expect(extracts).toHaveCount(3);
   await expect(extracts.first()).toBeVisible();
   await expect(extracts.first()).toContainText("seized 0.65625 weETH");
-  await expect(extracts.first()).toContainText("bonus realized — / configured 500 bps");
+  await expect(extracts.first()).toContainText("bonus realized —† / configured 500 bps");
   // What each repaid figure is counted in: the legacy row's own symbol, never an address prefix; the Debt Manager's
   // own USD — the demo's Cash liquidations are sub-dollar positions, printed as the fixture holds them.
   await expect(extracts.nth(0)).toContainText("debt repaid 2,500 USDC");
@@ -380,36 +408,46 @@ test("the ledger view pins the type to liquidation: the request says so, three r
     "href",
     "/inspector/0xBBbB000000000000000000000000000000000002",
   );
-  // The DM extracts carry no configured bonus: a dash, never a zero.
-  await expect(extracts.nth(1)).toContainText("bonus realized — / configured —");
-  await expect(extracts.nth(2)).toContainText("bonus realized — / configured —");
+  // The DM extracts carry no configured bonus: a marked dash, never a zero.
+  await expect(extracts.nth(1)).toContainText("bonus realized —† / configured —†");
+  await expect(extracts.nth(2)).toContainText("bonus realized —† / configured —†");
   await expect(extracts.nth(1)).not.toContainText("configured 0");
-  // The wire's note is the one sentence that says what those dashes mean: page text under each extract, not a hover.
-  const notes = page.getByTestId("activity-liquidation-note");
-  await expect(notes).toHaveCount(3);
-  for (const [i, event] of LEDGER_PAGE.events.entries()) {
-    const note = event.liquidation?.note ?? "NEVER";
-    await expect(notes.nth(i)).toBeVisible();
-    // Every word of the wire's note, its backticked field names set as code: no marker prints.
-    await expect(notes.nth(i)).toHaveText(noteWords(note));
-    await expect(notes.nth(i)).not.toContainText("`");
-    await expect(notes.nth(i).locator("code")).toHaveText(inlineParts(note).filter((part) => part.kind === "code").map((part) => part.text));
-    await expect(extracts.nth(i)).not.toHaveAttribute("title", /.+/);
+  // What the marked dashes mean is said ONCE, as page text under the table — each engine's own reason, not a hover —
+  // and no extract repeats the wire's note.
+  const footnote = page.getByTestId("activity-bonus-note");
+  await expect(footnote).toBeVisible();
+  await expect(footnote).toHaveText(
+    "† Not established, so never estimated: on the legacy Aave v3 market the realized bonus would need event-time prices this service does not re-read; Cash records its bonuses in its own 100e18 denomination, not in basis points, so neither is converted.",
+  );
+  await expect(page.getByTestId("activity-table").getByTestId("activity-liquidation-note")).toHaveCount(0);
+  for (const i of LEDGER_PAGE.events.keys()) await expect(extracts.nth(i)).not.toHaveAttribute("title", /.+/);
+  // The wire's own notes are the drawer's: each distinct note once, every word kept, its code spans set as code.
+  await page.getByTestId("activity-drawer").click();
+  const drawerNotes = page.getByTestId("activity-drawer-body").getByTestId("activity-liquidation-note");
+  const distinct = [...new Set(LEDGER_PAGE.events.map((event) => event.liquidation?.note ?? "NEVER"))];
+  await expect(drawerNotes).toHaveCount(distinct.length);
+  for (const [i, note] of distinct.entries()) {
+    await expect(drawerNotes.nth(i)).toHaveText(noteWords(note));
+    await expect(drawerNotes.nth(i)).not.toContainText("`");
+    await expect(drawerNotes.nth(i).locator("code")).toHaveText(inlineParts(note).filter((part) => part.kind === "code").map((part) => part.text));
   }
+  await expect(page.getByTestId("activity-drawer-notes").getByRole("heading", { name: LIQUIDATION_NOTES_HEADING })).toBeVisible();
+  await page.keyboard.press("Escape");
   const ledgerSentence = takeawayText(LEDGER_PAGE.events, "cross-engine", false, asServed(LEDGER_PAGE.served_at, { ledger: true }));
   expect(ledgerSentence).toBe(`3 liquidations loaded, the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`);
   await expect(headline(page)).toHaveText(ledgerSentence);
   await expect(page.getByTestId("activity-verdict-dek")).toHaveText("2 are on Cash and 1 on the legacy Aave v3 market.");
-  // One pressed-toggle grammar, the kit's: the pressed button wears the accent, the resting one the dim ink.
+  // One pressed-toggle grammar, the kit's toggle group: the pressed option wears the ink on the chip ground and the
+  // accent underline, the resting one the secondary ink.
   const look = (id: string) =>
     page.getByTestId(id).evaluate((el) => {
       const style = getComputedStyle(el);
-      return { color: style.color, border: style.borderTopColor, background: style.backgroundColor };
+      return { color: style.color, shadow: style.boxShadow, background: style.backgroundColor };
     });
   const pressed = await look("activity-view-ledger");
   const resting = await look("activity-view-all");
   expect(pressed.color).not.toBe(resting.color);
-  expect(pressed.border).not.toBe(resting.border);
+  expect(pressed.shadow).not.toBe(resting.shadow);
   expect(pressed.background).not.toBe(resting.background);
 
   // Back to every action: the walk restarts from the demo page, the vocabulary returns.
@@ -418,7 +456,7 @@ test("the ledger view pins the type to liquidation: the request says so, three r
   await expect(page.getByTestId("activity-types")).toBeVisible();
 });
 
-test("all-actions view: an UNESTABLISHED extract is visible on cold load — the em dash never waits behind a fold or a hover", async ({ page }) => {
+test("all-actions view: an UNESTABLISHED extract is visible on cold load — the marked em dash never waits behind a fold or a hover, and its footnote says why", async ({ page }) => {
   await muteStream(page);
   // The committed cross page's liquidation carries realized_bonus_bps null — the exact field a closed fold once hid.
   await mockEvents(page, (params, route) => fulfillJson(route, FEED_CROSS_PAGE_1));
@@ -428,22 +466,23 @@ test("all-actions view: an UNESTABLISHED extract is visible on cold load — the
   const extract = page.getByTestId("activity-liquidation");
   await expect(extract).toHaveCount(1);
   await expect(extract).toBeVisible();
-  await expect(extract).toContainText("realized —");
+  await expect(extract).toContainText("realized —†");
   await expect(extract).toContainText("configured 500 bps");
-  // What the dash means is said where the dash is: the wire's own note, visible with no hover (a title is out of
-  // reach of a keyboard and of a touch screen).
-  await expect(extract.getByTestId("activity-liquidation-note")).toBeVisible();
-  await expect(extract).toContainText("never estimated");
-  await expect(extract).toContainText(noteWords(FEED_CROSS_PAGE_1.events[0]?.liquidation?.note ?? "NEVER"));
-  await expect(extract.getByTestId("activity-liquidation-note").locator("code")).toHaveText(["configured_bonus_bps", "realized_bonus_bps"]);
+  // What the dash means is said on the page, once, under the table: visible with no hover (a title is out of reach of
+  // a keyboard and of a touch screen), in the legacy market's own reason.
+  const footnote = page.getByTestId("activity-bonus-note");
+  await expect(footnote).toBeVisible();
+  await expect(footnote).toContainText("never estimated");
+  await expect(footnote).toContainText("event-time prices this service does not re-read");
+  await expect(footnote).not.toContainText("100e18");
   await expect(extract).not.toHaveAttribute("title", /.+/);
   await expect(extract.getByTestId("activity-liquidator")).toHaveAttribute("href", /^\/inspector\/0x/);
-  // The extract sits inside its own row, beneath the crit pill.
-  await expect(rows(page).first().locator('[data-tone="crit"]')).toHaveText("liquidation");
+  // The extract sits inside its own row, beneath the key record's type.
+  await expect(rows(page).first().locator('[data-tone="key"]')).toHaveText("Liquidation");
   await expect(rows(page).first().getByTestId("activity-liquidation")).toBeVisible();
 });
 
-test("a liquidation in the untimed tail dims WITH its row: the extract, its figures and its note take the row's dim ink — a timed row's extract keeps its own", async ({ page }) => {
+test("a liquidation in the untimed tail dims WITH its row: the extract and its figures take the row's dim ink — a timed row's extract keeps its own", async ({ page }) => {
   await muteStream(page);
   const liquidation = FEED_CROSS_PAGE_1.events[0];
   if (liquidation === undefined || liquidation.liquidation === null) throw new Error("fixture invariant: the cross page opens on its liquidation");
@@ -467,7 +506,6 @@ test("a liquidation in the untimed tail dims WITH its row: the extract, its figu
           cell: colour(extract?.closest("td") ?? null),
           extract: colour(extract),
           figure: colour(extract?.querySelector("b") ?? null),
-          note: colour(extract?.querySelector('[data-testid="activity-liquidation-note"]') ?? null),
         };
       });
   const timed = await inks(0);
@@ -475,7 +513,6 @@ test("a liquidation in the untimed tail dims WITH its row: the extract, its figu
   // In the tail everything the extract prints is the dim cell's ink.
   expect(tail.extract).toBe(tail.cell);
   expect(tail.figure).toBe(tail.cell);
-  expect(tail.note).toBe(tail.cell);
   // A timed row's extract is NOT the cell's ink (secondary prose, full-ink figures), so the pin above can fail.
   expect(timed.cell).not.toBe(tail.cell);
   expect(timed.figure).not.toBe(tail.figure);
@@ -511,10 +548,12 @@ test("since-block: a stated impossibility with no single engine — short form, 
   await expect(page.getByTestId("activity-engine-aave_v3_etherfi")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-mode", "engine-scoped");
   await expect(page.getByTestId("activity-verdict")).toContainText("Activity · Aave v3 market (legacy)");
-  await expect(chip(page, "Scope")).toContainText("Aave v3 market (legacy)");
+  await expect(chip(page, "Scope")).toHaveCount(0);
   await expect(chip(page, "Order")).toContainText("by block number");
   await expect(chip(page, "Newest")).toContainText("block 25,635,601");
-  await expect(page.getByTestId("activity-order")).toContainText("newest first, by block number on the legacy Aave v3 market's chain · loads 2 at a time"); // the envelope's own limit echo, never an assumed page size
+  await expect(page.getByTestId("activity-order")).toContainText("Newest first · by block number");
+  // The envelope's own limit echo, never an assumed page size — the foot's, beside the next page.
+  await expect(page.getByTestId("activity-end")).toHaveText(END_OF_FEED);
   await expect(page.getByTestId("activity-tail")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(2);
   await expect(headline(page)).toHaveText(
@@ -530,8 +569,9 @@ test("since-block: a stated impossibility with no single engine — short form, 
   await input.fill("25635600");
   await input.press("Enter");
   await expect(rows(page)).toHaveCount(1);
-  await expect(page.getByTestId("activity-since-applied")).toHaveText("≥ 25635600");
-  await expect(chip(page, FILTER_APPLIED_LABEL)).toContainText("Aave v3 market (legacy) · all types · from block 25,635,600 · 2 per page");
+  await expect(page.getByTestId("activity-since-applied")).toHaveText("≥ 25,635,600");
+  // The service's echo of the bound it applied: a filter chip while it narrows the list.
+  await expect(chip(page, FILTER_LABEL)).toContainText("from block 25,635,600");
 
   // Back to every engine: the bound is REMOVED with a visible notice, never silently re-meant.
   await page.getByTestId("activity-engine-all").click();
@@ -540,13 +580,14 @@ test("since-block: a stated impossibility with no single engine — short form, 
   );
   await expect(since).toHaveText(ACTIVITY_SINCE_SHORT);
   await expect(rows(page)).toHaveCount(50);
+  await expect(chip(page, FILTER_LABEL)).toHaveCount(0);
 
   // The law of the walk: no request EVER carried a cursor across a mode switch, and no cross-engine request smuggled the bound.
   for (const params of requests) expect(params.get("cursor")).toBeNull();
   for (const params of requests.filter((candidate) => candidate.get("engine") === null)) expect(params.get("since_block")).toBeNull();
 });
 
-test("a refused cursor (400): the headline names the refusal under the dashed tone and counts the loaded rows as loaded, the dek gives the envelope's own words — once; the strip names the refusal and restarts; no 'Load more' re-sends the refused cursor; served rows survive; restart from page one clears it", async ({ page }) => {
+test("a refused cursor (400): the headline names the refusal in the refused register and counts the loaded rows as loaded, the dek says it in reader words; the refusal card discloses the envelope's own words — once — and restarts; no 'Load more' re-sends the refused cursor; served rows survive; the restart clears it", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, (params, route) =>
     params.get("cursor") === null ? fulfillJson(route, DEMO_FEED_PAGE_1) : fulfillJson(route, FEED_ERROR_BAD_CURSOR, 400),
@@ -557,10 +598,15 @@ test("a refused cursor (400): the headline names the refusal under the dashed to
   await page.getByTestId("activity-load-more").click();
   const refusal = page.getByTestId("activity-refusal");
   await expect(refusal).toBeVisible();
-  await expect(refusal).toContainText("PAGE REFUSED · bad_request");
-  // The service's words are the dek's, said once: the strip names the refusal and carries the restart, no more.
-  await expect(refusal).not.toContainText("not interchangeable");
-  await expect(refusal.getByTestId("activity-restart")).toBeVisible();
+  await expect(refusal).toHaveAttribute("data-state", "refused");
+  await expect(refusal.getByRole("heading", { name: "Page refused" })).toBeVisible();
+  await expect(refusal).toContainText("The rows below were served before it and still stand.");
+  // The service's words move under the card's disclosure, verbatim — said once on the page, and never in the dek.
+  await expect(refusal.locator("summary")).toHaveText(SERVICE_SAID);
+  await expect(refusal.locator("details")).toContainText("not interchangeable");
+  await expect(refusal.locator("details")).toContainText("bad_request");
+  await expect(page.getByTestId("activity-verdict-dek")).not.toContainText("not interchangeable");
+  await expect(refusal.getByTestId("activity-restart")).toHaveText("Start from the newest");
   await expect(page.locator("main").getByText("not interchangeable")).toHaveCount(1);
   // The refused cursor is never offered again: the foot offers nothing until the list restarts.
   await expect(page.getByTestId("activity-load-more")).toHaveCount(0);
@@ -569,11 +615,11 @@ test("a refused cursor (400): the headline names the refusal under the dashed to
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "refused");
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
   await expect(headline(page)).toHaveText("The next page was refused, after 50 chain actions loaded.");
-  await expect(page.getByTestId("activity-verdict-dek")).toContainText("not interchangeable");
-  await expect(page.getByTestId("activity-verdict-dek")).toContainText("Restart the list below.");
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText("The service would not return the next page of the list. Start again from the newest actions.");
   // Page-one rows are still shown and still counted — a refusal doesn't erase served truth.
   await expect(rows(page)).toHaveCount(50);
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("50");
+  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("3");
+  await expect(chip(page, "Loaded")).toContainText("50 · next page refused");
 
   await page.getByTestId("activity-restart").click();
   await expect(page.getByTestId("activity-refusal")).toHaveCount(0);
@@ -582,7 +628,7 @@ test("a refused cursor (400): the headline names the refusal under the dashed to
   await expect(page.getByTestId("activity-load-more")).toBeVisible();
 });
 
-test("a refusal with NOTHING loaded: the service's words are said once, no 'Load more' stands beside the restart, the tiles are dashes — and the restart is the way forward", async ({ page }) => {
+test("a refusal with NOTHING loaded: the service's words are disclosed once, no 'Load more' stands beside the restart, the tiles and the table's row say Refused — never a zero or a bare dash — and the restart is the way forward", async ({ page }) => {
   await muteStream(page);
   let refuse = true;
   const asked: URLSearchParams[] = [];
@@ -593,22 +639,27 @@ test("a refusal with NOTHING loaded: the service's words are said once, no 'Load
   await expect(rows(page)).toHaveCount(0);
   await expect(headline(page)).toHaveText("The service refused this page.");
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
-  // Once: the dek carries the envelope's own words; the strip, the table and the tiles name the state, not the words again.
-  await expect(page.getByTestId("activity-verdict-dek")).toContainText("not interchangeable");
-  await expect(page.getByTestId("activity-verdict-dek")).toContainText("Restart the list below.");
+  // Once: the card discloses the envelope's own words; the dek, the table and the tiles name the state in reader words.
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText("The service would not return this page of the list. Start again from the newest actions.");
   await expect(page.locator("main").getByText("not interchangeable")).toHaveCount(1);
   const refusal = page.getByTestId("activity-refusal");
-  await expect(refusal).toContainText("PAGE REFUSED · bad_request");
-  await expect(refusal).not.toContainText("not interchangeable");
-  await expect(page.getByTestId("activity-table")).toContainText("page refused · bad_request: restart above");
+  await expect(refusal).toContainText("No row of the list was read.");
+  await expect(refusal.locator("details")).toContainText("not interchangeable");
+  await expect(page.getByTestId("activity-table").locator("tbody td")).toHaveText("Refused");
   // One way forward, one button: the restart. Nothing loaded means there is no "more" to load.
   await expect(page.getByTestId("activity-restart")).toBeVisible();
   await expect(page.getByTestId("activity-load-more")).toHaveCount(0);
   await expect(page.getByTestId("activity-end")).toHaveCount(0);
-  // Nothing loaded is a dash, never a zero.
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("—");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("page refused");
-  await expect(page.getByTestId("activity-kpi-rows")).not.toContainText("0");
+  // Nothing loaded is the refused register's word, never a zero and never a bare dash.
+  for (const tile of ["activity-kpi-liquidations", "activity-kpi-deficits"]) {
+    await expect(page.getByTestId(tile)).toHaveAttribute("data-state", "refused");
+    await expect(page.getByTestId(tile)).toContainText("Refused");
+    await expect(page.getByTestId(tile)).toContainText("This page was refused");
+    await expect(page.getByTestId(tile)).not.toContainText("0");
+    await expect(page.getByTestId(tile)).not.toContainText("—");
+  }
+  // The identity is never empty: the order key stays.
+  await expect(chip(page, "Order")).toContainText("by block time");
 
   refuse = false;
   await page.getByTestId("activity-restart").click();
@@ -620,7 +671,7 @@ test("a refusal with NOTHING loaded: the service's words are said once, no 'Load
   for (const params of asked) expect(params.get("cursor")).toBeNull();
 });
 
-test("load more appends the cursor page: the rows tile counts, the tail grows, the end is stated, the headline says these are every action matching the filter", async ({ page }) => {
+test("load more appends the cursor page: the loaded chip counts, the tail grows, the end is stated, the headline says these are every action matching the filter", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
@@ -628,10 +679,10 @@ test("load more appends the cursor page: the rows tile counts, the tail grows, t
 
   await page.getByTestId("activity-load-more").click();
   await expect(rows(page)).toHaveCount(52);
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("52");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("end of the filtered feed");
+  await expect(chip(page, "Loaded")).toContainText("52 · end of the list");
+  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("among the 52 loaded");
   await expect(page.getByTestId("activity-load-more")).toHaveCount(0);
-  await expect(page.getByTestId("activity-end")).toHaveText("end of the filtered feed");
+  await expect(page.getByTestId("activity-end")).toHaveText("End of the list.");
   await expect(page.locator('[data-testid^="activity-row-"][class*="dim"]')).toHaveCount(4);
   await expect(page.getByTestId("activity-drift")).toHaveCount(0);
   // The reference year is the newest envelope's own served_at — the continuation page's.
@@ -643,7 +694,7 @@ test("load more appends the cursor page: the rows tile counts, the tail grows, t
   await expect(page.getByTestId("activity-tail")).toHaveText(ACTIVITY_TAIL_NOTICE_UNORDERED);
 });
 
-test("degraded envelopes: 429 and 500 state their reasons as the page's own refusal — the strip, the state, the dashed header, dashed tiles that never read zero; retry recovers", async ({ page }) => {
+test("degraded envelopes: 429 and 500 are fetch failures, never a refusal — the unavailable card with the service's words disclosed, the absent headline with the one status code, Unavailable tiles that never read zero, the order key kept; retry recovers", async ({ page }) => {
   await muteStream(page);
   let mode: "rate" | "internal" | "ok" = "rate";
   await mockEvents(page, (params, route) => {
@@ -654,21 +705,31 @@ test("degraded envelopes: 429 and 500 state their reasons as the page's own refu
   await page.goto("/feed");
 
   const error = page.getByTestId("activity-error");
-  await expect(error).toContainText("rate limit exceeded");
+  // The service's words, disclosed in the card: relocated, never removed.
+  await expect(error.locator("details")).toContainText("rate limit exceeded");
+  await expect(error).toHaveAttribute("data-state", "unavailable");
+  await expect(error).toHaveAttribute("data-frame", "solid");
+  await expect(error.getByRole("heading", { name: "Page unavailable" })).toBeVisible();
+  await expect(page.getByTestId("activity-refusal")).toHaveCount(0);
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "error");
-  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "absent");
   await expect(headline(page)).toHaveText("Recorded chain actions could not be fetched.");
-  await expect(page.getByTestId("activity-verdict-dek")).toContainText("rate limit exceeded");
-  await expect(page.getByTestId("activity-kpi-rows")).toHaveAttribute("data-tone", "refused");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("—");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("page fetch failed");
-  await expect(page.getByTestId("activity-kpi-rows")).not.toContainText("0");
-  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("—");
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText("The service did not return this page (HTTP 429), so no row of it is shown.");
+  for (const tile of ["activity-kpi-liquidations", "activity-kpi-deficits"]) {
+    await expect(page.getByTestId(tile)).toHaveAttribute("data-state", "unavailable");
+    await expect(page.getByTestId(tile)).toContainText("Unavailable");
+    await expect(page.getByTestId(tile)).not.toContainText("Refused");
+    await expect(page.getByTestId(tile)).not.toContainText("0");
+  }
+  await expect(page.getByTestId("activity-table").locator("tbody td")).toHaveText("Unavailable");
+  await expect(chip(page, "Order")).toContainText("by block time");
   await expect(rows(page)).toHaveCount(0);
 
   mode = "internal";
+  await expect(page.getByTestId("activity-retry")).toHaveText("Try again");
   await page.getByTestId("activity-retry").click();
   await expect(page.getByTestId("activity-error")).toContainText("the service failed to build the response");
+  await expect(page.getByTestId("activity-verdict-dek")).toContainText("(HTTP 500)");
 
   mode = "ok";
   await page.getByTestId("activity-retry").click();
@@ -677,23 +738,47 @@ test("degraded envelopes: 429 and 500 state their reasons as the page's own refu
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
 });
 
-test("an empty filtered feed is a real answer: the exhausted state, the table's sentence, zero tiles that are true, a headline that invents nothing", async ({ page }) => {
+test("an empty filtered feed is a real answer in ink: the exhausted state, the table's state word, a headline scoped to the filter the service echoed — never an unscoped negative — and the one way to see more", async ({ page }) => {
   await muteStream(page);
-  await mockEvents(page, (params, route) => fulfillJson(route, FEED_EMPTY));
+  // The committed empty page echoes the bad-debt type filter; the page asks with it pressed.
+  expect(FEED_EMPTY.filter.types).toEqual(["deficit_created"]);
+  await mockEvents(page, (params, route) => (params.get("types") === "deficit_created" ? fulfillJson(route, FEED_EMPTY) : demoWalk(params, route)));
   await page.goto("/feed");
+  await expect(rows(page)).toHaveCount(50);
+  await page.getByTestId("activity-type-deficit_created").click();
 
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "exhausted");
-  const table = page.getByTestId("activity-table");
-  await expect(table).toContainText("no recorded chain action matches this filter");
-  await expect(table).toContainText("a real answer");
+  await expect(page.getByTestId("activity-table").locator("tbody td")).toHaveText("No rows");
   await expect(rows(page)).toHaveCount(0);
-  await expect(headline(page)).toHaveText("No recorded chain action matches this filter.");
-  await expect(page.getByTestId("activity-verdict-dek")).toHaveText(ACTIVITY_EXHAUSTED_DEK);
+  await expect(headline(page)).toHaveText("No recorded chain action is a bad-debt realization.");
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText(ACTIVITY_CLEAR_FILTER_DEK);
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "neutral");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("0");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("end of the filtered feed");
+  // The pressed filter stays pressed: the empty answer is for it.
+  await expect(page.getByTestId("activity-type-deficit_created")).toHaveAttribute("aria-pressed", "true");
+  await expect(chip(page, FILTER_LABEL)).toContainText("bad debt realized");
+  // A true zero: the service's answer for this filter.
+  await expect(page.getByTestId("activity-kpi-deficits")).toContainText("0");
+  await expect(page.getByTestId("activity-kpi-deficits")).toContainText("No rows loaded");
+  // The filter admits no liquidation: that count is filtered out, never the chain's zero.
+  await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("Filtered out");
+  await expect(page.getByTestId("activity-end")).toHaveText(END_OF_FEED);
+
+  // One way forward: clear the filter, and the walk restarts on every action.
+  await page.getByTestId("activity-clear-filter").click();
+  await expect(rows(page)).toHaveCount(50);
+  await expect(page.getByTestId("activity-type-deficit_created")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("activity-clear-filter")).toHaveCount(0);
+});
+
+test("an empty answer with no filter says the service recorded nothing, in ink, with no filter to clear", async ({ page }) => {
+  await muteStream(page);
+  await mockEvents(page, (params, route) => fulfillJson(route, { ...FEED_EMPTY, filter: { ...FEED_EMPTY.filter, types: [] } }));
+  await page.goto("/feed");
+  await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "exhausted");
+  await expect(headline(page)).toHaveText("No chain action is recorded.");
+  await expect(page.getByTestId("activity-verdict-dek")).toHaveText(ACTIVITY_EXHAUSTED_DEK);
   await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("0");
-  await expect(page.getByTestId("activity-end")).toBeVisible();
+  await expect(page.getByTestId("activity-clear-filter")).toHaveCount(0);
 });
 
 test("amount units render honestly: named, raw where unlicensed and tagged, a record-only dash with its word in the unit column, never a fake USD", async ({ page }) => {
@@ -715,8 +800,8 @@ test("amount units render honestly: named, raw where unlicensed and tagged, a re
   await expect(rows(page).nth(2).getByTestId("activity-amount-tag")).toHaveCount(0);
 
   // The record-only row (unit `none`, null amount) is its own statement, not a zero — and not a value: its amount cell
-  // holds a dash set in the table's dim sub register, never the mono of a figure, and its word stands in the unit
-  // column with what the dash means as its title — as the Inspector says it.
+  // holds a dash set in the table's dim sub register, and its word stands in the unit column with what the dash means
+  // as its title — as the Inspector says it.
   expect(FEED_UNITS.events[2]?.amount).toBeNull();
   const recordOnly = rows(page).nth(2).getByTestId("activity-amount");
   await expect(recordOnly).toHaveText("—");
@@ -725,11 +810,10 @@ test("amount units render honestly: named, raw where unlicensed and tagged, a re
   await expect(rows(page).nth(2).getByTestId("activity-unit")).toHaveText("record-only");
   await expect(rows(page).nth(2).getByTestId("activity-unit")).toHaveAttribute("title", RECORD_ONLY_TITLE);
   await expect(page.getByTestId("activity-amount").filter({ hasText: "record-only" })).toHaveCount(0);
-  await expect(page.getByTestId("activity-amount").filter({ hasText: "123456789" })).toHaveClass(/addr/);
   await expect(units).toHaveCount(4);
 
-  // The opaque amount is the RAW integer — its decimals were NOT applied.
-  await expect(page.getByTestId("activity-amount").filter({ hasText: "123456789" })).toHaveCount(1);
+  // The opaque amount is the RAW integer, grouped for reading — its decimals were NOT applied.
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "123,456,789" })).toHaveCount(1);
   await expect(page.getByText("123.456789")).toHaveCount(0);
 
   expect((await page.getByTestId("activity-table").innerText()).includes("$")).toBe(false);
@@ -764,7 +848,8 @@ test("ordering drift: a timed row inside the untimed tail — the alert stands o
   const alert = page.getByTestId("activity-drift");
   await expect(alert).toBeVisible();
   await expect(alert).toHaveAttribute("role", "alert");
-  await expect(alert).toContainText("Ordering fault · the service sent a timed row inside the untimed tail");
+  await expect(alert.locator("b")).toHaveText("Ordering fault");
+  await expect(alert).toContainText("The service sent a timed row inside the untimed tail");
   await expect(alert).toContainText("treat this walk as suspect");
   await expect(headline(page)).toHaveText(
     "2 liquidations among the 3 chain actions loaded, no newest is claimed: the service broke its own ordering (see the alert below); that is every action matching this filter.",
@@ -772,7 +857,7 @@ test("ordering drift: a timed row inside the untimed tail — the alert stands o
   await expect(headline(page)).not.toContainText("the newest at");
   // No newest anywhere: no chip; and the list's head claims no order the service did not keep.
   await expect(chip(page, "Newest")).toHaveCount(0);
-  await expect(page.getByTestId("activity-order")).toContainText("in the order the service sent");
+  await expect(page.getByTestId("activity-order")).toContainText("In the order the service sent");
   await expect(page.getByTestId("activity-tail")).toHaveCount(0);
   await expect(rows(page).nth(1)).toHaveClass(/dim/);
   await expect(rows(page).nth(2)).not.toHaveClass(/dim/);
@@ -822,7 +907,7 @@ test("the live strip: no base frame → said, never pretended, on ONE plain line
   expect(figureFamily).not.toBe(await batch.evaluate((el) => getComputedStyle(el).fontFamily));
 });
 
-test("before the first page answers NOTHING is counted: the headline names the load under the dashed tone and prints no digit, the dek says what will be here, the tiles are pending — never a zero", async ({ page }) => {
+test("before the first page answers NOTHING is counted: the headline names the load in the absent register and prints no digit, the dek says what will be here, the tiles are pending — never a zero or a refusal", async ({ page }) => {
   await muteStream(page);
   let release: () => void = () => undefined;
   const held = new Promise<void>((resolve) => {
@@ -837,13 +922,15 @@ test("before the first page answers NOTHING is counted: the headline names the l
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "loading");
   await expect(headline(page)).toHaveText("Loading recorded chain actions…");
   await expect(headline(page)).not.toContainText(/\d/);
-  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "absent");
   await expect(page.getByTestId("activity-verdict-dek")).toHaveText(ACTIVITY_LOADING_DEK);
   await expect(chip(page, "Newest")).toHaveCount(0);
+  // The identity is never empty: the order key stands before anything is counted.
+  await expect(chip(page, "Order")).toContainText("by block time");
   // A tile still being computed wears the kit's pending register: the ellipsis under aria-busy, never a digit.
-  await expect(page.getByTestId("activity-kpi-rows")).toHaveAttribute("aria-busy", "true");
-  await expect(page.getByTestId("activity-kpi-rows")).toContainText("…");
-  await expect(page.getByTestId("activity-kpi-rows")).not.toContainText("0");
+  await expect(page.getByTestId("activity-kpi-deficits")).toHaveAttribute("aria-busy", "true");
+  await expect(page.getByTestId("activity-kpi-deficits")).toContainText("…");
+  await expect(page.getByTestId("activity-kpi-deficits")).not.toContainText("0");
   await expect(page.getByTestId("activity-kpi-liquidations")).toHaveAttribute("aria-busy", "true");
   await expect(page.getByTestId("activity-kpi-liquidations")).toContainText("…");
   await expect(page.getByTestId("activity-kpi-liquidations")).not.toContainText("0");
@@ -854,7 +941,7 @@ test("before the first page answers NOTHING is counted: the headline names the l
   await expect(headline(page)).toContainText("3 liquidations among the 50 chain actions loaded,");
 });
 
-test("the doctrine lives in the drawer, verbatim — sentences only: the intro, the method line, the forensics note, the tail note, the order's full sentence, the since-block law and the live strip's law; the list's name is the list head's, not a paragraph; the intro's opening is not page copy; Escape closes it and the button regains focus", async ({ page }) => {
+test("the doctrine lives in the drawer, verbatim — sentences only: the intro, the forensics note, the tail note, the order's full sentence, the since-block law and the live strip's law, then the service's own liquidation notes; the list's name is the list head's, not a paragraph; the intro's opening is not page copy; Escape closes it and the button regains focus", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
@@ -867,9 +954,8 @@ test("the doctrine lives in the drawer, verbatim — sentences only: the intro, 
 
   await page.getByTestId("activity-drawer").click();
   const body = page.getByTestId("activity-drawer-body");
-  await expect(body.locator("p")).toHaveText([
+  await expect(body.locator(":scope > p")).toHaveText([
     ACTIVITY_INTRO,
-    ACTIVITY_METHOD,
     ACTIVITY_FORENSICS,
     ACTIVITY_TAIL_NOTE,
     "Ordered by custodied header time (block_time DESC) with a deterministic chain-aware tiebreak. Block heights are never compared across chains, and rows without header time follow in the disclosed untimed tail.",
@@ -884,25 +970,29 @@ test("the doctrine lives in the drawer, verbatim — sentences only: the intro, 
   );
   await expect(body).toContainText("never dressed up as a token or USD figure");
   await expect(body).toContainText("null until custodied, in which case the block number renders instead");
+  // The demo page's three liquidations carry two distinct notes: each is printed once.
+  await expect(body.getByTestId("activity-liquidation-note")).toHaveCount(2);
 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("activity-drawer-body")).toHaveCount(0);
   await expect(page.getByTestId("activity-drawer")).toBeFocused();
 });
 
-test("answer before evidence: header above tiles above the live strip above the list's head above the controls above the table above the foot", async ({ page }) => {
+test("answer before evidence: header above tiles above the live strip above the list's head above the controls (engine and since-block, then view and type) above the table above the foot", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
   await expect(rows(page)).toHaveCount(50);
   const y = async (id: string) => (await page.getByTestId(id).boundingBox())?.y ?? Number.NaN;
-  expect(await y("activity-verdict")).toBeLessThan(await y("activity-kpi-rows"));
-  expect(await y("activity-kpi-rows")).toBeLessThan(await y("activity-live"));
+  expect(await y("activity-verdict")).toBeLessThan(await y("activity-kpi-liquidations"));
+  expect(await y("activity-kpi-liquidations")).toBeLessThan(await y("activity-live"));
   expect(await y("activity-live")).toBeLessThan(await y("activity-order"));
   expect(await y("activity-order")).toBeLessThan(await y("activity-engine-all"));
-  // Two control rows, then the tail's one-line notice, then the table.
-  expect(await y("activity-engine-all")).toBeLessThan(await y("activity-since"));
-  expect(await y("activity-since")).toBeLessThan(await y("activity-tail"));
+  // Two control rows — the engine with its since-block bound, then the view and the type — then the tail's one-line
+  // notice, then the table.
+  expect(await y("activity-engine-all")).toBeLessThan(await y("activity-view-all"));
+  expect(await y("activity-since")).toBeLessThan(await y("activity-view-all"));
+  expect(await y("activity-view-all")).toBeLessThan(await y("activity-tail"));
   expect(await y("activity-tail")).toBeLessThan(await y("activity-table"));
   expect(await y("activity-table")).toBeLessThan(await y("activity-foot"));
 });

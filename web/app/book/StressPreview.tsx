@@ -1,26 +1,39 @@
 import Link from "next/link";
-import { ChartCard } from "@/components/kit";
+import { ChartCard, StatusPill } from "@/components/kit";
+import { BOOK_CARDS, PROJECTION_BADGE, stressWithheldLine } from "@/lib/book-copy";
 import { unmeasuredSentence, type StressPreview as Preview } from "@/lib/stress-preview";
 import styles from "./book.module.css";
 
-/** The committed ETH grid for the Cash engine, one line per shocked point; the full workspace is Scenarios. */
+/**
+ * The committed shock grid for the Cash engine, one line per shocked point, under the one PROJECTION badge; the full
+ * workspace is Scenarios. A preview that is not there says why in the card's finding, and wears no badge: nothing on
+ * it is projected.
+ */
 export function StressPreview({ preview }: { preview: Preview | null }) {
-  const unmeasured = preview !== null && preview.kind === "view" ? unmeasuredSentence(preview.unmeasured) : null;
+  const view = preview !== null && preview.kind === "view" ? preview : null;
+  const unmeasured = view === null ? null : unmeasuredSentence(view.unmeasured);
+  const finding =
+    view !== null
+      ? BOOK_CARDS.stress.finding
+      : preview === null
+        ? BOOK_CARDS.stress.none
+        : preview.kind === "refused"
+          ? stressWithheldLine(preview.reason)
+          : BOOK_CARDS.stress.notOnGrid;
   return (
     <ChartCard
-      title="Stress preview"
-      finding="The committed ETH shock grid, run against this batch. Every figure below is a projection."
-      link={{ href: preview !== null && preview.kind === "view" ? `/lab?scenario=${preview.scenarioId}` : "/lab", label: "Scenarios →" }}
+      title={BOOK_CARDS.stress.title}
+      badge={view === null ? undefined : <StatusPill tone="projection">{PROJECTION_BADGE}</StatusPill>}
+      finding={finding}
+      link={{ href: view === null ? "/lab" : `/lab?scenario=${view.scenarioId}`, label: BOOK_CARDS.stress.link }}
       testId="book-stress-preview"
     >
-      {preview === null ? (
-        <p className={styles.note}>This batch carries no stress grid.</p>
-      ) : preview.kind === "view" ? (
+      {view !== null && (
         <>
           <ul className={styles.lines}>
-            {preview.lines.map((line) => (
+            {view.lines.map((line) => (
               <li key={line.shock}>
-                <Link href={`/lab?scenario=${preview.scenarioId}`}>{line.text}</Link>
+                <Link href={`/lab?scenario=${view.scenarioId}`}>{line.text}</Link>
               </li>
             ))}
           </ul>
@@ -30,10 +43,6 @@ export function StressPreview({ preview }: { preview: Preview | null }) {
             </p>
           )}
         </>
-      ) : preview.kind === "refused" ? (
-        <p className={styles.note}>Preview withheld: {preview.reason}.</p>
-      ) : (
-        <p className={styles.note}>The Cash engine is not on this batch&apos;s stress grid.</p>
       )}
     </ChartCard>
   );

@@ -4,7 +4,7 @@
 // vocabulary (lib/feed-view.ts), in the Activity page's order: the figure, then
 // what it is counted in; a liquidation's figures are the ones the Activity
 // page prints, from the same functions.
-import { EVENT_DISPLAY_TYPES } from "./feed-data";
+import { UNTIMED_WHEN } from "./activity-view";
 import {
   LIQUIDATION_WORDS,
   RAW_UNITS_TAG,
@@ -15,23 +15,21 @@ import {
   liquidationSeized,
   typeLabel,
 } from "./feed-view";
-import { renderBlockTime, truncateAddress } from "./format";
+import { blockTimeTitle, renderBlockTime, shortHex, truncateAddress } from "./format";
 import { txExplorerUrl, type ChainEvent } from "./inspector-data";
 import { groupInt, plural } from "./prose";
 
 /**
- * An action as this card heads its row: the Activity page's word for the same wire type, sentence-cased — one
- * vocabulary on both surfaces. A type outside the contract's vocabulary prints as the wire sent it, never guessed at.
+ * An action as this card heads its row: the Activity page's own label for the same wire type — one vocabulary on both
+ * surfaces. A type outside the contract's vocabulary prints as the wire sent it, never guessed at.
  */
-export function actionLabel(type: string): string {
-  if (!(EVENT_DISPLAY_TYPES as readonly string[]).includes(type)) return type;
-  const words = typeLabel(type);
-  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
-}
+export const actionLabel: (type: string) => string = typeLabel;
 
 export interface ActivityRow {
   readonly key: string;
   readonly when: string;
+  /** The When cell's title: the wire's own ISO instant, or what the block number standing in means. */
+  readonly whenTitle: string;
   readonly timed: boolean;
   readonly action: string;
   /** The engine's own event word (`raw_type`), verbatim, for the hover; the visible label comes from `type`. */
@@ -79,15 +77,13 @@ function unitWords(parts: readonly (string | null)[]): string {
   return words === "" ? "" : `· ${words}`;
 }
 
-/** The first ten characters; the ellipsis appears only when something was actually cut. */
-const shortHash = (hash: string): string => (hash.length > 10 ? `${hash.slice(0, 10)}…` : hash);
-
 export function activityRows(events: readonly ChainEvent[], scale?: ActivityScale): ActivityRow[] {
   return events.map((event) => {
     const amount = feedAmount(event, { engineValueDecimals: scale?.valueDecimalsByEngine?.[event.engine] ?? null });
     return {
       key: `${event.tx_hash}:${String(event.log_index)}:${String(event.seq)}`,
       when: renderBlockTime(event.block_number, event.block_time), // "block 155,315,000" when the header time is not custodied
+      whenTitle: event.block_time === null ? UNTIMED_WHEN : blockTimeTitle(event.block_number, event.block_time),
       timed: event.block_time !== null,
       action: actionLabel(event.type),
       actionTitle: event.raw_type,
@@ -96,7 +92,7 @@ export function activityRows(events: readonly ChainEvent[], scale?: ActivityScal
       amountTitle: amount.kind === "record-only" ? RECORD_ONLY_TITLE : (amount.unitTitle ?? amount.unitChip),
       unit: amount.kind === "record-only" ? RECORD_ONLY_WORD : unitWords([amount.unitChip, amount.symbol]),
       amountTag: amount.kind === "amount" && amount.rawUnits ? RAW_UNITS_TAG : null,
-      tx: { hash: event.tx_hash, short: shortHash(event.tx_hash), url: txExplorerUrl(event.chain_id, event.tx_hash) },
+      tx: { hash: event.tx_hash, short: shortHex(event.tx_hash), url: txExplorerUrl(event.chain_id, event.tx_hash) },
       detail: liquidationDetail(event),
     };
   });
@@ -106,10 +102,10 @@ export function activityRows(events: readonly ChainEvent[], scale?: ActivityScal
  * The card's qualifier, in the Activity page's words for the same rows: they are chain actions, listed newest first
  * by block time. The builder's custody vocabulary stays in the code; a reader sees the page's one vocabulary.
  */
-export const ACTIVITY_CARD_QUALIFIER = "this account's chain actions · newest first, by block time";
+export const ACTIVITY_CARD_QUALIFIER = "Newest first · by block time";
 
 /** An untimed row's hover: its block has no block time yet, so the block number stands in — never an invented clock. */
-export const UNTIMED_WHEN_TITLE = "no block time yet — the block number stands in";
+export const UNTIMED_WHEN_TITLE = UNTIMED_WHEN;
 
 /**
  * The activity section's takeaway: the feed orders CUSTODIED header
@@ -135,18 +131,30 @@ export function activityTakeaway(timed: number, untimed: number, hasMore: boolea
   );
 }
 
-/** The table's words when it holds no rows: the load phase, then a failure in its own words, then the proven-empty sentence. */
+/**
+ * The table's words when it holds no rows: the state's own word while a read is in flight or after it failed (the
+ * service's words are disclosed beneath the table, never printed as the row), then the proven-empty sentence.
+ */
 export function activityEmptyText(loading: boolean, error: Error | null): string {
-  if (loading) return "Loading activity…";
-  if (error !== null) return `Activity unavailable: ${error.message}`;
+  if (loading) return "Loading…";
+  if (error !== null) return "Unavailable";
   return "No chain actions for this account.";
 }
 
 /**
  * A page fetch that failed beside rows already loaded. The rows stand — each answered for itself — and the failure
- * is stated on its own line in its own words; it is never folded into the table's empty words, which print only
- * when there are no rows to show, so a refused "Load more" would otherwise vanish.
+ * is stated on its own line; it is never folded into the table's empty words, which print only when there are no
+ * rows to show, so a refused "Load more" would otherwise vanish. The service's own words sit under a disclosure beside it.
  */
-export function activityFailureText(error: Error): string {
-  return `More activity could not be loaded: ${error.message}. The rows above stand; nothing beyond them was read.`;
+export function activityFailureText(): string {
+  return "More activity could not be loaded; the rows above stand, and nothing beyond them was read.";
 }
+
+/** The card a failed read of this account's activity stands in: what is missing, and what still stands. */
+export function activityFailureCard(loaded: number): { readonly title: string; readonly cause: string } {
+  return loaded === 0
+    ? { title: "Activity unavailable", cause: "The request for this account's chain actions did not succeed, so none is shown." }
+    : { title: "More activity unavailable", cause: activityFailureText() };
+}
+
+export { SERVICE_SAID } from "./activity-view";

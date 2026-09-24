@@ -6,13 +6,16 @@
 // `lib/runbook.ts`, verdicts refined on receipt — never the raw wire shape: a
 // record's outcome is sealed by law before anything here reads it.
 import type { components } from "@solvent/client";
-import { engineName } from "./inspector-headline";
 import { CASH } from "./inspector-position";
 import { answerFault, readEngine } from "./lab-engine";
-import { signedCount, signedUsd } from "./lab-headline";
-import { groupInt, joinAnd } from "./prose";
+import { signedCount } from "./lab-headline";
+import { signedBookMoney } from "./money";
+import { engineList, groupInt } from "./prose";
 import type { LabRunBook, RunBookOutcome } from "./runbook";
 import type { RunBookSetResponse, SetRunOutcome } from "./runbookSet";
+import { scenarioGist, scenarioName, scenarioTitle } from "./scenario-name";
+
+export { scenarioGist, scenarioName, scenarioTitle } from "./scenario-name";
 
 type Schemas = components["schemas"];
 export type ScenariosResponse = Schemas["ScenariosResponse"];
@@ -52,7 +55,11 @@ export interface LibraryOutcome {
 export interface LibraryRow {
   readonly id: string;
   readonly version: string;
+  /** The scenario's one name (`scenarioName`), built from its definition. */
   readonly label: string;
+  /** The wire's own label, id and version, verbatim: the name's title. */
+  readonly title: string;
+  /** The one-line gist (`scenarioGist`); the full description is the drawer's. */
   readonly description: string;
   readonly engines: string;
   readonly coversCash: boolean;
@@ -70,6 +77,8 @@ const FAILURE_WORD: Record<Exclude<RunBookOutcome["kind"], "ok" | "failed">, str
 };
 
 const failed = (text: string): LibraryOutcome => ({ key: "failed", text, tone: "refused" });
+/** A read that did not complete: its own word, never the refused register the header and the tiles withhold from it. */
+const unanswered = (text: string): LibraryOutcome => ({ key: "failed", text, tone: "dim" });
 
 /** The row's one word. A settled result is the Cash reading of `lab-engine` — the workspace's own — said in a word, never a second judgement of the same body. */
 export function outcomeLine(record: RunRecord | undefined, definition: ScenarioDefinition, configVersion: string): LibraryOutcome {
@@ -86,8 +95,10 @@ export function outcomeLine(record: RunRecord | undefined, definition: ScenarioD
     return word.key === "failed" && standing !== null ? standing : word;
   }
   if (standing !== null) return standing;
-  if (o.kind === "failed") return failed(`Failed ${String(o.status)}`);
-  return failed(FAILURE_WORD[o.kind]);
+  // A 4xx is the service declining the request and a request never sent is the page's refusal; every other failure
+  // is an answer that did not come.
+  if (o.kind === "failed") return (o.status >= 500 ? unanswered : failed)(`Failed ${String(o.status)}`);
+  return (o.kind === "refused-locally" ? failed : unanswered)(FAILURE_WORD[o.kind]);
 }
 
 function cashOutcome(response: LabRunBook, definition: ScenarioDefinition, configVersion: string): LibraryOutcome {
@@ -109,7 +120,7 @@ function cashOutcome(response: LabRunBook, definition: ScenarioDefinition, confi
     case "result": {
       const { newly, deltaEligibleDebt, decimals, heat } = r.result;
       if (newly > 0) {
-        return { key: "result", text: `${signedUsd(deltaEligibleDebt, decimals)} liquidatable · ${groupInt(newly)} account${newly === 1 ? "" : "s"}`, tone: "crit" };
+        return { key: "result", text: `${signedBookMoney(decimals)(deltaEligibleDebt)} liquidatable · ${groupInt(newly)} account${newly === 1 ? "" : "s"}`, tone: "crit" };
       }
       // The wire's count is a NET: at or below zero, the headline's own law — the net beside the gross the merged lanes show, in a word.
       const net = `Net ${signedCount(newly)} account${newly === -1 ? "" : "s"}`;
@@ -126,9 +137,10 @@ export function libraryRows(listing: ScenariosResponse | null, records: Readonly
   return listing.scenarios.map((def) => ({
     id: def.id,
     version: def.version,
-    label: def.label,
-    description: def.description,
-    engines: joinAnd(def.engines.map(engineName)),
+    label: scenarioName(def),
+    title: scenarioTitle(def.label, def.id, def.version),
+    description: scenarioGist(def),
+    engines: engineList(def.engines),
     coversCash: def.engines.includes(CASH),
     outcome: outcomeLine(records.get(def.id), def, listing.scenario_config_version),
     checked: checked.has(def.id),

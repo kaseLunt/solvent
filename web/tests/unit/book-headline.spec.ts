@@ -31,9 +31,9 @@ test("material: money first, the emphasized phrase carries the verdict", () => {
   expect(h.emphasis).toBe("$6,840 of Cash debt is liquidatable right now,");
   expect(h.rest).toBe(" across 2 accounts.");
   expect(h.dek).toBe(
-    "47 more positions are technically liquidatable, each under the $100 line — $112 together — and not headlined. " +
+    "47 more accounts are technically liquidatable, each under the $100 line — $112 together — and not headlined. " +
       "27 accounts are within 10% of their borrow cap, carrying $312K. " +
-      "6 positions have no verdict in this batch and are counted, not hidden.",
+      "6 accounts have no verdict in this batch.",
   );
 });
 
@@ -49,7 +49,7 @@ test("material, singular everywhere", () => {
   expect(h.emphasis).toBe("$4,200 of Cash debt is liquidatable right now,");
   expect(h.rest).toBe(" across 1 account.");
   expect(h.dek).toBe(
-    "No account is within 10% of its borrow cap. 1 position has no verdict in this batch and is counted, not hidden.",
+    "No account is within 10% of its borrow cap. 1 account has no verdict in this batch.",
   );
 });
 
@@ -67,7 +67,7 @@ test("quiet: nothing material — the dek leads with the below-line count", () =
   expect(h.emphasis).toBe("Nothing material is liquidatable on the Cash book right now.");
   expect(h.rest).toBe("");
   expect(h.dek).toBe(
-    "46 more positions are technically liquidatable, each under the $100 line — <$0.01 together — and not headlined. No account is within 10% of its borrow cap.",
+    "46 more accounts are technically liquidatable, each under the $100 line — <$0.01 together — and not headlined. No account is within 10% of its borrow cap.",
   );
 });
 
@@ -80,16 +80,16 @@ test("quiet with nothing liquidatable at all", () => {
     notComputed: 0,
     ...settled,
   });
-  expect(h.dek).toBe("No position is liquidatable. 3 accounts are within 10% of their borrow cap, carrying $11K.");
+  expect(h.dek).toBe("No account is liquidatable. 3 accounts are within 10% of their borrow cap, carrying $11K.");
 });
 
-test("a negative is claimed only over computed accounts: beside refused accounts the dek says 'No computed position'", () => {
+test("a negative is claimed only over computed accounts: beside refused accounts the dek says 'No computed account'", () => {
   const h = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 2, computed: 5, complete: true, stopped: null, stopKind: null });
   expect(h.variant).toBe("quiet");
   expect(h.dek).toBe(
-    "No computed position is liquidatable. No account is within 10% of its borrow cap. 2 positions have no verdict in this batch and are counted, not hidden.",
+    "No computed account is liquidatable. No account is within 10% of its borrow cap. 2 accounts have no verdict in this batch.",
   );
-  expect(h.dek).not.toContain("No position is liquidatable.");
+  expect(h.dek).not.toContain("No account is liquidatable.");
 });
 
 test("a complete walk that computed no account beside refused ones is a refusal, never a quiet verdict", () => {
@@ -97,36 +97,31 @@ test("a complete walk that computed no account beside refused ones is a refusal,
   expect(h.variant).toBe("refused");
   expect(h.tone).toBe("refused");
   expect(h.emphasis).toBe("No Cash account could be computed this batch.");
-  expect(h.dek).toBe("1 position has no verdict in this batch and is counted, not hidden.");
+  expect(h.dek).toBe("1 account has no verdict in this batch.");
   expect(h.dek).not.toContain("liquidatable");
 });
 
-test("the refused positions' sentence is true of every refusal code — no verdict in this batch, never 'could not be computed this batch' beside a cause that may be permanent — and says their debt is not known only where no refused row carries a figure", () => {
+test("the no-verdict sentence is true of every refusal code — no verdict in this batch, never 'could not be computed this batch' beside a cause that may be permanent — and says their debt is not known only where no refused row carries a figure; the doctrine ('counted, not hidden') is the drawer's, never the dek's", () => {
   expect(notComputedSentence(0)).toBeNull();
   expect(notComputedSentence(0, true)).toBeNull();
-  expect(notComputedSentence(1)).toBe("1 position has no verdict in this batch and is counted, not hidden.");
-  expect(notComputedSentence(6)).toBe("6 positions have no verdict in this batch and are counted, not hidden.");
+  expect(notComputedSentence(1)).toBe("1 account has no verdict in this batch.");
+  expect(notComputedSentence(6)).toBe("6 accounts have no verdict in this batch.");
   expect(notComputedSentence(6, false)).toBe(notComputedSentence(6));
-  expect(notComputedSentence(1, true)).toBe(
-    "1 position has no verdict in this batch and is counted, not hidden. " +
-      "No debt figure is served for a position the engine could not compute, so its debt is not known.",
-  );
-  expect(notComputedSentence(6, true)).toBe(
-    "6 positions have no verdict in this batch and are counted, not hidden. " +
-      "No debt figure is served for a position the engine could not compute, so their debt is not known.",
-  );
+  expect(notComputedSentence(1, true)).toBe("1 account has no verdict in this batch; its debt is not known.");
+  expect(notComputedSentence(6, true)).toBe("6 accounts have no verdict in this batch; their debt is not known.");
   for (const words of [notComputedSentence(1), notComputedSentence(6, true)]) {
-    expect(words).not.toMatch(/could not be computed this batch|\$0|\bnone\b|\bzero\b/);
+    expect(words).not.toMatch(/could not be computed this batch|\$0|\bnone\b|\bzero\b|counted, not hidden|position/);
   }
-  // The headline carries the flag in every variant that counts refused positions; absent, it says nothing about their debt.
+  // The headline carries the flag in every variant that counts refused accounts; absent, it says nothing about their debt.
   const base = { decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 6 } as const;
-  const clause = "No debt figure is served for a position the engine could not compute, so their debt is not known.";
+  const noVerdict = "6 accounts have no verdict in this batch; their debt is not known.";
   const material = bookHeadline({ ...base, material: { sum: usd6(6840), count: 2 }, ...settled, refusedDebtUnserved: true });
-  expect(material.dek).toBe(`No account is within 10% of its borrow cap. 6 positions have no verdict in this batch and are counted, not hidden. ${clause}`);
+  expect(material.dek).toBe(`No account is within 10% of its borrow cap. ${noVerdict}`);
   const quiet = bookHeadline({ ...base, ...settled, refusedDebtUnserved: true });
-  expect(quiet.dek).toBe(`No computed position is liquidatable. No account is within 10% of its borrow cap. 6 positions have no verdict in this batch and are counted, not hidden. ${clause}`);
+  expect(quiet.dek).toBe(`No computed account is liquidatable. No account is within 10% of its borrow cap. ${noVerdict}`);
   const none = bookHeadline({ ...base, computed: 0, complete: true, stopped: null, stopKind: null, refusedDebtUnserved: true });
-  expect(none.dek).toBe(`6 positions have no verdict in this batch and are counted, not hidden. ${clause}`);
+  expect(none.dek).toBe(noVerdict);
+  const clause = "their debt is not known.";
   const walking = bookHeadline({ ...base, computed: 0, complete: false, stopped: null, stopKind: null, refusedDebtUnserved: true });
   expect(walking.dek).toContain(clause);
   for (const flag of [undefined, false]) {
@@ -138,10 +133,11 @@ test("the refused positions' sentence is true of every refusal code — no verdi
 test("an unfinished walk with nothing material is pending — never 'Nothing material is liquidatable'", () => {
   const first = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 1, computed: 0, complete: false, stopped: null, stopKind: null });
   expect(first.variant).toBe("pending");
-  expect(first.tone).toBe("refused");
+  // A walk in flight has refused nothing: its headline states there is no answer yet, in the absent register.
+  expect(first.tone).toBe("absent");
   expect(first.emphasis).toBe("Walking the Cash book…");
   expect(first.dek).toBe(
-    "No page has landed yet. The verdict settles when the walk ends. 1 position has no verdict in this batch and is counted, not hidden.",
+    "No page has landed yet. The verdict settles when the walk ends. 1 account has no verdict in this batch.",
   );
   expect(first.dek).not.toContain("No account is within 10%");
   const later = bookHeadline({ decimals: 6, material: nothing, belowLine: nothing, nearCap: nothing, notComputed: 0, computed: 40, complete: false, stopped: null, stopKind: null });
@@ -161,6 +157,8 @@ test("a stopped walk names its cause and claims no verdict over the rest", () =>
     stopKind: "before-end",
   });
   expect(h.variant).toBe("refused");
+  // A walk that stopped is no refusal: nobody declined to answer, and the headline says only that there is no answer.
+  expect(h.tone).toBe("absent");
   expect(h.emphasis).toBe("The Cash book could not be fully read this batch.");
   expect(h.dek).toBe(
     "The walk stopped before the last page (Failed to fetch). " +
@@ -233,18 +231,19 @@ test("one frame is never said of every ending: each stop kind has its own words,
   for (const kind of ["before-end", "at-end", "over", "duplicate"] as const) expect(stopFrame(kind, "why")).toBe(`${stopWords(kind)} (why)`);
 });
 
-test("an unreadable computed row withholds every negative the headline can say — the quiet emphasis, 'No position is liquidatable', 'No computed position', the near-cap negative — over a complete walk", () => {
+test("an unreadable computed row withholds every negative the headline can say — the quiet emphasis, 'No account is liquidatable', 'No computed account', the near-cap negative — over a complete walk", () => {
   const complete = { decimals: 6, belowLine: nothing, nearCap: nothing, complete: true, stopped: null, stopKind: null } as const;
-  const NEGATIVES = /Nothing material is liquidatable|No position is liquidatable|No computed position is liquidatable|No account is within 10%/;
+  const NEGATIVES = /Nothing material is liquidatable|No account is liquidatable|No computed account is liquidatable|No account is within 10%/;
   expect(unreadableSentence(0)).toBeNull();
-  expect(unreadableSentence(1)).toBe("1 position the engine calls computed could not be read by this page and is counted, not cleared.");
-  expect(unreadableSentence(3)).toBe("3 positions the engine calls computed could not be read by this page and are counted, not cleared.");
+  expect(unreadableSentence(1)).toBe("1 account the engine calls computed could not be read by this page.");
+  expect(unreadableSentence(3)).toBe("3 accounts the engine calls computed could not be read by this page.");
   // The aggregate refused nothing and the walk is complete: without the count this is the quiet, green all-clear.
   const blocked = bookHeadline({ ...complete, material: nothing, notComputed: 0, computed: 9, unreadable: 1 });
   expect(blocked.variant).toBe("refused");
-  expect(blocked.tone).toBe("refused");
+  // The engine refused nothing here: a row this page could not read is an absent answer, never a refusal.
+  expect(blocked.tone).toBe("absent");
   expect(blocked.emphasis).toBe("The Cash book could not be fully read this batch.");
-  expect(blocked.dek).toBe("1 position the engine calls computed could not be read by this page and is counted, not cleared. No verdict is claimed over it.");
+  expect(blocked.dek).toBe("1 account the engine calls computed could not be read by this page. No verdict is claimed over it.");
   // With refused positions beside it, and with no account readable at all: still no negative, and never "could be computed".
   const beside = bookHeadline({ ...complete, material: nothing, notComputed: 2, computed: 5, unreadable: 2 });
   const none = bookHeadline({ ...complete, material: nothing, notComputed: 1, computed: 0, unreadable: 1 });
@@ -253,7 +252,7 @@ test("an unreadable computed row withholds every negative the headline can say �
   const material = bookHeadline({ ...complete, material: { sum: usd6(4200), count: 1 }, notComputed: 0, computed: 1, unreadable: 1 });
   expect(material.variant).toBe("material");
   expect(material.dek).toBe(
-    "1 position the engine calls computed could not be read by this page and is counted, not cleared. Every figure is a lower bound over the 1 computed account this page could read.",
+    "1 account the engine calls computed could not be read by this page. Every figure is a lower bound over the 1 computed account this page could read.",
   );
   const near = bookHeadline({ ...complete, nearCap: { sum: usd6(500), count: 1 }, material: nothing, notComputed: 0, computed: 4, unreadable: 1 });
   expect(near.dek).toContain("1 account is within 10% of its borrow cap, carrying $500.");
@@ -262,7 +261,7 @@ test("an unreadable computed row withholds every negative the headline can say �
   for (const unreadable of [undefined, 0]) {
     const whole = bookHeadline({ ...complete, material: nothing, notComputed: 0, computed: 9, ...(unreadable === undefined ? {} : { unreadable }) });
     expect(whole.variant).toBe("quiet");
-    expect(whole.dek).toBe("No position is liquidatable. No account is within 10% of its borrow cap.");
+    expect(whole.dek).toBe("No account is liquidatable. No account is within 10% of its borrow cap.");
   }
   expect(walkSentence({ complete: true, stopped: null, stopKind: null, computed: 9, unreadable: 0 })).toBeNull();
   expect(walkSentence({ complete: true, stopped: null, stopKind: null, computed: 9, unreadable: 2 })).toBe(

@@ -10,8 +10,11 @@ import { isWirePopulation, isWireSignedCount } from "./wireGuard";
 
 type Schemas = components["schemas"];
 
+/** The fields a name is built from — a listed definition, a per-address scenario and a set run's result all carry them. */
+export type NameSource = Pick<Schemas["ScenarioDefinition"], "id" | "label" | "shocks">;
+
 /** The fields a name and a gist are built from — a listed definition and a per-address scenario both carry them. */
-export type NamedScenario = Pick<Schemas["ScenarioDefinition"], "id" | "label" | "description" | "shocks">;
+export type NamedScenario = NameSource & Pick<Schemas["ScenarioDefinition"], "description">;
 
 /**
  * The contract's shock axes, by the word a reader knows them by. The asset axis is named per asset; the stable axis
@@ -37,12 +40,21 @@ export const SCENARIO_NAMES: Readonly<Record<string, string>> = {
   dm_rate_horizon_plus_200bps: "Cash borrow APY +200 bps",
 };
 
-/** One line under a name, at most 70 characters, for the scenarios the library leads with. */
+/**
+ * One line under a name, at most 70 characters, each checked against its committed definition: the scenarios the
+ * library leads with, every scenario whose own first sentence runs past the line, and the stable depegs, which read
+ * as one set.
+ */
 export const SCENARIO_GISTS: Readonly<Record<string, string>> = {
-  eth_minus_30: "All ETH-linked collateral, instantaneous mark",
-  weeth_market_depeg_oracles_held: "Market price 5% under redemption; oracles unchanged",
-  dm_rate_horizon_plus_200bps: "Closed-form horizon projection; prices held flat",
-  ethfi_minus_50: "Own-ecosystem token shock; sETHFI moves with it",
+  eth_minus_30: "All ETH-linked collateral, instantaneous mark.",
+  weeth_market_depeg_oracles_held: "Market price 5% under redemption; oracles unchanged.",
+  dm_rate_horizon_plus_200bps: "Closed-form horizon projection; prices held flat.",
+  ethfi_minus_50: "Own-ecosystem token shock; sETHFI moves with it.",
+  btc_leg_minus_20: "BTC collateral: liquidBTC and eBTC move together on one axis.",
+  dm_composition_census: "Each previously unclaimed Cash asset held at its mark, on purpose.",
+  stable_depeg_099_boundary: "Cash stables exactly 1% below par, at the band's open edge: no snap.",
+  stable_depeg_098_unsnapped: "Cash stables 2% below par, outside the snap band: they re-price.",
+  stable_depeg_0995_in_band: "Cash stables 0.5% below par, inside the snap band: nothing moves.",
 };
 
 /**
@@ -55,7 +67,7 @@ export function shockWord(shock: { readonly axis: string; readonly asset?: strin
 }
 
 /** "ETH −30%" for a single named factor shock; else the display name; else the wire's label verbatim. */
-export function scenarioName(def: NamedScenario): string {
+export function scenarioName(def: NameSource): string {
   const [shock, ...rest] = def.shocks;
   if (shock !== undefined && rest.length === 0) {
     const word = shockWord(shock);
@@ -74,4 +86,9 @@ export function scenarioGist(def: NamedScenario): string {
   // A sentence ends at a full stop followed by a space or the end — the point inside "0.95" is not one.
   const end = /\.(?=\s|$)/.exec(def.description);
   return end === null ? def.description : def.description.slice(0, end.index + 1);
+}
+
+/** The wire's own identity behind a displayed name — its label, id and version, verbatim — for the name's title. */
+export function scenarioTitle(label: string, id: string, version: string): string {
+  return `${label} · ${id} · ${version}`;
 }

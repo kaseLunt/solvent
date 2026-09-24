@@ -4,13 +4,20 @@
 // the library's row prints in one word — and a refusal of any kind is its own
 // state here with its own sentence.
 import type { ReceivedAt } from "./freshness";
+import { WARN_HEADROOM_PCT } from "./headroom";
+import { humanUtc } from "./human-utc";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import type { LoadPhase } from "./inspector-view";
+import type { StateRegister } from "./kit";
+import { truncateAddress } from "./format";
 import { classifyRunBookEnvelope, contractFaults } from "./lab-classify";
 import { compareRows, setFault, type CompareView } from "./lab-compare";
-import { answerFault, readEngine, type EngineReading } from "./lab-engine";
+import { answerFault, readEngine, type EngineReading, type EngineResult } from "./lab-engine";
 import {
+  compareCaption,
+  compareFailedLine,
+  compareRerunFailedLine,
   contradictoryHeadline,
   definitionChangedHeadline,
   EMPTY_LISTING,
@@ -24,6 +31,7 @@ import {
   runningHeadline,
   setMembershipHeadline,
   setUnreadableHeadline,
+  signedCount,
   withheldHeadline,
   type Banner,
   type HeldCondition,
@@ -32,31 +40,32 @@ import {
 } from "./lab-headline";
 import { definitionSkew, libraryRows, type HeldResult, type LibraryRow, type RunRecord, type ScenarioDefinition, type ScenariosResponse } from "./lab-library";
 import type { LabReading } from "./lab-reading";
-import type { HeatmapView } from "./lab-transitions";
-import { groupInt, joinAnd } from "./prose";
+import { CONTRACT_LANE_EDGES, roomBoundLabel, type HeatmapView } from "./lab-transitions";
+import { bookMoney, signedBookMoney } from "./money";
+import { engineList, groupInt, joinAnd } from "./prose";
 import type { ResultIdentity } from "./resultIdentity";
 import type { LabRunBook, RunBookOutcome } from "./runbook";
+import { scenarioName } from "./scenario-name";
 
 export { readEngine } from "./lab-engine";
 export type { EngineReading, EngineResult } from "./lab-engine";
 export type { Banner, HeldCondition, Retained } from "./lab-headline";
 
 /**
- * Three populations, three words. The lane tile counts `lane_changed_rows`,
- * rows whose lane changed, which the contract says is NOT `movers_total`, so
- * it never says "moved". A lane is one of the buckets the service's
- * histogram serves and every lane change is between buckets, so the tile
- * names the bucket and never the word "lane", which no page defines. "Risk"
- * is the engine-neutral word: only the legacy market's comparator is a health
- * factor, and on Cash the buckets are a disclosure of cap ÷ debt.
- * The movers table prints the service's rows in the service's own ranking
- * (its caption, `moversCaption`, names which accounts they are). The dek's
- * "move to a worse band" is the web's own band count.
+ * Three populations, three words. The band tile counts the heatmap's own population — accounts whose band after the
+ * shock differs from their band today, both ends measured — so the tile and the grid beside it state one count. The
+ * service's `lane_changed_rows` (rows whose risk bucket changed, which the contract says is NOT `movers_total`) is a
+ * finer count over more buckets; it stays on the page, in the tile's title. Neither says "moved", and no page says
+ * "lane". The movers table prints the service's rows in the service's own ranking (its caption, `moversCaption`, names
+ * which accounts they are).
  */
-export const LANE_TILE_LABEL = "Accounts changing risk bucket";
+export const LANE_TILE_LABEL = "Accounts changing band";
+/** The four result tiles' labels, the same in every state. */
+export const LAB_TILE_LABELS = { newly: "Newly liquidatable", debt: "Liquidatable debt", badDebt: "Bad debt at liquidation", band: LANE_TILE_LABEL } as const;
 export const MOVERS_TITLE = "Most affected accounts";
-export const MOVERS_QUALIFIER = "room today → after the shock · ranked by the service";
-export const MOVERS_LINK = `${MOVERS_TITLE} →`;
+export const MOVERS_QUALIFIER = "Room today and after the shock";
+/** The movers table sits further down this page: the arrow says so. */
+export const MOVERS_LINK = `${MOVERS_TITLE} ↓`;
 /** An empty movers list states only that nothing is listed; which accounts, and how many, is the caption's. */
 export const MOVERS_EMPTY = "No account is listed.";
 /**
@@ -68,6 +77,10 @@ export const MOVERS_EMPTY = "No account is listed.";
 export const ASSUMPTIONS_BUTTON = "Assumptions · What the model leaves out";
 export const ASSUMPTIONS_TITLE = "Assumptions & what the model leaves out";
 export const ASSUMPTIONS_LEFT_OUT = "Left out of the model";
+/** The drawer on a scenario served and never run: what a run adds to it. */
+export const ASSUMPTIONS_NOT_RUN = "Not run yet: the applied shocks, the held-flat inputs and the exact figures follow its run.";
+/** The drawer's title names the scenario it opens on. */
+export const assumptionsTitle = (name: string | null): string => (name === null ? ASSUMPTIONS_TITLE : `${ASSUMPTIONS_TITLE} · ${name}`);
 
 /**
  * The transition grid's reading. On Cash the grid joins the service's risk
@@ -86,8 +99,107 @@ export function transitionFinding(view: HeatmapView): string {
   const improved = view.improved === 0 ? "none improve" : `${groupInt(view.improved)} ${one(view.improved, "improve", "improves")}`;
   const moves = `${groupInt(view.bandChanged)} ${one(view.bandChanged, "accounts change", "account changes")} ${unit}; ${groupInt(view.crossedCap)} ${one(view.crossedCap, "cross", "crosses")} the cap; ${improved}.`;
   const unmeasured = view.unmeasuredRows === 0 ? "" : ` ${groupInt(view.unmeasuredRows)} not measured.`;
-  return `${axes} ${moves}${unmeasured}`;
+  return `${axes} ${moves}${unmeasured}${bandEdgesSentence(view)}`;
 }
+
+/**
+ * Where the merged bands' edges fall, built from the contract's own bucket edges — never typed — so a reader who
+ * knows the Book's near-cap line is told the two are not one cut. Said only when no edge IS that line.
+ */
+function bandEdgesSentence(view: HeatmapView): string {
+  if (!view.merged) return "";
+  const edges = CONTRACT_LANE_EDGES.slice(2, 5).map(roomBoundLabel);
+  const line = `${String(WARN_HEADROOM_PCT)}%`;
+  if (edges.includes(line)) return "";
+  return ` Bands follow the service's risk buckets, so their edges fall at ${joinAnd(edges)} of cap, not at the Book's ${line} line.`;
+}
+
+/** A tile's words: its figure, its sub-line and, where the figure has a finer sibling count, the title that names it. */
+export interface TileWords {
+  readonly value: string;
+  readonly sub: string;
+  readonly title?: string;
+}
+
+/** The four result tiles' words, from one engine's result. A tile sub is no link, so it carries no arrow. */
+export function resultTileWords(r: EngineResult): { readonly newly: TileWords; readonly debt: TileWords; readonly badDebt: TileWords; readonly band: TileWords } {
+  const money = bookMoney(r.decimals);
+  const signed = signedBookMoney(r.decimals);
+  const heat = r.heat;
+  const buckets = heat.bands.filter((b) => b.kind === "bucket").reduce((n, b) => n + b.lanes.length, 0);
+  const lane = r.laneChanged;
+  return {
+    newly: { value: signedCount(r.newly), sub: `Accounts · was ${groupInt(r.beforeEligible)}, now ${groupInt(r.afterEligible)}` },
+    debt: { value: signed(r.deltaEligibleDebt), sub: `Was ${money(r.eligibleDebtBefore)}, now ${money(r.eligibleDebtAfter)}` },
+    badDebt: { value: signed(r.deltaBadDebt), sub: `Was ${money(r.badDebtBefore)}, now ${money(r.badDebtAfter)}` },
+    band: {
+      value: groupInt(heat.bandChanged),
+      sub: `Of ${groupInt(heat.measuredRows)} measured · ${heat.improved === 0 ? "none improve" : `${groupInt(heat.improved)} improve`}`,
+      title:
+        lane === null
+          ? undefined
+          : heat.merged
+            ? `${groupInt(lane)} account${lane === 1 ? " changes" : "s change"} risk bucket among the service's ${groupInt(buckets)}`
+            : undefined,
+    },
+  };
+}
+
+/** Which absence a tile shows, and the lib's own word for it where it has one. */
+export interface TileAbsence {
+  readonly register: StateRegister;
+  readonly word?: string;
+}
+
+/**
+ * The absence the result tiles show when there is no result: the engine's own reading where the run answered, else
+ * the book's state. A read in flight is pending; a fetch that failed is unavailable, never refused; a scenario served
+ * and not run is not run; a request the service declined is refused.
+ */
+export function tileAbsence(book: Pick<BookWorkspace, "state" | "headline">, reading: EngineReading | null): TileAbsence | null {
+  if (reading !== null) {
+    switch (reading.kind) {
+      case "result":
+        return null;
+      case "withheld":
+        return { register: "refused", word: "Withheld" };
+      case "not-covered":
+        return { register: "not-run", word: "Not modelled" };
+      case "contradictory":
+        return { register: "unreadable", word: "Contradictory" };
+      case "unreadable":
+        return { register: "unreadable" };
+    }
+  }
+  switch (book.state) {
+    case "listing-loading":
+    case "running":
+      return { register: "pending" };
+    case "not-run":
+    case "definition-changed":
+      return { register: "not-run" };
+    case "not-served":
+      return { register: "not-served" };
+    case "listing-unreadable":
+    case "contradictory":
+      return { register: "unreadable" };
+    case "withheld":
+      return { register: "refused", word: "Withheld" };
+    case "not-covered":
+      return { register: "not-run", word: "Not modelled" };
+    default:
+      return { register: book.headline.tone === "refused" ? "refused" : "unavailable" };
+  }
+}
+
+/** The kicker: the scenario's name, which keeps its own case under the kicker's capitals, and the scope beside it. */
+export interface LabKicker {
+  readonly name: string | null;
+  readonly scope: string;
+}
+
+/** The compare page's kicker. */
+export const COMPARE_KICKER: LabKicker = { name: null, scope: "Compare · Cash book" };
 
 /** A chip on the identity strip; structurally the kit's IdentityChip, kept out of the component layer. */
 export interface LabChip {
@@ -123,7 +235,7 @@ export interface BookWorkspace {
   readonly rerunFailure: LabHeadline | null;
   readonly heldCondition: HeldCondition;
   readonly retained: Retained | null;
-  readonly kicker: string;
+  readonly kicker: LabKicker;
   readonly headline: LabHeadline;
   readonly chips: LabChip[];
   readonly identity: ResultIdentity | null;
@@ -195,7 +307,7 @@ const emptyBook = (state: BookState, headline: LabHeadline, definition: Scenario
   rerunFailure: null,
   heldCondition: null,
   retained: null,
-  kicker: definition === null ? "Scenarios · Cash book" : `${definition.label} · Cash book`,
+  kicker: definition === null ? { name: null, scope: "Scenarios · Cash book" } : { name: scenarioName(definition), scope: "Cash book" },
   headline,
   chips,
   identity: null,
@@ -207,6 +319,18 @@ const emptyBook = (state: BookState, headline: LabHeadline, definition: Scenario
   skew: [],
 });
 
+/**
+ * The chips of a set run's answer: its own batch, config and computed instant — never the single run's. A batch that
+ * is no longer the newest says so.
+ */
+export function compareChips(view: CompareView): LabChip[] {
+  const freshness =
+    view.freshness === "still_newest"
+      ? { label: "Result for batch", value: groupInt(view.batchId) }
+      : { label: "Result for batch", value: `${groupInt(view.batchId)} · ${view.freshness === "superseded" ? "superseded" : "not the newest"}`, tone: "warn" as const };
+  return [freshness, { label: "Config", value: view.configVersion }, { label: "Computed", value: humanUtc(view.computedAt, view.servedAt), title: view.computedAt }];
+}
+
 /** The chips of a book that has no result: the definition's own identity and the listing's config version. */
 function definitionChips(def: ScenarioDefinition, configVersion: string): LabChip[] {
   return [
@@ -215,10 +339,17 @@ function definitionChips(def: ScenarioDefinition, configVersion: string): LabChi
   ];
 }
 
+/**
+ * The engines a result answers for, Cash first. With both engines answered, the legacy market is the fold below the
+ * Cash result, and the chip says where; a withheld engine is named as withheld.
+ */
 function enginesChip(run: LabRunBook, cash: EngineReading): LabChip {
-  const served = run.engines.map((e) => engineName(e.engine));
+  const served = [...new Set(run.engines.map((e) => e.engine))];
   const withheld = run.excluded_engines.map((e) => `${engineName(e.engine)} withheld`);
-  const parts = [...(served.length > 0 ? [joinAnd(served)] : []), ...withheld];
+  const both = served.includes(CASH) && served.includes(LEGACY);
+  const others = served.filter((e) => e !== CASH && e !== LEGACY);
+  const lead = both ? ["Cash", "legacy market below", ...(others.length > 0 ? [engineList(others)] : [])] : served.length > 0 ? [engineList(served)] : [];
+  const parts = [...lead, ...withheld];
   return { label: "Engines", value: parts.join(" · "), tone: withheld.length > 0 || cash.kind === "withheld" ? "warn" : undefined };
 }
 
@@ -227,16 +358,17 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
   // contradictory state naming every field, and nothing of it is carried — no run for the drawer or the age to
   // read, no identity, the definition's own chips. Both engines' readings refuse by the same names.
   const envelope = classifyRunBookEnvelope(run);
+  const name = scenarioName(def);
   if (envelope.length > 0) {
     return {
-      ...emptyBook("contradictory", contradictoryHeadline(def.label, contractFaults(envelope)), def, definitionChips(def, configVersion)),
+      ...emptyBook("contradictory", contradictoryHeadline(name, contractFaults(envelope)), def, definitionChips(def, configVersion)),
       cash: readEngine(run, CASH, def),
       legacy: def.engines.includes(LEGACY) ? readEngine(run, LEGACY, def) : null,
     };
   }
   const skew = definitionSkew(def, configVersion, run);
   const superseded = run.batch.supersession.superseded;
-  const kicker = `${def.label} · Cash book`;
+  const kicker: LabKicker = { name, scope: "Cash book" };
   // The answered engines, distinct and in wire order; a withheld engine is a refusal, never an answer.
   const identity: ResultIdentity = { scope: "book", batchId: run.batch.id, configVersion: run.scenario_config_version, engines: [...new Set(run.engines.map((e) => e.engine))], servedAt: run.served_at };
   const cash = readEngine(run, CASH, def);
@@ -261,12 +393,12 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
   // the result state rather than replacing it.
   const contradictory = (reasons: readonly string[]): BookWorkspace => {
     const undrawn = (r: EngineReading | null): EngineReading | null => (r?.kind === "result" ? { kind: "contradictory", reasons } : r);
-    return { ...base, cash: undrawn(cash), legacy: undrawn(legacy), state: "contradictory", banner: null, headline: contradictoryHeadline(def.label, reasons) };
+    return { ...base, cash: undrawn(cash), legacy: undrawn(legacy), state: "contradictory", banner: null, headline: contradictoryHeadline(name, reasons) };
   };
   const fault = answerFault(run);
   if (fault !== null) return contradictory(fault.reasons);
   const banner: Banner = superseded ? "superseded" : skew.length > 0 ? "stale-input" : null;
-  if (skew.includes("version")) return { ...base, state: "definition-changed", banner: null, headline: definitionChangedHeadline(def.label, skew), cash: null, legacy: null };
+  if (skew.includes("version")) return { ...base, state: "definition-changed", banner: null, headline: definitionChangedHeadline(name, skew), cash: null, legacy: null };
   switch (cash.kind) {
     // A Cash row that does not read is a fault of the body, answered above: these two arms keep the switch total
     // rather than trusted, and say the same thing.
@@ -275,13 +407,13 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
     case "unreadable":
       return contradictory(contractFaults(cash.fields));
     case "withheld":
-      return { ...base, state: "withheld", banner, headline: withheldHeadline(def.label, cash.cause) };
+      return { ...base, state: "withheld", banner, headline: withheldHeadline(name, cash.cause) };
     case "not-covered":
-      return { ...base, state: "not-covered", banner, headline: notCoveredHeadline(def.label, def.engines, legacy !== null) };
+      return { ...base, state: "not-covered", banner, headline: notCoveredHeadline(name, def.engines, legacy !== null) };
     case "result": {
       const r = cash.result;
       const headline = resultHeadline({
-        label: def.label,
+        label: name,
         decimals: r.decimals,
         newly: r.newly,
         beforeEligible: r.beforeEligible,
@@ -299,10 +431,9 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
 function bookOf(listing: ScenariosResponse, def: ScenarioDefinition, record: RunRecord | undefined): BookWorkspace {
   const configVersion = listing.scenario_config_version;
   const chips = definitionChips(def, configVersion);
-  if (record === undefined) {
-    return emptyBook("not-run", notRunHeadline({ label: def.label, description: def.description, path_assumption: def.path_assumption, shocks: def.shocks.length }), def, chips);
-  }
-  if (record.phase === "running") return emptyBook("running", runningHeadline(def.label), def, chips);
+  const name = scenarioName(def);
+  if (record === undefined) return emptyBook("not-run", notRunHeadline(name, def.engines.includes(CASH)), def, chips);
+  if (record.phase === "running") return emptyBook("running", runningHeadline(name), def, chips);
   const o = record.outcome;
   if (o.kind === "ok") {
     const book = resultBook(def, configVersion, o.response, { wallMs: record.at, monotonicMs: record.atMonotonicMs });
@@ -428,3 +559,92 @@ export function deriveLabView(reading: LabReading, ui: LabUi): LabView {
   }
   return { listingLoad, library, selectedId, checked, configVersion: listing.scenario_config_version, book: bookOf(listing, def, reading.runs.get(def.id)), compare };
 }
+
+/* ---------------- the surface's words ---------------- */
+
+/** The Run button: the scenario's own name. */
+export const runLabel = (name: string | null): string => (name === null ? "Run" : `Run ${name}`);
+export const RUN_AGAIN = "Run again";
+export const LIBRARY_LOADING = "Loading the committed scenarios…";
+export const LIBRARY_EMPTY = "No committed scenarios are listed.";
+export const libraryFootnote = (configVersion: string | null): string =>
+  `Committed, versioned scenarios${configVersion === null ? "" : ` (config ${configVersion})`}. No sliders — every result is reproducible.`;
+
+/** One-address mode's kicker: the account, the engine. The address keeps its own case and face; before one is entered, the mode names itself. */
+export function addressKicker(address: string): { readonly lead: string; readonly address: string | null; readonly scope: string } {
+  return address === "" ? { lead: "One address", address: null, scope: "Cash" } : { lead: "Account", address: truncateAddress(address), scope: "Cash" };
+}
+/** The one-address workspace's way to the same account on the Inspector — another page, so the arrow. */
+export const OPEN_IN_INSPECTOR = "Open in the Inspector →";
+export const EVERY_SCENARIO_TITLE = "Every committed scenario";
+export const NO_SCENARIO_APPLIES = "No scenario applies to this address.";
+
+/** The heatmap's two axes, as its corner and its region name read them. */
+export const HEAT_ROWS = "today";
+export const HEAT_COLS = "after";
+export const NO_RESULT_YET = "No result yet.";
+export const NO_GRID = "No grid: nothing here is a count.";
+
+/** A cell's hover: its count, its move in the grid's own band labels, the debt it carries today. */
+export function heatCellTitle(view: HeatmapView, cell: HeatmapView["cells"][number]): string {
+  const from = view.bands[cell.from]?.label ?? "";
+  const to = view.bands[cell.to]?.label ?? "";
+  return `${groupInt(cell.rows)} account${cell.rows === 1 ? "" : "s"} · from ${from} to ${to} · debt ${bookMoney(view.decimals)(cell.debtBefore)}`;
+}
+
+/** The transition card's finding: the grid's own reading, or the state's words. */
+export function transitionWords(reading: EngineReading | null, engine: string): string {
+  if (reading === null) return "Run a scenario to see where accounts move.";
+  switch (reading.kind) {
+    case "result":
+      return transitionFinding(reading.result.heat);
+    case "withheld":
+      return `Withheld: ${engineName(engine)} was not computed under this scenario.`;
+    case "not-covered":
+      return `This scenario does not model ${engineName(engine)}.`;
+    case "contradictory":
+    case "unreadable":
+      return "Not drawn: the result contradicts itself.";
+  }
+}
+
+/** The Compare card's finding for each state; a settled comparison's finding is what its plot's shares are shares of. */
+export function compareFinding(state: CompareState): string {
+  switch (state.kind) {
+    case "idle":
+      return "Tick two or more scenarios and press Compare.";
+    case "running":
+      return `Evaluating ${String(state.ids.length)} scenario${state.ids.length === 1 ? "" : "s"}…`;
+    case "failed":
+      // A failed Compare over a held comparison names the failure and what stands beneath it; with nothing held, the failure is the state.
+      return state.held === null ? compareFailedLine(state.headline) : compareRerunFailedLine(state.headline, state.held.cash.batchId);
+    case "ok":
+      return compareCaption(state.cash);
+  }
+}
+
+/** The plot's place when there is no plot to draw. */
+export function comparePlotEmpty(state: CompareState): string {
+  return state.kind === "running" ? "Running…" : state.kind === "idle" ? "No plot yet." : "No plot: nothing here is a share.";
+}
+
+/** The evaluated batch is not the newest: the pill's word and the sentence beside it. Null while it is the newest. */
+export function compareFreshnessNote(view: CompareView): { readonly pill: string; readonly text: string } | null {
+  if (view.freshness === "still_newest") return null;
+  const pill = view.freshness === "superseded" ? "Superseded" : view.freshness === "newest_is_older" ? "Newest is older" : "None servable";
+  const newest = view.newestServable === null ? "no batch was servable at probe time" : `the newest servable batch is ${groupInt(view.newestServable)}`;
+  return { pill, text: `evaluated on batch ${groupInt(view.batchId)}; ${newest}.` };
+}
+
+/** The value column's header and the axes of the two books, each on its own axis. */
+export const COMPARE_VALUE_HEADER = "Share · change";
+export const COMPARE_AXIS = {
+  cash: { label: "change in liquidatable Cash debt, percent of the Cash book", caption: "Share of the Cash book" },
+  legacy: { label: "change in liquidatable legacy debt, percent of the legacy book", caption: "Share of the legacy book" },
+} as const;
+
+/** The legacy market's folds on this page: what each holds, and the law they keep. */
+export const LEGACY_RESULT_SUMMARY = "Its own result, in its own unit";
+export const LEGACY_COMPARE_SUMMARY = "Its own shares, on its own book";
+export const LEGACY_RESULT_FOOTNOTE = "Judged by its own health factor, in its own unit. The two books are never added together.";
+export const LEGACY_COMPARE_FOOTNOTE = "Shares of the legacy book, in its own unit. The two books are never added together.";

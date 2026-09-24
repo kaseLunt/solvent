@@ -2,6 +2,7 @@
 import { expect, test } from "@playwright/test";
 import { refinePositionsResponse, refinePositionSummary, type RefinedPositionsResponse } from "@solvent/client";
 import {
+  byRoom,
   DEBT_UNREADABLE,
   liquidatableRows,
   nearCapRows,
@@ -13,6 +14,8 @@ import {
   refusedRowDebtCell,
   refusedRows,
   roomBands,
+  roomCell,
+  roomCellTitle,
   roomPercentiles,
   rowStandingLabel,
   sumDebt,
@@ -106,7 +109,7 @@ test("a refused row keeps a readable debt for display but never enters the liqui
   expect(roomBands([r]).reduce((n, b) => n + b.count, 0)).toBe(0);
 });
 
-test("a refused row's Debt cell: a dash that says on hover no debt figure is served for a position the engine could not compute — never $0; a served figure prints with no such title; an unreadable row is not a refusal and never wears it", () => {
+test("a refused row's Debt cell: a dash that says on hover no debt figure is served for an account the engine could not compute — never $0; a served figure prints with no such title; an unreadable row is not a refusal and never wears it", () => {
   const refusedNoFigure = readCashRow(
     row({ account: "0xc", status: "refused", refusal: { code: "SWEEP_NEVER", detail: "", note: "" }, health_factor: null, total_debt: null, total_collateral: null, liquidation_verdict: "unknowable" }),
   );
@@ -114,10 +117,10 @@ test("a refused row's Debt cell: a dash that says on hover no debt figure is ser
     row({ account: "0xe", status: "refused", refusal: { code: "API_RECONSTRUCTION_MISMATCH", detail: "", note: "" }, health_factor: null, total_debt: "1500000000", liquidation_verdict: "unknowable" }),
   );
   const unreadable = readCashRow(row({ account: "0xbad", total_debt: "1e6" }));
-  expect(REFUSED_DEBT_UNSERVED).toBe("no debt figure is served for a position the engine could not compute");
+  expect(REFUSED_DEBT_UNSERVED).toBe("no debt figure is served for an account the engine could not compute");
   expect(refusedRowDebtCell(refusedNoFigure)).toEqual({ text: "—", title: REFUSED_DEBT_UNSERVED });
   expect(refusedRowDebtCell(refusedWithFigure)).toEqual({ text: "$1,500", title: null });
-  expect(refusedRowDebtCell(unreadable)).toEqual({ text: "unreadable", title: DEBT_UNREADABLE });
+  expect(refusedRowDebtCell(unreadable)).toEqual({ text: "Unreadable", title: DEBT_UNREADABLE });
   // The dek's flag: at least one refused row landed, and none carries a figure.
   expect(refusedRows([refusedNoFigure, refusedWithFigure, unreadable]).map((r) => r.account)).toEqual(["0xc", "0xe"]);
   expect(refusedDebtUnserved([refusedNoFigure])).toBe(true);
@@ -126,7 +129,7 @@ test("a refused row's Debt cell: a dash that says on hover no debt figure is ser
   expect(refusedDebtUnserved([unreadable])).toBe(false);
 });
 
-test("a refused row served a debt this page cannot read: the figure was served, so its cell says unreadable and names the fault — never the dash of a debt not served — and the dek's absence clause is not said over it", () => {
+test("a refused row served a debt this page cannot read: the figure was served, so its cell says Unreadable and names the fault — never the dash of a debt not served — and the dek's absence clause is not said over it", () => {
   const refusal = { code: "SWEEP_NEVER", detail: "", note: "" };
   const refused = (account: string, total_debt: unknown): CashWireRow =>
     row({ account, status: "refused", refusal, health_factor: null, total_debt: total_debt as string, liquidation_verdict: "unknowable" });
@@ -137,10 +140,10 @@ test("a refused row served a debt this page cannot read: the figure was served, 
   for (const r of malformed) {
     // Still the engine's refusal — not the page's unreadable row — and still no figure to size or sum.
     expect(r.unreadable).toBeUndefined();
-    expect(rowStandingLabel(r)).toBe("Not computed");
+    expect(rowStandingLabel(r)).toBe("No verdict");
     expect(r.debt).toBeNull();
     expect(r.debtUnreadable).toBe(true);
-    expect(refusedRowDebtCell(r)).toEqual({ text: "unreadable", title: DEBT_UNREADABLE });
+    expect(refusedRowDebtCell(r)).toEqual({ text: "Unreadable", title: DEBT_UNREADABLE });
     expect(refusedRowDebtCell(r).title).not.toBe(REFUSED_DEBT_UNSERVED);
     expect(refusedDebtUnserved([r])).toBe(false);
     expect(refusedDebtUnserved([noFigure, r])).toBe(false);
@@ -202,7 +205,7 @@ test("a row the engine calls computed that this page cannot read is its own clas
   // A refused row is the engine's act: never unreadable, whatever its operands hold. A computed row is neither.
   const refused = readCashRow(row({ account: "0xc", status: "refused", refusal: { code: "SWEEP_NEVER", detail: "", note: "" }, health_factor: null, total_debt: "1e6", liquidation_verdict: "unknowable" }));
   expect(refused.unreadable).toBeUndefined();
-  expect(rowStandingLabel(refused)).toBe("Not computed");
+  expect(rowStandingLabel(refused)).toBe("No verdict");
   expect(readCashRow(row({ account: "0xa" })).unreadable).toBeUndefined();
   expect(unreadableRows([r, both, noVerdict, refused, readCashRow(row({ account: "0xa" }))]).map((x) => x.account)).toEqual(["0xbad", "0xbad2", "0xu"]);
 });
@@ -234,6 +237,42 @@ test("selectors: liquidatable, near cap (<10%, sorted by room), bands, percentil
   // computed rows' room tenths sorted: −313, 38, 90, 500 → lower median 38 → "3.8%"; p10 → "−31.3%"
   expect(roomPercentiles(rows)).toEqual({ median: "3.8%", p10: "−31.3%" });
   expect(roomPercentiles([rows[4]!])).toEqual({ median: null, p10: null });
+  // A tile value keeps its tenth: a whole percent prints "50.0%", so the figure reads at one precision.
+  expect(roomPercentiles([rows[3]!])).toEqual({ median: "50.0%", p10: "50.0%" });
+});
+
+test("the Room to cap cell: one unit in every row — percent of cap at one fixed decimal, over cap negative with U+2212 — and the dollar room in its title, worded 'over cap by'; a row with no room prints no percent it does not have", () => {
+  const near = readCashRow(row({ account: "0xa" })); // 3.8%, $184 of room
+  expect(roomCell(near)).toEqual({ text: "3.8%", title: "$184 of room", over: false });
+  const whole = readCashRow(row({ account: "0xw", health_factor: cap("10000000000", "9000000000"), total_debt: "9000000000" }));
+  expect(roomCell(whole)).toEqual({ text: "10.0%", title: "$1,000 of room", over: false });
+  const breached = readCashRow(row({ account: "0xb", liquidation_verdict: "liquidatable", health_factor: cap("3200000000", "4200000000"), total_debt: "4200000000" }));
+  expect(roomCell(breached)).toEqual({ text: "−31.3%", title: "over cap by $1,000", over: true });
+  // A minus sign never rides a dollar figure: the title words the overage as a positive amount, in cents under $1,000.
+  const cents = readCashRow(row({ account: "0xs", liquidation_verdict: "liquidatable", health_factor: cap("100000000", "284800000"), total_debt: "284800000" }));
+  expect(roomCellTitle(cents)).toBe("over cap by $184.80");
+  expect(roomCell(cents).text).toBe("−184.8%");
+  // Over a cap of zero no percent of the cap exists: the cell names the band, the title the dollars.
+  const noCap = readCashRow(row({ account: "0xz", liquidation_verdict: "liquidatable", health_factor: cap("0", "100000000"), total_debt: "100000000" }));
+  expect(noCap.roomTenths).toBeNull();
+  expect(roomCell(noCap)).toEqual({ text: "Over cap", title: "over cap by $100", over: true });
+  // A row with no verdict has no room: a dash with no title — never "0%", never "$0 of room".
+  const refused = readCashRow(row({ account: "0xc", status: "refused", refusal: { code: "SWEEP_NEVER", detail: "", note: "" }, health_factor: null, total_debt: null, liquidation_verdict: "unknowable" }));
+  expect(roomCell(refused)).toEqual({ text: "—", title: null, over: false });
+  expect(roomCellTitle(refused)).toBeNull();
+  for (const r of [near, whole, breached, cents, noCap]) expect(roomCell(r).text).not.toMatch(/\$|-/);
+});
+
+test("rows sort by room, least first, and a row with no room sorts last — never as a zero room", () => {
+  const breached = readCashRow(row({ account: "0xb", liquidation_verdict: "liquidatable", health_factor: cap("3200000000", "4200000000"), total_debt: "4200000000" }));
+  const near = readCashRow(row({ account: "0xa" }));
+  const noRoom = readCashRow(row({ account: "0xc", status: "refused", refusal: { code: "SWEEP_NEVER", detail: "", note: "" }, health_factor: null, total_debt: "1000000", liquidation_verdict: "unknowable" }));
+  const zero = readCashRow(row({ account: "0x0", health_factor: cap("4620000000", "4620000000") }));
+  // Over a cap of zero the row is over by its whole debt: no percent exists, and it sorts ahead of every one.
+  const noCap = readCashRow(row({ account: "0xz", liquidation_verdict: "liquidatable", health_factor: cap("0", "100000000"), total_debt: "100000000" }));
+  expect([noRoom, near, zero, breached, noCap].sort(byRoom).map((r) => r.account)).toEqual(["0xz", "0xb", "0x0", "0xa", "0xc"]);
+  expect([near, noRoom].sort(byRoom).map((r) => r.account)).toEqual(["0xa", "0xc"]);
+  expect([noRoom, noCap, noRoom].sort(byRoom).map((r) => r.account)).toEqual(["0xz", "0xc", "0xc"]);
 });
 
 // ---------------------------------------------------------------------------

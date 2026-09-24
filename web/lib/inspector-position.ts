@@ -10,7 +10,7 @@ import { headroomBand, headroomTenths } from "./headroom";
 import { humanAmount, humanPrice } from "./human-price";
 import { noPricePathTitle } from "./liq-distance";
 import { fallPercent, formatTenths, percentOf } from "./percent";
-import { joinAnd } from "./prose";
+import { CASH_PRICE_SOURCE_CHIP, joinAnd } from "./prose";
 import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
 export const CASH = "debt_manager";
@@ -287,9 +287,9 @@ export function boundaryOf(position: RefinedPosition, cash: CashPosition): Bound
   };
 }
 
-/** Wire source names, made readable. Unknown sources print verbatim. */
+/** Wire source names, made readable: Cash's price contract by the one name every page gives it. Unknown sources print verbatim. */
 export function sourceDisplay(source: string): string {
-  if (source === "priceproviderv2") return "PriceProvider v2";
+  if (source === "priceproviderv2") return CASH_PRICE_SOURCE_CHIP;
   if (source.startsWith("aaveoracle:")) return "Aave oracle";
   return source;
 }
@@ -311,6 +311,7 @@ export function pricesChip(inputs: readonly PriceInput[]): ViewChip {
   return {
     label: "Prices",
     value: `${sources} · ${oldest === null ? "age unknown" : humanAge(oldest)}`,
-    tone: worst === 0 ? "ok" : worst === 1 ? "warn" : "crit",
+    // Fresh inputs are a record, in ink: green is a health verdict or a passed check, never freshness.
+    tone: worst === 0 ? "neutral" : worst === 1 ? "warn" : "crit",
   };
 }

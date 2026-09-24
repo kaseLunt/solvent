@@ -276,7 +276,8 @@ test.describe("the feed page", () => {
         // Ray-scaled units: the engine's base-currency decimals are a different unit and are NOT applied.
         expect(r.amount_unit).toBe("aave_scaled");
         expect(rendered.rawUnits).toBe(true);
-        expect(rendered.display).toBe(r.amount);
+        // The wire's own digits, grouped for reading and never scaled; the sign is the display minus.
+        expect(rendered.display.replace(/,/g, "").replace(/^−/, "-")).toBe(r.amount);
       }
       // Signed on the debt side: borrows add, repays / liquidations / write-offs remove.
       if (r.type === "borrow") expect(r.amount!.startsWith("-")).toBe(false);

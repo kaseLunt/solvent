@@ -6,7 +6,24 @@ import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
 import type { AddressReading } from "../../lib/address-lookup";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
-import { deriveInspectorView, drawerEmptyText, drawerSweepBlock, historyFinding, historyHead, stressBatchNote, stressEmptyText } from "../../lib/inspector-view";
+import {
+  batchAxisLabel,
+  deriveInspectorView,
+  drawerEmptyText,
+  drawerSweepBlock,
+  historyFinding,
+  historyHead,
+  inspectorTiles,
+  legacyWords,
+  LIQUIDATION_LINE_LABEL,
+  NEAR_LINE_LABEL,
+  OPEN_IN_SCENARIOS,
+  PRICE_INPUTS,
+  stressBatchNote,
+  stressCaption,
+  stressEmptyText,
+  TRUST_LINK,
+} from "../../lib/inspector-view";
 import { plainCause } from "../../lib/refusal-phrasebook";
 import { DEMO_ADDRESS_REFUSED, DEMO_REFUSED_ADDR } from "../fixtures/demo";
 import { ADDRESS_FOUND, ADDRESS_NOT_FOUND, ADDRESS_UNKNOWABLE, FOUND_ADDR, HISTORY } from "../fixtures/inspector";
@@ -113,22 +130,23 @@ test("the evidence read's PHASE reaches the Trust card THROUGH the view: a recei
   const receipt = (overrides: Partial<AddressReading>) =>
     deriveInspectorView(reading({ ...ready, ...overrides }), TIER_FALLBACK).trust?.find((t) => t.id === "reconcile");
   // The lookup finished first; /v1/evidence is still out. Both reads hold no manifest — only the phase tells them apart.
-  expect(receipt({ evidence: null, evidencePhase: "pending" })).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt pending", state: "pending" });
-  expect(receipt({ evidence: null, evidencePhase: "failed" })).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt unavailable", state: "dim" });
+  expect(receipt({ evidence: null, evidencePhase: "pending" })).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "Receipt pending", state: "pending" });
+  expect(receipt({ evidence: null, evidencePhase: "failed" })).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "Receipt unavailable", state: "dim" });
   expect(receipt({ evidence: null, evidencePhase: "pending" })?.detail).not.toContain("unavailable");
   // Answered: the whole manifest is judged, and the run that passed whole is ticked with its own date.
   expect(receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered" })).toMatchObject({ label: "Pinned reconcile run matched the chain", state: "ok" });
   expect(receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered" })?.detail).toContain("29/29 Cash account comparisons exact · Jul");
   // The whole manifest rides through — the wire's own proof status included: a Cash weld alone is not the run.
   const refusedByWire = { ...EVIDENCE_MANIFEST, proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" as const } };
-  expect(receipt({ evidence: refusedByWire, evidencePhase: "answered" })).toMatchObject({ label: "Pinned reconcile run", state: "warn" });
+  // A receipt the wire itself rejects is a failed run: crit here, as on Verification.
+  expect(receipt({ evidence: refusedByWire, evidencePhase: "answered" })).toMatchObject({ label: "Pinned reconcile run", state: "crit" });
   // A resume repair re-asks the lookup alone: the receipt on the page neither blanks nor turns unavailable.
   expect(receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered", lookupRepaired: true })).toEqual(
     receipt({ evidence: EVIDENCE_MANIFEST, evidencePhase: "answered" }),
   );
   // A reading that states no phase is read by what it holds.
   expect(receipt({ evidence: EVIDENCE_MANIFEST })?.state).toBe("ok");
-  expect(receipt({ evidence: null })?.detail).toBe("receipt unavailable");
+  expect(receipt({ evidence: null })?.detail).toBe("Receipt unavailable");
 });
 
 test("near cap: state, kicker, headline, chips, table, boundary, trust and the room streak all derive from one reading", () => {
@@ -148,10 +166,11 @@ test("near cap: state, kicker, headline, chips, table, boundary, trust and the r
   expect(view.headline.dek).not.toContain("for the last");
   expect(view.chips).toEqual([
     { label: "Batch", value: "3" },
-    { label: "Snapshot", value: "42s · fresh", tone: "ok" },
-    { label: "Lookup", value: "complete · both engines", tone: "ok" },
-    { label: "Prices", value: "PriceProvider v2 · 35s", tone: "ok" },
-    { label: "Current", value: "not projected" },
+    // Fresh data and a completed lookup are records, in ink: green is a health verdict or a passed check alone.
+    { label: "Snapshot", value: "42s · fresh", tone: "neutral" },
+    { label: "Lookup", value: "complete · both engines", tone: "neutral" },
+    { label: "Prices", value: "PriceProvider v2 · 35s", tone: "neutral" },
+    { label: "Current, not projected", value: "" },
   ]);
   expect(view.table?.legs).toHaveLength(2);
   expect(view.boundary?.kind).toBe("boundary");
@@ -207,7 +226,7 @@ test("legacy only, not computed, no position, cannot compute — each is its own
   expect(none.headline.emphasis).toBe("No Cash or Aave position in batch 1.");
   expect(none.cash).toBeNull();
   expect(none.trust).toBeNull();
-  expect(none.chips.find((c) => c.label === "Lookup")).toEqual({ label: "Lookup", value: "complete · both engines", tone: "ok" });
+  expect(none.chips.find((c) => c.label === "Lookup")).toEqual({ label: "Lookup", value: "complete · both engines", tone: "neutral" });
   const unknowable = deriveInspectorView(reading({ lookup: { phase: "ready", value: lookup(ADDRESS_UNKNOWABLE) } }), TIER_FALLBACK);
   expect(unknowable.state).toBe("cannot-compute");
   expect(unknowable.headline.emphasis).toBe("Cannot say — the Cash book is withheld this batch.");
@@ -410,14 +429,14 @@ test("historyFinding: one sentence per arm — loading, error, withheld, not fou
     ],
   };
   expect(historyFinding(withHistory({ phase: "ready", value: lookup(newestRefused) }, 3))).toBe(
-    "The newest batch is not computed; the streak cannot be read · history as of batch 2, position as of batch 3 · dashed line: 10% of cap",
+    "The newest batch is not computed; the streak cannot be read · history as of batch 2, position as of batch 3",
   );
-  expect(historyFinding(withHistory({ phase: "ready", value: lookup(base) }))).toBe("Within 10% of its cap for the last 3 batches · dashed line: 10% of cap");
+  expect(historyFinding(withHistory({ phase: "ready", value: lookup(base) }))).toBe("Within 10% of its cap for the last 3 batches");
   const above: Schemas["AddressHistoryResponse"] = {
     ...base,
     engines: [{ ...engine, points: engine.points.map((p) => ({ ...p, health_factor: p.health_factor === null ? null : { ...p.health_factor, num: "6000000000" } })) }],
   };
-  expect(historyFinding(withHistory({ phase: "ready", value: lookup(above) }))).toBe("Room has stayed above the 10% line in the newest batch · dashed line: 10% of cap");
+  expect(historyFinding(withHistory({ phase: "ready", value: lookup(above) }))).toBe("Room has stayed above the 10% line in the newest batch");
 });
 
 test("stressEmptyText: loading, error, withheld with its cause, no position, and no scenarios — each its own words", () => {
@@ -495,11 +514,11 @@ test("the headline's streak is the lookup's batch's own: a history whose vantage
     "Borrowing $4,822 against a $5,012 cap — 96.2% used. A 3.8% fall in collateral value, or $190.50 more debt, brings this account to its cap.",
   );
   expect(stale.headline.dek).not.toContain("for the last");
-  expect(historyFinding(stale)).toBe("Within 10% of its cap for the last 3 batches · history as of batch 2, position as of batch 4 · dashed line: 10% of cap");
+  expect(historyFinding(stale)).toBe("Within 10% of its cap for the last 3 batches · history as of batch 2, position as of batch 4");
   // The same history at the lookup's own vantage: the run is this batch's, and the headline says it.
   const current = nearAt(2, dmHistory(FOUND_ADDR, 2));
   expect(current.headline.dek).toContain("It has been within 10% of its cap for the last 3 batches (≈2\u00a0min).");
-  expect(historyFinding(current)).toBe("Within 10% of its cap for the last 3 batches · dashed line: 10% of cap");
+  expect(historyFinding(current)).toBe("Within 10% of its cap for the last 3 batches");
 });
 
 test("the stress batch is the stress response's own: exposed as stressBatchId, disclosed when it is not the position's, and never read from the lookup", () => {
@@ -660,28 +679,28 @@ test("historyFinding speaks from the streak and the newest point's own kind: a o
   // The defect: rooms 20% then 5% — a one-batch run under the line — rendered "Room has stayed above the 10% line in the newest batch."
   const oneBatch = withHistory(cashHistory(2, [[2, "100000000", "95000000"], [1, "100000000", "80000000"]]), 2);
   expect(oneBatch.streak).toEqual({ batches: 1, spanSeconds: null, newestKind: "computed" });
-  expect(historyFinding(oneBatch)).toBe("Within 10% of its cap in the newest batch; the batch before was above the line · dashed line: 10% of cap");
+  expect(historyFinding(oneBatch)).toBe("Within 10% of its cap in the newest batch; the batch before was above the line");
   expect(historyFinding(oneBatch)).not.toContain("above the 10% line");
   // The run of one ended by a gap says the gap (a withheld batch 2 between two computed points); a lone point says it is the only batch.
   const twoPoints = cashHistory(3, [[3, "100000000", "95000000"], [1, "100000000", "80000000"]]);
   const gapBefore = { ...twoPoints, engines: twoPoints.engines.map((e) => ({ ...e, withheld_batch_ids: [2] })) };
-  expect(historyFinding(withHistory(gapBefore, 3))).toBe("Within 10% of its cap in the newest batch; the batch before is withheld, so no longer run can be read · dashed line: 10% of cap");
-  expect(historyFinding(withHistory(cashHistory(1, [[1, "100000000", "95000000"]]), 1))).toBe("Within 10% of its cap in the newest batch — the only batch in the window · dashed line: 10% of cap");
+  expect(historyFinding(withHistory(gapBefore, 3))).toBe("Within 10% of its cap in the newest batch; the batch before is withheld, so no longer run can be read");
+  expect(historyFinding(withHistory(cashHistory(1, [[1, "100000000", "95000000"]]), 1))).toBe("Within 10% of its cap in the newest batch — the only batch in the window");
   // A lone zero-cap point: known, past the cap, no room percent to place — a refusal, never "above the line".
   const zeroCap = withHistory(cashHistory(1, [[1, "0", "95000000"]]), 1);
   expect(zeroCap.streak).toEqual({ batches: 1, spanSeconds: null, newestKind: "zero-cap" });
   expect(historyFinding(zeroCap)).toBe(
-    "The newest batch carries a zero cap — debt with no counted collateral, past the cap; no room percent to read · dashed line: 10% of cap",
+    "The newest batch carries a zero cap — debt with no counted collateral, past the cap; no room percent to read",
   );
   expect(historyFinding(zeroCap)).not.toContain("above the 10% line");
   // A zero cap heading a longer run says the run.
   const zeroCapRun = withHistory(cashHistory(2, [[2, "0", "95000000"], [1, "100000000", "95000000"]]), 2);
   expect(historyFinding(zeroCapRun)).toBe(
-    "The newest batch carries a zero cap — debt with no counted collateral, past the cap; no room percent to read; under the 10% line for the last 2 batches · dashed line: 10% of cap",
+    "The newest batch carries a zero cap — debt with no counted collateral, past the cap; no room percent to read; under the 10% line for the last 2 batches",
   );
   // Above the line is still said of a computed newest point outside any run.
   expect(historyFinding(withHistory(cashHistory(2, [[2, "100000000", "80000000"], [1, "100000000", "95000000"]]), 2))).toBe(
-    "Room has stayed above the 10% line in the newest batch · dashed line: 10% of cap",
+    "Room has stayed above the 10% line in the newest batch",
   );
 });
 
@@ -708,4 +727,79 @@ test("why no Cash figure has a scale to print at is a fact of the view: no posit
   // A lookup in flight or failed knows nothing of the position.
   expect(of({ lookup: { phase: "loading" } }).scaleAbsence).toBe("no-lookup");
   expect(of({ lookup: { phase: "error", message: "Failed to fetch" } }).scaleAbsence).toBe("no-lookup");
+});
+
+test("the five tiles: figures in their register, an absence named in its own word and never a dash, over the cap in words, the exact debt on the exact layer", () => {
+  const ready = (positions: Schemas["Position"][]) => deriveInspectorView(reading({ lookup: { phase: "ready", value: found(positions) } }), TIER_FALLBACK);
+  const tiles = inspectorTiles(ready([nearWire()]));
+  expect(tiles.map((t) => [t.key, t.value, t.tone])).toEqual([
+    ["debt", "$4,822", "neutral"],
+    ["cap", "$5,012", "neutral"],
+    ["room", "$190.50", "warn"],
+    ["collateral", "$12,462", "neutral"],
+    ["status", "Near cap", "warn"],
+  ]);
+  const debt = tiles[0]!;
+  // The exact figure rides the exact layer beside its unit; the copy is the figure alone.
+  expect([debt.sub, debt.exact]).toEqual(["USD", "4,822.000000"]);
+  expect(tiles[2]?.sub).toBe("3.8% of cap");
+  // A tile sub that is not a link carries no arrow.
+  for (const t of tiles) expect(t.sub ?? "").not.toMatch(/[→↓]/);
+  expect(tiles[3]?.sub).toBe("2 assets, listed below");
+  // Over the cap: the words, the dollars under them — never a minus on a dollar figure.
+  const over = inspectorTiles(ready([nearWire({ borrowings: "5400000000", liquidatable: true })]));
+  expect(over[2]).toMatchObject({ value: "Over cap", tone: "crit", sub: "By $387.50 · −7.8% of cap" });
+  // No Cash figure: each tile names why, in its register — a refusal refused, an empty answer in ink, a failed read unavailable.
+  const refused = inspectorTiles(ready([nearWire({ status: "refused", refusal: { code: "SWEEP_FAILED", detail: "the sweep failed", note: "" }, liquidatable: null, max_borrow_lt: null, borrowings: "4100000000" })]));
+  expect(refused.map((t) => [t.value, t.state])).toEqual([
+    ["Not computed", "refused"],
+    ["Not computed", "refused"],
+    ["Not computed", "refused"],
+    ["Not computed", "refused"],
+    ["Not computed", "refused"],
+  ]);
+  expect(refused[0]?.sub).toBe("Last readable $4,100");
+  for (const t of refused) expect(t.value).not.toBe("—");
+  const none = inspectorTiles(deriveInspectorView(reading({ lookup: { phase: "ready", value: lookup(ADDRESS_NOT_FOUND) } }), TIER_FALLBACK));
+  expect(none.map((t) => [t.value, t.tone, t.state])).toEqual(Array.from({ length: 5 }, () => ["No position", "neutral", undefined]));
+  const failed = inspectorTiles(deriveInspectorView(reading({ lookup: { phase: "error", message: "down" } }), TIER_FALLBACK));
+  expect(failed.every((t) => t.state === "unavailable" && t.value === "Unavailable")).toBe(true);
+  const loading = inspectorTiles(deriveInspectorView(reading({}), TIER_FALLBACK));
+  expect(loading.every((t) => t.pending)).toBe(true);
+});
+
+test("the surface's words: arrows only on links to another page, the lines on the charts named, the axis in sentence case", () => {
+  expect(OPEN_IN_SCENARIOS).toBe("Open in Scenarios →");
+  expect(TRUST_LINK).toBe("Verification →");
+  // A drawer trigger is no page: no arrow.
+  expect(PRICE_INPUTS).toBe("Price inputs");
+  expect(NEAR_LINE_LABEL).toBe("10% of cap");
+  expect(LIQUIDATION_LINE_LABEL).toBe("Health factor 1.0");
+  expect(batchAxisLabel(18152)).toBe("Batch 18,152");
+});
+
+test("the stress caption states room today once — the stress body's own before side — while every row agrees on it", () => {
+  const view = deriveInspectorView(
+    reading({ address: STRESS_DM.address, lookup: { phase: "ready", value: found([nearWire({ account: STRESS_DM.address })]) }, stress: { phase: "ready", value: lookup(STRESS_DM) } }),
+    TIER_FALLBACK,
+  );
+  expect(stressCaption(view)).toMatch(/^Room today: over cap by \$[\d,.]+\. Room after is the engine’s own cap less debt under each scenario/);
+  // No rows, no figure to state.
+  expect(stressCaption(deriveInspectorView(reading({}), TIER_FALLBACK))).toBe("Room after is the engine’s own cap less debt under each scenario; the rate horizon lists its extra interest instead.");
+});
+
+test("the legacy fold: its own figures and verdict, sentence case, a missing health factor named and never a dash", () => {
+  const aave = ADDRESS_FOUND.positions.find((p) => p.engine === "aave_v3_etherfi");
+  if (aave === undefined) throw new Error("fixture: the found address holds a legacy position");
+  const position = lookup({ ...ADDRESS_FOUND, positions: [aave] }).response.positions[0]!;
+  const words = legacyWords(position);
+  expect(words.tiles.map((t) => t.label)).toEqual(["Health factor", "Collateral", "Debt", "Status"]);
+  for (const t of words.tiles) expect(t.sub).toMatch(/^[A-Z]/);
+  expect(words.footnote).toBe("The legacy market is judged by its own health factor. The two books are never added together.");
+  // A stale price input keeps its caution marker even under a Healthy status tile.
+  expect(words.tiles[3]).toMatchObject({ value: "Healthy", sub: "Stale price input" });
+  expect(words.stale).toMatchObject({ word: "Stale price", tone: "warn" });
+  expect(legacyWords({ ...position, flags: position.flags.filter((f) => f !== "stale_price") }).stale).toBeNull();
+  const unread = legacyWords({ ...position, health_factor: null });
+  expect(unread.tiles[0]).toMatchObject({ value: "Not computed", state: "refused" });
 });

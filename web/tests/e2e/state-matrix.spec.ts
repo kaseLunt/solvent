@@ -246,7 +246,8 @@ const MATRIX: Cell[] = [
       );
       // No fake freshness: the stale verdict is the LEGACY card's own visible
       // state — it rides the Aave position, never the Cash verdict.
-      await expect(page.getByTestId("inspector-legacy")).toContainText("stale price");
+      await expect(page.getByTestId("inspector-legacy")).toContainText("Stale price input");
+      await expect(page.getByTestId("inspector-legacy").locator("[data-tone='warn']")).toHaveText("Stale price");
     },
   },
   {
@@ -303,7 +304,7 @@ const MATRIX: Cell[] = [
       // The refused batch is a GAP (never a value): the legacy history card
       // renders, and the History card states the law in its own words.
       await expect(page.getByTestId("inspector-history-legacy")).toBeVisible();
-      await expect(page.getByTestId("inspector-history")).toContainText("gaps drawn as gaps");
+      await expect(page.getByTestId("inspector-history")).toContainText("A refused, withheld or missing batch is a gap in the line.");
     },
   },
   {
@@ -511,8 +512,8 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "degraded");
       const verdict = page.getByTestId("history-verdict");
-      await expect(verdict).toHaveAttribute("data-variant", "refused");
-      // The route's one source of `unavailable` is a rollup that was never migrated: a fact about the deployment, in the refused register.
+      await expect(verdict).toHaveAttribute("data-variant", "absent");
+      // The route's one source of `unavailable` is a rollup that was never migrated: a fact about the deployment, stated as an absence — nobody refused it.
       await expect(verdict).toContainText("on this deployment yet.");
       // Never an empty chart, never zeros.
       await expect(page.getByTestId("history-chart")).toHaveCount(0);
@@ -565,8 +566,8 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       const empty = page.getByTestId("activity-table");
-      await expect(empty).toContainText("no recorded chain action matches this filter");
-      await expect(empty).toContainText("a real answer");
+      await expect(page.getByTestId("activity-verdict-headline")).toHaveText("No recorded chain action is a bad-debt realization.");
+      await expect(empty.locator("tbody td")).toHaveText("No rows");
       await expect(page.locator('[data-testid^="activity-row-"]')).toHaveCount(0);
     },
   },
@@ -664,8 +665,8 @@ const MATRIX: Cell[] = [
       // Two subjects; the reconciled-exact claim lives ONLY on the proof
       // card — a live batch never reads as reconciled-exact.
       await expect(page.getByTestId("verification-surface")).toHaveAttribute("data-receipt", "exact");
-      await expect(page.getByTestId("verification-subject-proof")).toContainText("PROOF · EXACT");
-      await expect(page.getByTestId("verification-subject-live")).not.toContainText("PROOF · EXACT");
+      await expect(page.getByTestId("verification-subject-proof")).toContainText("Proof exact");
+      await expect(page.getByTestId("verification-subject-live")).not.toContainText(/proof exact/i);
     },
   },
   {
@@ -678,10 +679,10 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       await expect(page.getByTestId("verification-surface")).toHaveAttribute("data-receipt", "failed");
-      await expect(page.getByTestId("verification-proof-status")).toContainText("RECEIPT REJECTED");
+      await expect(page.getByTestId("verification-proof-status")).toContainText("Receipt rejected");
       // The live subject keeps ITS truth — serving continues, unconflated.
-      await expect(page.getByTestId("verification-live-status")).toContainText("SERVING");
-      await expect(page.locator("body")).not.toContainText("PROOF · EXACT @");
+      await expect(page.getByTestId("verification-live-status")).toContainText("Serving");
+      await expect(page.locator("body")).not.toContainText(/proof exact @/i);
     },
   },
   {
@@ -694,8 +695,8 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       await expect(page.getByTestId("verification-surface")).toHaveAttribute("data-receipt", "none");
-      await expect(page.getByTestId("verification-proof-status")).toContainText("NO COMMITTED RECEIPT");
-      await expect(page.getByTestId("verification-live-status")).toContainText("SERVING");
+      await expect(page.getByTestId("verification-proof-status")).toContainText("No committed receipt");
+      await expect(page.getByTestId("verification-live-status")).toContainText("Serving");
     },
   },
   {
@@ -707,7 +708,7 @@ const MATRIX: Cell[] = [
       await page.route("**/v1/evidence*", (route) => fulfillJson(route, EVIDENCE_NO_BATCH));
     },
     verify: async (page) => {
-      await expect(page.getByTestId("verification-live-status")).toContainText("NO SERVABLE BATCH");
+      await expect(page.getByTestId("verification-live-status")).toContainText("No servable batch");
       // No key is ever fabricated for a batch that does not exist.
       await expect(page.getByTestId("verification-key")).toContainText("never fabricated");
     },

@@ -9,18 +9,35 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { SolventClient } from "@solvent/client";
-import { apiDek, contractParagraphs, deriveApiView, errorStatuses, inlineParts, quickstartSample, verbCensus, type InlinePart } from "../../lib/api-view";
+import {
+  API_COPY,
+  API_ERROR_COLUMNS,
+  API_FIXTURES_NOTE,
+  apiDek,
+  contractBlocks,
+  contractParagraphs,
+  curlFor,
+  deriveApiView,
+  errorSampleCopy,
+  errorStatuses,
+  inlineParts,
+  operationCopy,
+  quickstartSample,
+  verbCensus,
+  versionNoteParts,
+  type InlinePart,
+} from "../../lib/api-view";
 import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS } from "../../lib/proof-contract.gen";
 
 const BASE = "http://x";
 
-test("tiles: the endpoint count, the error-response count and the contract version — the extract's own, each with a sub counted from the same extract", () => {
+test("tiles: the endpoint count and the error-response count — the extract's own, each with a sub counted from the same extract; the version is the kicker's and the chip's, never a third tile", () => {
   const v = deriveApiView(BASE);
   expect(v.tiles).toEqual({
     operations: { label: "Endpoints", value: String(OPERATIONS.length), sub: verbCensus() },
     errors: { label: "Error responses", value: String(ERROR_RESPONSES.length), sub: errorStatuses() },
-    version: { label: "Contract version", value: CONTRACT_META.version, sub: CONTRACT_META.sourcePath },
   });
+  for (const tile of Object.values(v.tiles)) expect(`${tile.value} ${tile.sub}`).not.toContain(CONTRACT_META.version);
   // No tile without a sub.
   for (const tile of Object.values(v.tiles)) expect(tile.sub.length).toBeGreaterThan(0);
 });
@@ -41,6 +58,9 @@ test("header: the kicker names the contract's version once; the headline counts 
   const v = deriveApiView(BASE);
   expect(v.kicker).toBe(`API · contract v${CONTRACT_META.version}`);
   expect(v.kicker).toBe("API · contract v1.8.0");
+  // The version is set apart so the kicker's capitals never recase it; the parts are the kicker, whole.
+  expect(v.kickerParts).toEqual({ lead: "API · contract", version: "v1.8.0" });
+  expect(`${v.kickerParts.lead} ${v.kickerParts.version}`).toBe(v.kicker);
   expect(v.headline).toEqual({
     emphasis: `${String(OPERATIONS.length)} read-only endpoints,`,
     rest: "every money value an exact decimal string.",
@@ -62,9 +82,9 @@ test("header: the kicker names the contract's version once; the headline counts 
   for (const text of printed) expect(text).not.toMatch(/operations?/i);
 });
 
-test("the dek: no key or sign-in but a rate limit, where each sample comes from, and what the fidelity test does — each clause licensed by the extract", () => {
+test("the dek: two sentences — no key or sign-in but a rate limit; where each sample comes from and what the fidelity test does — each clause licensed by the extract", () => {
   expect(apiDek()).toBe(
-    "No key or sign-in; requests are rate-limited per client. Every sample below is the contract's own example (api/openapi.yaml, v1.8.0) or a committed client fixture, cited beside each. A CI test re-reads both and fails if this page's extract has drifted from either; the fixtures are checked against the contract by the client package's own tests.",
+    "No key or sign-in; requests are rate-limited per client. Every sample is the contract's own example or a committed client fixture, and a CI test fails if this page drifts from either.",
   );
   // "No key" is never left to read as "no limit": the clause stands because the contract carries a 429.
   expect(ERROR_RESPONSES.some((e) => e.status === 429)).toBe(true);
@@ -82,10 +102,13 @@ test("the dek claims of CI only what CI runs: the fidelity test compares bytes, 
   const read = (...parts: string[]): string => readFileSync(path.join(repoRoot, ...parts), "utf8");
   // A fixture "validated against the contract" is a claim about packages/client-ts/test/fixtures.test.ts, which no CI step runs — so the dek never says "validated" of CI's test, and names the test's owner.
   expect(apiDek()).not.toMatch(/validated/i);
-  const [, ciSentence = ""] = /(A CI test [^;.]*)[;.]/.exec(apiDek()) ?? [];
-  expect(ciSentence).toBe("A CI test re-reads both and fails if this page's extract has drifted from either");
+  const [, ciSentence = ""] = /(a CI test [^;.]*)[;.]/.exec(apiDek()) ?? [];
+  expect(ciSentence).toBe("a CI test fails if this page drifts from either");
   expect(ciSentence).not.toMatch(/contract-valid|checked against|valid/i);
-  expect(apiDek()).toContain("the fixtures are checked against the contract by the client package's own tests.");
+  // Whether a fixture agrees with the contract is the drawer's clause, and it names the test's owner and that CI does not run it.
+  expect(apiDek()).not.toMatch(/client package/);
+  expect(deriveApiView(BASE).doctrine).toContain(API_FIXTURES_NOTE);
+  expect(API_FIXTURES_NOTE).toContain("the client package's own tests check those fixtures against the contract, and no CI step runs them.");
   // What licenses that clause: the client test validates every file in FIXTURE_FILES against api/openapi.yaml…
   const clientTest = read("packages", "client-ts", "test", "fixtures.test.ts");
   expect(clientTest).toContain("for (const name of Object.keys(FIXTURE_FILES)");
@@ -131,12 +154,69 @@ test("error rows equal ERROR_RESPONSES mapped: the name as key, the status as a 
   expect(v.errors.length).toBe(ERROR_RESPONSES.length);
 });
 
-test("doctrine: the intro, the base-URL note and the provenance paragraph, verbatim, in reading order", () => {
+test("the page's own words live in the lib, each standalone line in sentence case: the drawer, the index's name, the section titles and qualifier, the code bars, the link to Verification, the parameter words, the error table's heads", () => {
+  expect(API_COPY).toEqual({
+    drawer: "Methodology & evidence",
+    indexLabel: "Endpoint index",
+    quickstartTitle: "TypeScript",
+    quickstartQualifier: "@solvent/client",
+    quickstartCode: "TypeScript",
+    quickstartCopy: "Copy TypeScript quickstart",
+    endpointsTitle: "Endpoints",
+    verificationLink: "Verification →",
+    errorsTitle: "Error envelope",
+    curlCode: "curl",
+    jsonCode: "JSON",
+    required: "required",
+    optional: "optional",
+  });
+  // Another page is "→", after the words.
+  expect(API_COPY.verificationLink).toMatch(/^\S.* →$/);
+  expect(API_ERROR_COLUMNS).toEqual([
+    { key: "status", header: "Status" },
+    { key: "name", header: "Response" },
+    { key: "description", header: "Description" },
+  ]);
+});
+
+test("every copy action and sample fold is named from the contract's own method, path and response name — never typed beside them", () => {
+  const evidence = OPERATIONS.find((op) => op.method === "GET" && op.path === "/v1/evidence");
+  if (evidence === undefined) throw new Error("fixture invariant: GET /v1/evidence is in the contract");
+  expect(operationCopy(evidence)).toEqual({
+    curl: "Copy curl for GET /v1/evidence",
+    sampleSummary: "200 response",
+    sampleSource: `· ${String(evidence.exampleSource)}`,
+    sample: "Copy 200 sample for GET /v1/evidence",
+  });
+  // A stream's operation carries no sample, so it cites no source.
+  for (const op of OPERATIONS) {
+    const copy = operationCopy(op);
+    expect(copy.curl).toBe(`Copy curl for ${op.method} ${op.path}`);
+    expect(copy.sampleSource).toBe(op.exampleSource === null ? null : `· ${op.exampleSource}`);
+  }
+  for (const error of ERROR_RESPONSES) {
+    expect(errorSampleCopy(error)).toEqual({ summary: `${error.name} body`, source: `· ${error.source}`, copy: `Copy ${error.name} body` });
+  }
+});
+
+test("each endpoint's curl is the exact invocation against the stated origin: a stream keeps its connection open unbuffered, a POST names its verb, a GET is plain", () => {
+  for (const op of OPERATIONS) {
+    const curl = curlFor(op, BASE);
+    expect(curl).toBe(
+      op.sse ? `curl -sN "${BASE}${op.samplePath}"` : op.method === "POST" ? `curl -s -X POST "${BASE}${op.samplePath}"` : `curl -s "${BASE}${op.samplePath}"`,
+    );
+  }
+  expect(OPERATIONS.some((op) => op.sse)).toBe(true);
+  expect(OPERATIONS.some((op) => op.method === "POST")).toBe(true);
+});
+
+test("doctrine: the intro, the base-URL note, the provenance paragraph and the fixtures' note, verbatim, in reading order", () => {
   const v = deriveApiView(BASE);
   expect(v.doctrine).toEqual([
     "The committed API contract, rendered from its own examples: read-only JSON, no auth, every money value a decimal string. If a handler disagrees with this page, that is a failure, not documentation lag.",
     "Base URL http://x: the origin this deployment is built against (NEXT_PUBLIC_SOLVENT_API_URL).",
     "Samples are extracted from the committed contract by tests/fixtures/generate-proof.mjs; tests/unit/proof-contract-fidelity.spec.ts re-extracts from api/openapi.yaml on every run and fails on any drift between this page's source module and the contract.",
+    "Where the contract carries no example, a sample is a committed client fixture, cited beside it; the client package's own tests check those fixtures against the contract, and no CI step runs them.",
   ]);
   // The slogan is doctrine: the drawer keeps it whole, and the header states the facts that make it true instead.
   expect(v.headline.dek).not.toContain("documentation lag");
@@ -161,6 +241,62 @@ test("the contract's prose reflows without a word changing: blank lines end para
     expect(words(paragraphs.join(" "))).toEqual(words(text));
     for (const paragraph of paragraphs) expect(paragraph).not.toContain("\n");
   }
+});
+
+test("a run of list items is one list: each item's marker is its bullet and leaves the text, and not a word changes", () => {
+  expect(contractBlocks("Lead:\n  * `first` — item one,\n    continued.\n  * `second` — item two.\n\nAfter.")).toEqual([
+    { kind: "p", text: "Lead:" },
+    { kind: "ul", items: ["`first` — item one, continued.", "`second` — item two."] },
+    { kind: "p", text: "After." },
+  ]);
+  // Two runs parted by a paragraph are two lists; a dash is a marker too.
+  expect(contractBlocks("- a\n\nmid\n\n- b")).toEqual([
+    { kind: "ul", items: ["a"] },
+    { kind: "p", text: "mid" },
+    { kind: "ul", items: ["b"] },
+  ]);
+  expect(contractBlocks("")).toEqual([]);
+  // The positions sort's list: five keys, each item its own words, and the one list that description carries.
+  const positions = OPERATIONS.find((op) => op.operationId === "getPositions");
+  const sort = positions?.parameters.find((param) => param.name === "sort");
+  if (sort === undefined) throw new Error("contract invariant: getPositions takes a sort");
+  const lists = contractBlocks(sort.description).filter((block) => block.kind === "ul");
+  expect(lists).toHaveLength(1);
+  const [list] = lists;
+  if (list?.kind !== "ul") throw new Error("expected the sort list");
+  expect(list.items.map((item) => /^`(\w+)`/.exec(item)?.[1])).toEqual(["headroom", "liq_distance", "debt", "hf", "status"]);
+  // Over every description the page prints: the blocks' words, markers aside, are the contract's own, in order.
+  const words = (text: string): string[] => text.split(/\s+/).filter((w) => w !== "" && w !== "*" && w !== "-");
+  const prose = [...OPERATIONS.map((op) => op.description), ...OPERATIONS.flatMap((op) => op.parameters.map((p) => p.description))];
+  for (const text of prose) {
+    const blocks = contractBlocks(text).flatMap((block) => (block.kind === "p" ? [block.text] : block.items));
+    expect(words(blocks.join(" "))).toEqual(words(text));
+  }
+});
+
+test("a bracketed version note is set apart, never reworded: the parts join back to the text, and only the contract's own notes are marked", () => {
+  expect(versionNoteParts("`headroom` (ADDED 1.5.0) — the SHARE")).toEqual([
+    { kind: "text", text: "`headroom` " },
+    { kind: "ver", text: "(ADDED 1.5.0)" },
+    { kind: "text", text: " — the SHARE" },
+  ]);
+  expect(versionNoteParts("(DEPRECATED 1.5.0, STILL SERVED, ORDERING UNCHANGED) — distance")).toEqual([
+    { kind: "ver", text: "(DEPRECATED 1.5.0, STILL SERVED, ORDERING UNCHANGED)" },
+    { kind: "text", text: " — distance" },
+  ]);
+  // A parenthesis that is no version note stays text: "(account)", "(G4)".
+  expect(versionNoteParts("Ties break on (account) and (G4).")).toEqual([{ kind: "text", text: "Ties break on (account) and (G4)." }]);
+  expect(versionNoteParts("")).toEqual([]);
+  const prose = [...OPERATIONS.map((op) => op.description), ...OPERATIONS.flatMap((op) => op.parameters.map((p) => p.description))];
+  const notes: string[] = [];
+  for (const text of prose) {
+    for (const paragraph of contractParagraphs(text)) {
+      const parts = versionNoteParts(paragraph);
+      expect(parts.map((part) => part.text).join("")).toBe(paragraph);
+      notes.push(...parts.filter((part) => part.kind === "ver").map((part) => part.text));
+    }
+  }
+  expect(notes.sort()).toEqual(["(ADDED 1.5.0)", "(AMENDMENT 1)", "(AMENDMENT 1/E)", "(DEPRECATED 1.5.0, STILL SERVED, ORDERING UNCHANGED)"]);
 });
 
 /** What a reader sees of a paragraph once its parts render: a strong part's own code spans read again, every marker gone. */

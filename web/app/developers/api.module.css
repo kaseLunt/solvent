@@ -1,9 +1,9 @@
 /* API: the committed contract set in the Console register. Page-local rules only — the header, tiles, cards and
  * table are the kit's; these are the contract's own vocabulary (verb, path, params, response codes), the endpoint
  * index, and the terminal treatment for code, which the kit does not carry. Every figure on the page is the
- * contract's own text; the styling only sets it. */
-.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 28px 0 24px; }
-.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+ * contract's own text; the styling only sets it. A verb, a required flag and a status code are contract vocabulary,
+ * never a warning: they wear ink, and the word alone tells them apart. The shell owns the page's top offset. */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 0 0 24px; }
 /* A URL is an identifier: mono wherever the page prints it, the identity chip included. */
 .page [data-chip="Base URL"] b { font-family: var(--mono); font-size: var(--type-mono-sm); }
 
@@ -11,44 +11,45 @@
 .toc { columns: 3; column-gap: 24px; }
 .tocRow { display: grid; grid-template-columns: 5ch minmax(0, 1fr); gap: 8px; padding: 3px 0; border: 0; font-family: var(--mono); font-size: var(--type-small); color: var(--ink-2); break-inside: avoid; }
 .tocRow:hover .tocPath { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-.tocVerb { color: var(--accent-text); }
-.tocVerbPost { color: var(--warn-text); }
+.tocVerb { color: var(--ink-2); }
 .tocPath { min-width: 0; overflow-wrap: anywhere; }
 
 /* ---- endpoint card: the kit's .card, the contract's rows stacked inside it ---- */
 .endpoint { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; scroll-margin-top: 90px; }
 .endpointHead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.verb { font-family: var(--mono); font-size: var(--type-floor); letter-spacing: 0.06em; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--accent); color: var(--accent-text); white-space: nowrap; }
-.verbPost { border-color: var(--warn); color: var(--warn-text); }
+.verb { font-family: var(--mono); font-size: var(--type-floor); letter-spacing: 0.06em; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--line); color: var(--ink-2); white-space: nowrap; }
 .path { font-family: var(--mono); font-size: var(--type-mono); font-weight: var(--w-semibold); color: var(--ink); overflow-wrap: anywhere; }
 .summary { font-size: var(--type-body); color: var(--ink-2); }
-/* The contract's prose at the reading measure: paragraphs, never the yaml's hard wraps. */
+/* The contract's prose at the reading measure: paragraphs and lists, never the yaml's hard wraps or markers. */
 .description { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-width: 720px; font-size: var(--type-body); color: var(--ink-2); }
 .description p, .paramDescription p { margin: 0; }
+.description ul, .paramDescription ul { display: grid; gap: 6px; margin: 0; padding-left: 18px; }
 /* The contract's two inline markers as formatting: a code span is an identifier, mono and ink, broken anywhere rather than overflow the measure; bold is ink at the semibold weight. */
 .description code, .paramDescription code { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink); overflow-wrap: anywhere; }
 .description strong, .paramDescription strong { font-weight: var(--w-semibold); color: var(--ink); }
+/* A bracketed version note — "(ADDED 1.5.0)" — is history, not the sentence: set quieter, its words unchanged. */
+.ver { color: var(--ink-3); font-size: var(--type-small); }
 
 /* ---- params: one row each, the yaml's words ---- */
 .params { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid var(--line); }
 .paramRow { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; padding: 7px 0; border-bottom: 1px solid var(--chip-bg); font-size: var(--type-body); }
 .paramName { font-family: var(--mono); font-size: var(--type-mono); font-weight: var(--w-semibold); color: var(--ink); }
 .paramMeta { font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-3); white-space: nowrap; }
-.paramRequired { color: var(--warn-text); }
+.paramRequired { color: var(--ink); font-weight: var(--w-semibold); }
 .paramDescription { flex: 1 1 320px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; max-width: 720px; color: var(--ink-2); }
 
-/* ---- code: the terminal treatment; the rendered text and the copied text are one string ---- */
-.codeWrap { position: relative; min-width: 0; }
-.code { margin: 0; padding: 12px 44px 12px 14px; border-radius: 8px; background: var(--term-bg); color: var(--term-ink); font-family: var(--mono); font-size: var(--type-mono); line-height: 1.6; overflow-x: auto; }
-.codeCopy { position: absolute; top: 8px; right: 8px; }
+/* ---- code: the terminal treatment, framed so its ground has an edge on either theme; a header bar names the block
+ * and carries the copy, so nothing sits over the code. The rendered text and the copied text are one string ---- */
+.code { min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--term-bg); overflow: hidden; }
+.codeHead { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 8px 6px 14px; border-bottom: 1px solid color-mix(in srgb, var(--term-dim) 35%, transparent); font-family: var(--sans); font-size: var(--type-small); color: var(--term-dim); }
 /* The copy chip on the terminal ground wears the terminal's palette: --term-bg is one colour in both themes, so a chip on a page token would glow on it in light. */
-.codeCopy button { background: transparent; border-color: var(--term-dim); color: var(--term-dim); }
-.codeCopy button:hover { color: var(--term-accent); border-color: var(--term-accent); }
+.codeHead button { background: transparent; border-color: var(--term-dim); color: var(--term-dim); }
+.codeHead button:hover { color: var(--term-accent); border-color: var(--term-accent); }
+.codeBody { margin: 0; padding: 12px 14px; color: var(--term-ink); font-family: var(--mono); font-size: var(--type-mono); line-height: 1.6; overflow-x: auto; }
 
 /* ---- response codes above the sample fold: the non-2xx vocabulary never trails the happy path ---- */
 .responses { display: flex; flex-wrap: wrap; gap: 8px; }
 .responseChip { font-family: var(--mono); font-size: var(--type-small); border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; color: var(--ink-2); white-space: nowrap; }
-.responseChipErr { color: var(--warn-text); border-color: var(--warn); }
 .sample { border-top: 1px solid var(--line); }
 .sampleSummary { cursor: pointer; padding: 9px 0; font-family: var(--mono); font-size: var(--type-mono-sm); color: var(--ink-2); list-style: none; }
 .sampleSummary::-webkit-details-marker { display: none; }
@@ -63,9 +64,5 @@ details[open] > .sampleSummary::before { content: "▾ "; }
 .samples .sample { border-top: 0; border-bottom: 1px solid var(--chip-bg); }
 .samples .code { margin-bottom: 10px; }
 
-/* ---- drawer body: the doctrine, paragraph by paragraph ---- */
-.method { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; font-size: var(--type-body); color: var(--ink); }
-.method p { margin: 0; }
-
 @media (max-width: 900px) { .toc { columns: 2; } }
-@media (max-width: 640px) { .tiles { grid-template-columns: 1fr; } .toc { columns: 1; } }
+@media (max-width: 640px) { .toc { columns: 1; } }

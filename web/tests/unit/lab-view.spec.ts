@@ -9,16 +9,26 @@ import {
   ASSUMPTIONS_BUTTON,
   ASSUMPTIONS_LEFT_OUT,
   ASSUMPTIONS_TITLE,
+  addressKicker,
+  COMPARE_KICKER,
+  compareChips,
   compareControl,
+  compareFinding,
+  compareFreshnessNote,
   deriveLabView,
+  heatCellTitle,
   LANE_TILE_LABEL,
   MOVERS_EMPTY,
   MOVERS_LINK,
   MOVERS_QUALIFIER,
   MOVERS_TITLE,
   readEngine,
+  resultTileWords,
+  runLabel,
+  tileAbsence,
   transitionFinding,
 } from "../../lib/lab-view";
+import { compareRows } from "../../lib/lab-compare";
 import { compareRerunFailedLine, contradictoryHeadline, failureHeadline, staleBannerLine } from "../../lib/lab-headline";
 import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
 import { SCENARIOS } from "../fixtures/lab-book";
@@ -78,14 +88,16 @@ test("nothing can run until the listing answers: while it loads, and when it can
   expect(deriveLabView(reading({}), linked).checked).toEqual(["eth_minus_30", "ethfi_minus_50"]);
 });
 
-test("not run: the definition, the dashed tone, no chips beyond identity, no engines", () => {
+test("not run: the definition's name, the absent register and the way forward, no chips beyond identity, no engines", () => {
   const v = deriveLabView(reading({}), ui());
   expect(v.book.state).toBe("not-run");
   expect(v.book.banner).toBeNull();
-  expect(v.book.kicker).toBe("ETH -30 percent · Cash book");
-  expect(v.book.headline.emphasis).toBe("ETH -30 percent");
-  expect(v.book.headline.rest).toBe("— 1 committed shock, not run yet.");
-  expect(v.book.headline.tone).toBe("refused");
+  // The name keeps its own case under the kicker's capitals: the kicker hands it over apart from its scope.
+  expect(v.book.kicker).toEqual({ name: "ETH −30%", scope: "Cash book" });
+  expect(v.book.headline.emphasis).toBe("ETH −30% has not been run.");
+  expect(v.book.headline.rest).toBe("");
+  expect(v.book.headline.dek).toBe("Run it to see how much Cash debt becomes liquidatable and which accounts move.");
+  expect(v.book.headline.tone).toBe("absent");
   expect(v.book.definition?.id).toBe("eth_minus_30");
   expect(v.book.run).toBeNull();
   expect(v.book.cash).toBeNull();
@@ -97,7 +109,7 @@ test("not run: the definition, the dashed tone, no chips beyond identity, no eng
 test("running", () => {
   const v = deriveLabView(reading({ runs: new Map([["eth_minus_30", { phase: "running", startedAt: 1, held: null }]]) }), ui());
   expect(v.book.state).toBe("running");
-  expect(v.book.headline.emphasis).toBe("Running ETH -30 percent…");
+  expect(v.book.headline.emphasis).toBe("Running ETH −30%…");
 });
 
 test("the demo result: state, headline, chips, identity, both engine readings, the movers, no banner", () => {
@@ -110,7 +122,7 @@ test("the demo result: state, headline, chips, identity, both engine readings, t
   expect(v.book.chips.map((c) => [c.label, c.value])).toEqual([
     ["Result for batch", "18,251"],
     ["Scenario", "eth_minus_30 · v1"],
-    ["Engines", "Aave v3 market (legacy) and Cash"],
+    ["Engines", "Cash · legacy market below"],
     ["Config", "v1"],
   ]);
   expect(v.book.identity).toEqual({ scope: "book", batchId: 18251, configVersion: "v1", engines: ["aave_v3_etherfi", "debt_manager"], servedAt: "2026-08-08T20:22:50Z" });
@@ -135,7 +147,7 @@ test("withheld, not covered, contradictory, unreadable — each its own state an
   const withheld = runBookOf([legacyEngine({ 7: { 7: 1 } })], DEFINITION_ETH, { excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "the custody flag is unproven", note: "" }] });
   const w = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: withheld }) }), ui());
   expect(w.book.state).toBe("withheld");
-  expect(w.book.headline.emphasis).toBe("Cannot say — the Cash book is withheld under ETH -30 percent.");
+  expect(w.book.headline.emphasis).toBe("Cannot say — the Cash book is withheld under ETH −30%.");
   expect(w.book.cash?.kind).toBe("withheld");
   expect(w.book.legacy?.kind).toBe("result");
   expect(w.book.chips.find((c) => c.label === "Engines")?.value).toBe("Aave v3 market (legacy) · Cash withheld");
@@ -152,7 +164,7 @@ test("withheld, not covered, contradictory, unreadable — each its own state an
   const bad = runBookOf([demoCash({ hf_transitions: { ...transitionsOf(DEMO_CASH_TABLE), total_rows: 5 } })], DEFINITION_ETH);
   const c = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: bad }) }), ui());
   expect(c.book.state).toBe("contradictory");
-  expect(c.book.headline.emphasis).toBe("The result for ETH -30 percent contradicts itself.");
+  expect(c.book.headline.emphasis).toBe("The result for ETH −30% contradicts itself.");
   expect(c.book.cash?.kind).toBe("contradictory");
 
   const unreadable = runBookOf([demoCash({ usd_decimals: 1.5 })], DEFINITION_ETH);
@@ -178,7 +190,7 @@ test("banners: a superseded batch and a stale input keep the result; a changed v
   const rev = { ...SCENARIOS, scenarios: SCENARIOS.scenarios.map((sc) => (sc.id === "eth_minus_30" ? { ...sc, version: "v2" } : sc)) };
   const r = deriveLabView(reading({ listing: { phase: "ready", value: rev }, runs: settled("eth_minus_30", { kind: "ok", response: runBookOf([demoCash()], DEFINITION_ETH) }) }), ui());
   expect(r.book.state).toBe("definition-changed");
-  expect(r.book.headline.emphasis).toBe("ETH -30 percent changed since this result was computed.");
+  expect(r.book.headline.emphasis).toBe("ETH −30% changed since this result was computed.");
   expect(r.book.cash).toBeNull();
 });
 
@@ -186,7 +198,13 @@ test("every fetch failure is its own state with the failure sentence", () => {
   const at = (outcome: Parameters<typeof settled>[1]) => deriveLabView(reading({ runs: settled("eth_minus_30", outcome) }), ui()).book;
   expect(at({ kind: "not-served" }).state).toBe("not-served");
   expect(at({ kind: "no-batch", message: "no complete risk batch is available", retryAfterSeconds: 30 }).headline.dek).toBe("No complete risk batch is available (503). Retry after 30s.");
-  expect(at({ kind: "rate-limited", retryAfterSeconds: null }).state).toBe("rate-limited");
+  const limited = at({ kind: "rate-limited", retryAfterSeconds: null });
+  expect(limited.state).toBe("rate-limited");
+  // A throttle is a read that did not complete: the absent register and Unavailable tiles, as on every other surface.
+  expect(limited.headline.tone).toBe("absent");
+  expect(tileAbsence(limited, limited.cash)).toEqual({ register: "unavailable" });
+  const declined = at({ kind: "failed", status: 400, message: "bad request" });
+  expect(tileAbsence(declined, declined.cash)).toEqual({ register: "refused" });
   expect(at({ kind: "unreachable", message: "fetch failed" }).state).toBe("unreachable");
   expect(at({ kind: "failed", status: 500, message: "internal" }).headline.emphasis).toBe("The service answered 500.");
 });
@@ -198,7 +216,10 @@ test("compare: idle, running, ok (both engines' views), failed", () => {
   const busy: SetRecord = { phase: "settled", ids: ["a"], outcome: { kind: "busy", message: "another evaluation holds the slot", maxInFlight: 1, inFlight: 1 }, at: 2, held: null };
   const b = deriveLabView(reading({ set: busy }), ui()).compare;
   expect(b.kind).toBe("failed");
-  if (b.kind === "failed") expect(b.headline.emphasis).toBe("The evaluator is busy.");
+  if (b.kind === "failed") {
+    expect(b.headline.emphasis).toBe("The evaluator is busy.");
+    expect(b.headline.tone).toBe("absent");
+  }
 });
 
 test("readEngine reads by id, refuses by name, and never manufactures a figure", () => {
@@ -248,7 +269,7 @@ test("a held result whose definition changed is disclosed, not shown: the failed
   expect(v.book.cash).toBeNull();
   expect(v.book.run).toBeNull();
   expect(v.book.headline).toEqual(failureHeadline("not-served", {}));
-  expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Not served", tone: "refused" });
+  expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Not served", tone: "dim" });
 });
 
 test("a held result's own condition is said beside the failure that left it standing", () => {
@@ -294,7 +315,7 @@ test("a 2xx body that does not read never replaces a computed result: the held f
   expect(v.book.state).toBe("result");
   expect(v.book.banner).toBe("rerun-failed");
   expect(v.book.headline.emphasis).toBe("$1.2M more Cash debt becomes liquidatable,");
-  expect(v.book.rerunFailure).toEqual(contradictoryHeadline("ETH -30 percent", ["eligible_debt_delta_usd is outside the wire contract"]));
+  expect(v.book.rerunFailure).toEqual(contradictoryHeadline("ETH −30%", ["eligible_debt_delta_usd is outside the wire contract"]));
   expect(v.book.run).toBe(run);
   expect(v.book.receivedAt).toEqual({ wallMs: 1, monotonicMs: 1 });
   expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "result", text: "+$1.2M liquidatable · 118 accounts", tone: "crit" });
@@ -308,7 +329,7 @@ test("a 2xx body that does not read never replaces a computed result: the held f
   const c = deriveLabView(reading({ runs: over(contradictory, held) }), ui());
   expect(c.book.state).toBe("result");
   expect(c.book.banner).toBe("rerun-failed");
-  expect(c.book.rerunFailure?.emphasis).toBe("The result for ETH -30 percent contradicts itself.");
+  expect(c.book.rerunFailure?.emphasis).toBe("The result for ETH −30% contradicts itself.");
   // An honest answer releases the hold: a withheld book over a held result is the withheld state, no banner.
   const withheld = runBookOf([legacyEngine({ 7: { 7: 1 } })], ETH_DEF, { excluded_engines: [{ engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", detail: "the custody flag is unproven", note: "" }] });
   const w = deriveLabView(reading({ runs: over(withheld, held) }), ui());
@@ -368,7 +389,7 @@ test("the envelope is classified before any read: a 2xx run-book without its bat
   const over = (overrides: Record<string, unknown>) => settled("eth_minus_30", { kind: "ok", response: { ...run, ...overrides } as unknown as typeof run });
   const noBatch = deriveLabView(reading({ runs: over({ batch: undefined }) }), ui());
   expect(noBatch.book.state).toBe("contradictory");
-  expect(noBatch.book.headline).toEqual(contradictoryHeadline("ETH -30 percent", ["batch is outside the wire contract"]));
+  expect(noBatch.book.headline).toEqual(contradictoryHeadline("ETH −30%", ["batch is outside the wire contract"]));
   expect(noBatch.book.headline.dek).toBe("batch is outside the wire contract. Nothing from it is drawn.");
   // Nothing of the body is carried: no run for the drawer or the age to read, no identity, the definition's own chips.
   expect(noBatch.book.run).toBeNull();
@@ -391,7 +412,7 @@ test("the envelope is classified before any read: a 2xx run-book without its bat
   const v = deriveLabView(reading({ runs }), ui());
   expect(v.book.state).toBe("result");
   expect(v.book.banner).toBe("rerun-failed");
-  expect(v.book.rerunFailure).toEqual(contradictoryHeadline("ETH -30 percent", ["batch is outside the wire contract"]));
+  expect(v.book.rerunFailure).toEqual(contradictoryHeadline("ETH −30%", ["batch is outside the wire contract"]));
 });
 
 test("compare: a set whose envelope is outside the contract is a failed Compare naming the field — without its evaluation, its batch or its coverage nothing is read, and a held comparison stands", () => {
@@ -444,7 +465,7 @@ test("a 2xx body that is not a JSON object is a named answer on both paths, neve
     const response = body as unknown as typeof run;
     const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response }) }), ui());
     expect(v.book.state).toBe("contradictory");
-    expect(v.book.headline).toEqual(contradictoryHeadline("ETH -30 percent", ["The response body is not a JSON object"]));
+    expect(v.book.headline).toEqual(contradictoryHeadline("ETH −30%", ["The response body is not a JSON object"]));
     expect(v.book.headline.dek).toBe("The response body is not a JSON object. Nothing from it is drawn.");
     expect(v.book.run).toBeNull();
     expect(v.book.cash).toEqual({ kind: "unreadable", fields: ["the response body is not a JSON object"] });
@@ -475,7 +496,7 @@ test("one rule holds a result and releases it — does the body read: a malforme
   // whether it reads BEFORE its version is: it does not, so it is the contradiction, the fault named — and the result
   // already on the page stands under it, its figures never withdrawn.
   const skewedMalformed = runBookOf([demoCash({ eligible_debt_delta_usd: "1e6" })], { ...ETH_DEF, version: "v2" });
-  const fault = contradictoryHeadline("ETH -30 percent", ["eligible_debt_delta_usd is outside the wire contract"]);
+  const fault = contradictoryHeadline("ETH −30%", ["eligible_debt_delta_usd is outside the wire contract"]);
   expect(readsAsAnswer(skewedMalformed)).toBe(false);
   const one = deriveLabView(reading({ runs: over(skewedMalformed) }), ui());
   expect(one.book.state).toBe("result");
@@ -510,7 +531,7 @@ test("one rule holds a result and releases it — does the body read: a malforme
   const legacyOnly = { ...ETH_DEF, engines: ["aave_v3_etherfi"] };
   const listing = { ...SCENARIOS, scenarios: SCENARIOS.scenarios.map((s) => (s.id === "eth_minus_30" ? legacyOnly : s)) };
   const strayMalformed = runBookOf([legacyEngine({ 7: { 7: 1 } }), demoCash({ usd_decimals: 1.5 })], legacyOnly);
-  const stray = contradictoryHeadline("ETH -30 percent", ["usd_decimals is outside the wire contract"]);
+  const stray = contradictoryHeadline("ETH −30%", ["usd_decimals is outside the wire contract"]);
   expect(readsAsAnswer(strayMalformed)).toBe(false);
   const bareTwo = deriveLabView(reading({ listing: { phase: "ready", value: listing }, runs: over(strayMalformed, null) }), ui());
   expect(bareTwo.book.state).toBe("contradictory");
@@ -667,8 +688,8 @@ test("one predicate admits a result to the hold and releases it, and it covers e
     expect(v.book.banner).toBe("rerun-failed");
     expect(v.book.run).toBe(valid);
     expect(v.book.headline).toEqual(first.book.headline);
-    expect(v.book.rerunFailure).toEqual(contradictoryHeadline("ETH -30 percent", [name]));
-    expect(bannerLine(v)).toBe(`Run again failed — The result for ETH -30 percent contradicts itself. ${name}. Nothing from it is drawn. The result below stands for batch 18,251.`);
+    expect(v.book.rerunFailure).toEqual(contradictoryHeadline("ETH −30%", [name]));
+    expect(bannerLine(v)).toBe(`Run again failed — The result for ETH −30% contradicts itself. ${name}. Nothing from it is drawn. The result below stands for batch 18,251.`);
     expect(v.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "result", text: "+$1.2M liquidatable · 118 accounts", tone: "crit" });
   }
   // A transport failure after them finds the same hold: none of the bodies above moved into it.
@@ -686,7 +707,7 @@ test("one predicate admits a result to the hold and releases it, and it covers e
     const bare = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: body }) }), ui());
     expect(bare.book.state).toBe("contradictory");
     expect(bare.book.banner).toBeNull();
-    expect(bare.book.headline).toEqual(contradictoryHeadline("ETH -30 percent", [name]));
+    expect(bare.book.headline).toEqual(contradictoryHeadline("ETH −30%", [name]));
     expect(bare.book.cash?.kind === "result" || bare.book.legacy?.kind === "result").toBe(false);
     expect(bare.library.find((r) => r.id === "eth_minus_30")?.outcome).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
   }
@@ -800,11 +821,12 @@ test("the listing is judged before it is ready: a 200 that is no listing — nul
 
 test("three populations, three words: the lane tile is not a count of movers, the movers are ranked by the service, and the assumptions never reuse the tiles' 'not modelled'", () => {
   // `lane_changed_rows` counts rows whose lane changed; the contract says it is NOT `movers_total`.
-  expect(LANE_TILE_LABEL).toBe("Accounts changing risk bucket");
+  expect(LANE_TILE_LABEL).toBe("Accounts changing band");
   expect(LANE_TILE_LABEL).not.toMatch(/\bmoved?\b/i);
   expect(MOVERS_TITLE).toBe("Most affected accounts");
-  expect(MOVERS_QUALIFIER).toBe("room today → after the shock · ranked by the service");
-  expect(MOVERS_LINK).toBe("Most affected accounts →");
+  expect(MOVERS_QUALIFIER).toBe("Room today and after the shock");
+  // The movers table is further down this page: "↓", never "→", which is another page's arrow.
+  expect(MOVERS_LINK).toBe("Most affected accounts ↓");
   expect(MOVERS_EMPTY).toBe("No account is listed.");
   expect(ASSUMPTIONS_BUTTON).toBe("Assumptions · What the model leaves out");
   expect(ASSUMPTIONS_TITLE).toBe("Assumptions & what the model leaves out");
@@ -812,7 +834,7 @@ test("three populations, three words: the lane tile is not a count of movers, th
   for (const words of [ASSUMPTIONS_BUTTON, ASSUMPTIONS_TITLE, ASSUMPTIONS_LEFT_OUT]) expect(words.toLowerCase()).not.toContain("not modelled");
 });
 
-test("the lane tile names its unit, the service's risk bucket, and the grid says how its bands are made from those buckets", () => {
+test("the band tile counts the grid's own population, the service's finer bucket count in its title, and the grid says how its bands are made from those buckets", () => {
   // A lane is one of the buckets the histogram serves, and every lane change is between buckets: no page says "lane".
   expect(LANE_TILE_LABEL).not.toMatch(/\blane\b/i);
   // Only the legacy market's comparator is a health factor: a label both engines wear never says so.
@@ -826,8 +848,17 @@ test("the lane tile names its unit, the service's risk bucket, and the grid says
   expect(cash.result.laneChanged).toBe(941);
   expect(cash.result.heat.bandChanged).toBe(425);
   expect(transitionFinding(cash.result.heat)).toBe(
-    "Rows: room under cap today, in 5 bands made from the service's 8 risk buckets · columns: after the shock · cells are accounts. 425 accounts change band; 118 cross the cap; none improve. 6 not measured.",
+    "Rows: room under cap today, in 5 bands made from the service's 8 risk buckets · columns: after the shock · cells are accounts. 425 accounts change band; 118 cross the cap; none improve. 6 not measured. Bands follow the service's risk buckets, so their edges fall at 4.76%, 9.09% and 20% of cap, not at the Book's 10% line.",
   );
+  // One population on the tile and the grid: the band count, with the service's bucket count kept in the title.
+  const tiles = resultTileWords(cash.result);
+  expect(tiles.band).toEqual({ value: "425", sub: "Of 1,406 measured · none improve", title: "941 accounts change risk bucket among the service's 8" });
+  expect(tiles.newly).toEqual({ value: "118", sub: "Accounts · was 49, now 167" });
+  // A tile sub is no link: "was … now", never an arrow.
+  expect(tiles.debt.sub).toBe("Was $6,949, now $1.2M");
+  for (const t of Object.values(tiles)) expect(t.sub).not.toMatch(/[→↓]/);
+  // The legacy grid draws its buckets one to a row: its band count is the service's own, so no second count is titled.
+  expect(resultTileWords(legacy.result).band.title).toBeUndefined();
   // The legacy grid draws the buckets one to a row, so its count and the tile's are the same count, in the same word.
   expect(legacy.result.laneChanged).toBe(legacy.result.heat.bandChanged);
   expect(transitionFinding(legacy.result.heat)).toBe(
@@ -858,4 +889,60 @@ test("the Compare button says why it cannot act, in its own rule's words, and sa
   expect(compareControl(deriveLabView(reading({ listing: { phase: "ready", value: one } }), ui()))).toEqual({ label: "Compare…", disabled: true, hint: "Compare needs two or more scenarios; one is listed." });
   const none = { ...SCENARIOS, scenarios: [] };
   expect(compareControl(deriveLabView(reading({ listing: { phase: "ready", value: none } }), ui()))).toEqual({ label: "Compare…", disabled: true, hint: "Compare needs two or more scenarios; none is listed." });
+});
+
+test("the result tiles' absence is the state's own register: pending in flight, not run, not served, a failed fetch unavailable and never refused, a refusal refused", () => {
+  const book = (state: Parameters<typeof tileAbsence>[0]["state"], tone: "refused" | "absent" = "absent") => ({ state, headline: { emphasis: "", rest: "", tone, dek: "" } });
+  expect(tileAbsence(book("running"), null)).toEqual({ register: "pending" });
+  expect(tileAbsence(book("listing-loading"), null)).toEqual({ register: "pending" });
+  expect(tileAbsence(book("not-run"), null)).toEqual({ register: "not-run" });
+  expect(tileAbsence(book("not-served"), null)).toEqual({ register: "not-served" });
+  expect(tileAbsence(book("unreachable"), null)).toEqual({ register: "unavailable" });
+  expect(tileAbsence(book("listing-unavailable"), null)).toEqual({ register: "unavailable" });
+  expect(tileAbsence(book("rate-limited"), null)).toEqual({ register: "unavailable" });
+  expect(tileAbsence(book("failed", "refused"), null)).toEqual({ register: "refused" });
+  expect(tileAbsence(book("listing-unreadable", "refused"), null)).toEqual({ register: "unreadable" });
+  expect(tileAbsence(book("result"), { kind: "withheld", cause: "x" })).toEqual({ register: "refused", word: "Withheld" });
+  expect(tileAbsence(book("result"), { kind: "not-covered" })).toEqual({ register: "not-run", word: "Not modelled" });
+  expect(tileAbsence(book("result"), { kind: "contradictory", reasons: [] })).toEqual({ register: "unreadable", word: "Contradictory" });
+  expect(tileAbsence(book("result"), { kind: "unreadable", fields: [] })).toEqual({ register: "unreadable" });
+});
+
+test("compare chips are the set run's own identity: its batch, its config, its computed instant — the label the screenshot mask reads", () => {
+  const set = { ...DEMO_RUN_BOOK_SET };
+  const view = compareRows(set, "debt_manager");
+  expect(compareChips(view).map((c) => [c.label, c.value])).toEqual([
+    ["Result for batch", "18,251"],
+    ["Config", "v1"],
+    ["Computed", "Aug\u00a08,\u00a020:22\u00a0UTC"],
+  ]);
+  expect(compareChips({ ...view, freshness: "superseded" })[0]).toEqual({ label: "Result for batch", value: "18,251 · superseded", tone: "warn" });
+  expect(COMPARE_KICKER).toEqual({ name: null, scope: "Compare · Cash book" });
+});
+
+test("the surface's words: the Run button names the scenario, the one-address kicker names the account, a heat cell names its move without an arrow", () => {
+  expect(runLabel("ETH −30%")).toBe("Run ETH −30%");
+  expect(runLabel(null)).toBe("Run");
+  expect(addressKicker("0x7a3f19e2c8b4d0a6f1e3b5c7d9a2f4e6b8c0c21e")).toEqual({ lead: "Account", address: "0x7a3f…c21e", scope: "Cash" });
+  expect(addressKicker("")).toEqual({ lead: "One address", address: null, scope: "Cash" });
+  const run = runBookOf([legacyEngine({ 5: { 4: 2 }, 7: { 7: 10 } }), demoCash()], ETH_DEF);
+  const v = deriveLabView(reading({ runs: settled("eth_minus_30", { kind: "ok", response: run }) }), ui());
+  if (v.book.cash?.kind !== "result") throw new Error("cash must read");
+  const heat = v.book.cash.result.heat;
+  const worse = heat.cells.find((c) => c.movement === "worse");
+  if (worse === undefined) throw new Error("the demo moves accounts to a worse band");
+  const title = heatCellTitle(heat, worse);
+  expect(title).toMatch(/^[\d,]+ accounts? · from .+ to .+ · debt /);
+  expect(title).not.toMatch(/[→↓]/);
+});
+
+test("the Compare card's words: a settled comparison's finding is what its shares are of; a batch no longer the newest is said beside the plot", () => {
+  const view = compareRows(DEMO_RUN_BOOK_SET, "debt_manager");
+  expect(compareFinding({ kind: "ok", cash: view, legacy: compareRows(DEMO_RUN_BOOK_SET, "aave_v3_etherfi") })).toBe(
+    "Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251).",
+  );
+  expect(compareFinding({ kind: "idle" })).toBe("Tick two or more scenarios and press Compare.");
+  expect(compareFinding({ kind: "running", ids: ["a", "b"] })).toBe("Evaluating 2 scenarios…");
+  expect(compareFreshnessNote(view)).toBeNull();
+  expect(compareFreshnessNote({ ...view, freshness: "superseded", newestServable: 18252 })).toEqual({ pill: "Superseded", text: "evaluated on batch 18,251; the newest servable batch is 18,252." });
 });

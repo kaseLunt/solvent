@@ -1,6 +1,6 @@
 // The evidence-descriptor laws (lib/evidence.ts), pinned:
 //   - comparators are ENGINE-EXACT and an unknown engine is a refusal, not a guess;
-//   - every position descriptor is marked OPERATIONAL (LIVE · WATERMARKED) —
+//   - every position descriptor is marked OPERATIONAL (Live, watermarked) —
 //     never "proven": reconcile welds belong to /v1/evidence;
 //   - the materialization key is stated as NOT SERVED here, never invented;
 //   - a stale price input surfaces with a non-default tone in the chain.
@@ -30,14 +30,14 @@ test("comparators are engine-exact; an unknown engine refuses rather than guesse
 test("a position descriptor is OPERATIONAL and never claims the proof marker", () => {
   const descriptor = hfEvidence(aave, batch, "1.08");
   expect(descriptor.marker).toBe("operational");
-  expect(descriptor.markerNote).toContain("LIVE · WATERMARKED");
+  expect(descriptor.markerNote).toContain("Live, watermarked");
   expect(descriptor.markerNote).toContain("/v1/evidence");
 });
 
 test("the materialization key is stated as not-served — never invented", () => {
   const descriptor = hfEvidence(aave, batch, "1.08");
-  const batchSection = descriptor.sections.find((s) => s.title === "BATCH · MATERIALIZATION");
-  const keyRow = batchSection?.rows.find((row) => row.label === "materialization key");
+  const batchSection = descriptor.sections.find((s) => s.title === "Batch · materialization");
+  const keyRow = batchSection?.rows.find((row) => row.label === "Materialization key");
   expect(keyRow?.value).toContain("not served on this surface");
   expect(keyRow?.value).toContain("/v1/evidence");
   // The page that prints it is named as the nav names it.
@@ -46,7 +46,7 @@ test("the materialization key is stated as not-served — never invented", () =>
 
 test("a stale price input travels through the chain with a visible (non-default) tone", () => {
   const descriptor = totalEvidence(aave, batch, "collateral", "8000");
-  const priceSection = descriptor.sections.find((s) => s.title.startsWith("PRICE INPUTS"));
+  const priceSection = descriptor.sections.find((s) => s.title.startsWith("Price inputs"));
   const staleRow = priceSection?.rows.find((row) => row.value.includes("stale"));
   expect(staleRow).toBeDefined();
   expect(staleRow?.tone).toBe("warn");
@@ -56,9 +56,10 @@ test("the reorg posture counts its unacked epochs in real plurals, never 'epoch(
   const posture = (unacked: number) => {
     const watermarks = batch.watermarks.map((w) => (w.engine === aave.engine ? { ...w, acked_epoch: 4, max_epoch_at_compute: 4 + unacked } : w));
     const rows = hfEvidence(aave, { ...batch, watermarks }, "1.08").sections.flatMap((s) => s.rows);
-    return rows.find((row) => row.label === "reorg posture");
+    return rows.find((row) => row.label === "Reorg posture");
   };
-  expect(posture(0)).toMatchObject({ value: "none unacked", tone: "ok" });
+  // No unacked epoch is a record, not a verdict: it reads in ink, never the pass colour.
+  expect(posture(0)).toEqual({ label: "Reorg posture", value: "None unacked" });
   expect(posture(1)).toMatchObject({ value: "1 unacked epoch at compute · acked 4 of 5", tone: "crit" });
   expect(posture(2)).toMatchObject({ value: "2 unacked epochs at compute · acked 4 of 6", tone: "crit" });
   for (const n of [1, 2, 3]) expect(posture(n)?.value).not.toContain("(s)");
@@ -136,7 +137,7 @@ test("the drawer folds the observed prices:null serialization into the absent-bo
 test("the descriptor quotes the wire's own numbers for the HF law", () => {
   const descriptor = hfEvidence(aave, batch, "1.08");
   const focus = descriptor.sections[0];
-  expect(focus?.title).toBe("THIS NUMBER");
+  expect(focus?.title).toBe("This number");
   const values = focus?.rows.map((row) => row.value) ?? [];
   expect(values).toContain("1080000000000000000");
   expect(values).toContain("6480000000000000");
@@ -215,7 +216,7 @@ test("per-entry independence: a bad first entry does not hide a good second entr
   expect(text).toContain("prices[0]");
   expect(text).toContain("malformed");
   // the good entry's normal row: committed asset prefix + the scaled value
-  expect(text).toContain("lowest_healthy_price · 0xCd5fE23C…");
+  expect(text).toContain("lowest_healthy_price · 0xCd5f…b7ee");
   expect(text).toContain("3703.70370371");
   // the BOUNDARY claim reads prices[0], which is unreadable — no health claim
   expect(text).toContain("unreadable");

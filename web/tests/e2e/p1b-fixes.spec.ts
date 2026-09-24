@@ -82,20 +82,21 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
 
     await page.goto("/feed");
     // The filter echo is the Activity header's own chip, the applied filter said in words; the law is unchanged.
-    const foot = page.getByTestId("activity-verdict").locator('[data-chip="Filter applied"]');
-    // The initial cross-engine walk settles first (its own echo: every type).
-    await expect(foot).toContainText("all engines · all types ·");
+    const foot = page.getByTestId("activity-verdict").locator('[data-chip="Filter"]');
+    // The initial cross-engine walk settles first: its rows stand, and with no type narrowing it there is no Filter chip.
+    await expect(page.locator('[data-testid^="activity-row-"]').first()).toBeVisible();
+    await expect(foot).toHaveCount(0);
 
     const chips = page.getByTestId("activity-types");
     // Filter change ONE: walk A (types=borrow) — its page is HELD by the shim.
     const requestA = page.waitForRequest(
       (request) => request.url().includes("types=borrow") && !request.url().includes("%2C"),
     );
-    await chips.getByRole("button", { name: "borrow", exact: true }).click();
+    await chips.getByRole("button", { name: "Borrow", exact: true }).click();
     await requestA;
     // Filter change TWO, rapidly after: walk B (types=borrow,repay), answered.
-    await chips.getByRole("button", { name: "repay", exact: true }).click();
-    await expect(foot).toContainText("all engines · borrow and repay ·");
+    await chips.getByRole("button", { name: "Repay", exact: true }).click();
+    await expect(foot).toHaveText("Filter borrow and repay");
 
     // Release walk A's held page: its continuation runs AFTER the reset that
     // dropped its walk. The envelope echo must keep naming the SECOND scope.
@@ -103,10 +104,9 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
       (window as unknown as { __releaseHeldEvents: (() => void) | null }).__releaseHeldEvents?.();
     });
     await page.waitForTimeout(300); // the stale continuation gets its turn
-    await expect(foot).toContainText("all engines · borrow and repay ·");
-    // The stale echo's own spelling (all engines · borrow · any block …) may
-    // not stand anywhere in the foot.
-    await expect(foot).not.toContainText("all engines · borrow ·");
+    await expect(foot).toHaveText("Filter borrow and repay");
+    // The stale echo's own spelling (Filter borrow) may not stand in the chip.
+    await expect(foot).not.toHaveText("Filter borrow");
   });
 
   test("fix 3: the History header states the wire's own served_at verbatim (the Served chip)", async ({
@@ -127,10 +127,11 @@ test.describe("p1b-6 · the identity gap audit closes", () => {
     // another engine is refused by name — the legacy market's figures never stand under Cash's name.
     await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "unavailable");
     await expect(page.getByTestId("history-verdict").locator('[data-chip="Served"]')).toHaveCount(0);
-    // Asked for the engine it answers for, the same body is read, and its own instant is printed verbatim.
+    // Asked for the engine it answers for, the same body is read, and its own instant is carried verbatim in the
+    // chip's title (the face prints it typeset).
     await page.getByTestId("history-engine-aave_v3_etherfi").click();
     await expect(
       page.getByTestId("history-verdict").locator('[data-chip="Served"]'),
-    ).toContainText(OBSERVATORY_SERIES_AAVE.served_at);
+    ).toHaveAttribute("title", OBSERVATORY_SERIES_AAVE.served_at);
   });
 });

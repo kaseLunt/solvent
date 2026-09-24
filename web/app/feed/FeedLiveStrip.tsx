@@ -2,7 +2,7 @@
 
 // The Activity page's live strip (spec §3.5): the newest batch and the CURRENT
 // degradation/supersession state from the global SSE provider, as ONE plain
-// line.
+// line on the kit's strip.
 //
 // THE LAW (spec §5 law 6): degradation transitions are per-connection and not
 // persisted — this strip shows the stream's state on THIS connection only and
@@ -18,6 +18,7 @@
 // (deriveLiveStrip); this component only sets it: prose in the page's sans,
 // mono for ids and numbers alone.
 
+import kit from "@/components/kit/kit.module.css";
 import { deriveLiveStrip, type LivePart, type LiveStripView } from "@/lib/activity-view";
 import { usePosture } from "@/lib/posture";
 import styles from "./activity.module.css";
@@ -55,7 +56,7 @@ function Part({ part }: { part: LivePart }) {
 export function FeedLiveStrip() {
   const strip = deriveLiveStrip(usePosture());
   return (
-    <div className={styles.live} data-testid="activity-live" role="status">
+    <div className={`${kit.strip} ${styles.live}`} data-testid="activity-live" role="status">
       <span className={styles.liveLabel} title={strip.law}>
         {strip.label}
       </span>

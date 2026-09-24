@@ -162,7 +162,8 @@ test("boundaryOf: absent, breached, no-price-path and unreadable arms", () => {
 });
 
 test("pricesChip: source display, oldest age, worst verdict", () => {
-  expect(pricesChip(near().price_inputs)).toEqual({ label: "Prices", value: "PriceProvider v2 · 35s", tone: "ok" });
+  // Fresh prices are a record, in ink; only an aging or broken input takes a tone.
+  expect(pricesChip(near().price_inputs)).toEqual({ label: "Prices", value: "PriceProvider v2 · 35s", tone: "neutral" });
   const stale = near().price_inputs.map((i, k) => (k === 0 ? { ...i, age_seconds: 210, verdict: "stale" as const, fresh: false } : i));
   expect(pricesChip(stale)).toEqual({ label: "Prices", value: "PriceProvider v2 · 3\u00a0min", tone: "warn" });
   expect(pricesChip([...near().price_inputs, ...AAVE.price_inputs]).value).toBe("PriceProvider v2 + Aave oracle · 3\u00a0min");
@@ -318,6 +319,6 @@ test("oldestPriceAge: an age the population guard refuses is no age; with none m
   expect(oldestPriceAge([{ ...weeth, age_seconds: -5 }, { ...ethfi, age_seconds: 35 }])).toBe(35);
   expect(oldestPriceAge([{ ...weeth, age_seconds: -5 }, { ...ethfi, age_seconds: null }])).toBeNull();
   expect(oldestPriceAge([{ ...weeth, age_seconds: 1.5 }])).toBeNull();
-  expect(pricesChip([{ ...weeth, age_seconds: -5 }, { ...ethfi, age_seconds: null }])).toEqual({ label: "Prices", value: "PriceProvider v2 · age unknown", tone: "ok" });
+  expect(pricesChip([{ ...weeth, age_seconds: -5 }, { ...ethfi, age_seconds: null }])).toEqual({ label: "Prices", value: "PriceProvider v2 · age unknown", tone: "neutral" });
   expect(pricesChip([{ ...weeth, age_seconds: -5 }]).value).not.toContain("0s");
 });

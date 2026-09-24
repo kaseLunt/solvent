@@ -44,17 +44,17 @@ test("five items, in the mockup's order; the happy account is all green except t
   const items = trustChecklist({ position: near(), batchId: 18251, sweep, evidence: answered(reconcile, null) });
   expect(items.map((i) => i.id)).toEqual(["computed", "prices", "sweep", "provenance", "reconcile"]);
   const t = byId(items);
-  expect(t.computed).toMatchObject({ label: "Computed this batch", detail: "batch 18,251", state: "ok" });
+  expect(t.computed).toMatchObject({ label: "Computed this batch", detail: "Batch 18,251", state: "ok" });
   expect(t.prices).toMatchObject({ label: "Prices fresh", detail: "35s · within 180s", state: "ok" });
   // the fixture's sweep stamp: 1 of 3 attempted accounts failed, generation 4 — an engine-wide caveat, so warn; the
   // detail leads with what this account's own evidence says, and the stamp rides the title
   expect(t.sweep).toMatchObject({
     label: "Collateral sweep",
-    detail: "this account's latest sweep succeeded · engine-wide, 1 of 3 attempted accounts failed",
+    detail: "This account's latest sweep succeeded · engine-wide, 1 of 3 attempted accounts failed",
     state: "warn",
     title: "engine-wide sweep tally, gen 4",
   });
-  expect(t.provenance).toMatchObject({ label: "Price provenance", detail: "the engine's own inputs", state: "ok", title: "engine-exact" });
+  expect(t.provenance).toMatchObject({ label: "Price provenance", detail: "The engine's own inputs", state: "ok", title: "engine-exact" });
   // The receipt item says what the receipt IS — a pinned, dated run that matched the chain — and carries the run's own finish instant.
   expect(t.reconcile).toMatchObject({
     label: "Pinned reconcile run matched the chain",
@@ -112,7 +112,7 @@ test("a refused position names its cause; a stale price names the asset and the 
     sweep,
     evidence,
   });
-  expect(byId(refused).computed).toMatchObject({ state: "refused", detail: "collateral never read", title: "SWEEP_NEVER" });
+  expect(byId(refused).computed).toMatchObject({ state: "refused", detail: "Collateral never read", title: "SWEEP_NEVER" });
   const base = near();
   const stale = base.price_inputs.map((i, k) => (k === 0 ? { ...i, age_seconds: 210, verdict: "stale" as const, fresh: false } : i));
   expect(byId(trustChecklist({ position: near({ price_inputs: stale }), batchId: 1, sweep, evidence })).prices).toMatchObject({
@@ -124,7 +124,7 @@ test("a refused position names its cause; a stale price names the asset and the 
     state: "refused",
     detail: "ETHFI price missing",
   });
-  expect(byId(trustChecklist({ position: near({ price_inputs: [] }), batchId: 1, sweep, evidence })).prices).toMatchObject({ state: "dim", detail: "no price inputs" });
+  expect(byId(trustChecklist({ position: near({ price_inputs: [] }), batchId: 1, sweep, evidence })).prices).toMatchObject({ state: "dim", detail: "No price inputs" });
 });
 
 test("sweep: the tally is engine-wide ATTEMPTED accounts (a failed count includes accounts never successfully swept), and the detail leads with what it means for THIS account — proved by its own flag, its own status and its own sweep block, never that its collateral was excluded", () => {
@@ -132,13 +132,13 @@ test("sweep: the tally is engine-wide ATTEMPTED accounts (a failed count include
   const own = near({ as_of: { ...near().as_of, sweep_block: 155323390 } });
   const notStale = item(own, { ...sweep, rows: 3, failed: 1, generation: 4 });
   // One line in the checklist's detail column: this account's own evidence first, then the engine-wide tally; the stamp rides the title.
-  expect(notStale.detail).toBe("this account's latest sweep succeeded · engine-wide, 1 of 3 attempted accounts failed");
+  expect(notStale.detail).toBe("This account's latest sweep succeeded · engine-wide, 1 of 3 attempted accounts failed");
   expect(notStale.state).toBe("warn");
   expect(notStale.title).toBe("engine-wide sweep tally, gen 4");
   // The engine flags an account whose OWN latest sweep failed; its collateral stays at its last successful sweep.
   const staleOwn = near({ as_of: { ...near().as_of, sweep_block: 155323390 }, flags: ["collateral_sweep_stale"] });
   const stale = item(staleOwn, { ...sweep, rows: 3, failed: 1, generation: 4 });
-  expect(stale.detail).toBe("this account's last sweep failed — its collateral is from block 155,323,390 · engine-wide, 1 of 3 attempted accounts failed");
+  expect(stale.detail).toBe("This account's last sweep failed — its collateral is from block 155,323,390 · engine-wide, 1 of 3 attempted accounts failed");
   expect(stale.state).toBe("warn");
   expect(stale.title).toBe("engine-wide sweep tally, gen 4");
   // The engine flags only a computed row: a refused row's own latest sweep may have failed unflagged, so it claims no
@@ -147,7 +147,7 @@ test("sweep: the tally is engine-wide ATTEMPTED accounts (a failed count include
   const refused = item(refusedOwn, { ...sweep, rows: 3, failed: 1, generation: 4 });
   expect(refused).toMatchObject({
     state: "warn",
-    detail: "this account's last successful sweep was at block 155,323,390 · engine-wide, 1 of 3 attempted accounts failed",
+    detail: "This account's last successful sweep was at block 155,323,390 · engine-wide, 1 of 3 attempted accounts failed",
     title: "engine-wide sweep tally, gen 4",
   });
   expect(refused.detail).not.toContain("succeeded");
@@ -155,14 +155,14 @@ test("sweep: the tally is engine-wide ATTEMPTED accounts (a failed count include
   const cleanStamp = { ...sweep, failed: 0, age_seconds: 1205 };
   expect(item(staleOwn, cleanStamp)).toMatchObject({
     state: "warn",
-    detail: "gen 4 · 20\u00a0min ago",
+    detail: "Generation 4 · 20\u00a0min ago",
     title: "engine-wide sweep stamp · this account's last sweep failed — its collateral is from its last successful sweep at block 155,323,390",
   });
   expect(item(own, cleanStamp)).toMatchObject({
     state: "ok",
     title: "engine-wide sweep stamp · this account's collateral is from its sweep at block 155,323,390",
   });
-  expect(item(own, { ...cleanStamp, generation_open: true })).toMatchObject({ state: "warn", detail: "gen 4 open · sweep in progress" });
+  expect(item(own, { ...cleanStamp, generation_open: true })).toMatchObject({ state: "warn", detail: "Generation 4 open · sweep in progress" });
   // A tally that contradicts itself is named in the same words.
   expect(item(own, { ...sweep, rows: 3, failed: 4 }).detail).toBe("4 failed of 3 attempted accounts · contradictory stamp");
   // The account's own sweep block passes the population guard before it prints.
@@ -178,20 +178,21 @@ const neverRead = (): TrustInput["position"] =>
   near({ status: "refused", refusal: { code: "SWEEP_NEVER", detail: "collateral sweep status \"failed\" with no successful sweep ever", note: "" }, as_of: { ...near().as_of, sweep_block: 0 } });
 
 test("sweep: a collateral never read refuses; a clean stamp is ok with its generation and age; no stamp is dim", () => {
-  expect(byId(trustChecklist({ position: neverRead(), batchId: 1, sweep, evidence })).sweep).toMatchObject({ state: "refused", detail: "collateral never read · collateral clock absent" });
+  expect(byId(trustChecklist({ position: neverRead(), batchId: 1, sweep, evidence })).sweep).toMatchObject({ state: "refused", detail: "Collateral never read · collateral clock absent" });
   const clean = { ...sweep, failed: 0, age_seconds: 1205 };
-  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep: clean, evidence })).sweep).toMatchObject({ state: "ok", detail: "gen 4 · 20\u00a0min ago" });
-  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep: null, evidence })).sweep).toMatchObject({ state: "dim", detail: "no sweep stamp on this batch" });
+  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep: clean, evidence })).sweep).toMatchObject({ state: "ok", detail: "Generation 4 · 20\u00a0min ago" });
+  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep: null, evidence })).sweep).toMatchObject({ state: "dim", detail: "No sweep stamp on this batch" });
 });
 
 test("sweep: an absent collateral clock names the engine's cause only when the engine gave one — SWEEP_NEVER covers a sweep never attempted AND one attempted that never succeeded, so its words are the phrasebook's 'never read', never 'never swept'", () => {
   const item = (position: TrustInput["position"]) => byId(trustChecklist({ position, batchId: 1, sweep, evidence })).sweep;
   const never = item(neverRead());
-  expect(never).toEqual({ id: "sweep", label: "Collateral sweep", detail: `${plainCause("SWEEP_NEVER")} · collateral clock absent`, state: "refused", title: "sweep_block: 0" });
+  const cause = plainCause("SWEEP_NEVER");
+  expect(never).toEqual({ id: "sweep", label: "Collateral sweep", detail: `${cause.charAt(0).toUpperCase()}${cause.slice(1)} · collateral clock absent`, state: "refused", title: "sweep_block: 0" });
   // A row the engine refused for another cause before it consulted the sweep also carries block 0: the clock is absent,
   // and no sweep cause is invented for it.
   const early = item(near({ status: "refused", refusal: { code: "G3", detail: "borrow token carries normalized debt but no positive interest index", note: "" }, as_of: { ...near().as_of, sweep_block: 0 } }));
-  expect(early).toEqual({ id: "sweep", label: "Collateral sweep", detail: "collateral clock absent", state: "refused", title: "sweep_block: 0" });
+  expect(early).toEqual({ id: "sweep", label: "Collateral sweep", detail: "Collateral clock absent", state: "refused", title: "sweep_block: 0" });
   for (const it of [never, early]) expect(it.detail).not.toMatch(/never swept/);
 });
 
@@ -205,15 +206,15 @@ test("provenance: adapter output warns with the mockup's words; an unknown word 
     state: "warn",
   });
   const odd = base.price_inputs.map((i) => ({ ...i, provenance: "replayed" }));
-  expect(byId(trustChecklist({ position: near({ price_inputs: odd }), batchId: 1, sweep, evidence })).provenance).toMatchObject({ state: "dim", detail: "provenance not recognised", title: "replayed" });
+  expect(byId(trustChecklist({ position: near({ price_inputs: odd }), batchId: 1, sweep, evidence })).provenance).toMatchObject({ state: "dim", detail: "Provenance not recognised", title: "replayed" });
 });
 
-test("reconcile: drift warns with the count; no receipt is dim, never ok", () => {
-  const drifted = { ...reconcile, result: "fail", gated_drift: 2 };
-  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, evidence: answered(drifted) })).reconcile).toMatchObject({ state: "warn", detail: "2 checked rows drifted · did not pass" });
+test("reconcile: a failed receipt is crit, as Verification wears it; drift warns with the count; no receipt is dim, never ok", () => {
+  const failed = { ...reconcile, result: "fail", gated_drift: 2 };
+  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, evidence: answered(failed) })).reconcile).toMatchObject({ state: "crit", detail: "2 checked rows drifted · did not pass" });
   // A read that FAILED is unavailable; a manifest that answered with no receipt states the absence — two facts, two wordings.
-  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, evidence: EVIDENCE_FAILED })).reconcile).toMatchObject({ state: "dim", detail: "receipt unavailable" });
-  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, evidence: answered(null) })).reconcile).toMatchObject({ state: "dim", detail: "no committed receipt" });
+  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, evidence: EVIDENCE_FAILED })).reconcile).toMatchObject({ state: "dim", detail: "Receipt unavailable" });
+  expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, evidence: answered(null) })).reconcile).toMatchObject({ state: "dim", detail: "No committed receipt" });
   const noWeld = { ...reconcile, welds: [] };
   expect(byId(trustChecklist({ position: near(), batchId: 1, sweep, evidence: answered(noWeld, null) })).reconcile).toMatchObject({
     state: "ok",
@@ -228,7 +229,7 @@ test("prices: the oldest input keeps its own budget; unmeasured ages are dim; ev
   const prices = (price_inputs: TrustInput["position"]["price_inputs"]) => byId(trustChecklist({ position: near({ price_inputs }), batchId: 1, sweep, evidence })).prices;
   // the oldest input (150s) is not the tightest-budget input (120s): the detail must not marry one's age to the other's budget
   expect(prices([{ ...weeth, age_seconds: 150, budget_seconds: 180 }, { ...ethfi, age_seconds: 35, budget_seconds: 120 }])).toMatchObject({ state: "ok", detail: "150s · within 180s" });
-  expect(prices([{ ...weeth, age_seconds: null }, { ...ethfi, age_seconds: null }])).toMatchObject({ state: "dim", detail: "age unknown · budget 180s" });
+  expect(prices([{ ...weeth, age_seconds: null }, { ...ethfi, age_seconds: null }])).toMatchObject({ state: "dim", detail: "Age unknown · budget 180s" });
   expect(prices([{ ...weeth, verdict: "no-as-of", fresh: false }, ethfi])).toMatchObject({ state: "refused", detail: "weETH price without a timestamp", title: "no-as-of" });
   expect(prices([{ ...weeth, verdict: "missing", value: null, age_seconds: null, fresh: false }, { ...ethfi, verdict: "over-ceiling", fresh: false }])).toMatchObject({
     state: "refused",
@@ -247,12 +248,12 @@ test("prices: the oldest input keeps its own budget; unmeasured ages are dim; ev
 test("sweep: the account's clock outranks a missing stamp; an empty, contradictory or open stamp is never ok", () => {
   expect(byId(trustChecklist({ position: neverRead(), batchId: 1, sweep: null, evidence })).sweep).toMatchObject({
     state: "refused",
-    detail: "collateral never read · collateral clock absent",
+    detail: "Collateral never read · collateral clock absent",
     title: "sweep_block: 0",
   });
   const stamp = (patch: TrustInput["sweep"]) => byId(trustChecklist({ position: near(), batchId: 1, sweep: patch, evidence })).sweep;
-  expect(stamp({ ...sweep, rows: 0, failed: 0 })).toMatchObject({ state: "dim", detail: "sweep stamp empty" });
-  expect(stamp({ ...sweep, generation_open: true, failed: 0 })).toMatchObject({ state: "warn", detail: "gen 4 open · sweep in progress" });
+  expect(stamp({ ...sweep, rows: 0, failed: 0 })).toMatchObject({ state: "dim", detail: "Sweep stamp empty" });
+  expect(stamp({ ...sweep, generation_open: true, failed: 0 })).toMatchObject({ state: "warn", detail: "Generation 4 open · sweep in progress" });
   expect(stamp({ ...sweep, failed: 5, rows: 3 })).toMatchObject({ state: "warn", detail: "5 failed of 3 attempted accounts · contradictory stamp" });
 });
 
@@ -278,7 +279,7 @@ test("provenance: every off-direct word speaks plainly; several inputs are liste
     title: "adapter-output; ratio-reference",
   });
   const unstated = provenance([{ ...weeth, provenance: "" }, { ...ethfi, provenance: "" }]);
-  expect(unstated).toMatchObject({ state: "dim", label: "Price provenance", detail: "provenance not stated" });
+  expect(unstated).toMatchObject({ state: "dim", label: "Price provenance", detail: "Provenance not stated" });
   expect(unstated.title).toBeUndefined();
   // a caveat on weETH never hides ETHFI's unrecognised word: both inputs are named, both wire words ride the title
   expect(provenance([{ ...weeth, provenance: "adapter-output" }, { ...ethfi, provenance: "replayed" }])).toMatchObject({
@@ -287,12 +288,12 @@ test("provenance: every off-direct word speaks plainly; several inputs are liste
     detail: "weETH price is adapter output · not oracle-direct; ETHFI provenance not recognised",
     title: "adapter-output; replayed",
   });
-  expect(provenance([])).toMatchObject({ state: "dim", detail: "no price inputs" });
+  expect(provenance([])).toMatchObject({ state: "dim", detail: "No price inputs" });
 });
 
 test("computed: a refusal without a code is spoken without inventing one", () => {
   const item = byId(trustChecklist({ position: near({ status: "refused", refusal: null }), batchId: 1, sweep, evidence })).computed;
-  expect(item).toMatchObject({ state: "refused", detail: "refused without a code" });
+  expect(item).toMatchObject({ state: "refused", detail: "Refused without a code" });
   expect(item.title).toBeUndefined();
 });
 
@@ -305,8 +306,8 @@ test("reconcile: a drifted weld, a nonzero exit or an empty weld is never ok", (
   // A weld comparison that is not exact is counted as not exact — "drifted" is the receipt's word for its checked rows alone.
   expect(receipt(cashWeld({ rows_exact: 28 }))).toMatchObject({ state: "warn", detail: "1 of 29 Cash account comparisons not exact", title: reconcile.artifact_path });
   expect(receipt(cashWeld({ rows_compared: 1, rows_exact: 0 }))).toMatchObject({ state: "warn", detail: "1 of 1 Cash account comparison not exact" });
-  expect(receipt({ ...reconcile, exit_code: 1, result: "pass" })).toMatchObject({ state: "warn", detail: "0 checked rows drifted · did not pass", title: "result: pass · exit 1" });
-  expect(receipt(cashWeld({ rows_compared: 0, rows_exact: 0 }))).toMatchObject({ state: "dim", detail: "no Cash account comparisons in the receipt" });
+  expect(receipt({ ...reconcile, exit_code: 1, result: "pass" })).toMatchObject({ state: "crit", detail: "0 checked rows drifted · did not pass", title: "result: pass · exit 1" });
+  expect(receipt(cashWeld({ rows_compared: 0, rows_exact: 0 }))).toMatchObject({ state: "dim", detail: "No Cash account comparisons in the receipt" });
   expect(receipt(cashWeld({ rows_compared: 29, rows_exact: 30 }))).toMatchObject({ state: "warn", detail: "30 exact of 29 Cash account comparisons · contradictory receipt" });
   // a passing receipt that still counts drift warns on the count alone, with no "did not pass" suffix
   expect(receipt({ ...reconcile, result: "pass", exit_code: 0, gated_drift: 2 })).toMatchObject({ state: "warn", detail: "2 checked rows drifted" });
@@ -315,9 +316,9 @@ test("reconcile: a drifted weld, a nonzero exit or an empty weld is never ok", (
   expect(receipt({ ...reconcile, welds: [], gated_exact: 86, gated_rows: 87 })).toMatchObject({ state: "warn", detail: "1 of 87 checked rows not exact" });
   // A run that checked no rows proves nothing: Verification's words for it, never a tally and never a tick.
   const empty = receipt({ ...reconcile, welds: [], gated_rows: 0, gated_exact: 0 });
-  expect(empty).toMatchObject({ state: "dim", detail: "the run checked no rows · nothing proven" });
+  expect(empty).toMatchObject({ state: "dim", detail: "The run checked no rows · nothing proven" });
   // One receipt state, one wording on both pages: the wire's `gated` rows are "checked rows" wherever a reader sees them.
-  expect(RECEIPT_EMPTY_STATUS).toContain(empty.detail.split(" · ")[0] ?? "");
+  expect(RECEIPT_EMPTY_STATUS.toLowerCase()).toContain((empty.detail.split(" · ")[0] ?? "").toLowerCase());
   expect(empty.detail).not.toContain("gated");
 });
 
@@ -328,11 +329,16 @@ test("reconcile: the ticked label is about the WHOLE run — it is ticked only w
   const notWhole: readonly [string, Manifest, Partial<TrustItem>][] = [
     ["a gated row short", manifestWith({ ...reconcile, gated_exact: 86, gated_rows: 87 }), { state: "warn", detail: "29/29 Cash account comparisons exact · the run did not match whole" }],
     ["the legacy weld short", manifestWith(legacyShort), { state: "warn", detail: "29/29 Cash account comparisons exact · the run did not match whole" }],
-    ["no gated rows beside a Cash weld", manifestWith({ ...reconcile, gated_exact: 0, gated_rows: 0 }), { state: "dim", detail: "the run checked no rows · nothing proven" }],
+    ["no gated rows beside a Cash weld", manifestWith({ ...reconcile, gated_exact: 0, gated_rows: 0 }), { state: "dim", detail: "The run checked no rows · nothing proven" }],
     [
       "the wire's own proof status refusing a receipt that passes on its numbers",
       manifestWith(reconcile, servedAt, { proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } }),
-      { state: "warn", detail: "29/29 Cash account comparisons exact · the service does not vouch for this receipt" },
+      { state: "crit", detail: "29/29 Cash account comparisons exact · the service does not vouch for this receipt" },
+    ],
+    [
+      "the wire's own proof status refusing a receipt with nothing this card can tally",
+      manifestWith({ ...reconcile, welds: [], gated_rows: 0, gated_exact: 0 }, servedAt, { proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } }),
+      { state: "crit", detail: "No checked rows in the receipt · the service does not vouch for this receipt" },
     ],
   ];
   for (const [name, manifest, expected] of notWhole) {
@@ -341,7 +347,7 @@ test("reconcile: the ticked label is about the WHOLE run — it is ticked only w
     expect(got.label, name).toBe("Pinned reconcile run");
     expect(`${got.label} ${got.detail}`, name).not.toContain("matched the chain");
     // The judge's own finding rides the hover when it rejected the run.
-    if (got.state === "warn") expect(got.title ?? "", name).toMatch(/gated 86\/87|weld 13\/14|CONTRADICTION/);
+    if (got.state !== "dim") expect(got.title ?? "", name).toMatch(/gated 86\/87|weld 13\/14|contradiction/i);
   }
   // The whole conjunction, and only it, is ticked.
   expect(item(manifestWith(reconcile))).toMatchObject({ state: "ok", label: "Pinned reconcile run matched the chain" });
@@ -354,7 +360,8 @@ test("reconcile: the ticked label is about the WHOLE run — it is ticked only w
 test("reconcile AGREES with Verification: over the four evidence fixtures, a drifted pass and a zero-row body the item is ticked exactly when receiptState says exact — never green over a run Verification calls drifted, failed, empty or absent", () => {
   const bodies: readonly [string, Manifest, ReceiptState, TrustItem["state"]][] = [
     ["the accepted manifest", EVIDENCE_MANIFEST, "exact", "ok"],
-    ["the failed proof", EVIDENCE_PROOF_FAILED, "failed", "warn"],
+    // One receipt state, one tone: a run Verification calls failed is crit here too.
+    ["the failed proof", EVIDENCE_PROOF_FAILED, "failed", "crit"],
     ["no committed receipt", EVIDENCE_NO_RECEIPT, "none", "dim"],
     ["no servable batch (the receipt still stands)", EVIDENCE_NO_BATCH, "exact", "ok"],
     ["a passing verdict that counts drift", manifestWith({ ...reconcile, gated_drift: 2, gated_exact: 85 }), "drift", "warn"],
@@ -372,8 +379,8 @@ test("reconcile AGREES with Verification: over the four evidence fixtures, a dri
 
 test("a receipt in flight is PENDING, never unavailable: the item words the evidence read's phase — and a re-read never flashes a failure that has not happened", () => {
   const item = (read: EvidenceRead) => byId(trustChecklist({ position: near(), batchId: 1, sweep, evidence: read })).reconcile;
-  expect(item(EVIDENCE_PENDING)).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt pending", state: "pending" });
-  expect(item(EVIDENCE_FAILED)).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "receipt unavailable", state: "dim" });
+  expect(item(EVIDENCE_PENDING)).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "Receipt pending", state: "pending" });
+  expect(item(EVIDENCE_FAILED)).toEqual({ id: "reconcile", label: "Pinned reconcile run", detail: "Receipt unavailable", state: "dim" });
   expect(item(EVIDENCE_PENDING).detail).not.toContain("unavailable");
   // The four items beside it do not wait for the manifest.
   expect(trustChecklist({ position: near(), batchId: 1, sweep, evidence: EVIDENCE_PENDING }).slice(0, 4)).toEqual(

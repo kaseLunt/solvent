@@ -11,37 +11,42 @@
 //
 // What this pins: the cold load (the page opens on Cash, Cash first in the
 // switch; the header in ink — a record wears no verdict's colour; the H1 =
-// the takeaway's emphasis + rest, the holes counted in the dek; five chips,
-// four tiles = the Book's figures); the engine switch (remount, kicker,
-// tiles, the request's engine); the holes (the withheld and absent buckets
-// as the chart's own gap marks, never a zero; the hour record naming
-// each, with the block its balances are as of); the degraded rollup as
-// a named refused state with no tiles and no chart; the drawer (doctrine
-// verbatim, Escape, focus restored); the metric selector (the drawn series and
-// its labels move; the finding is the grid's and holds); the direct labels
-// (the y-max named the window's peak, over the peak where it has room); the
-// contract's own withheld-newest example (the qualified label, the dashed
-// tiles, the sparse-window line); a figure that fails its wire guard as a
-// named hole — headline, tile, mark, key and record — never the route
-// boundary, whatever JavaScript type the money arrived in; a series that
-// answers for another engine than the one asked, refused by name; the bucket
-// record's provenance and the three sweep states; the
-// hazard placement; a state clause never in the caption ink; no key on a
-// hole-free window; the record named by its heading; a phone's width with no
-// sideways scroll; loading; the error arm; answer before evidence.
+// the takeaway's emphasis + rest — the change leads — the other counts and
+// the holes in the dek; four chips in the reader's words over their ISO
+// titles, four tiles = the Book's figures with their change); the engine
+// switch (remount, kicker, tiles, the request's engine); the holes (the
+// withheld and absent buckets as the chart's own gap marks, never a zero; the
+// hour record naming each, with the block its balances are as of); the
+// degraded rollup as a named not-served state with its own card — the
+// service's words disclosed in it, the Book the way forward — no tiles and no
+// chart; the drawer (doctrine verbatim, Escape, focus restored); the metric
+// switch (the drawn series, its labels and its finding move); the direct
+// labels in the book register (the y-max named the window's peak, over the
+// peak where it has room; never one figure for two values); the contract's
+// own withheld-newest example (the qualified label, the gap tiles, the
+// sparse-window line); a figure that fails its wire guard as a named hole —
+// headline, tile, mark, key and record — never the route boundary, whatever
+// JavaScript type the money arrived in; a series that answers for another
+// engine than the one asked, refused by name in its own card; the hour
+// record's provenance and the three sweep states; the hazard placement; a
+// state clause never in the caption ink; no key on a hole-free window; the
+// record named by its heading; a phone's width with no sideways scroll;
+// loading; the error arm, never a refusal; answer before evidence.
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { EM_DASH, formatBlock } from "../../lib/format";
 import {
   deriveHistoryView,
-  HISTORY_DEGRADED_CLAUSE,
+  HISTORY_DEGRADED_DEK,
   HISTORY_FOREIGN_CLAUSE,
   HISTORY_INTRO,
-  HISTORY_LOADING_DEK,
   HISTORY_MARKS,
-  HISTORY_RECORD_TITLE,
   HISTORY_UNAVAILABLE_CLAUSE,
+  historyLoadingDek,
+  recordTitle,
+  SERVICE_SAID,
 } from "../../lib/history-view";
 import { humanUsd } from "../../lib/human-usd";
+import { humanUtc } from "../../lib/human-utc";
 import type { ObservatorySeriesResponse } from "../../lib/observatory-data";
 import {
   buildBucketAxis,
@@ -50,6 +55,7 @@ import {
   gridReadingLine,
   observatoryTakeaway,
   pointDetailTakeaway,
+  seriesDirectLabels,
   seriesMaxPoint,
   seriesNewestPoint,
   type BucketMetric,
@@ -110,7 +116,7 @@ const headlineOf = (response: ObservatorySeriesResponse) => {
   return { ...takeaway, h1: takeaway.rest === "" ? takeaway.emphasis : `${takeaway.emphasis} ${takeaway.rest}` };
 };
 
-test("cold load: the page opens on Cash, Cash first in the switch; state ok; the header is ink (neutral); the H1 IS the takeaway's emphasis + rest and the holes are counted in the dek; five chips; four tiles with the Book's figures", async ({
+test("cold load: the page opens on Cash, Cash first in the switch; state ok; the header is ink (neutral); the H1 IS the takeaway's emphasis + rest — the change leads — and the counts and holes are the dek; four chips in the reader's words; four tiles with the Book's figures and their change", async ({
   page,
 }) => {
   const asked = await mockHistory(page);
@@ -130,41 +136,48 @@ test("cold load: the page opens on Cash, Cash first in the switch; state ok; the
   await expect(page.getByTestId("history-verdict")).toContainText("History · Cash");
   await expect(page.getByTestId("history-verdict-headline")).toHaveText(takeaway.h1);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(takeaway.h1);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-    "$27.8M of Cash debt is outstanding, across 1,412 accounts in the hour starting Aug 8, 20:00 UTC.",
-  );
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Cash debt rose $1.8M since Aug 1, 21:00 UTC, to $27.8M.");
   await expect(page.getByTestId("history-verdict-headline").locator("b")).toHaveText(takeaway.emphasis);
   await expect(page.getByTestId("history-verdict-dek")).toHaveText(takeaway.dek);
   await expect(page.getByTestId("history-verdict-dek")).toHaveText(
-    "165 of the 168 hours in this window were recorded. 2 are absent — no complete batch was observed — and 1 was withheld; each is a gap on the chart, never a zero.",
+    "Liquidatable accounts rose by 1, to 49; accounts fell by 52, to 1,412. 165 of 168 hours were recorded; 2 are absent and 1 was withheld, each a gap on the chart.",
   );
 
-  await expect(chip(page, "Engine")).toContainText("Cash");
+  // The engine is the kicker's and the switch's: no chip restates it.
+  await expect(chip(page, "Engine")).toHaveCount(0);
+  await expect(page.getByTestId("history-verdict").locator("[data-chip]")).toHaveCount(4);
   // The stride is one reader's word; its method sentence is the chip's title (and a drawer paragraph), not its face.
   await expect(chip(page, "Stride")).toHaveText("Stride hourly");
   await expect(chip(page, "Stride")).toHaveAttribute("title", describeStride(DEMO_OBSERVATORY_DM.step_seconds));
   await expect(chip(page, "Stride")).not.toContainText("verbatim");
-  await expect(chip(page, "Range")).toContainText(`${DEMO_OBSERVATORY_DM.from ?? "unbounded"} → unbounded`);
+  // Every instant is the reader's; its wire ISO is the chip's title.
+  await expect(chip(page, "Range")).toHaveText("Range Aug 1, 21:00 UTC → latest");
+  await expect(chip(page, "Range")).toHaveAttribute("title", `${DEMO_OBSERVATORY_DM.from ?? "unbounded"} → unbounded`);
   // The window is counted in hours, in the dek's own words ("recorded", "withheld", "absent").
   await expect(chip(page, "Hours")).toContainText("165 recorded · 1 withheld · 2 absent");
   await expect(chip(page, "Buckets")).toHaveCount(0);
-  // The envelope carries served_at and no age: the wire's own instant, verbatim.
-  await expect(chip(page, "Served")).toContainText(DEMO_OBSERVATORY_DM.served_at);
+  // The envelope carries served_at and no age: the wire's own instant, in the reader's words over its ISO title.
+  await expect(chip(page, "Served")).toHaveText("Served Aug 8, 20:22 UTC");
+  await expect(chip(page, "Served")).toHaveAttribute("title", DEMO_OBSERVATORY_DM.served_at);
 
   // The four tiles ARE the Book's Cash card at the newest bucket (the demo weld), through the Book's money tier.
   const c = card("debt_manager");
-  const newest = newestOf(DEMO_OBSERVATORY_DM);
   await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(4);
   await expect(page.getByTestId("history-kpi-debt")).toContainText(money(c.total_debt, c.value_decimals));
   await expect(page.getByTestId("history-kpi-collateral")).toContainText(money(c.total_collateral, c.value_decimals));
   await expect(page.getByTestId("history-kpi-accounts")).toContainText(groupInt(c.positions));
   await expect(page.getByTestId("history-kpi-liquidatable")).toContainText(groupInt(c.liquidatable_positions));
+  // On Cash the liquidatable count is accounts: one noun for one population.
+  await expect(page.getByTestId("history-kpi-liquidatable")).toContainText("Liquidatable accounts");
+  const since = `since ${humanUtc(DEMO_OBSERVATORY_DM.points[0]!.bucket_start, DEMO_OBSERVATORY_DM.served_at)}`;
   for (const key of TILES) {
     await expect(page.getByTestId(`history-kpi-${key}`)).toHaveAttribute("data-tone", "neutral");
-    // The exact instant the headline humanised stays one glance away, verbatim, under the reader's word for it.
-    await expect(page.getByTestId(`history-kpi-${key}`)).toContainText(`hour of ${newest.bucket_start}`);
+    // Each tile says how its figure moved since the window's first recorded hour.
+    await expect(page.getByTestId(`history-kpi-${key}`)).toContainText(since);
     await expect(page.getByTestId(`history-kpi-${key}`)).not.toContainText("bucket");
   }
+  await expect(page.getByTestId("history-kpi-debt")).toContainText("+$1.8M since Aug 1, 21:00 UTC");
+  await expect(page.getByTestId("history-kpi-accounts")).toContainText("\u221252 since Aug 1, 21:00 UTC");
   // No legacy figure leaks into the Cash view (engines never combined).
   const aave = card("aave_v3_etherfi");
   await expect(page.locator("body")).not.toContainText(money(aave.total_debt, aave.value_decimals));
@@ -187,11 +200,10 @@ test("engine switch: explicit, one engine per view — the view remounts, the ki
   await expect(page.getByTestId("history-engine-debt_manager")).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByTestId("history-verdict")).toContainText("History · Aave v3 market (legacy)");
   await expect(page.getByTestId("history-verdict-headline")).toHaveText(headlineOf(DEMO_OBSERVATORY_AAVE).h1);
-  await expect(page.getByTestId("history-verdict-headline")).toHaveText(
-    "$1.9M of legacy Aave v3 debt is outstanding, across 8,552 accounts in the hour starting Aug 8, 20:00 UTC.",
-  );
+  await expect(page.getByTestId("history-verdict-headline")).toHaveText("Legacy Aave v3 debt fell $11K since Aug 1, 21:00 UTC, to $1.9M.");
   await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "neutral");
-  await expect(chip(page, "Engine")).toContainText("Aave v3 market (legacy)");
+  // The legacy market keeps its own noun.
+  await expect(page.getByTestId("history-kpi-liquidatable")).toContainText("Liquidatable positions");
   // The legacy view replaces the Cash view wholesale — no Cash total remains, in a tile or in a sentence.
   await expect(page.getByTestId("history-kpi-debt")).toContainText(money(aave.total_debt, aave.value_decimals));
   await expect(page.getByTestId("history-kpi-debt")).not.toContainText(money(dm.total_debt, dm.value_decimals));
@@ -237,8 +249,8 @@ test("the holes are the chart's own marks, never a zero: two absent ticks, one w
   await expect(marks.locator("li")).toHaveText(viewOf(DEMO_OBSERVATORY_DM).marks.map((mark) => mark.label));
   await expect(marks.locator("li")).toHaveText([HISTORY_MARKS[0]!.label, HISTORY_MARKS[1]!.label]);
   // An absent hour is one no complete batch was OBSERVED in: the page claims the observation, never that none existed.
-  await expect(marks).toContainText("no complete batch was observed");
-  await expect(marks).toContainText("batch present, figures withheld");
+  await expect(marks).toContainText("No complete batch observed");
+  await expect(marks).toContainText("Batch present, figures withheld");
   await expect(marks.locator('[data-mark="withheld"] rect')).toHaveCount(1);
   await expect(marks.locator('[data-mark="absent"] rect')).toHaveCount(0);
   await expect(marks.locator('[data-mark="unreadable"]')).toHaveCount(0);
@@ -250,11 +262,13 @@ test("the holes are the chart's own marks, never a zero: two absent ticks, one w
   const record = page.getByTestId("history-point");
   await expect(record).toHaveAttribute("data-kind", "withheld");
   await expect(record).toHaveAttribute("data-bucket", withheld.bucketStart);
+  // The selected hour is named in the reader's words, its wire ISO the heading's title.
+  await expect(record.getByRole("heading", { level: 3 })).toHaveText(recordTitle(withheld.bucketStart, DEMO_OBSERVATORY_DM.served_at, false));
   await expect(page.getByTestId("history-point-takeaway")).toHaveText(pointDetailTakeaway(withheld));
   await expect(record).toContainText("FLAG_CUSTODY_UNPROVEN");
   await expect(record.getByText("null because the book was withheld and never zero").first()).toBeVisible();
   await expect(record).toContainText(EM_DASH);
-  await expect(chart.getByTestId("obs-x-selected")).toHaveText(withheld.bucketStart);
+  await expect(chart.getByTestId("obs-x-selected")).toHaveText(humanUtc(withheld.bucketStart, DEMO_OBSERVATORY_DM.served_at));
   // A click on a hole never moves the answer: the tiles stay the newest bucket's.
   await expect(page.getByTestId("history-kpi-debt")).toHaveAttribute("data-tone", "neutral");
 
@@ -265,7 +279,7 @@ test("the holes are the chart's own marks, never a zero: two absent ticks, one w
   await expect(record).toHaveAttribute("data-kind", "absent");
   await expect(record).toHaveAttribute("data-bucket", absent.bucketStart);
   await expect(page.getByTestId("history-point-takeaway")).toHaveText(pointDetailTakeaway(absent));
-  await expect(record).toContainText("ABSENT · no complete batch was observed in this bucket");
+  await expect(record).toContainText("Absent: no complete batch was observed in this hour.");
   await expect(record).toContainText("no complete risk batch was observed in it");
   await expect(record).not.toContainText("existed to observe");
   await expect(record).toContainText("never renders as zero");
@@ -273,27 +287,34 @@ test("the holes are the chart's own marks, never a zero: two absent ticks, one w
   await expect(chart.locator(`[data-testid="obs-gap"][data-kind="absent"] title`).first()).toContainText(
     "no complete batch was observed in this bucket",
   );
-  await expect(chart.getByTestId("obs-x-selected")).toHaveText(absent.bucketStart);
+  await expect(chart.getByTestId("obs-x-selected")).toHaveText(humanUtc(absent.bucketStart, DEMO_OBSERVATORY_DM.served_at));
 });
 
-test("the degraded rollup is a NAMED refused state: no tiles, no chart, the wire's message in the dek, the deployment note in the drawer", async ({
+test("the degraded rollup is a NAMED not-served state: the absent register, a reader's dek, its own card with the service's words disclosed and the Book as the way forward; no tiles, no chart; the deployment note in the drawer", async ({
   page,
 }) => {
   await mockShell(page);
   await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, OBSERVATORY_DEGRADED, 503));
   await page.goto("/observatory");
   await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "degraded");
-  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "refused");
+  // No answer here — not a refusal of the page: the whole line in the absent register.
+  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "absent");
   await expect(page.getByTestId("history-verdict-headline")).toHaveText(
     "No hourly history exists for Cash on this deployment yet.",
   );
-  // The server's own message, verbatim, as the dek's first sentence; then what the state is and where the live figures are.
-  await expect(page.getByTestId("history-verdict-dek")).toContainText("observatory_points does not exist on this database");
-  await expect(page.getByTestId("history-verdict-dek")).toContainText(HISTORY_DEGRADED_CLAUSE);
-  await expect(page.getByTestId("history-verdict-dek")).toContainText(
-    "That is a fact about this deployment, not an empty history; live figures are on the Book.",
-  );
-  await expect(chip(page, "Rollup")).toContainText("unavailable");
+  // The dek in reader words; the service's own message, verbatim, moves under the card's disclosure.
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(HISTORY_DEGRADED_DEK);
+  await expect(page.getByTestId("history-verdict-dek")).not.toContainText("observatory_points");
+  const card = page.getByTestId("history-state");
+  await expect(card).toHaveAttribute("data-state", "not-served");
+  await expect(card).toHaveAttribute("data-frame", "solid");
+  await expect(card.getByRole("heading", { name: "No hourly history on this deployment" })).toBeVisible();
+  await expect(card.locator("summary")).toHaveText(SERVICE_SAID);
+  await expect(card.locator("details")).toContainText("observatory_points does not exist on this database");
+  await expect(card.locator("details")).toContainText("503");
+  await expect(card.getByTestId("history-state-book")).toHaveText("Open the Book →");
+  await expect(card.getByTestId("history-state-book")).toHaveAttribute("href", "/book");
+  await expect(chip(page, "Hourly record")).toContainText("not served here");
   await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(0);
   await expect(page.getByTestId("history-chart")).toHaveCount(0);
   await expect(page.getByTestId("history-point")).toHaveCount(0);
@@ -301,7 +322,7 @@ test("the degraded rollup is a NAMED refused state: no tiles, no chart, the wire
 
   await page.getByTestId("history-drawer").click();
   await expect(page.getByTestId("history-drawer-body")).toContainText(
-    "this deployment's database predates the observatory rollup (migration 00016)",
+    "This deployment's database predates the observatory rollup (migration 00016)",
   );
 });
 
@@ -322,8 +343,8 @@ test("the doctrine lives in the drawer, verbatim — the intro, the chart's meth
   await expect(body.locator("p")).toHaveText([...view.doctrine]);
   await expect(body).toContainText(HISTORY_INTRO);
   await expect(body).toContainText("the line never interpolates across a gap");
-  await expect(body).toContainText("withheld bucket · the book was refused, so totals are null and never 0");
-  await expect(body).toContainText("zero floor drawn · the scale never crops it away");
+  await expect(body).toContainText("Withheld hour: the book was refused, so its totals are null and never 0.");
+  await expect(body).toContainText("Zero floor drawn: the scale never crops it away.");
   await expect(body).toContainText(DEMO_OBSERVATORY_DM.notes[0] ?? "NEVER");
 
   await page.keyboard.press("Escape");
@@ -331,20 +352,22 @@ test("the doctrine lives in the drawer, verbatim — the intro, the chart's meth
   await expect(page.getByTestId("history-drawer")).toBeFocused();
 });
 
-test("the metric selector redraws the chart: the pressed metric, the chart's name and the newest figure's label are that metric's; the finding is the grid's (R6) and holds", async ({
+test("the metric switch redraws the chart: the pressed metric, the chart's name, the newest figure's label and the finding are that metric's; the switch speaks the engine's noun", async ({
   page,
 }) => {
   await mockHistory(page);
   await page.goto("/observatory");
   const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
   const chart = page.getByTestId("history-chart");
-  const finding = gridReadingLine(DEMO_OBSERVATORY_DM, axis);
-  await expect(page.getByTestId("history-chart-finding")).toHaveText(finding);
-  // The finding states DELTAS on one engine at one scale — the compact tier would flatten an "A → B" pair.
-  // Each movement says its change and its end apart ("rose by 1, to 49" — never "rose 1 to 49", which reads as a range).
+  await expect(page.getByTestId("history-chart-finding")).toHaveText(gridReadingLine(DEMO_OBSERVATORY_DM, axis, "debt_usd"));
+  // The finding states a DELTA on one engine at one scale — the compact tier would flatten an "A → B" pair — and
+  // says its change and its end apart ("rose by 1, to 49" — never "rose 1 to 49", which reads as a range).
   await expect(page.getByTestId("history-chart-finding")).toHaveText(
-    "Between the first and last recorded hours (Aug 1, 21:00 → Aug 8, 20:00 UTC), debt rose by $1.8M, to $27.8M; accounts fell by 52, to 1,412; and liquidatable positions rose by 1, to 49.",
+    "Between the first and last recorded hours (Aug 1, 21:00 → Aug 8, 20:00 UTC), debt rose by $1.8M, to $27.8M.",
   );
+  // The switch is the kit's group, under its own name, each option in sentence case.
+  await expect(page.getByTestId("history-metric")).toContainText("Show");
+  await expect(page.locator('[data-testid^="history-metric-"]')).toHaveText(["Debt (USD)", "Collateral (USD)", "Accounts", "Liquidatable accounts"]);
 
   const debt = buildMetricSeries(axis, DEMO_OBSERVATORY_DM, "debt_usd");
   const debtNewest = seriesNewestPoint(axis, DEMO_OBSERVATORY_DM, "debt_usd", debt);
@@ -359,16 +382,18 @@ test("the metric selector redraws the chart: the pressed metric, the chart's nam
   if (accountsNewest === null) throw new Error("fixture invariant: the accounts series plots a newest point");
   await expect(page.getByTestId("history-metric-accounts")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("history-metric-debt_usd")).toHaveAttribute("aria-pressed", "false");
-  await expect(chart.locator("svg[role='img']")).toHaveAttribute("aria-label", "accounts for Cash across rollup buckets");
+  await expect(chart.locator("svg[role='img']")).toHaveAttribute("aria-label", "Accounts for Cash, hour by hour");
   await expect(chart.getByTestId("obs-newest-value")).toHaveText(accountsNewest.directLabel);
   expect(accountsNewest.directLabel).not.toBe(debtNewest.directLabel);
-  // The finding reads the grid — debt, accounts and liquidatable between the first and last recorded hours — and does not move with the metric.
-  await expect(page.getByTestId("history-chart-finding")).toHaveText(finding);
+  // The finding follows the drawn metric.
+  await expect(page.getByTestId("history-chart-finding")).toHaveText(
+    "Between the first and last recorded hours (Aug 1, 21:00 → Aug 8, 20:00 UTC), accounts fell by 52, to 1,412.",
+  );
   // The tiles above are not the chart's: they hold.
   await expect(page.getByTestId("history-kpi-debt")).toHaveAttribute("data-tone", "neutral");
 });
 
-test("W-OBS: the direct labels — the drawn y-max's ledger string, the x extents, the selected time — are the pure layer's strings; a dense window states no sparse line", async ({
+test("W-OBS: the direct labels — the drawn y-max and the newest figure in the book register, told apart, the x extents and the selected time in the reader's words — are the pure layer's strings; each mark's exact figure is its title; a dense window states no sparse line", async ({
   page,
 }) => {
   await mockHistory(page);
@@ -381,15 +406,18 @@ test("W-OBS: the direct labels — the drawn y-max's ledger string, the x extent
   if (maxPoint === null || newestPoint === null) throw new Error("fixture invariant: the debt series plots a max and a newest point");
   expect(newestPoint.atNewestBucket).toBe(true);
 
-  // One point, one label: the y-max prints its exact ledger string unless it IS the newest plotted point, whose
-  // label already prints that string. It is NAMED the window's peak: a bare figure at the plot's left edge reads as
-  // the starting value — above a sentence saying debt rose.
-  if (maxPoint.index === newestPoint.index) await expect(chart.getByTestId("obs-ymax-label")).toHaveCount(0);
-  else await expect(chart.getByTestId("obs-ymax-label")).toHaveText(maxPoint.directLabel);
-  await expect(chart.getByTestId("obs-newest-value")).toHaveText(newestPoint.label);
-  // The labels are the exact layer the finding leans on: grouped, the digits the wire's own.
-  await expect(chart.getByTestId("obs-newest-value")).toHaveText("$27,828,808.216758");
-  await expect(chart.getByTestId("obs-ymax-label")).toHaveText("peak $27,942,906.330446");
+  // One point, one label: the y-max prints unless it IS the newest plotted point. It is NAMED the window's peak: a bare
+  // figure at the plot's left edge reads as the starting value — above a sentence saying debt rose. Both speak the
+  // book register, and two different values never print as one figure: the demo's $27.9M peak and $27.8M newest
+  // already differ, so neither takes a digit more.
+  const labels = seriesDirectLabels(axis, DEMO_OBSERVATORY_DM, "debt_usd", debt);
+  await expect(chart.getByTestId("obs-ymax-label")).toHaveText(labels.peak?.directLabel ?? "NEVER");
+  await expect(chart.getByTestId("obs-newest-value")).toHaveText(labels.newest?.directLabel ?? "NEVER");
+  await expect(chart.getByTestId("obs-newest-value")).toHaveText("$27.8M");
+  await expect(chart.getByTestId("obs-ymax-label")).toHaveText("Peak $27.9M");
+  // The exact figure is one hover away: each mark's own title carries the hour's exact string.
+  await expect(chart.locator(`[data-testid="obs-point"][data-index="${String(newestPoint.index)}"] title`)).toContainText(newestPoint.label);
+  await expect(chart.locator(`[data-testid="obs-point"][data-index="${String(maxPoint.index)}"] title`)).toContainText("$27,942,906.330446");
   // The demo's peak is nine hours before the newest hour: over the peak the label would run into the newest figure's
   // label, so it keeps the plot's left edge — where its word still says what it is.
   expect(newestPoint.index - maxPoint.index).toBe(9);
@@ -429,19 +457,20 @@ test("W-OBS: the direct labels — the drawn y-max's ledger string, the x extent
 
   const oldestEntry = axis.entries[0]!;
   const newestEntry = axis.entries[axis.entries.length - 1]!;
-  await expect(chart.getByTestId("obs-x-start")).toHaveText(oldestEntry.bucketStart);
-  await expect(chart.getByTestId("obs-x-end")).toHaveText(newestEntry.bucketStart);
+  await expect(chart.getByTestId("obs-x-start")).toHaveText(humanUtc(oldestEntry.bucketStart, DEMO_OBSERVATORY_DM.served_at));
+  await expect(chart.getByTestId("obs-x-end")).toHaveText(humanUtc(newestEntry.bucketStart, DEMO_OBSERVATORY_DM.served_at));
+  await expect(chart.getByTestId("obs-x-end")).toHaveText("Aug 8, 20:00 UTC");
   // The default selection is the newest bucket, whose hour the x-end already states — no duplicate row.
   await expect(chart.getByTestId("obs-x-selected")).toHaveCount(0);
 
   const firstPlottedIndex = debt.values.findIndex((v) => v !== null);
   await chart.locator('[data-testid="obs-point"]').first().click();
-  await expect(chart.getByTestId("obs-x-selected")).toHaveText(axis.entries[firstPlottedIndex]!.bucketStart);
+  await expect(chart.getByTestId("obs-x-selected")).toHaveText(humanUtc(axis.entries[firstPlottedIndex]!.bucketStart, DEMO_OBSERVATORY_DM.served_at));
   await expect(page.getByTestId("history-point")).toHaveAttribute("data-bucket", axis.entries[firstPlottedIndex]!.bucketStart);
   await expect(page.getByTestId("history-chart-sparse")).toHaveCount(0);
 });
 
-test("W-OBS-B, the contract's own example: a withheld NEWEST bucket dashes every tile with its word, turns the headline refused, qualifies the chart's older label, states the sparse window, and the record opens on the refusal", async ({
+test("W-OBS-B, the contract's own example: a withheld NEWEST bucket puts its word in every tile's figure, turns the headline refused, qualifies the chart's older label, states the sparse window, and the record opens on the refusal", async ({
   page,
 }) => {
   await mockHistory(page, CONTRACT);
@@ -461,14 +490,14 @@ test("W-OBS-B, the contract's own example: a withheld NEWEST bucket dashes every
   // The dek names the cause in plain words with the wire's code, then counts the window's holes.
   await expect(page.getByTestId("history-verdict-dek")).toHaveText(takeaway.dek);
   await expect(page.getByTestId("history-verdict-dek")).toHaveText(
-    "The engine's whole book was refused in that hour (collateral-flag custody unproven · FLAG_CUSTODY_UNPROVEN). 1 of the 2 hours in this window was recorded. 1 was withheld; it is a gap on the chart, never a zero.",
+    "The engine's whole book was refused in that hour (collateral-flag custody unproven · FLAG_CUSTODY_UNPROVEN). 1 of 2 hours was recorded; 1 was withheld, a gap on the chart.",
   );
   // No older figure stands in for the withheld hour, in the header's words either.
   await expect(page.getByTestId("history-verdict-headline")).not.toContainText("$");
   await expect(page.getByTestId("history-verdict-dek")).not.toContainText("$");
   await expect(chip(page, "Hours")).toContainText("1 recorded · 1 withheld · 0 absent");
 
-  // The tiles refuse honestly: the dash and the gap's word, never the older figure presented as newest.
+  // The tiles refuse honestly: the gap's word in the figure's place — never a dash, never the older figure presented as newest.
   const debt = buildMetricSeries(axis, OBSERVATORY_SERIES_DM, "debt_usd");
   const newestPoint = seriesNewestPoint(axis, OBSERVATORY_SERIES_DM, "debt_usd", debt);
   if (newestPoint === null) throw new Error("fixture invariant: the DM debt series plots a point");
@@ -476,8 +505,9 @@ test("W-OBS-B, the contract's own example: a withheld NEWEST bucket dashes every
   for (const key of TILES) {
     const tile = page.getByTestId(`history-kpi-${key}`);
     await expect(tile).toHaveAttribute("data-tone", "refused");
-    await expect(tile).toContainText(EM_DASH);
-    await expect(tile).toContainText("withheld");
+    await expect(tile).toHaveAttribute("data-state", "refused");
+    await expect(tile).toContainText("Withheld");
+    await expect(tile).not.toContainText(EM_DASH);
     await expect(tile).not.toContainText(newestPoint.label);
   }
   await expect(page.locator("body")).not.toContainText("$0");
@@ -485,7 +515,7 @@ test("W-OBS-B, the contract's own example: a withheld NEWEST bucket dashes every
   // ONE STORY, two surfaces: the chart's direct label names the older row it belongs to, and it is the only direct
   // label (the drawn max IS the last plotted point).
   const chart = page.getByTestId("history-chart");
-  expect(newestPoint.directLabel).toBe(`${newestPoint.label} (last captured ${axis.entries[newestPoint.index]?.bucketStart ?? "NEVER"})`);
+  expect(newestPoint.directLabel).toBe(`$309.59 (last captured ${humanUtc(axis.entries[newestPoint.index]?.bucketStart ?? "NEVER", OBSERVATORY_SERIES_DM.served_at)})`);
   await expect(chart.getByTestId("obs-newest-value")).toHaveText(newestPoint.directLabel);
   await expect(chart.getByTestId("obs-ymax-label")).toHaveCount(0);
   await expect(chart.getByTestId("obs-newest-value")).toHaveCount(1);
@@ -494,7 +524,7 @@ test("W-OBS-B, the contract's own example: a withheld NEWEST bucket dashes every
   await expect(chart.getByTestId("obs-gap-warn")).toHaveCount(1);
   // The sparse window states itself BEFORE the visual — computed, threshold <= 1.
   await expect(page.getByTestId("history-chart-sparse")).toHaveText(
-    "1 captured bucket plots in this window · 1 withheld bucket stays a named refusal",
+    "1 captured hour plots in this window · 1 withheld hour stays a named refusal",
   );
   await expect(page.getByTestId("history-chart-finding")).toHaveText(
     "Only one hour in this window was recorded (Jul 29, 08:00 UTC), so there is no movement to state.",
@@ -506,7 +536,7 @@ test("W-OBS-B, the contract's own example: a withheld NEWEST bucket dashes every
   const record = page.getByTestId("history-point");
   await expect(record).toHaveAttribute("data-kind", "withheld");
   await expect(record).toHaveAttribute("data-bucket", "2026-07-29T09:00:00Z");
-  await expect(page.getByTestId("history-point-takeaway")).toContainText("withheld");
+  await expect(page.getByTestId("history-point-takeaway")).toContainText("Withheld");
   await expect(record.getByText("null because the book was withheld and never zero").first()).toBeVisible();
   await expect(record).not.toContainText("$0");
 });
@@ -526,11 +556,15 @@ test("provenance on a point: the record pins as-of, watermark, batch, key and ra
   await expect(record).toHaveAttribute("data-kind", "captured");
   await expect(page.getByTestId("history-point-takeaway")).toHaveText(pointDetailTakeaway(entry));
   await expect(page.getByTestId("history-point-takeaway")).toContainText(`balances as of block ${formatBlock(point.last_block)}`);
-  // The demo's literal: the hour and the block its balances are as of.
-  await expect(page.getByTestId("history-point-takeaway")).toHaveText("captured at 2026-08-08T20:00:00Z · balances as of block 155,323,444.");
-  // The record's ANSWER stays visible without a click...
-  await expect(record.getByText("debt (usd)")).toBeVisible();
-  await expect(record.getByText("liquidatable positions")).toBeVisible();
+  // The demo's literal: the block its balances are as of; the hour is the record's own title.
+  await expect(page.getByTestId("history-point-takeaway")).toHaveText("Captured · balances as of block 155,323,444.");
+  await expect(record.getByRole("heading", { level: 3 })).toHaveText("Latest hour · Aug 8, 20:00 UTC");
+  // The record's ANSWER stays visible without a click, its keys in sentence case, the Cash counts named accounts...
+  await expect(record.getByText("Debt (USD)", { exact: true })).toBeVisible();
+  await expect(record.getByText("Liquidatable accounts", { exact: true })).toBeVisible();
+  await expect(record.getByText("Accounts with no verdict", { exact: true })).toBeVisible();
+  // ...each exact figure in the page's tabular sans, never bold mono, with its copy action.
+  await expect(record.getByRole("button", { name: "Copy debt (USD)" })).toBeVisible();
   // The record's figures are grouped — the exact layer the headline and the finding lean on.
   await expect(record).toContainText(groupInt(point.accounts!));
   await expect(record).toContainText("$27,828,808.216758");
@@ -544,16 +578,18 @@ test("provenance on a point: the record pins as-of, watermark, batch, key and ra
   await expect(page.getByTestId("history-point-batch")).toContainText(`#${String(point.batch_id)}`);
   await expect(record).toContainText(`block ${formatBlock(point.last_block)}`);
   await expect(record).toContainText("never a chain head observed later");
-  await expect(record).toContainText("captured from the newest COMPLETE risk batch");
+  await expect(record).toContainText("captured from the newest complete risk batch");
   // This fixture carries no hazard: the reorg and sweep rows live INSIDE the fold, now open.
-  await expect(page.getByTestId("history-point-epochs")).toContainText("none unacked");
+  await expect(page.getByTestId("history-point-epochs")).toContainText("None unacked");
   const sweep = page.getByTestId("history-point-sweep");
   const stamp = point.sweep!;
   await expect(sweep).toContainText(
     `${String(stamp.rows)} swept · ${String(stamp.failed)} failed · gen ${String(stamp.generation)} (pass complete)`,
   );
-  await expect(sweep).toContainText(stamp.max_updated_at ?? "NEVER");
-  await expect(sweep).toContainText("aggregates THIS sweep-cut");
+  // A record field's instant is typeset, every field kept; the wire ISO is its title.
+  await expect(sweep).toContainText("2026-08-08 20:02:45 UTC");
+  await expect(sweep.locator(`[title="${stamp.max_updated_at ?? "NEVER"}"]`)).toHaveCount(1);
+  await expect(sweep).toContainText("aggregates this sweep-cut");
   // The rate snapshot carries its OWN as-of block and its scale from the closed vocabulary.
   const rates = page.getByTestId("history-point-rates");
   const rate = point.rates[0]!;
@@ -572,7 +608,7 @@ test("the sweep clock renders all three states honestly — stamped, recorded no
   await expect(page.getByTestId("history-surface")).toHaveAttribute("data-engine", "aave_v3_etherfi");
   await page.getByTestId("history-point-forensics").locator("summary").click();
   const sweep = page.getByTestId("history-point-sweep");
-  await expect(sweep).toContainText("none");
+  await expect(sweep).toContainText("None");
   await expect(sweep).toContainText("recorded: this engine has no collateral sweep");
 
   // (b) UNRECORDED: a pre-00018 point whose batch was pruned before the backfill — the record is ABSENT, disclosed
@@ -663,7 +699,7 @@ for (const hazard of HAZARDS) {
 // figure in its place, never the absent hour's word or the withheld one's.
 // ---------------------------------------------------------------------------
 
-test("a malformed newest hour: the debt is not an exact decimal — the page stands; the headline says it cannot be read (dashed), the debt tile is a dash with the word, the chart draws the unreadable mark and keys it, the older label is qualified, the finding gives no change, the record names the cause", async ({
+test("a malformed newest hour: the debt is not an exact decimal — the page stands; the headline says it cannot be read, the debt tile says Unreadable in the unreadable register, the chart draws the unreadable mark and keys it, the older label is qualified, the finding gives no change, the record names the cause", async ({
   page,
 }) => {
   const malformed = newestMutated((p) => ({ ...p, debt_usd: "27828808.216758" }));
@@ -679,11 +715,12 @@ test("a malformed newest hour: the debt is not an exact decimal — the page sta
   );
   await expect(page.getByTestId("history-verdict-headline")).not.toContainText("$");
 
-  // The debt tile is a dash with its word; the hour's other three figures still answer.
+  // The debt tile says its gap's word in the figure's place; the hour's other three figures still answer.
   const debtTile = page.getByTestId("history-kpi-debt");
   await expect(debtTile).toHaveAttribute("data-tone", "refused");
-  await expect(debtTile).toContainText(EM_DASH);
-  await expect(debtTile).toContainText("unreadable");
+  await expect(debtTile).toHaveAttribute("data-state", "unreadable");
+  await expect(debtTile).toContainText("Unreadable");
+  await expect(debtTile).not.toContainText(EM_DASH);
   for (const key of ["collateral", "accounts", "liquidatable"] as const) {
     await expect(page.getByTestId(`history-kpi-${key}`)).toHaveAttribute("data-tone", "neutral");
   }
@@ -697,13 +734,11 @@ test("a malformed newest hour: the debt is not an exact decimal — the page sta
   await expect(chart.getByTestId("obs-gap-unreadable")).toHaveCount(1);
   await expect(chart.locator('[data-testid="obs-gap"][data-kind="absent"]')).toHaveCount(axis.absentCount);
   await expect(chart.getByTestId("obs-gap-warn")).toHaveCount(axis.withheldCount);
-  await expect(chart.locator('[data-testid="obs-gap"][data-kind="unreadable"] title')).toContainText(
-    "debt (usd) is unreadable in this bucket",
-  );
+  await expect(chart.locator('[data-testid="obs-gap"][data-kind="unreadable"] title')).toContainText("· debt is unreadable in this bucket");
   // The key names the third mark, in the lib's words.
   const marks = page.getByTestId("history-marks");
   await expect(marks.locator("li")).toHaveText(view.marks.map((mark) => mark.label));
-  await expect(marks.locator('[data-mark="unreadable"]')).toHaveText("figure unreadable");
+  await expect(marks.locator('[data-mark="unreadable"]')).toHaveText("Figure unreadable");
   // An older figure never stands in unqualified: the chart's direct label names the hour it belongs to.
   const newestPoint = seriesNewestPoint(axis, malformed, "debt_usd", debt);
   if (newestPoint === null) throw new Error("fixture invariant: the older hours still plot");
@@ -711,10 +746,9 @@ test("a malformed newest hour: the debt is not an exact decimal — the page sta
   await expect(chart.getByTestId("obs-newest-value")).toHaveText(newestPoint.directLabel);
   await expect(chart.getByTestId("obs-newest-value")).toContainText("(last captured ");
 
-  // The finding gives no change for the metric it cannot read, and still states the other two.
+  // The finding gives no change for the metric it cannot read.
   await expect(page.getByTestId("history-chart-finding")).toHaveText(view.finding ?? "NEVER");
-  await expect(page.getByTestId("history-chart-finding")).toContainText("debt unreadable at one end, so no change is given;");
-  await expect(page.getByTestId("history-chart-finding")).toContainText("accounts fell by 52, to 1,412;");
+  await expect(page.getByTestId("history-chart-finding")).toContainText("debt unreadable at one end, so no change is given.");
 
   // The record (open on the newest hour): captured, its debt a dash with the true cause, its collateral exact.
   const record = page.getByTestId("history-point");
@@ -748,7 +782,7 @@ test("the peak's label sits over the peak where it has room: centred on the peak
   const maxPoint = seriesMaxPoint(axis, peaked, "debt_usd", buildMetricSeries(axis, peaked, "debt_usd"));
   if (maxPoint === null) throw new Error("fixture invariant: the debt series plots a peak");
   const label = chart.getByTestId("obs-ymax-label");
-  await expect(label).toHaveText("peak $31,000,000");
+  await expect(label).toHaveText("Peak $31M");
   await expect(label).toHaveText(maxPoint.directLabel);
   await expect(label).toHaveAttribute("data-place", "peak");
   await expect(label).toHaveAttribute("text-anchor", "middle");
@@ -809,12 +843,14 @@ test("a window with no hole carries no key — a key explains marks that are on 
   await expect(page.getByTestId("history-chart").locator('[data-testid="obs-gap"]')).toHaveCount(0);
   await expect(page.getByTestId("history-marks")).toHaveCount(0);
   await expect(chip(page, "Hours")).toContainText("24 recorded · 0 withheld · 0 absent");
-  // The record's accessible name IS its visible heading — the title and the hour, one node, one case.
+  // The record's accessible name IS its visible heading — which hour, in the reader's words, one node, one case.
   const newest = newestOf(whole);
-  expect(HISTORY_RECORD_TITLE).toBe("Hour record");
-  const record = page.getByRole("region", { name: `${HISTORY_RECORD_TITLE} ${newest.bucket_start}` });
+  const title = recordTitle(newest.bucket_start, whole.served_at, true);
+  expect(title).toBe("Latest hour \u00b7 Aug\u00a08,\u00a020:00\u00a0UTC");
+  const record = page.getByRole("region", { name: title });
   await expect(record).toHaveAttribute("data-testid", "history-point");
-  await expect(record.getByRole("heading", { level: 3 })).toHaveText(`Hour record ${newest.bucket_start}`);
+  await expect(record.getByRole("heading", { level: 3 })).toHaveText(title);
+  await expect(record.getByRole("heading", { level: 3 })).toHaveAttribute("title", newest.bucket_start);
 });
 
 test("a phone's width (390): the page never scrolls sideways — the chips fit or wrap, the plot and the rate table scroll inside their own frames", async ({
@@ -859,8 +895,11 @@ test("a phone's width (390), the honest states: a failed fetch whose message car
   );
   await page.goto("/observatory");
   await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "unavailable");
-  // The failure's own message names the request's URL — one unbreakable token wider than the viewport.
-  await expect(page.getByTestId("history-verdict-dek")).toContainText("/v1/observatory/series");
+  // The failure's own message names the request's URL — one unbreakable token wider than the viewport — inside the
+  // card's disclosure, opened here so its width is measured.
+  const said = page.getByTestId("history-state").locator("details");
+  await expect(said).toContainText("/v1/observatory/series");
+  await said.locator("summary").click();
   const overflow = () =>
     page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
   const failed = await overflow();
@@ -873,7 +912,7 @@ test("a phone's width (390), the honest states: a failed fetch whose message car
   expect(rollup.scroll).toBeLessThanOrEqual(rollup.client);
 });
 
-test("loading: the refused tone, the pending tiles, no chart — the state named while the series is in flight, and nothing counted before it answers", async ({
+test("loading: the absent register — a read in flight is never a refusal — the pending tiles, no chart — the state named while the series is in flight, and nothing counted before it answers", async ({
   page,
 }) => {
   await mockShell(page);
@@ -882,12 +921,13 @@ test("loading: the refused tone, the pending tiles, no chart — the state named
   const surface = page.getByTestId("history-surface");
   await expect(surface).toHaveAttribute("data-state", "loading");
   await expect(surface).toHaveAttribute("aria-busy", "true");
-  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "absent");
   await expect(page.getByTestId("history-verdict-headline")).toHaveText("Loading the history of Cash…");
-  await expect(page.getByTestId("history-verdict-dek")).toHaveText(HISTORY_LOADING_DEK);
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(historyLoadingDek("debt_manager"));
   await expect(page.getByTestId("history-verdict-dek")).toHaveText(
-    "The hourly record of this engine's debt, collateral, accounts and liquidatable positions.",
+    "The hourly record of this engine's debt, collateral, accounts and liquidatable accounts.",
   );
+  await expect(page.getByTestId("history-state")).toHaveCount(0);
   await expect(page.getByTestId("history-verdict")).not.toContainText(/\d/);
   await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(4);
   await expect(page.getByTestId("history-kpi-debt")).toHaveAttribute("aria-busy", "true");
@@ -895,20 +935,35 @@ test("loading: the refused tone, the pending tiles, no chart — the state named
   await expect(page.getByTestId("history-chart")).toHaveCount(0);
 });
 
-test("a failed fetch is the unavailable state: refused, the message and the never-shown-as-empty clause in the dek, no tiles, no chart", async ({
+test("a failed fetch is the unavailable state, never a refusal: the absent register, the one status code and the never-shown-as-empty clause in the dek, its own solid card with the service's words disclosed and a retry that reads again; no tiles, no chart", async ({
   page,
 }) => {
   await mockShell(page);
-  await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, FEED_ERROR_INTERNAL, 500));
+  let answer: "error" | "ok" = "error";
+  await page.route("**/v1/observatory/series*", (route) =>
+    answer === "error" ? fulfillJson(route, FEED_ERROR_INTERNAL, 500) : fulfillJson(route, DEMO_OBSERVATORY_DM),
+  );
   await page.goto("/observatory");
   await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "unavailable");
-  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "refused");
+  await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "absent");
   await expect(page.getByTestId("history-verdict-headline")).toHaveText("The history of Cash could not be fetched.");
-  await expect(page.getByTestId("history-verdict-dek")).toContainText(HISTORY_UNAVAILABLE_CLAUSE);
-  await expect(chip(page, "Record")).toContainText("unavailable");
+  await expect(page.getByTestId("history-verdict-dek")).toHaveText(`The service did not return the hourly record (HTTP 500). ${HISTORY_UNAVAILABLE_CLAUSE}`);
+  await expect(chip(page, "Hourly record")).toContainText("unavailable");
+  const card = page.getByTestId("history-state");
+  await expect(card).toHaveAttribute("data-state", "unavailable");
+  await expect(card).toHaveAttribute("data-frame", "solid");
+  await expect(card.getByRole("heading", { name: "Hourly record unavailable" })).toBeVisible();
+  await expect(card.locator("details")).toContainText("the service failed to build the response");
+  // Never the degraded state's words: this is a failed read, not a deployment without a rollup.
+  await expect(card).not.toContainText("on this deployment");
   await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(0);
   await expect(page.getByTestId("history-chart")).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText("$0");
+  // The retry reads again, and an answer replaces the card.
+  answer = "ok";
+  await card.getByTestId("history-retry").click();
+  await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("history-state")).toHaveCount(0);
 });
 
 test("answer before evidence: header above the engine switcher above the tiles above the chart above the bucket record", async ({
@@ -943,7 +998,7 @@ test("money served as a JSON NUMBER is judged as money: an integer that would pl
     );
     const debtTile = page.getByTestId("history-kpi-debt");
     await expect(debtTile).toHaveAttribute("data-tone", "refused");
-    await expect(debtTile).toContainText("unreadable");
+    await expect(debtTile).toContainText("Unreadable");
 
     // The chart's geometry: the hour is a hole with the unreadable mark, and the y-max is a readable hour's — money, named.
     const axis = buildBucketAxis(malformed);
@@ -953,7 +1008,7 @@ test("money served as a JSON NUMBER is judged as money: an integer that would pl
     const chart = page.getByTestId("history-chart");
     await expect(chart.locator('[data-testid="obs-gap"][data-kind="unreadable"]')).toHaveCount(1);
     await expect(chart.getByTestId("obs-gap-unreadable")).toHaveCount(1);
-    await expect(chart.getByTestId("obs-ymax-label")).toHaveText("peak $27,942,906.330446");
+    await expect(chart.getByTestId("obs-ymax-label")).toHaveText("Peak $27.9M");
     await expect(chart.getByTestId("obs-newest-value")).toContainText("(last captured ");
     await expect(chart.getByTestId("obs-newest-value")).toContainText("$");
     // Never the number itself in any register: not grouped as a count, not as money, not raw.
@@ -968,7 +1023,7 @@ test("money served as a JSON NUMBER is judged as money: an integer that would pl
     // The drawer teaches the mark the key shows.
     await page.getByTestId("history-drawer").click();
     await expect(page.getByTestId("history-drawer-body")).toContainText(
-      "unreadable figure · the bucket was recorded, but this figure is not the exact decimal the contract allows, so it is a hole and never 0",
+      "Unreadable figure: the hour was recorded, but this figure is not the exact decimal the contract allows, so it is a hole and never 0.",
     );
     await page.keyboard.press("Escape");
     await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -988,10 +1043,14 @@ test("a series answers for the engine that was ASKED: Cash is asked and the lega
   await expect(page.getByTestId("history-verdict")).toHaveAttribute("data-variant", "refused");
   await expect(page.getByTestId("history-verdict-headline")).toHaveText("The history of Cash cannot be shown.");
   await expect(page.getByTestId("history-verdict-dek")).toHaveText(
-    `The service answered with the series of the legacy Aave v3 market (aave_v3_etherfi) where Cash (debt_manager) was asked for. ${HISTORY_FOREIGN_CLAUSE} ${HISTORY_UNAVAILABLE_CLAUSE}`,
+    `The service answered with the series of the legacy Aave v3 market (aave_v3_etherfi) where Cash (debt_manager) was asked for. ${HISTORY_FOREIGN_CLAUSE}`,
   );
-  await expect(chip(page, "Engine")).toContainText("Cash");
   await expect(chip(page, "Record")).toContainText("wrong engine");
+  // Its own card: the answer came and cannot be shown as Cash's — never the degraded state's words, never a fetch failure's.
+  const card = page.getByTestId("history-state");
+  await expect(card).toHaveAttribute("data-state", "unreadable");
+  await expect(card).toHaveAttribute("data-frame", "dashed");
+  await expect(card.getByRole("heading", { name: "A series for another engine" })).toBeVisible();
   // None of the legacy market's figures stand under Cash's name: no tile, no chart, no record, no money at all.
   await expect(page.locator('[data-testid^="history-kpi-"]')).toHaveCount(0);
   await expect(page.getByTestId("history-chart")).toHaveCount(0);

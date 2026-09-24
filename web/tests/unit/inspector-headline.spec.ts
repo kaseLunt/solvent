@@ -43,7 +43,7 @@ test("near cap — spec §3.5, with the fall, the extra debt, and the streak sen
 test("liquidatable — spec §3.5", () => {
   const h = cashHeadline(computed({ borrowings: "5400000000", liquidation_verdict: "liquidatable" }), NONE);
   expect(h).toMatchObject({ variant: "liquidatable", tone: "crit", emphasis: "Liquidatable now — $5,400 against a $5,012 cap.", rest: "" });
-  expect(h.dek).toBe("Borrowing $5,400 against a $5,012 cap — 107.8% used. $387.50 over the line: the strict rule is debt > cap.");
+  expect(h.dek).toBe("Borrowing $5,400 against a $5,012 cap — 107.8% used. Over cap by $387.50: the strict rule is debt > cap.");
 });
 
 test("healthy — spec §3.5", () => {
@@ -57,10 +57,10 @@ test("a floor note rides every Cash dek", () => {
   expect(cashHeadline(computed(), { streak: null, floor }).dek.endsWith(` ${floor}`)).toBe(true);
 });
 
-test("no position — the definitive negative, spec §3.5", () => {
+test("no position — the definitive negative, spec §3.5: an answer, stated in ink", () => {
   expect(noPositionHeadline(18251)).toEqual({
     variant: "no-position",
-    tone: "refused",
+    tone: "neutral",
     emphasis: "No Cash or Aave position in batch 18,251.",
     rest: "",
     dek: "The lookup was complete: every engine was available to be asked and none withheld its book, so this is a definitive answer for this batch.",
@@ -89,19 +89,19 @@ test("not computed, other engine, unavailable, loading, invalid — the honest e
   expect(notComputedHeadline("collateral sweep failed", null).dek).toBe("Collateral sweep failed. No verdict is served for it.");
   expect(otherEngineHeadline(18251, ["aave_v3_etherfi"])).toMatchObject({
     variant: "other-engine",
-    tone: "refused",
+    tone: "neutral",
     emphasis: "No Cash position in batch 18,251; a legacy Aave v3 position exists.",
     dek: "The legacy market is judged by its own health factor, below. The two books are never added together.",
   });
   expect(otherEngineHeadline(7, ["morpho_blue"]).emphasis).toBe("No Cash position in batch 7; a position exists on morpho_blue, which this page does not read.");
   expect(unavailableLookupHeadline("no servable batch: the service refuses to answer from nothing (503)")).toEqual({
     variant: "unavailable",
-    tone: "refused",
+    tone: "absent",
     emphasis: "The lookup could not be completed.",
     rest: "",
     dek: "No servable batch: the service refuses to answer from nothing (503). This is neither “no position” nor a position — an error is not an answer.",
   });
-  expect(LOADING_HEADLINE).toEqual({ variant: "loading", tone: "refused", emphasis: "Looking up this address…", rest: "", dek: "Fetching the newest batch." });
+  expect(LOADING_HEADLINE).toEqual({ variant: "loading", tone: "absent", emphasis: "Looking up this address…", rest: "", dek: "Fetching the newest batch." });
   expect(INVALID_HEADLINE).toEqual({
     variant: "invalid",
     tone: "refused",
@@ -116,7 +116,7 @@ test("not computed, other engine, unavailable, loading, invalid — the honest e
 
 test("a zero cap, legacy beside foreign engines, one terminal period, a non-positive span, the kit's address copy", () => {
   // a zero cap has no percent: the used clause is omitted, never "— — used"
-  expect(cashHeadline(computed({ max_borrow_lt: "0", liquidation_verdict: "liquidatable" }), NONE).dek.startsWith("Borrowing $4,822 against a $0 cap. $4,822 over the line")).toBe(true);
+  expect(cashHeadline(computed({ max_borrow_lt: "0", liquidation_verdict: "liquidatable" }), NONE).dek.startsWith("Borrowing $4,822 against a $0 cap. Over cap by $4,822")).toBe(true);
   // legacy beside a foreign engine: the legacy sentence leads; the foreign one is noted in the dek
   expect(otherEngineHeadline(7, ["aave_v3_etherfi", "morpho_blue"])).toMatchObject({
     emphasis: "No Cash position in batch 7; a legacy Aave v3 position exists.",

@@ -11,7 +11,7 @@ import type { ActivityScale } from "@/lib/activity-rows";
 import { useAddressLookup } from "@/lib/address-lookup";
 import { truncateAddress } from "@/lib/format";
 import { CASH, LEGACY } from "@/lib/inspector-position";
-import { deriveInspectorView } from "@/lib/inspector-view";
+import { ADDRESS_HINT, deriveInspectorView, INSPECTOR_DRAWER_TITLE, OPEN_IN_SCENARIOS } from "@/lib/inspector-view";
 import { useMetaConstants } from "@/lib/meta";
 import { rememberLookup } from "@/lib/recent-lookups";
 import styles from "../inspector.module.css";
@@ -55,8 +55,8 @@ export function InspectorSurface({ addr }: { addr: string }) {
         <AddressField
           testId="inspector-address"
           initial={reading.valid ? addr : ""}
-          hint="any 0x address"
-          secondary={view.cash === null ? undefined : { href: `/lab?address=${addr}`, label: "Stress this address →" }}
+          hint={ADDRESS_HINT}
+          secondary={view.cash === null ? undefined : { href: `/lab?address=${addr}`, label: OPEN_IN_SCENARIOS }}
           onInspect={(address) => {
             rememberLookup(address);
             router.push(`/inspector/${address}`);
@@ -74,7 +74,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
         actions={
           explainable ? (
             <button type="button" className={`${kit.btn} ${kit.btnGhost}`} onClick={() => setDrawerOpen(true)} data-testid="inspector-drawer">
-              Inputs · Calculation · Provenance
+              {INSPECTOR_DRAWER_TITLE}
             </button>
           ) : undefined
         }
@@ -91,8 +91,9 @@ export function InspectorSurface({ addr }: { addr: string }) {
               Mounted once the lookup has answered, so amounts are scaled by the wire's decimals from the first render
               instead of flipping from "raw units" when the position lands. */}
           {reading.lookup.phase !== "loading" && <ActivityTable key={addr} addr={addr} valid={reading.valid} scale={scale} />}
-          {view.legacy !== null && <LegacyCard position={view.legacy} />}
           {view.cash !== null && <StressTable view={view} />}
+          {/* The legacy market's fold is a sibling after all Cash content, never inside it. */}
+          {view.legacy !== null && <LegacyCard position={view.legacy} />}
           <InspectorDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} view={view} reading={reading} />
         </>
       )}

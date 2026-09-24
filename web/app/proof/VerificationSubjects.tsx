@@ -1,15 +1,16 @@
 "use client";
 
-// The two subjects (the split is the product: a manifest carries two, never one identity), as two kit
-// cards that must read as different instruments — the proof card accent-ruled,
-// the live card ok-ruled. Every word on both cards is the view model's
-// (`subjectCards`, lib/verification-view.ts): the status pill, the answer rows
-// with their hazards hoisted, the counted provenance fold. This component prints.
+// The two subjects (the split is the product: a manifest carries two, never one identity), as two kit cards that
+// must read as different instruments — the proof card's rule wears the receipt's one tone (ok for an exact proof, warn
+// for a drifted receipt, crit for a failed one, the dashed refused rule for a finding withheld or a receipt absent),
+// the live card's the live accent, always: the batch it serves is posture, never health. Every word on both cards is
+// the view model's (`subjectCards`, lib/verification-view.ts): the status pill, the answer rows with their hazards
+// hoisted, the counted provenance fold. This component prints.
 
 import { StatusPill } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { liveSubjectEvidence, proofSubjectEvidence, type EvidenceDescriptor, type EvidenceManifest } from "@/lib/evidence";
-import { subjectCards, type CardRow, type CardTone, type SubjectCard } from "@/lib/verification-view";
+import { subjectCards, VERIFICATION_COPY, type CardRow, type CardTone, type SubjectCard } from "@/lib/verification-view";
 import { CopyChip } from "./CopyChip";
 import styles from "./verification.module.css";
 
@@ -18,18 +19,17 @@ const TONE_CLASS: Record<CardTone, string | undefined> = {
   ok: styles.vOk,
   warn: styles.vWarn,
   crit: styles.vCrit,
+  refused: styles.vRefused,
   dim: styles.vDim,
 };
 
 type Kind = "proof" | "live";
 
-const RULE_CLASS: Record<Kind, string | undefined> = { proof: styles.proofCard, live: styles.liveCard };
-
 function Row({ row }: { row: CardRow }) {
   return (
     <div className={styles.row} data-testid={row.id === undefined ? undefined : `verification-${row.id}`}>
       <span className={styles.k}>{row.label}</span>
-      <span className={[styles.v, TONE_CLASS[row.tone]].filter(Boolean).join(" ")} data-tone={row.tone}>
+      <span className={[styles.v, TONE_CLASS[row.tone]].filter(Boolean).join(" ")} data-tone={row.tone} title={row.title}>
         {row.copy === undefined ? (
           row.value
         ) : (
@@ -56,7 +56,7 @@ function Rows({ rows }: { rows: readonly CardRow[] }) {
 
 function SubjectCardView({ kind, card, onExplain }: { kind: Kind; card: SubjectCard; onExplain: () => void }) {
   return (
-    <section className={[kit.card, RULE_CLASS[kind]].filter(Boolean).join(" ")} data-testid={`verification-subject-${kind}`}>
+    <section className={`${kit.card} ${styles.subject}`} data-rule={card.rule} data-testid={`verification-subject-${kind}`}>
       <div className={kit.cardT}>
         <div className={styles.cardHead}>
           <h3>{card.title}</h3>
@@ -64,8 +64,8 @@ function SubjectCardView({ kind, card, onExplain }: { kind: Kind; card: SubjectC
             <StatusPill tone={card.status.tone}>{card.status.text}</StatusPill>
           </span>
         </div>
-        <button type="button" className={styles.explain} aria-label={card.explain} onClick={onExplain}>
-          explain
+        <button type="button" aria-label={card.explain} onClick={onExplain} data-testid={`verification-${kind}-explain`}>
+          {VERIFICATION_COPY.explain}
         </button>
       </div>
       {card.takeaway !== null && (
@@ -94,7 +94,7 @@ export interface VerificationSubjectsProps {
   onExplain: (descriptor: EvidenceDescriptor) => void;
 }
 
-/** The two subject cards, side by side; each "explain" opens the drawer on that subject's evidence chain. */
+/** The two subject cards, side by side; each Explain opens the drawer on that subject's evidence chain. */
 export function VerificationSubjects({ manifest, onExplain }: VerificationSubjectsProps) {
   const cards = subjectCards(manifest);
   return (

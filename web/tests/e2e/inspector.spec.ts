@@ -65,7 +65,10 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   await expect(page.getByTestId("inspector-verdict-identity")).toContainText("Batch 18,251");
   await expect(chip(page, "Lookup")).toContainText("complete · both engines");
   await expect(chip(page, "Prices")).toContainText("PriceProvider v2 · 35s");
-  await expect(chip(page, "Current")).toContainText("not projected");
+  // A statement of kind: the label alone.
+  await expect(chip(page, "Current, not projected")).toHaveText("Current, not projected");
+  // The toolbar's way to this account on another page names the page it goes to.
+  await expect(page.getByTestId("inspector-address-secondary")).toHaveText("Open in Scenarios →");
   await expect(page.getByTestId("inspector-kpi-debt")).toContainText("$4,822");
   await expect(page.getByTestId("inspector-kpi-debt")).toContainText("4,822.000000 exact");
   await expect(page.getByTestId("inspector-kpi-cap")).toContainText("$5,012");
@@ -88,7 +91,7 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   await expect(page.getByTestId("inspector-trust-prices")).toContainText("35s · within 180s");
   await expect(page.getByTestId("inspector-trust-sweep")).toHaveAttribute("data-state", "warn");
   // One line: what THIS account's own evidence says first, then the engine-wide tally; the stamp rides the title.
-  await expect(page.getByTestId("inspector-trust-sweep")).toContainText("this account's latest sweep succeeded · engine-wide, 1 of 3 attempted accounts failed");
+  await expect(page.getByTestId("inspector-trust-sweep")).toContainText("This account's latest sweep succeeded · engine-wide, 1 of 3 attempted accounts failed");
   await expect(page.getByTestId("inspector-trust-sweep")).toHaveAttribute("title", "engine-wide sweep tally, gen 4");
   await expect(page.getByTestId("inspector-trust-sweep")).not.toContainText("rows failed");
   // The receipt item says what the receipt IS — a pinned, dated run that matched the chain — and nothing about this
@@ -102,6 +105,13 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   await expect(page.getByTestId("inspector-room-spark").locator("svg")).toBeVisible();
   await expect(page.getByTestId("inspector-legacy")).toHaveCount(0);
   await expect(page.getByTestId("inspector-address-secondary")).toHaveAttribute("href", `/lab?address=${DEMO_NEAR_ADDR}`);
+  // The Trust card goes to the page the nav calls Verification; the price inputs open a drawer, so they carry no arrow.
+  await expect(page.getByTestId("inspector-trust-card").getByRole("link", { name: "Verification →" })).toHaveAttribute("href", "/proof");
+  await expect(page.getByTestId("inspector-backing-card").getByRole("button", { name: "Price inputs", exact: true })).toBeVisible();
+  // The room sparkline's near-cap line is named on the chart and wears the tables' warn.
+  const spark = page.getByTestId("inspector-room-spark");
+  await expect(spark.getByTestId("sparkline-reference")).toHaveAttribute("data-tone", "warn");
+  await expect(spark.getByTestId("sparkline-reference-label")).toHaveText("10% of cap");
 });
 
 test("liquidatable and healthy — the other two spec templates, verbatim", async ({ page }) => {
@@ -110,7 +120,10 @@ test("liquidatable and healthy — the other two spec templates, verbatim", asyn
   await expect(surface(page)).toHaveAttribute("data-state", "liquidatable");
   await expect(headline(page)).toHaveText("Liquidatable now — $5,400 against a $5,012 cap.");
   await expect(page.getByTestId("inspector-kpi-status")).toHaveAttribute("data-tone", "crit");
-  await expect(page.getByTestId("inspector-kpi-room")).toContainText("−$387.50");
+  // Over the cap the tile says so in words, the dollars under them — never a minus on a dollar figure.
+  await expect(page.getByTestId("inspector-kpi-room")).toContainText("Over cap");
+  await expect(page.getByTestId("inspector-kpi-room")).toContainText("By $387.50");
+  await expect(page.getByTestId("inspector-kpi-room")).not.toContainText("−$");
   await expect(page.getByTestId("inspector-boundary")).toHaveAttribute("data-kind", "breached");
   await page.unroute("**/v1/address/*");
   await page.route("**/v1/address/*", (route) => json(route, DEMO_ADDRESS_HEALTHY));
@@ -132,10 +145,12 @@ test("a refused Cash position: cannot say, tiles refused, no debt served and non
   for (const id of ["debt", "cap", "room", "collateral", "status"]) {
     await expect(page.getByTestId(`inspector-kpi-${id}`)).toHaveAttribute("data-tone", "refused");
   }
-  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("—");
-  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("not computed");
-  await expect(page.getByTestId("inspector-kpi-debt")).not.toContainText("last readable");
-  await expect(page.getByTestId("inspector-kpi-cap")).toContainText("—");
+  // Never a dash as a tile's figure: the refused register names itself.
+  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("Not computed");
+  await expect(page.getByTestId("inspector-kpi-debt")).toHaveAttribute("data-state", "refused");
+  await expect(page.getByTestId("inspector-kpi-debt")).not.toContainText("—");
+  await expect(page.getByTestId("inspector-kpi-debt")).not.toContainText("Last readable");
+  await expect(page.getByTestId("inspector-kpi-cap")).toContainText("Not computed");
   await expect(page.getByTestId("inspector-trust-computed")).toHaveAttribute("data-state", "refused");
   await expect(page.locator("main")).not.toContainText("$0");
 });
@@ -146,7 +161,9 @@ test("no position — the definitive negative, entitled by a complete lookup", a
   await expect(surface(page)).toHaveAttribute("data-state", "no-position");
   await expect(headline(page)).toHaveText("No Cash or Aave position in batch 1.");
   await expect(chip(page, "Lookup")).toContainText("complete");
-  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("—");
+  // A definitive empty answer, stated in ink: never a dash, never the refused register.
+  await expect(page.getByTestId("inspector-kpi-debt")).toContainText("No position");
+  await expect(page.getByTestId("inspector-verdict")).toHaveAttribute("data-variant", "neutral");
   await expect(page.locator("main")).not.toContainText("$0");
   await expect(page.locator("main")).not.toContainText("Cannot say");
 });
@@ -167,7 +184,7 @@ test("the contract fixture: Cash liquidatable beside a legacy position — never
   await page.goto(`/inspector/${FOUND_ADDR}`);
   await expect(headline(page)).toHaveText("Liquidatable now — $4,620 against a $4,200 cap.");
   await expect(page.getByTestId("inspector-legacy")).toBeVisible();
-  await expect(page.getByTestId("inspector-legacy")).toContainText("Legacy · Aave v3 market position");
+  await expect(page.getByTestId("inspector-legacy")).toContainText("Legacy · Aave v3 market");
   await page.getByTestId("inspector-legacy").locator("summary").click();
   await expect(page.getByTestId("inspector-legacy")).toContainText(/1\.08/);
   // the legacy market is judged by its own health factor: 1.08 on the wad is Healthy, in a non-refused tone — the wire's
@@ -179,8 +196,16 @@ test("the contract fixture: Cash liquidatable beside a legacy position — never
   // 4,620 (Cash, 6 dec) + 6,000 (legacy, 8 dec) must never appear as one figure
   await expect(page.locator("body")).not.toContainText("$10,620");
   // the stale legacy price rides the legacy card, not the Cash verdict
-  await expect(page.getByTestId("inspector-legacy")).toContainText("stale price");
+  await expect(page.getByTestId("inspector-legacy")).toContainText("Stale price input");
+  await expect(page.getByTestId("inspector-legacy").locator("[data-tone='warn']")).toHaveText("Stale price");
   await expect(page.getByTestId("inspector-history-legacy")).toBeVisible();
+  // A health factor of 1.0 IS the liquidation boundary: its line wears crit and says what it is, never the near-cap warn.
+  const legacyLine = page.getByTestId("inspector-history-legacy");
+  await expect(legacyLine.getByTestId("sparkline-reference")).toHaveAttribute("data-tone", "crit");
+  await expect(legacyLine.getByTestId("sparkline-reference-label")).toHaveText("Health factor 1.0");
+  // The legacy fold is a sibling after all Cash content: the stress section comes first.
+  const order = await page.locator("[data-testid='inspector-stress'], [data-testid='inspector-legacy']").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-testid")));
+  expect(order).toEqual(["inspector-stress", "inspector-legacy"]);
 });
 
 test("a stale Cash price input turns the Prices chip and the Trust item amber", async ({ page }) => {
@@ -202,7 +227,9 @@ test("a stale Cash price input turns the Prices chip and the Trust item amber", 
   await expect(chip(page, "Prices")).toHaveClass(/chipWarn/);
   await expect(page.getByTestId("inspector-trust-prices")).toHaveAttribute("data-state", "warn");
   await expect(page.getByTestId("inspector-trust-prices")).toContainText("weETH 210s old · budget 180s");
-  await expect(page.getByTestId("inspector-backing")).toContainText("stale");
+  // The price's refusal in the reader's word; the wire's word rides its title.
+  await expect(page.getByTestId("inspector-backing").locator("[data-tone='warn']")).toHaveText("Stale");
+  await expect(page.getByTestId("inspector-backing").locator("[data-tone='warn']")).toHaveAttribute("title", "stale");
 });
 
 test("503: the lookup could not be completed — neither a position nor 'no position'", async ({ page }) => {
@@ -259,13 +286,19 @@ test("activity: six rows, a null block_time falls back to the block number, the 
   await expect(table.locator("tbody tr td:nth-child(2)")).toHaveText(["Borrow", "Supply", "Withdraw", "Supply", "Borrow", "Repay"]);
   await expect(table.locator("tbody tr").last()).toContainText("block 155,315,000");
   // The card speaks Activity's words for the same rows: chain actions and a block time, never the builder's custody word.
-  await expect(table.locator("tbody tr").last().locator("td").first().locator("span[title]")).toHaveAttribute("title", "no block time yet — the block number stands in");
+  await expect(table.locator("tbody tr").last().locator("td").first().locator("span[title]")).toHaveAttribute("title", "No block time yet: the block number stands in, never an invented time.");
   const card = page.locator("section", { has: table });
-  await expect(card.locator("h2")).toContainText("this account's chain actions · newest first, by block time");
+  await expect(card.locator("h2")).toContainText("Newest first · by block time");
   await expect(page.getByTestId("inspector-activity-takeaway")).toContainText("6 chain actions loaded for this account: 5 with a block time, newest first; 1 untimed row follows");
   await expect(page.getByTestId("inspector-activity-takeaway")).not.toContainText("(s)");
   await expect(card).not.toContainText("custodied");
   await expect(page.getByTestId("inspector-activity-more")).toHaveCount(0);
+  // The table sits in a kit card, as the Stress table does: its scroll shadows and sticky first column are drawn on the
+  // card's panel ground. On a phone the five columns overflow, and the scroll frame becomes the region named "Activity".
+  await expect(table.locator("xpath=../..")).toHaveClass(/__card(\s|$)/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(table.locator("xpath=..")).toHaveAttribute("data-overflow", "true");
+  await expect(page.getByRole("region", { name: "Activity" })).toBeVisible();
 });
 
 test("activity amounts: the Activity page's caveat heads the column; a normalized figure stands alone, its unit words after it and never a bare symbol on the digits; a record with no amount is a dash with the record-only word", async ({ page }) => {
@@ -295,25 +328,37 @@ test("activity amounts, two scales in one column: an unscaled figure carries the
   const table = page.getByTestId("inspector-activity");
   await expect(table.locator("tbody tr")).toHaveCount(2);
   const amount = (row: number) => table.locator("tbody tr").nth(row).locator("td").nth(3);
-  const legacy = EVENTS.events[0]?.amount ?? "NEVER";
-  await expect(amount(0)).toHaveText(`${legacy} raw units · aave-scaled · USDC`);
+  // The wire's "-2499100000", grouped for reading with the display minus: every digit the wire's.
+  await expect(amount(0)).toHaveText("−2,499,100,000 raw units · aave-scaled · USDC");
   await expect(amount(0).getByTestId("inspector-activity-amount-tag")).toHaveText("raw units");
   await expect(amount(0).getByTestId("inspector-activity-unit")).toHaveText("· aave-scaled · USDC");
   await expect(amount(1)).toHaveText("1,199.403 · normalized debt · USDC");
   await expect(amount(1).getByTestId("inspector-activity-amount-tag")).toHaveCount(0);
   // The extract in the Activity page's words and figures: the seized leg exact, never truncated.
-  await expect(table.locator("tbody tr").nth(0)).toContainText("liquidator 0xBBbB…0002 · debt repaid 2,500 USDC · seized 0.65625 weETH");
+  await expect(table.locator("tbody tr").nth(0)).toContainText("Liquidator 0xBBbB…0002 · debt repaid 2,500 USDC · seized 0.65625 weETH");
 });
 
-test("stress: the committed scenarios inline — two flips, one projection", async ({ page }) => {
+test("stress: the committed scenarios inline — two flips, one projection, one badge over the section, room today stated once", async ({ page }) => {
   await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
   await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
   const table = page.getByTestId("inspector-stress-table");
   await expect(table.locator("tbody tr")).toHaveCount(3);
-  await expect(table.locator("tbody tr").nth(0)).toContainText("ETH -30 percent");
+  // One name per scenario, built from its definition; the wire's label rides the title.
+  await expect(table.locator("tbody tr").nth(0)).toContainText("ETH −30%");
+  await expect(table.locator("tbody tr").nth(0).locator("td").first().locator("[title]").first()).toHaveAttribute("title", "ETH -30 percent");
   await expect(table.locator("tbody tr").nth(0)).toContainText("Yes");
-  await expect(table.locator("tbody tr").nth(2)).toContainText("PROJECTION");
-  await expect(table.locator("tbody tr").nth(2)).toContainText("30d");
+  // Room after in one unit: a signed percent of the cap, the dollars in the title, over the cap in crit.
+  await expect(table.locator("tbody tr").nth(0).locator("td").nth(1)).toHaveText("−28.6%");
+  await expect(table.locator("tbody tr").nth(0).locator("td").nth(1).locator("[title]")).toHaveAttribute("title", "Over cap by $1,069");
+  // The rate horizon: its name and what it holds — no badge on the row; the section wears the one badge.
+  await expect(table.locator("tbody tr").nth(2)).toContainText("Cash borrow APY +200 bps");
+  await expect(table.locator("tbody tr").nth(2)).toContainText("Rate horizon · prices held flat");
+  await expect(table.locator("tbody tr").nth(2)).not.toContainText("PROJECTION");
+  await expect(table.locator("tbody tr").nth(2)).toContainText("30\u00a0d");
+  await expect(page.getByTestId("inspector-stress-projection")).toHaveText("PROJECTION");
+  // Room today is one figure for every row: the caption states it once, and the table drops the repeated column.
+  await expect(table.locator("thead th")).toHaveText(["Scenario", "Room after", "Becomes liquidatable?"]);
+  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: $190.50.");
   await expect(page.getByTestId("inspector-stress")).toHaveAttribute("id", "stress");
 });
 
@@ -397,7 +442,7 @@ test("stress: an unknowable horizon is a cannot-say that names it — never 'No'
   await expect(table.locator("tbody tr")).toHaveCount(3);
   const cell = table.locator("tbody tr").nth(2).locator("td").last();
   await expect(cell.locator("[data-tone='refused']")).toHaveText("Cannot say");
-  await expect(cell.locator("[data-tone='refused']")).toHaveAttribute("title", "the 30d horizon carries no verdict");
+  await expect(cell.locator("[data-tone='refused']")).toHaveAttribute("title", "the 30\u00a0d horizon carries no verdict");
   await expect(cell).not.toContainText("No");
   // The batches agree, so no batch note is printed.
   await expect(page.getByTestId("inspector-stress-batch")).toHaveCount(0);
@@ -405,7 +450,7 @@ test("stress: an unknowable horizon is a cannot-say that names it — never 'No'
   await page.unroute("**/v1/address/*/stress*");
   await page.route("**/v1/address/*/stress*", (route) => json(route, DEMO_STRESS_NEAR));
   await page.reload();
-  await expect(table.locator("tbody tr").nth(2).locator("td").last()).toHaveText("Not within 90d");
+  await expect(table.locator("tbody tr").nth(2).locator("td").last()).toHaveText("Not within 90\u00a0d");
   await expect(table.locator("tbody tr").nth(0).locator("td").last()).toHaveText("Yes");
 });
 
@@ -484,26 +529,37 @@ test("stress answering for another batch: the section discloses both batches, ea
   const table = page.getByTestId("inspector-stress-table");
   await expect(table.locator("tbody tr")).toHaveCount(3);
   for (const k of [0, 1, 2]) await expect(table.locator("tbody tr").nth(k).locator("td").first()).toContainText("batch 18,252");
-  // "Room today" is the stress body's own before, for its own batch.
-  await expect(table.locator("tbody tr").nth(0).locator("td").nth(1)).toHaveText("$190.50");
+  // "Room today" is the stress body's own before, for its own batch: stated once, in the caption.
+  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: $190.50.");
+  await expect(table.locator("tbody tr").nth(0).locator("td").nth(1)).toHaveText("−28.6%");
   await expect(table.locator("tbody tr").nth(0).locator("td").last()).toHaveText("Yes");
 });
 
-test("stress: the room cells and the verdict are the one judge's words — a negative room is 'over cap by' a positive figure, never a minus on a dollar figure; a side that is unknowable or not a position prints no room and earns no verdict word", async ({ page }) => {
+test("stress: the room cells and the verdict are the one judge's words — a negative room is a signed percent of the cap with 'over cap by' a positive figure in its title, never a minus on a dollar figure; a side that is unknowable or not a position prints no room and earns no verdict word", async ({ page }) => {
   await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
   await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
   const table = page.getByTestId("inspector-stress-table");
   await expect(table.locator("tbody tr")).toHaveCount(3);
-  const rowFor = (label: string) => table.locator("tbody tr").filter({ hasText: label });
-  const eth = rowFor("ETH -30 percent");
-  const ethfi = rowFor("ETHFI -50 percent");
+  // The rows agree on room today, so the table is Scenario · Room after · verdict.
+  await expect(table.locator("thead th")).toHaveText(["Scenario", "Room after", "Becomes liquidatable?"]);
+  const rowFor = (name: string) => table.locator("tbody tr").filter({ hasText: name });
+  const eth = rowFor("ETH −30%");
+  const ethfi = rowFor("ETHFI −50%");
+  await expect(eth).toHaveCount(1);
+  await expect(ethfi).toHaveCount(1);
   // The demo body as served: both shocks leave the debt above the shocked cap.
-  await expect(eth.locator("td").nth(1)).toHaveText("$190.50");
-  await expect(eth.locator("td").nth(2)).toHaveText("over cap by $1,069");
-  await expect(eth.locator("td").nth(3)).toHaveText("Yes");
-  await expect(ethfi.locator("td").nth(2)).toHaveText("over cap by $215.75");
+  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: $190.50.");
+  await expect(eth.locator("td").nth(1)).toHaveText("−28.6%");
+  await expect(eth.locator("td").nth(1).locator("[title]")).toHaveAttribute("title", "Over cap by $1,069");
+  await expect(eth.locator("td").nth(2)).toHaveText("Yes");
+  await expect(ethfi.locator("td").nth(1)).toHaveText("−4.7%");
+  await expect(ethfi.locator("td").nth(1).locator("[title]")).toHaveAttribute("title", "Over cap by $215.75");
   await expect(table).not.toContainText("−$");
   await expect(table).not.toContainText("-$");
+  for (const title of await table.locator("td [title]").evaluateAll((els) => els.map((el) => el.getAttribute("title") ?? ""))) {
+    expect(title).not.toContain("−$");
+    expect(title).not.toContain("-$");
+  }
   // ETH's shocked side loses its verdict (the wire's null boolean); ETHFI's carries a negative debt — a legal string, not a position.
   const refusing = {
     ...DEMO_STRESS_NEAR,
@@ -517,21 +573,21 @@ test("stress: the room cells and the verdict are the one judge's words — a neg
   await page.route("**/v1/address/*/stress*", (route) => json(route, refusing));
   await page.reload();
   await expect(table.locator("tbody tr")).toHaveCount(3);
-  // No room beside an unknowable verdict, whatever figures ride with it; the side that stands keeps its room.
-  await expect(eth.locator("td").nth(1)).toHaveText("$190.50");
-  await expect(eth.locator("td").nth(2)).toHaveText("not computed");
-  await expect(eth.locator("td").nth(3).locator("[data-tone='refused']")).toHaveText("Cannot say");
-  await expect(eth.locator("td").nth(3).locator("[data-tone='refused']")).toHaveAttribute("title", "one side of the comparison is withheld or unknowable");
+  // No room beside an unknowable verdict, whatever figures ride with it; the side that stands keeps its room, stated once.
+  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: $190.50.");
+  await expect(eth.locator("td").nth(1)).toHaveText("Not computed");
+  await expect(eth.locator("td").nth(2).locator("[data-tone='refused']")).toHaveText("Cannot say");
+  await expect(eth.locator("td").nth(2).locator("[data-tone='refused']")).toHaveAttribute("title", "one side of the comparison is withheld or unknowable");
   // A negative figure is not a position: no room from it, and never the wire's "Yes" or "No".
-  await expect(ethfi.locator("td").nth(2)).toHaveText("not computed");
-  await expect(ethfi.locator("td").nth(3).locator("[data-tone='refused']")).toHaveText("Cannot say");
-  await expect(ethfi.locator("td").nth(3).locator("[data-tone='refused']")).toHaveAttribute("title", "the shocked figures are not a position");
+  await expect(ethfi.locator("td").nth(1)).toHaveText("Not computed");
+  await expect(ethfi.locator("td").nth(2).locator("[data-tone='refused']")).toHaveText("Cannot say");
+  await expect(ethfi.locator("td").nth(2).locator("[data-tone='refused']")).toHaveAttribute("title", "the shocked figures are not a position");
   await expect(ethfi).not.toContainText("$4,822");
   await expect(ethfi).not.toContainText("$9,428");
   await expect(table).not.toContainText("−$");
 });
 
-test("activity: a refused 'Load more' is stated on its own line beside the rows it could not extend — the rows stand, the button remains", async ({ page }) => {
+test("activity: a 'Load more' that could not be served is stated on its own line beside the rows it could not extend — the rows stand, the button remains", async ({ page }) => {
   await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
   await page.unroute("**/v1/events*");
   await page.route("**/v1/events*", (route) =>
@@ -545,8 +601,9 @@ test("activity: a refused 'Load more' is stated on its own line beside the rows 
   await page.getByTestId("inspector-activity-more").click();
   const line = page.getByTestId("inspector-activity-error");
   await expect(line).toHaveAttribute("role", "status");
-  await expect(line).toContainText("More activity could not be loaded: 503 unavailable: no complete risk batch is available");
-  await expect(line).toContainText("The rows above stand; nothing beyond them was read.");
+  await expect(line).toContainText("More activity unavailable");
+  await expect(line).toContainText("More activity could not be loaded; the rows above stand, and nothing beyond them was read.");
+  await expect(line).toContainText("503 unavailable: no complete risk batch is available");
   await expect(table.locator("tbody tr")).toHaveCount(6);
   await expect(table).not.toContainText("Activity unavailable");
   await expect(page.getByTestId("inspector-activity-more")).toBeVisible();
@@ -566,14 +623,18 @@ test("stress: a projection that carries NO horizon cannot say — never the spot
   await expect(table.locator("tbody tr")).toHaveCount(3);
   const row = table.locator("tbody tr").nth(2);
   // Still a projection — the wire carried one — and it states no horizon: the judge's own arm, with its own title.
-  await expect(row.locator("td").first()).toContainText("PROJECTION");
-  const verdict = row.locator("td").last();
+  // The row says what it projects; the one PROJECTION badge is the section's, never the row's.
+  await expect(table.locator("thead th")).toHaveText(["Scenario", "Room after", "Becomes liquidatable?"]);
+  await expect(row.locator("td").first()).toContainText("Rate horizon · prices held flat");
+  await expect(row).not.toContainText("PROJECTION");
+  await expect(page.getByTestId("inspector-stress-projection")).toHaveText("PROJECTION");
+  const verdict = row.locator("td").nth(2);
   await expect(verdict.locator("[data-tone='refused']")).toHaveText("Cannot say");
   await expect(verdict.locator("[data-tone='refused']")).toHaveAttribute("title", "the projection carries no horizon");
   await expect(verdict).not.toContainText("No");
   await expect(verdict).not.toContainText("Not within");
   // The projection's cell says what is missing; it is not blank and lists no interest.
-  await expect(row.locator("td").nth(2)).toHaveText("no horizon in the projection");
+  await expect(row.locator("td").nth(1)).toHaveText("No horizon in the projection");
   // The spot rows beside it keep their own words.
   await expect(table.locator("tbody tr").nth(0).locator("td").last()).toHaveText("Yes");
 });
@@ -593,28 +654,28 @@ test("trust: a receipt IN FLIGHT is pending, never unavailable — the lookup an
   await expect(surface(page)).toHaveAttribute("data-state", "near");
   const receipt = page.getByTestId("inspector-trust-reconcile");
   await expect(receipt).toContainText("Pinned reconcile run");
-  await expect(receipt).toContainText("receipt pending");
+  await expect(receipt).toContainText("Receipt pending");
   // The pending register, in words for assistive tech too: a read in flight is never "not available".
   await expect(receipt).toHaveAttribute("data-state", "pending");
   await expect(receipt).toContainText("pending:");
-  await expect(receipt).not.toContainText("not available");
-  await expect(receipt).not.toContainText("unavailable");
+  await expect(receipt).not.toContainText(/not available/i);
+  await expect(receipt).not.toContainText(/unavailable/i);
   await expect(receipt).not.toContainText("matched");
   // The four items beside it did not wait for the manifest.
   await expect(page.getByTestId("inspector-trust-computed")).toHaveAttribute("data-state", "ok");
   release();
   await expect(receipt).toHaveAttribute("data-state", "ok");
   await expect(receipt).toContainText("Pinned reconcile run matched the chain");
-  await expect(receipt).not.toContainText("pending");
+  await expect(receipt).not.toContainText(/pending/i);
 
   // A read that failed: unavailable — and only then.
   await page.unroute("**/v1/evidence*");
   await page.route("**/v1/evidence*", (route) => json(route, BOOK_ERROR_UNAVAILABLE, 503));
   await page.reload();
   await expect(surface(page)).toHaveAttribute("data-state", "near");
-  await expect(receipt).toContainText("receipt unavailable");
+  await expect(receipt).toContainText("Receipt unavailable");
   await expect(receipt).toHaveAttribute("data-state", "dim");
-  await expect(receipt).not.toContainText("pending");
+  await expect(receipt).not.toContainText(/pending/i);
 });
 
 test("trust: the ticked label is about the WHOLE run — a Cash weld that is whole inside a run that is not is never green, and says what Verification says of it", async ({ page }) => {
@@ -630,9 +691,9 @@ test("trust: the ticked label is about the WHOLE run — a Cash weld that is who
       words: "29/29 Cash account comparisons exact · the run did not match whole",
     },
     // The wire's own proof status refuses a receipt that passes on its numbers.
-    { manifest: { ...EVIDENCE_MANIFEST, proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } }, state: "warn", words: "29/29 Cash account comparisons exact · the service does not vouch for this receipt" },
+    { manifest: { ...EVIDENCE_MANIFEST, proof_subject: { ...EVIDENCE_MANIFEST.proof_subject, status: "rejected" } }, state: "crit", words: "29/29 Cash account comparisons exact · the service does not vouch for this receipt" },
     // No gated rows beside a whole Cash weld: the run checked no rows and proves nothing, in Verification's words for the same receipt.
-    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 0, gated_rows: 0 } }, state: "dim", words: "the run checked no rows · nothing proven" },
+    { manifest: { ...EVIDENCE_MANIFEST, reconcile: { ...receiptOf, gated_exact: 0, gated_rows: 0 } }, state: "dim", words: "The run checked no rows · nothing proven" },
   ];
   for (const body of bodies) {
     await mockInspector(page, { address: DEMO_ADDRESS_NEAR });

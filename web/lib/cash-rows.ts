@@ -1,7 +1,9 @@
 // web/lib/cash-rows.ts
 import type { components } from "@solvent/client";
 import { HEADROOM_BANDS, headroomBand, headroomPercent, headroomTenths } from "./headroom";
-import { humanUsd } from "./human-usd";
+import { EM_DASH } from "./format";
+import { accountMoney, type Money } from "./money";
+import { formatTenths } from "./percent";
 import { plainCause } from "./refusal-phrasebook";
 import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
@@ -128,10 +130,10 @@ export function refusedRows(rows: readonly CashRow[]): CashRow[] {
   return rows.filter((r) => !r.computed && r.unreadable === undefined);
 }
 
-/** Why a refused row's Debt cell is a dash: the engine writes no totals on a position it refuses, so none is served. */
-export const REFUSED_DEBT_UNSERVED = "no debt figure is served for a position the engine could not compute";
+/** Why a refused row's Debt cell is a dash: the engine writes no totals on an account it refuses, so none is served. */
+export const REFUSED_DEBT_UNSERVED = "no debt figure is served for an account the engine could not compute";
 
-/** Why a Debt cell reads "unreadable": a figure was served, and it failed the guard — never a debt that was not served. */
+/** Why a Debt cell reads "Unreadable": a figure was served, and it failed the guard — never a debt that was not served. */
 export const DEBT_UNREADABLE = "this page could not read the debt served: total_debt is not a wire decimal";
 
 /**
@@ -145,18 +147,43 @@ export function refusedDebtUnserved(rows: readonly CashRow[]): boolean {
 }
 
 /**
- * The Debt cell of a row with no verdict: its served figure; "unreadable", naming the fault, when the figure served
- * fails its guard; or a dash — on a refused row, with why on hover. Never $0.
+ * The Debt cell of a row with no verdict: its served figure, in the column's own register; "Unreadable", naming the
+ * fault, when the figure served fails its guard; or a dash — on a refused row, with why on hover. Never $0.
  */
-export function refusedRowDebtCell(row: CashRow): { readonly text: string; readonly title: string | null } {
-  if (row.debt !== null) return { text: humanUsd(row.debt, row.decimals), title: null };
-  if (row.debtUnreadable === true) return { text: "unreadable", title: DEBT_UNREADABLE };
-  return { text: "—", title: !row.computed && row.unreadable === undefined ? REFUSED_DEBT_UNSERVED : null };
+export function refusedRowDebtCell(
+  row: CashRow,
+  money: Money = accountMoney(row.decimals),
+): { readonly text: string; readonly title: string | null } {
+  if (row.debt !== null) return { text: money(row.debt), title: null };
+  if (row.debtUnreadable === true) return { text: "Unreadable", title: DEBT_UNREADABLE };
+  return { text: EM_DASH, title: !row.computed && row.unreadable === undefined ? REFUSED_DEBT_UNSERVED : null };
 }
 
 /** The standing a row without a verdict wears in the table: the engine's act, or the page's own inability — never one word for both. */
 export function rowStandingLabel(row: CashRow): string {
-  return row.unreadable !== undefined ? "Unreadable" : "Not computed";
+  return row.unreadable !== undefined ? "Unreadable" : "No verdict";
+}
+
+/**
+ * The Room to cap cell's dollar room, for its title: "over cap by $184.80" — a minus sign never rides a dollar figure
+ * — or "$1,204.50 of room". Null for a row with no room to state.
+ */
+export function roomCellTitle(row: CashRow): string | null {
+  if (row.room === null) return null;
+  const money = accountMoney(row.decimals);
+  return row.room < 0n ? `over cap by ${money(-row.room)}` : `${money(row.room)} of room`;
+}
+
+/**
+ * The Room to cap cell: one unit in every row — percent of the cap at one fixed decimal, an over-cap row negative
+ * (U+2212) — and the dollars in its title. Over a cap of zero no percent of it exists, so the cell names the band. A row
+ * with no room has no percent to print: a dash, never "0%".
+ */
+export function roomCell(row: CashRow): { readonly text: string; readonly title: string | null; readonly over: boolean } {
+  if (row.room === null) return { text: EM_DASH, title: null, over: false };
+  const over = row.room < 0n;
+  const text = row.roomTenths !== null ? formatTenths(row.roomTenths, { fixed: true }) : over ? "Over cap" : EM_DASH;
+  return { text, title: roomCellTitle(row), over };
 }
 
 /** What one page of the Cash walk must agree with: the book it is walked for. */
@@ -314,10 +341,23 @@ export const NEAR_CAP_BAND_IDS: ReadonlySet<string> = new Set(
   HEADROOM_BANDS.flatMap((band, index) => (NEAR_CAP_BANDS.has(index) ? [band.id] : [])),
 );
 
-function byRoom(a: CashRow, b: CashRow): number {
-  const x = a.roomTenths ?? 0n;
-  const y = b.roomTenths ?? 0n;
-  return x < y ? -1 : x > y ? 1 : 0;
+export function byRoom(a: CashRow, b: CashRow): number {
+  const x = roomRank(a);
+  const y = roomRank(b);
+  if (x === y) return 0;
+  if (x === "none" || y === "floor") return 1;
+  if (y === "none" || x === "floor") return -1;
+  return x < y ? -1 : 1;
+}
+
+/**
+ * Where a row sorts by room: its tenths of the cap; over a cap of zero no percent exists and the row is over by its
+ * whole debt, so it sorts ahead of every percent ("floor"); a row with no room at all sorts after every row that has
+ * one ("none") — never as a zero room.
+ */
+function roomRank(row: CashRow): bigint | "floor" | "none" {
+  if (row.roomTenths !== null) return row.roomTenths;
+  return row.room !== null && row.room < 0n ? "floor" : "none";
 }
 
 export function nearCapRows(rows: readonly CashRow[]): SizedCashRow[] {
@@ -344,15 +384,6 @@ export function roomBands(rows: readonly CashRow[]): RoomBand[] {
   return out;
 }
 
-function formatTenths(tenths: bigint): string {
-  const negative = tenths < 0n;
-  const abs = negative ? -tenths : tenths;
-  const whole = abs / 10n;
-  const tenth = abs % 10n;
-  const body = tenth === 0n ? whole.toString() : `${whole.toString()}.${tenth.toString()}`;
-  return `${negative ? "−" : ""}${body}%`;
-}
-
 /** Lower median / lower 10th percentile over computed rows. */
 export function roomPercentiles(rows: readonly CashRow[]): { median: string | null; p10: string | null } {
   const tenths = rows
@@ -362,7 +393,7 @@ export function roomPercentiles(rows: readonly CashRow[]): { median: string | nu
   const first = tenths[0];
   if (first === undefined) return { median: null, p10: null };
   const at = (fraction: number): bigint => tenths[Math.floor((tenths.length - 1) * fraction)] ?? first;
-  return { median: formatTenths(at(0.5)), p10: formatTenths(at(0.1)) };
+  return { median: formatTenths(at(0.5), { fixed: true }), p10: formatTenths(at(0.1), { fixed: true }) };
 }
 
 export function sumDebt(rows: readonly { readonly debt: bigint }[]): bigint {

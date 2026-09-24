@@ -1,10 +1,14 @@
 // Geometry for the Scenarios charts. These numbers become an opacity and an x
 // coordinate; they are never printed, so floats are allowed here and nowhere else.
 
-/** The cell's share of the largest cell, clamped to [0, 1]; 0 for an empty or unreadable pair. */
+/**
+ * The cell's opacity: the square root of its share of the largest cell in the whole grid, clamped to [0, 1]; 0 for an
+ * empty or unreadable pair. The root lifts the small cells a linear share left at the floor; the one maximum keeps one
+ * opacity meaning one count in every movement class.
+ */
 export function heatIntensity(count: number, max: number): number {
   if (!Number.isFinite(count) || !Number.isFinite(max) || max <= 0 || count <= 0) return 0;
-  return Math.min(1, count / max);
+  return Math.sqrt(Math.min(1, count / max));
 }
 
 export interface DotPlotScale {
@@ -56,11 +60,11 @@ export const DOT_PLOT_VALUE_PAD = 16;
  * The dot plot's text columns from a MEASURED glyph (LF-8): a mono column is measured, never
  * estimated. `glyphPx` is one mono `0`'s rendered width from `useMonoCharWidth`; each column is
  * its longest text's glyph count times that width plus its pad, rounded UP to a whole pixel, so
- * no column is ever a fraction narrower than the text it holds. The value column renders in the
- * mono face the glyph came from; the label column renders in the sans face and is budgeted at
- * the mono advance per character, which sits above the sans face's mean advance at the same
- * size. An unmeasurable glyph (not finite, or not positive) is not estimated either: the columns
- * fall to their floors.
+ * no column is ever a fraction narrower than the text it holds. Both columns render in the sans
+ * face, and both are budgeted at the mono advance per character, which sits above the sans
+ * face's mean advance at the same size, so the budget holds the sans text with room to spare.
+ * An unmeasurable glyph (not finite, or not positive) is not estimated either: the columns fall
+ * to their floors.
  */
 export function dotPlotColumns(labels: readonly string[], values: readonly string[], glyphPx: number): DotPlotColumns {
   const glyph = Number.isFinite(glyphPx) && glyphPx > 0 ? glyphPx : 0;

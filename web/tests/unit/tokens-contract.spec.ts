@@ -246,7 +246,7 @@ test("p1a-1: the shell composes from the token and wears the one page gutter", (
   // token the header aligns to, so the brand and the content share one edge.
   const shell = /\.shell \{([^}]+)\}/.exec(globalsCss)?.[1] ?? "";
   expect(shell).toContain("max-width: var(--shell-max)");
-  expect(shell).toContain("padding: 0 var(--gutter) 120px");
+  expect(shell).toContain("padding: var(--frame-top) var(--gutter) 120px");
 });
 
 test("the frame tokens: one gutter and one top offset, each stepping once at the phone breakpoint", () => {

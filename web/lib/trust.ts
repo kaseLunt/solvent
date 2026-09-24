@@ -22,7 +22,9 @@
 //     calls drifted, failed or empty is never green here;
 //   - a read in flight has not failed: while the manifest is being read the
 //     receipt item is pending, and "unavailable" is said only of a read that
-//     failed. A manifest that answered with no receipt states an absence.
+//     failed. A manifest that answered with no receipt states an absence;
+//   - one receipt state, one tone on every page: a run Verification calls
+//     failed is crit here too; a drifted run warns.
 import type { PriceInput, RefinedPosition, components } from "@solvent/client";
 import {
   ACCOUNT_COMPARISON,
@@ -48,7 +50,7 @@ type ReconcileSummary = components["schemas"]["ReconcileSummary"];
 type PriceVerdict = PriceInput["verdict"];
 type BrokenVerdict = Exclude<PriceVerdict, "fresh" | "stale">;
 
-export type TrustState = "ok" | "warn" | "refused" | "dim" | "pending";
+export type TrustState = "ok" | "warn" | "crit" | "refused" | "dim" | "pending";
 export type TrustId = "computed" | "prices" | "sweep" | "provenance" | "reconcile";
 
 export interface TrustItem {
@@ -218,8 +220,8 @@ function sweepItem(position: RefinedPosition, sweep: SweepStamp | null): TrustIt
     };
   }
   const title = `engine-wide sweep stamp · ${own}`;
-  if (sweep.generation_open) return { id: "sweep", label, detail: `gen ${groupInt(generation)} open · sweep in progress`, state: "warn", title };
-  return { id: "sweep", label, detail: `gen ${groupInt(generation)}${age === null ? "" : ` · ${humanAge(age)} ago`}`, state: stale ? "warn" : "ok", title };
+  if (sweep.generation_open) return { id: "sweep", label, detail: `generation ${groupInt(generation)} open · sweep in progress`, state: "warn", title };
+  return { id: "sweep", label, detail: `generation ${groupInt(generation)}${age === null ? "" : ` · ${humanAge(age)} ago`}`, state: stale ? "warn" : "ok", title };
 }
 
 function provenanceItem(position: RefinedPosition): TrustItem {
@@ -328,16 +330,28 @@ function answeredItem(manifest: EvidenceManifest): TrustItem {
   const exitCode = readWirePopulation(reconcile.exit_code, "reconcile.exit_code");
   const passed = reconcile.result === "pass" && exitCode === 0;
   if (!passed || drift > 0) {
-    // "drifted" is the receipt's own count, and it counts checked rows alone.
+    // "drifted" is the receipt's own count, and it counts checked rows alone. The tone is the judge's: a failed run is crit.
     const detail = `${groupInt(drift)} ${plural(drift, CHECKED_ROW)} drifted${passed ? "" : " · did not pass"}`;
-    return { id: "reconcile", label, detail, state: "warn", title: `result: ${reconcile.result} · exit ${String(exitCode)}` };
+    return { id: "reconcile", label, detail, state: arm === "failed" ? "crit" : "warn", title: `result: ${reconcile.result} · exit ${String(exitCode)}` };
   }
   if (arm === "empty") return { id: "reconcile", label, detail: RECEIPT_EMPTY, state: "dim" };
 
   // Book-level: the Cash weld when the receipt carries one, else the gated totals.
   const { one, many, compared, exact } = countedRows(reconcile);
   const title = reconcile.artifact_path;
-  if (compared === 0) return { id: "reconcile", label, detail: `no ${many} in the receipt`, state: "dim" };
+  // One receipt state, one tone on both pages: a receipt the service does not vouch for is crit here as on Verification,
+  // even when it counts nothing this card can tally.
+  if (compared === 0) {
+    if (arm !== "failed") return { id: "reconcile", label, detail: `no ${many} in the receipt`, state: "dim" };
+    const proof = proofSubjectStatus(manifest);
+    return {
+      id: "reconcile",
+      label,
+      detail: `no ${many} in the receipt · the service does not vouch for this receipt`,
+      state: "crit",
+      title: proof.kind === "rejected" ? proof.detail : title,
+    };
+  }
   if (exact > compared) return { id: "reconcile", label, detail: `${groupInt(exact)} exact of ${groupInt(compared)} ${many} · contradictory receipt`, state: "warn", title };
   if (exact !== compared) {
     // Short of exact with no drift counted: a weld comparison is not a checked row, and a checked row the receipt does
@@ -352,7 +366,7 @@ function answeredItem(manifest: EvidenceManifest): TrustItem {
     // follow from it. The judge's own finding rides the title.
     const proof = proofSubjectStatus(manifest);
     const words = arm === "failed" ? "the service does not vouch for this receipt" : "the run did not match whole";
-    return { id: "reconcile", label, detail: `${tally} · ${words}`, state: "warn", title: proof.kind === "rejected" ? proof.detail : title };
+    return { id: "reconcile", label, detail: `${tally} · ${words}`, state: arm === "failed" ? "crit" : "warn", title: proof.kind === "rejected" ? proof.detail : title };
   }
   const servedAt: unknown = manifest.served_at;
   const finished = finishedWords(reconcile, typeof servedAt === "string" ? servedAt : null);
@@ -366,6 +380,15 @@ function reconcileItem(evidence: EvidenceRead): TrustItem {
   return answeredItem(evidence.manifest);
 }
 
+/**
+ * A detail is a standalone line, so it starts with a capital — unless it starts with a name that keeps its own case
+ * (weETH, sETHFI) or a figure.
+ */
+function sentenceStart(detail: string): string {
+  const first = /^\S+/.exec(detail)?.[0] ?? "";
+  return /^[a-z][a-z'’-]*$/.test(first.replace(/[,;:·—]+$/, "")) ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}` : detail;
+}
+
 export function trustChecklist({ position, batchId, sweep, evidence }: TrustInput): TrustItem[] {
   return [
     computedItem(position, batchId),
@@ -373,5 +396,5 @@ export function trustChecklist({ position, batchId, sweep, evidence }: TrustInpu
     sweepItem(position, sweep),
     provenanceItem(position),
     reconcileItem(evidence),
-  ];
+  ].map((item) => ({ ...item, detail: sentenceStart(item.detail) }));
 }

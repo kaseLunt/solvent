@@ -101,7 +101,8 @@ test.describe("closed vocabularies", () => {
   });
 
   test("the engines are the contract's two, verbatim — never combined", () => {
-    expect([...FEED_ENGINES]).toEqual(["aave_v3_etherfi", "debt_manager"]);
+    // Cash first: the product's book, the order every engine list on the page reads in.
+    expect([...FEED_ENGINES]).toEqual(["debt_manager", "aave_v3_etherfi"]);
   });
 
   test("the amount-unit set is the store's four, and membership is exact", () => {

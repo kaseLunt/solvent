@@ -10,6 +10,7 @@ const TONE_CLASS: Record<EvidenceTone, string | undefined> = {
   ok: styles.vOk,
   warn: styles.vWarn,
   crit: styles.vCrit,
+  refused: styles.vRefused,
   dim: styles.vDim,
 };
 
@@ -18,22 +19,21 @@ export interface VerificationDrawerProps {
   onClose: () => void;
   /** The view model's doctrine, paragraph by paragraph, verbatim. */
   doctrine: readonly string[];
-  /** A subject's evidence chain when its explain opened the drawer; null from the header's button. */
+  /** A subject's evidence chain when its Explain opened the drawer; null from the header's button. */
   descriptor: EvidenceDescriptor | null;
 }
 
 /**
- * Methodology & evidence: the page's doctrine, paragraph by paragraph, and —
- * when a subject's explain opened the drawer — that subject's typed evidence
- * chain first: its rows, its comparator verbatim, operational vs proven.
- * Nothing here knows about manifests; the descriptor is lib/evidence's and
- * every heading is the view model's. A paragraph is keyed by its place: two
- * paragraphs may say the same words, and a key is never their text.
+ * Methodology & evidence: the page's doctrine, paragraph by paragraph, in the drawer's own prose rhythm, and — when a
+ * subject's Explain opened the drawer — that subject's typed evidence chain first: its rows in the record pattern the
+ * cards share, its comparator verbatim, operational vs proven. Nothing here knows about manifests; the descriptor is
+ * lib/evidence's and every heading is the view model's. A paragraph is keyed by its place: two paragraphs may say the
+ * same words, and a key is never their text.
  */
 export function VerificationDrawer({ open, onClose, doctrine, descriptor }: VerificationDrawerProps) {
   return (
     <Drawer open={open} onClose={onClose} title={descriptor === null ? VERIFICATION_COPY.drawerTitle : descriptor.title}>
-      <div className={styles.method} data-testid="verification-drawer-body">
+      <div data-testid="verification-drawer-body">
         {descriptor !== null && (
           <section data-testid="verification-drawer-evidence">
             <div className={styles.row}>

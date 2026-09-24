@@ -91,7 +91,7 @@ test("(4) a DM amount is scaled by the engine's OWN value_decimals, with separat
 
   // The fixture's DM borrow is 1199403000 normalized-debt units.
   await expect(page.getByTestId("activity-amount").filter({ hasText: "1,199.403" })).toBeVisible();
-  await expect(page.getByTestId("activity-amount").filter({ hasText: "1199403000" })).toHaveCount(0);
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "1,199,403,000" })).toHaveCount(0);
 });
 
 test("(4) with the stream muted, the book's own value_decimals scale the DM amount; with a book that states none it stays RAW and TAGGED", async ({
@@ -102,14 +102,14 @@ test("(4) with the stream muted, the book's own value_decimals scale the DM amou
   await page.route("**/v1/book*", (route) => fulfillJson(route, DEMO_BOOK));
   await page.goto("/feed");
   await expect(page.getByTestId("activity-amount").filter({ hasText: "1,199.403" })).toBeVisible();
-  await expect(page.getByTestId("activity-amount").filter({ hasText: "1199403000" })).toHaveCount(0);
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "1,199,403,000" })).toHaveCount(0);
 
   await page.unroute("**/v1/book*");
   await page.route("**/v1/book*", (route) => fulfillJson(route, BOOK_WITHOUT_SCALES));
   await page.goto("/feed");
-  await expect(page.getByTestId("activity-amount").filter({ hasText: "1199403000" })).toBeVisible();
+  await expect(page.getByTestId("activity-amount").filter({ hasText: "1,199,403,000" })).toBeVisible();
   // The tag sits in the Amount cell beside the digits; the unit cell names the unit and does not repeat it.
-  const dmRow = page.locator('[data-testid^="activity-row-"]', { has: page.getByTestId("activity-amount").filter({ hasText: "1199403000" }) });
+  const dmRow = page.locator('[data-testid^="activity-row-"]', { has: page.getByTestId("activity-amount").filter({ hasText: "1,199,403,000" }) });
   await expect(dmRow.getByTestId("activity-amount-tag")).toHaveText("raw units");
   await expect(page.getByTestId("activity-unit").filter({ hasText: "normalized debt" })).not.toContainText("raw units");
 });
@@ -127,11 +127,11 @@ test("(4) an aave_scaled amount with no leg decimals stays RAW and is TAGGED as 
   // The ray-scaled aToken amount is NOT divided by the engine's base-currency
   // decimals — a different unit entirely.
   await expect(
-    page.getByTestId("activity-amount").filter({ hasText: "1500000000000000000" }),
+    page.getByTestId("activity-amount").filter({ hasText: "1,500,000,000,000,000,000" }),
   ).toBeVisible();
   // The tag sits in the Amount cell beside the digits, where the magnitude is read; the unit cell does not repeat it.
   const aaveRow = page.locator('[data-testid^="activity-row-"]', {
-    has: page.getByTestId("activity-amount").filter({ hasText: "1500000000000000000" }),
+    has: page.getByTestId("activity-amount").filter({ hasText: "1,500,000,000,000,000,000" }),
   });
   await expect(aaveRow.getByTestId("activity-amount-tag")).toHaveText("raw units");
   await expect(page.getByTestId("activity-unit").filter({ hasText: "aave-scaled" })).not.toContainText("raw units");

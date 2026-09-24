@@ -1,16 +1,34 @@
-/* Book-only rules (spec 2026-09-15 §5.2); everything reusable is the kit. */
+/* Book-only rules (spec 2026-09-15 §5.2); everything reusable is the kit. The shell owns the page's top offset. */
 
-.page { padding: 28px 0 24px; }
+.page { padding: 0 0 24px; }
 .note { color: var(--ink-2); font-size: var(--type-body); margin: 12px 0 0; }
+/* Inside the legacy fold the kit spaces its children: a note there adds no margin of its own. */
+.foldNote { color: var(--ink-2); font-size: var(--type-body); margin: 0; }
 .lines { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; font-size: var(--type-body); font-variant-numeric: tabular-nums; }
 .lines a { color: var(--ink); }
 .lines a:hover { color: var(--accent-text); }
 .walkFailure { color: var(--warn-text); font-size: var(--type-body); margin: 12px 0 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 /* The attention table's folds stack, each on its own line under the table. */
 .toggles { display: grid; justify-items: start; }
-.legacy { margin-top: 26px; border: 1px solid var(--line); border-radius: 10px; padding: 0 20px 18px; background: var(--panel-2); }
-.legacy summary { cursor: pointer; padding: 14px 0; font-size: var(--type-card); font-weight: var(--w-semibold); color: var(--ink); }
-.method { display: grid; gap: 8px; font-size: var(--type-body); color: var(--ink); }
-.method h3 { font-size: var(--type-card); margin: 14px 0 0; }
-.method code { font-family: var(--mono); font-size: var(--type-mono-sm); }
-.method ul { margin: 0; padding-left: 1.2em; }
+/* An over-cap room is the liquidatable verdict's own figure: crit ink, the sign carried by the glyph. */
+.over { color: var(--crit-text); }
+
+/* One named-area grid: the chart is as tall as its bars, stress and bad debt stack under it, and the attention table
+ * spans all three — no card stretches to fill a void; ragged bottoms are the lesser cost. */
+.bookGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  grid-template-areas: "chart attn" "stress attn" "bad attn";
+  grid-template-rows: auto auto 1fr;
+  align-items: start;
+  gap: 16px;
+  margin-top: 12px;
+}
+.areaChart { grid-area: chart; min-width: 0; }
+.areaAttn { grid-area: attn; min-width: 0; align-self: start; }
+.areaStress { grid-area: stress; min-width: 0; }
+.areaBad { grid-area: bad; min-width: 0; }
+
+@media (max-width: 900px) {
+  .bookGrid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "chart" "attn" "stress" "bad"; grid-template-rows: none; }
+}

@@ -160,12 +160,13 @@
 
 /* ---- step strip: the pipeline's steps as one joined strip ---- */
 .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
-.step { padding: 18px 20px; border-right: 1px solid var(--line); min-width: 0; }
+/* Each cell stretches to the strip's height; the figure line sits on the cell's floor so figures align across steps whose descriptions differ in length. */
+.step { display: flex; flex-direction: column; padding: 18px 20px; border-right: 1px solid var(--line); min-width: 0; }
 .step:last-child { border-right: 0; }
 .stepNum { font-size: var(--type-floor); color: var(--accent-text); font-weight: var(--w-semibold); letter-spacing: 0.08em; text-transform: uppercase; }
 .stepN { margin-top: 6px; font-size: var(--type-card); font-weight: var(--w-semibold); color: var(--ink); }
 .stepD { margin-top: 6px; font-size: var(--type-label); color: var(--ink-2); line-height: 1.45; }
-.stepV { margin-top: 10px; font-size: var(--type-label); color: var(--ink); font-variant-numeric: tabular-nums; }
+.stepV { margin-top: auto; padding-top: 10px; font-size: var(--type-label); color: var(--ink); font-variant-numeric: tabular-nums; }
 .stepV b { font-weight: var(--w-semibold); }
 .step[data-tone="ok"] .stepV b { color: var(--ok-text); }
 .step[data-tone="warn"] .stepV b { color: var(--warn-text); }
@@ -253,6 +254,7 @@
 .check li { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--chip-bg); align-items: baseline; color: var(--ink); }
 .checkI { color: var(--ok-text); font-weight: var(--w-semibold); width: 14px; flex: none; }
 .checkWarn { color: var(--warn-text); }
+.checkCrit { color: var(--crit-text); }
 /* A refusal is not a failure: the × keeps its glyph and loses the verdict colour. */
 .checkRefused { color: var(--ink-2); }
 .checkDim { color: var(--ink-3); }

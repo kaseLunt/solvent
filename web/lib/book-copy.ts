@@ -184,3 +184,70 @@ export function comparatorReaderLabel(comparator: string): string {
   }
   return comparator;
 }
+
+// ---------------------------------------------------------------------------
+// The Book page's own words: the labels, card titles and fixed lines the page
+// prints around the view's figures. The components print these and compose none.
+// ---------------------------------------------------------------------------
+
+/** The one drawer trigger, named as the drawer titles itself: a drawer trigger carries no arrow. */
+export const METHODOLOGY_LABEL = "Methodology & evidence";
+
+/** The Cash section head's jump to the legacy fold further down this page: the arrow after the words, pointing down. */
+export const LEGACY_LINK_LABEL = "Legacy Aave v3 market ↓";
+
+/** The PROJECTION badge a projected container wears, once, beside its title. */
+export const PROJECTION_BADGE = "PROJECTION";
+
+export const BOOK_CARDS = {
+  bands: {
+    title: "Distance to liquidation, by debt",
+    /** Opens the Methodology drawer, so it carries no arrow. */
+    method: "How the bands are cut",
+  },
+  attention: { title: "Needs attention" },
+  stress: {
+    title: "Stress preview",
+    /** The shock grid is the configured scenario's, whichever axis it walks: the line names no asset of its own. */
+    finding: "The committed shock grid, run against this batch: at each step, the debt newly liquidatable and the bad debt that follows.",
+    /** A link to another page: the arrow after the words. */
+    link: "Scenarios →",
+    none: "This batch carries no stress grid.",
+    notOnGrid: "The Cash engine is not on this batch's stress grid.",
+  },
+  badDebt: {
+    title: "Bad debt on the book",
+    note: "Standing bad debt is measured, not projected: collateral value today is below the debt it secures.",
+  },
+} as const;
+
+/** The withheld preview's line: the refusal named with its cause. */
+export function stressWithheldLine(reason: string): string {
+  return `Preview withheld: ${reason}.`;
+}
+
+/** The Needs attention table's columns: one unit per column — the Room column is percent of the cap in every row. */
+export const ATTENTION_COLUMNS = [
+  { key: "account", header: "Account" },
+  { key: "room", header: "Room to cap", align: "right" },
+  { key: "debt", header: "Debt", align: "right" },
+  { key: "status", header: "Status", align: "right" },
+] as const;
+
+/** The standing a sized row wears in the table's Status column. */
+export const ATTENTION_STATUS = { liquidatable: "Liquidatable", near: "Near cap" } as const;
+
+/** A transport-class or unreadable walk failure beneath the table, with its cause. */
+export function walkFailureLine(message: string): string {
+  return `The walk stopped: ${message.trim().replace(/\.$/, "")}.`;
+}
+
+export const RETRY_LABEL = "Retry";
+
+/**
+ * The Methodology drawer's word on the accounts with no verdict — the doctrine the dek no longer carries, said once, here:
+ * they are counted, never hidden, and a debt the engine served no figure for is not known, never a zero.
+ */
+export const NO_VERDICT_METHOD =
+  "An account with no verdict is counted, not hidden: it stands in the No verdict tile and, dimmed, in the Needs attention table. " +
+  "Where the engine served no debt figure for it, its Debt cell is a dash — its debt is not known, never a zero.";

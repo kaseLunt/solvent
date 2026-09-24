@@ -242,7 +242,12 @@ function edgesMatchContract(lanes: readonly TransitionLane[], bucketCount: numbe
 }
 
 function hf(label: string): string {
-  return `health factor ${label}`;
+  return `Health factor ${label}`;
+}
+
+/** A band label as the grid prints it: a standalone line, so a word label starts with a capital; a number range is untouched. */
+function sentenceLabel(label: string): string {
+  return /^[a-z]/.test(label) ? `${label.charAt(0).toUpperCase()}${label.slice(1)}` : label;
 }
 
 function mergedBands(lanes: readonly TransitionLane[]): RoomBand[] {
@@ -250,13 +255,13 @@ function mergedBands(lanes: readonly TransitionLane[]): RoomBand[] {
   const r = (i: number) => roomBoundLabel(e[i] ?? WAD);
   const l = (i: number) => lanes[i]?.label ?? "";
   return [
-    { key: "over-cap", label: "over cap", title: `${hf("below 1.00")} (${l(0)}, ${l(1)})`, lanes: [0, 1], kind: "bucket", overCap: true },
+    { key: "over-cap", label: "Over cap", title: `${hf("below 1.00")} (${l(0)}, ${l(1)})`, lanes: [0, 1], kind: "bucket", overCap: true },
     { key: "b1", label: `< ${r(2)}`, title: `${hf(l(2))} · room under ${r(2)}`, lanes: [2], kind: "bucket", overCap: false },
     { key: "b2", label: `${r(2)} – ${r(3)}`, title: `${hf(l(3))} · room ${r(2)} to ${r(3)}`, lanes: [3], kind: "bucket", overCap: false },
     { key: "b3", label: `${r(3)} – ${r(4)}`, title: `${hf(l(4))} · room ${r(3)} to ${r(4)}`, lanes: [4], kind: "bucket", overCap: false },
     { key: "b4", label: `≥ ${r(4)}`, title: `${hf("1.25 and above")} (${l(5)}, ${l(6)}, ${l(7)}) · room ${r(4)} and above`, lanes: [5, 6, 7], kind: "bucket", overCap: false },
-    { key: "no-debt", label: "no debt", title: l(8), lanes: [8], kind: "infinite", overCap: false },
-    { key: "unmeasured", label: "not measured", title: l(9), lanes: [9], kind: "unmeasured", overCap: false },
+    { key: "no-debt", label: "No debt", title: l(8), lanes: [8], kind: "infinite", overCap: false },
+    { key: "unmeasured", label: "Not measured", title: l(9), lanes: [9], kind: "unmeasured", overCap: false },
   ];
 }
 
@@ -265,7 +270,7 @@ function verbatimBands(lanes: readonly TransitionLane[]): RoomBand[] {
     const upper = lane.upper_wad === null ? null : wireBigInt(lane.upper_wad);
     return {
       key: `lane-${String(lane.index)}`,
-      label: lane.label,
+      label: sentenceLabel(lane.label),
       title: lane.kind === "bucket" ? hf(lane.label) : lane.label,
       lanes: [lane.index],
       kind: lane.kind,

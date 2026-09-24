@@ -7,20 +7,21 @@
 // welds to api/openapi.yaml; every sentence is lib/api-view.ts's.
 //
 // What this pins: the verdict header in ink and its three identity chips; the
-// three tiles, each with a sub counted from the extract; the base URL stated
+// two tiles, each with a sub counted from the extract; the base URL stated
 // once; every operation rendered, in the endpoint index and as a card, none
 // dropped, the index a column of plain anchors walked by Tab in order; curl
 // and sample fidelity against the page's own base URL; the copy affordance
 // copies the verbatim command; params carry their required flags and the SSE
-// route invents no sample; the contract's prose set as paragraphs at the
-// reading measure, its words unchanged and its bold and code markers rendered
-// as formatting; the error envelope is one table with
+// route invents no sample; the contract's prose set as paragraphs and lists at
+// the reading measure, its words unchanged, its bold and code markers rendered
+// as formatting and its version notes set quieter; code framed, its copy on a
+// header bar and never over the code; every verb, flag and status in ink; the error envelope is one table with
 // every response and its byte-faithful body beneath; the quickstart is the
 // real client API; the page links to Verification; the response codes sit
 // above the sample fold; the doctrine lives in the drawer, verbatim; answer
 // before evidence.
 import { expect, test, type Page } from "@playwright/test";
-import { contractParagraphs, deriveApiView, inlineParts, type InlinePart } from "../../lib/api-view";
+import { contractBlocks, deriveApiView, inlineParts, type InlinePart } from "../../lib/api-view";
 import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS } from "../../lib/proof-contract.gen";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
 
@@ -48,11 +49,15 @@ test("the verdict header: the contract's version in the kicker, the endpoint cou
   // A statement of record wears ink: green is a health verdict, and this page has none.
   await expect(page.getByTestId("api-verdict")).toHaveAttribute("data-variant", "neutral");
   await expect(page.getByTestId("api-verdict")).toContainText(`API · contract v${CONTRACT_META.version}`);
+  // The kicker's capitals never recase the version: it is set apart, as the contract writes it.
+  const version = page.getByTestId("api-verdict").locator("p").first().locator("span");
+  await expect(version).toHaveText(`v${CONTRACT_META.version}`);
+  expect(await version.evaluate((el) => getComputedStyle(el).textTransform)).toBe("none");
   await expect(page.getByTestId("api-verdict-headline")).toHaveText(`${String(OPERATIONS.length)} read-only endpoints, every money value an exact decimal string.`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(`${view.headline.emphasis} ${view.headline.rest}`);
   await expect(page.getByTestId("api-verdict-dek")).toHaveText(view.headline.dek);
   await expect(page.getByTestId("api-verdict-dek")).toHaveText(
-    "No key or sign-in; requests are rate-limited per client. Every sample below is the contract's own example (api/openapi.yaml, v1.8.0) or a committed client fixture, cited beside each. A CI test re-reads both and fails if this page's extract has drifted from either; the fixtures are checked against the contract by the client package's own tests.",
+    "No key or sign-in; requests are rate-limited per client. Every sample is the contract's own example or a committed client fixture, and a CI test fails if this page drifts from either.",
   );
   await expect(page.getByTestId("api-verdict-identity").locator("[data-chip]")).toHaveCount(3);
   await expect(chip(page, "Contract")).toContainText(`${CONTRACT_META.title} · v${CONTRACT_META.version}`);
@@ -73,7 +78,7 @@ test("the base URL is stated once: the header's mono chip carries it in full, th
   await expect(page.getByTestId("api-quickstart")).toContainText(`baseUrl: "${baseUrl}"`);
 });
 
-test("three tiles: endpoints, error responses, contract version — the extract's own figures, each with a sub counted from the extract", async ({ page }) => {
+test("two tiles: endpoints and error responses — the extract's own figures, each with a sub counted from the extract; the version is the kicker's, never a third tile", async ({ page }) => {
   await open(page);
   const view = deriveApiView(await statedBaseUrl(page));
   const endpoints = page.getByTestId("api-kpi-operations");
@@ -85,8 +90,8 @@ test("three tiles: endpoints, error responses, contract version — the extract'
   await expect(errors).toContainText(String(ERROR_RESPONSES.length));
   await expect(errors).toContainText(view.tiles.errors.sub);
   await expect(errors).toContainText("400 · 404 · 409 · 429 · 500 · 503");
-  await expect(page.getByTestId("api-kpi-version")).toContainText(CONTRACT_META.version);
-  await expect(page.getByTestId("api-kpi-version")).toContainText(CONTRACT_META.sourcePath);
+  await expect(page.getByTestId("api-kpi-version")).toHaveCount(0);
+  await expect(page.locator("[data-testid^='api-kpi-']")).toHaveCount(2);
 });
 
 test("every contract operation renders — in the endpoint index and as a card; none added, none dropped", async ({ page }) => {
@@ -99,7 +104,7 @@ test("every contract operation renders — in the endpoint index and as a card; 
   await expect(page.getByTestId("api-toc").locator("a")).toHaveCount(OPERATIONS.length);
 });
 
-test("the endpoint index is aligned rows of plain anchors: the method in its own coloured column, no button form, and Tab walks every row in the contract's order", async ({ page }) => {
+test("the endpoint index is aligned rows of plain anchors: the method in its own ink column, no button form, and Tab walks every row in the contract's order", async ({ page }) => {
   await open(page);
   const anchors = page.getByTestId("api-toc").locator("a");
   // An anchor wears no button form: one tab away that form is a pressable filter.
@@ -114,11 +119,14 @@ test("the endpoint index is aligned rows of plain anchors: the method in its own
   const x = async (row: typeof first, n: number) => (await row.locator("span").nth(n).boundingBox())?.x ?? Number.NaN;
   expect(await x(first, 0)).toBe(await x(second, 0));
   expect(await x(first, 1)).toBe(await x(second, 1));
-  // The method carries the card's verb colour: a POST is not a GET.
+  // A verb is contract vocabulary, not a warning: a POST wears the GET's ink, in the index and on its card, and the word alone tells them apart.
   const post = page.getByTestId("api-toc").locator('a[href="#runBookScenario"] span').first();
   await expect(post).toHaveText("POST");
   const colour = (el: Element) => getComputedStyle(el).color;
-  expect(await post.evaluate(colour)).not.toBe(await first.locator("span").first().evaluate(colour));
+  expect(await post.evaluate(colour)).toBe(await first.locator("span").first().evaluate(colour));
+  const verb = (id: string) => page.getByTestId(`api-endpoint-${id}`).locator("span").first();
+  await expect(verb("runBookScenario")).toHaveText("POST");
+  expect(await verb("runBookScenario").evaluate(colour)).toBe(await verb("getBook").evaluate(colour));
   // Keyboard: every row is a stop, in the contract's order — DOM order is reading order, down each column.
   await first.focus();
   for (let i = 0; i < OPERATIONS.length; i += 1) {
@@ -146,16 +154,38 @@ test("curl-sample fidelity: the evidence curl and the quickstart target the stat
 test("the curl copy affordance copies the verbatim command", async ({ page }) => {
   await open(page);
   const curl = (await page.getByTestId("api-curl-getEvidence").textContent()) ?? "";
-  await page.getByRole("button", { name: "copy curl for GET /v1/evidence" }).click();
+  await page.getByRole("button", { name: "Copy curl for GET /v1/evidence" }).click();
   const copied = await page.evaluate(() => navigator.clipboard.readText());
   expect(copied).toBe(curl);
 });
 
-test("params render with required flags; the SSE route invents no JSON sample", async ({ page }) => {
+test("a code block is framed and its copy sits on a header bar, never over the code: the bar names the block, the copy is the verbatim text", async ({ page }) => {
+  await open(page);
+  const pre = page.getByTestId("api-curl-getEvidence");
+  const frame = pre.locator("xpath=..");
+  // The terminal ground has an edge on the page in either theme.
+  expect(await frame.evaluate((el) => getComputedStyle(el).borderTopStyle)).toBe("solid");
+  await expect(frame.locator(":scope > div").first()).toContainText("curl");
+  const copy = frame.getByRole("button", { name: "Copy curl for GET /v1/evidence" });
+  const copyBox = await copy.boundingBox();
+  const preBox = await pre.boundingBox();
+  if (copyBox === null || preBox === null) throw new Error("expected the copy control and the code laid out");
+  expect(copyBox.y + copyBox.height).toBeLessThanOrEqual(preBox.y + 1);
+  await expect(page.getByTestId("api-quickstart").locator("xpath=..")).toContainText("TypeScript");
+});
+
+test("params render with required flags in ink, never amber; the status chips all wear one ink; the SSE route invents no JSON sample", async ({ page }) => {
   await open(page);
   const positions = page.getByTestId("api-endpoint-getPositions");
   await expect(positions).toContainText("engine");
   await expect(positions).toContainText("required");
+  const colour = (el: Element) => getComputedStyle(el).color;
+  const required = positions.getByText("required", { exact: true }).first();
+  const path = positions.locator("span").nth(1);
+  expect(await required.evaluate(colour)).toBe(await path.evaluate(colour));
+  const chips = page.getByTestId("api-responses-getBook").locator("span");
+  const chipColours = await chips.evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
+  expect(new Set(chipColours).size).toBe(1);
   await expect(positions).toContainText("never blended");
 
   const stream = page.getByTestId("api-endpoint-getStream");
@@ -163,19 +193,21 @@ test("params render with required flags; the SSE route invents no JSON sample", 
   await expect(stream.locator('[data-testid="api-sample-getStream"]')).toHaveCount(0);
 });
 
-test("the contract's prose is set as paragraphs at the reading measure: the yaml's hard wraps are gone, the words are not — its bold and code markers render as formatting", async ({ page }) => {
+test("the contract's prose is set as paragraphs and lists at the reading measure: the yaml's hard wraps and list markers are gone, the words are not — its bold and code markers render as formatting, its version notes quieter", async ({ page }) => {
   await open(page);
   const op = OPERATIONS.find((o) => o.operationId === "getEvents");
   if (op === undefined) throw new Error("contract invariant: getEvents exists");
   // What a reader sees of each paragraph: the contract's words, in order, the markers rendered rather than printed.
   const plain = (parts: readonly InlinePart[]): string => parts.map((part) => (part.kind === "strong" ? plain(inlineParts(part.text)) : part.text)).join("");
-  const expected = contractParagraphs(op.description).map((paragraph) => plain(inlineParts(paragraph)));
+  const paragraphs = contractBlocks(op.description).flatMap((block) => (block.kind === "p" ? [block.text] : []));
+  const expected = paragraphs.map((paragraph) => plain(inlineParts(paragraph)));
   expect(expected.length).toBeGreaterThan(1);
   const prose = page.getByTestId("api-description-getEvents");
   await expect(prose.locator("p")).toHaveText([...expected]);
-  // Every backtick pair is a code element, and no marker survives as a character.
-  const codes = contractParagraphs(op.description)
-    .flatMap((paragraph) => inlineParts(paragraph))
+  // Every backtick pair is a code element, in a paragraph or a list item, and no marker survives as a character.
+  const codes = contractBlocks(op.description)
+    .flatMap((block) => (block.kind === "p" ? [block.text] : block.items))
+    .flatMap((text) => inlineParts(text))
     .filter((part) => part.kind === "code")
     .map((part) => part.text);
   expect(codes.length).toBeGreaterThan(0);
@@ -190,6 +222,19 @@ test("the contract's prose is set as paragraphs at the reading measure: the yaml
   // A hard wrap is no longer preserved, and the column is the prose measure, not the card's width.
   expect(await prose.locator("p").first().evaluate((el) => getComputedStyle(el).whiteSpace)).toBe("normal");
   expect((await prose.boundingBox())?.width ?? Number.NaN).toBeLessThanOrEqual(720);
+  // A run of "* " items is a list: its marker is the bullet, never a literal star, and each item keeps its words.
+  const sortParam = OPERATIONS.find((o) => o.operationId === "getPositions")?.parameters.find((p) => p.name === "sort");
+  if (sortParam === undefined) throw new Error("contract invariant: getPositions takes a sort");
+  const list = contractBlocks(sortParam.description).find((block) => block.kind === "ul");
+  if (list?.kind !== "ul") throw new Error("contract invariant: the sort description carries a list");
+  const sort = page.getByTestId("api-param-getPositions-sort");
+  await expect(sort.locator("ul > li")).toHaveText(list.items.map((item) => plain(inlineParts(item))));
+  await expect(sort).not.toContainText("* ");
+  // A bracketed version note is history, set quieter than the sentence it sits in, its words unchanged.
+  const added = sort.getByText("(ADDED 1.5.0)", { exact: true });
+  await expect(added).toBeVisible();
+  const size = (el: Element) => Number.parseFloat(getComputedStyle(el).fontSize);
+  expect(await added.evaluate(size)).toBeLessThan(await sort.locator("ul > li").first().evaluate(size));
 });
 
 test("the error envelope is one table: every contract response a row with its status, and each body byte-faithful beneath", async ({ page }) => {
@@ -262,6 +307,8 @@ test("the doctrine lives in the drawer, verbatim: the intro, the base-URL note, 
   );
   await expect(body).toContainText(`Base URL ${baseUrl}: the origin this deployment is built against (NEXT_PUBLIC_SOLVENT_API_URL).`);
   await expect(body).toContainText("tests/unit/proof-contract-fidelity.spec.ts re-extracts from api/openapi.yaml on every run");
+  // Whether a fixture agrees with the contract is the client package's own test, and the drawer says CI does not run it.
+  await expect(body).toContainText("the client package's own tests check those fixtures against the contract, and no CI step runs them.");
 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("api-drawer-body")).toHaveCount(0);

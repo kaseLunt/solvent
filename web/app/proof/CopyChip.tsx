@@ -10,7 +10,7 @@ import styles from "./verification.module.css";
 export interface CopyChipProps {
   /** The COMPLETE text placed on the clipboard. */
   text: string;
-  /** Accessible name, e.g. "copy materialization key". */
+  /** Accessible name, e.g. "Copy materialization key". */
   label: string;
 }
 

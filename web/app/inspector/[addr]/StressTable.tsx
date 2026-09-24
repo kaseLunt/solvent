@@ -1,44 +1,51 @@
-import { KitTable, SectionHead, StatusPill, type KitRow } from "@/components/kit";
-import { projectionWords, rowVerdict, sideRoomWords, stressVerdictWords, type StressRow, type StressSide } from "@/lib/address-stress";
-import { humanUsdFull } from "@/lib/human-price";
-import { stressBatchNote, stressEmptyText, type InspectorView } from "@/lib/inspector-view";
-import { isWireScale } from "@/lib/wireGuard";
+import { KitTable, SectionHead, StatusPill, type KitColumn, type KitRow } from "@/components/kit";
+import kit from "@/components/kit/kit.module.css";
+import { projectionWords, realizationWords, roomCell, rowVerdict, stressVerdictWords, type StressSide } from "@/lib/address-stress";
+import {
+  OPEN_IN_SCENARIOS,
+  PROJECTION_ROW_SUB,
+  PROJECTION_TITLE,
+  PROJECTION_WORD,
+  STRESS_QUALIFIER,
+  STRESS_TITLE,
+  stressBatchNote,
+  stressCaption,
+  stressEmptyText,
+  stressRoomToday,
+  type InspectorView,
+} from "@/lib/inspector-view";
 import styles from "../inspector.module.css";
 
-const COLUMNS = [
-  { key: "scenario", header: "Scenario" },
-  { key: "before", header: "Room today", align: "right" as const },
-  { key: "after", header: "Room after", align: "right" as const },
-  { key: "flips", header: "Becomes liquidatable?", align: "right" as const },
-];
-
-function realization(r: StressRow): string | null {
-  const m = r.marketRealization;
-  if (m === null || !isWireScale(m.decimals)) return null;
-  const part = (label: string, v: bigint | null): string | null => (v === null ? null : `${label} ${humanUsdFull(v, m.decimals)}`);
-  const parts = [part("shortfall", m.shortfall), part("bad debt", m.badDebt)].filter((p): p is string => p !== null);
-  return parts.length === 0 ? null : parts.join(" · ");
-}
+const BEFORE: KitColumn = { key: "before", header: "Room today", align: "right" };
+const AFTER: KitColumn = { key: "after", header: "Room after", align: "right" };
+const SCENARIO: KitColumn = { key: "scenario", header: "Scenario" };
+const FLIPS: KitColumn = { key: "flips", header: "Becomes liquidatable?", align: "right" };
 
 /**
  * The committed scenarios applied to this account — the wire's own before/after sides; a rate step is a delta-only
  * projection. The lib decides the row's verdict (`rowVerdict`, the one judge the Scenarios page shares), its room
- * words, its projection's words, the batch note and the empty words; this file only places the rows. A room prints
- * only from a computable side — never beside an unknowable verdict — and a negative room is "over cap by", never a
- * minus on a dollar figure. Where no figure has a scale to print at, the cell says the view's own cause
- * (`view.scaleAbsence`) — "unreadable scale" is never said of a lookup that holds no Cash position.
- * Before and after are the STRESS body's own sides, read for the batch it names.
+ * cell, its projection's words, the batch note, the caption and the empty words; this file only places the rows.
+ * Room today is one figure for the whole table, so the caption states it once while the rows agree; the section wears
+ * the one PROJECTION badge its shocked figures sit under.
  */
 export function StressTable({ view }: { view: InspectorView }) {
-  const room = (side: StressSide | null): string => sideRoomWords(side, view.decimals, view.scaleAbsence);
+  const room = (side: StressSide | null) => {
+    const cell = roomCell(side, view.decimals, view.scaleAbsence);
+    return (
+      <span className={cell.over ? styles.over : undefined} title={cell.title ?? undefined}>
+        {cell.text}
+      </span>
+    );
+  };
   const result = view.stress;
   const note = stressBatchNote(view);
+  const todayOnce = stressRoomToday(view) !== null;
+  const columns = todayOnce ? [SCENARIO, AFTER, FLIPS] : [SCENARIO, BEFORE, AFTER, FLIPS];
   const rows: KitRow[] =
     result === null || result.kind !== "rows"
       ? []
       : result.rows.map((r) => {
-          const projected = r.projection !== null;
-          const extra = realization(r);
+          const extra = realizationWords(r.marketRealization);
           const verdict = stressVerdictWords(rowVerdict(r));
           return {
             key: r.id,
@@ -46,13 +53,8 @@ export function StressTable({ view }: { view: InspectorView }) {
             cells: {
               scenario: (
                 <>
-                  {projected ? (
-                    <span title={r.projectionNote ?? undefined}>
-                      {r.label} <StatusPill tone="projection">PROJECTION</StatusPill>
-                    </span>
-                  ) : (
-                    r.label
-                  )}
+                  <span title={r.projection === null ? r.label : (r.projectionNote ?? r.label)}>{r.name}</span>
+                  {r.projection !== null && <span className={styles.detail}>{PROJECTION_ROW_SUB}</span>}
                   {note !== null && <span className={styles.detail}>{note.rowLabel}</span>}
                 </>
               ),
@@ -60,12 +62,10 @@ export function StressTable({ view }: { view: InspectorView }) {
               after:
                 r.projection !== null ? (
                   projectionWords(r.projection, view.decimals, view.scaleAbsence)
-                ) : extra === null ? (
-                  room(r.after)
                 ) : (
                   <>
                     {room(r.after)}
-                    <span className={styles.detail}>{extra}</span>
+                    {extra !== null && <span className={styles.detail}>{extra}</span>}
                   </>
                 ),
               flips:
@@ -84,17 +84,28 @@ export function StressTable({ view }: { view: InspectorView }) {
   return (
     <section id="stress" data-testid="inspector-stress">
       <SectionHead
-        title="Stress this address"
-        qualifier="the committed scenarios, applied to this account · shocked figures are projections, not readings"
-        link={{ href: view.cash === null ? "/lab" : `/lab?address=${view.cash.account}`, label: "Open Scenarios →" }}
+        title={STRESS_TITLE}
+        qualifier={STRESS_QUALIFIER}
+        badge={
+          <span data-testid="inspector-stress-projection">
+            <StatusPill tone="projection" title={PROJECTION_TITLE}>
+              {PROJECTION_WORD}
+            </StatusPill>
+          </span>
+        }
+        link={{ href: view.cash === null ? "/lab" : `/lab?address=${view.cash.account}`, label: OPEN_IN_SCENARIOS }}
       />
       {note !== null && (
         <p className={styles.note} role="note" data-testid="inspector-stress-batch">
           {note.disclosure}
         </p>
       )}
-      <KitTable testId="inspector-stress-table" columns={COLUMNS} rows={rows} emptyText={stressEmptyText(view)} />
-      <p className={styles.dim}>Before and after are the engine’s own cap and debt under each shock; a rate step is a delta-only projection with prices held flat.</p>
+      <div className={kit.card}>
+        <KitTable testId="inspector-stress-table" columns={columns} rows={rows} emptyText={stressEmptyText(view)} label={STRESS_TITLE} />
+      </div>
+      <p className={styles.dim} data-testid="inspector-stress-caption">
+        {stressCaption(view)}
+      </p>
     </section>
   );
 }

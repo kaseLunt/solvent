@@ -7,8 +7,11 @@ import type { components } from "@solvent/client";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import { classifySetEnvelope, classifySetResult, classifySetRunEngine, contractFaults } from "./lab-classify";
-import { signedUsd } from "./lab-headline";
+import { compareRowWords, type LabHeadline } from "./lab-headline";
+import { bookMoney, signedBookMoney } from "./money";
 import { formatTenths, percentTenths } from "./percent";
+import { joinAnd } from "./prose";
+import { scenarioName } from "./scenario-name";
 import { isWireDecimal, isWireScale } from "./wireGuard";
 
 type Schemas = components["schemas"];
@@ -16,12 +19,20 @@ export type RunBookSetResponse = Schemas["RunBookSetResponse"];
 export type SetRunScenarioResult = Schemas["SetRunScenarioResult"];
 export type SetRunEngineSummary = Schemas["SetRunEngineSummary"];
 
-export type CompareKind = "point" | "withheld" | "not-covered" | "unmeasurable" | "contradictory" | "no-denominator" | "unreadable";
+/**
+ * `projection` is a scenario the service evaluated with no spot pass at all (`shock_reach.reach` is
+ * `projection_no_spot_pass`): its spot figures are the unshocked book by construction, so it has no spot change to
+ * rank or to draw as a dot.
+ */
+export type CompareKind = "point" | "projection" | "withheld" | "not-covered" | "unmeasurable" | "contradictory" | "no-denominator" | "unreadable";
 
 export interface CompareRow {
   readonly id: string;
   readonly version: string;
+  /** The scenario's one name, built from its definition (`scenarioName`). */
   readonly label: string;
+  /** The wire's own label, verbatim: the name's title. */
+  readonly wireLabel: string;
   readonly kind: CompareKind;
   readonly deltaUsd: bigint | null;
   readonly decimals: number | null;
@@ -53,6 +64,8 @@ export interface CompareView {
   readonly evaluated: number;
   readonly configVersion: string;
   readonly servedAt: string;
+  /** The evaluated batch's own `computed_at`, as the wire states it. */
+  readonly computedAt: string;
 }
 
 /** Signed tenths of a percent, truncated toward zero; null without a positive denominator. The percent law, applied to a signed delta. */
@@ -140,8 +153,20 @@ function resultFault(r: SetRunScenarioResult, engine: string): ResultFault | nul
   return malformed.length === 0 ? null : { kind: "fields", fields: malformed };
 }
 
+/** The result's name from its own shocks. A set result's shocks are not classified, so a list that is not a list of objects is never read: the wire's label stands. */
+const nameOf = (r: SetRunScenarioResult): string => {
+  const shocks: unknown = r.shocks;
+  return Array.isArray(shocks) && shocks.every((shock) => typeof shock === "object" && shock !== null) ? scenarioName({ id: r.scenario_id, label: r.label, shocks: r.shocks }) : r.label;
+};
+
+/** Whether the service evaluated the result with no spot pass at all; read defensively, since the reach is not classified. */
+const projectionOnly = (r: SetRunScenarioResult): boolean => {
+  const reach: unknown = (r.shock_reach as { readonly reach?: unknown } | null | undefined)?.reach;
+  return reach === "projection_no_spot_pass";
+};
+
 function rowOf(r: SetRunScenarioResult, engine: string): CompareRow {
-  const base = { id: r.scenario_id, version: r.scenario_version, label: r.label, deltaUsd: null, decimals: null, shareTenths: null, plotTenths: null, tone: null, shareText: "—", deltaText: "—", newly: null };
+  const base = { id: r.scenario_id, version: r.scenario_version, label: nameOf(r), wireLabel: r.label, deltaUsd: null, decimals: null, shareTenths: null, plotTenths: null, tone: null, shareText: "—", deltaText: "—", newly: null };
   // Wrong only in the share's inputs, the row is unreadable; wrong anywhere else, contradictory. Neither is ever a point.
   const fault = resultFault(r, engine);
   if (fault !== null) {
@@ -153,9 +178,11 @@ function rowOf(r: SetRunScenarioResult, engine: string): CompareRow {
   if (absent !== undefined) return { ...base, kind: "unmeasurable", reason: absent.reason };
   const e = r.engines.find((s) => s.engine === engine);
   if (e === undefined) return { ...base, kind: "not-covered", reason: "not modelled" };
+  // No spot pass ran: the after side is the before side by construction, so its zero is no measurement of a change.
+  if (projectionOnly(r)) return { ...base, kind: "projection", reason: "projection, no spot pass", newly: e.flipped_to_eligible };
   const delta = BigInt(e.eligible_debt_delta_usd);
   const share = shareTenths(delta, BigInt(e.total_debt_usd_before));
-  const deltaText = signedUsd(delta, e.usd_decimals);
+  const deltaText = signedBookMoney(e.usd_decimals)(delta);
   const newly = e.flipped_to_eligible;
   if (share === null) return { ...base, kind: "no-denominator", deltaUsd: delta, decimals: e.usd_decimals, deltaText, reason: "no denominator", newly };
   // The tone and the dot's side are the DELTA's — the unrounded figure — so a rise too small for a tenth is still a
@@ -191,6 +218,67 @@ export function compareRows(set: RunBookSetResponse, engine: string): CompareVie
     evaluated: set.evaluation.scenarios_evaluated,
     configVersion: set.scenario_config_version,
     servedAt: set.served_at,
+    computedAt: set.batch.computed_at,
+  };
+}
+
+/** The book a compare view is a share of, as a headline names it: "Cash", or "legacy" for the legacy market. */
+const bookWord = (engine: string): string => (engine === LEGACY ? "legacy" : engineName(engine));
+
+/** A point's share of its book, unsigned — the sign is the delta's word: "4.5%", "under 0.1%" for a change the tenths cannot resolve, "0%" for a measured zero. */
+function shareOfBook(p: Point): string {
+  if (p.deltaUsd === 0n) return "0%";
+  if (p.shareTenths === 0n) return "under 0.1%";
+  return formatTenths(abs(p.shareTenths));
+}
+
+/** A kind the service or the engine declined to answer, as against a projection or a scenario that does not model the book. */
+const REFUSAL_KINDS: ReadonlySet<CompareKind> = new Set(["withheld", "unmeasurable", "contradictory", "no-denominator", "unreadable"]);
+
+/** The dek's clause for a row that is not ranked: a refusal named with its word, a book the scenario does not model, a projection. */
+function unrankedClause(row: CompareRow, engine: string, book: string): string {
+  if (row.kind === "not-covered") return `${row.label} does not model the ${book} book.`;
+  if (row.kind === "projection") return `${row.label} is a projection with no spot pass, so it is not ranked on spot liquidatability.`;
+  return `${row.label} could not be evaluated: ${compareRowWords(row, engine)}.`;
+}
+
+/**
+ * The compare page's answer: the scenario that moves the most liquidatable debt, named with its money phrase and its
+ * share of the book, crit when that is more debt. The ranking is the view's own (|share|, then |Δ|); a tie in the
+ * figure names every leader. Every other ranked scenario is one clause of the dek; a refused, withheld or unmeasurable
+ * scenario is left out of the ranking and named; a projection with no spot pass is never ranked on spot
+ * liquidatability, and the dek says so. A set where no ranked scenario moves anything says that instead.
+ */
+export function compareHeadline(view: CompareView): LabHeadline {
+  const book = bookWord(view.engine);
+  const points = view.rows.filter(isPoint);
+  const unranked = view.rows.filter((r) => !isPoint(r));
+  const unrankedDek = unranked.map((r) => unrankedClause(r, view.engine, book));
+  const first = points[0];
+  if (first === undefined) {
+    if (view.rows.length === 0) return { emphasis: "No scenario was compared.", rest: "", tone: "absent", dek: "" };
+    const allRefused = unranked.every((r) => REFUSAL_KINDS.has(r.kind));
+    return { emphasis: `No scenario in this set could be ranked for the ${book} book.`, rest: "", tone: allRefused ? "refused" : "absent", dek: unrankedDek.join(" ") };
+  }
+  if (points.every((p) => p.deltaUsd === 0n)) {
+    const names = points.map((p) => p.label);
+    const still = `${joinAnd(names)} ${names.length === 1 ? "leaves" : "leave"} it unchanged.`;
+    return { emphasis: `No scenario in this set makes more ${book} debt liquidatable.`, rest: "", tone: "neutral", dek: [still, ...unrankedDek].join(" ") };
+  }
+  const leaders = points.filter((p) => p.deltaUsd === first.deltaUsd);
+  const others = points.slice(leaders.length);
+  const each = leaders.length > 1 ? " under each" : "";
+  const money = bookMoney(first.decimals)(abs(first.deltaUsd));
+  const rest =
+    first.deltaUsd > 0n
+      ? `${money} more ${book} debt becomes liquidatable${each}, ${shareOfBook(first)} of the book.`
+      : `${money} less ${book} debt is liquidatable${each}, ${shareOfBook(first)} of the book.`;
+  const otherDek = others.map((p) => (p.deltaUsd === 0n ? `${p.label}: no change.` : `${p.label}: ${p.deltaText}, ${shareOfBook(p)} of the book.`));
+  return {
+    emphasis: `${joinAnd(leaders.map((p) => p.label))} ${leaders.length === 1 ? "moves" : "move"} the most:`,
+    rest,
+    tone: first.deltaUsd > 0n ? "crit" : "neutral",
+    dek: [...otherDek, ...unrankedDek].join(" "),
   };
 }
 

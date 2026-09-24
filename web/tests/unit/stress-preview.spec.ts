@@ -26,7 +26,7 @@ test("the committed book fixture previews one line per shocked grid point, per e
   if (aave.kind !== "view") return;
   expect(aave.scenarioId).toBe("eth_minus_30");
   expect(aave.lines.map((l) => l.shock)).toEqual(["ETH −10%", "ETH −20%", "ETH −30%", "ETH −40%", "ETH −50%"]);
-  expect(aave.lines[0]?.text).toBe("ETH −10% → +$6,000 liquidatable · 1 account · bad debt $0");
+  expect(aave.lines[0]?.text).toBe("ETH −10%: +$6,000 liquidatable · 1 account · bad debt unchanged at $0");
   expect(aave.lines[0]?.deltaDebt).toBe(600_000_000_000n);
   expect(aave.lines[0]?.deltaAccounts).toBe(1);
   expect(aave.unmeasured).toBeNull();
@@ -34,8 +34,51 @@ test("the committed book fixture previews one line per shocked grid point, per e
   const dm = stressPreview(waterfall,"debt_manager");
   expect(dm.kind).toBe("view");
   if (dm.kind !== "view") return;
-  expect(dm.lines[0]?.text).toBe("ETH −10% → no new liquidatable debt · bad debt $635.64");
+  expect(dm.lines[0]?.text).toBe("ETH −10%: no new liquidatable debt · bad debt +$396.03, to $635.64");
   expect(dm.lines[0]?.deltaDebt).toBe(0n);
+});
+
+test("bad debt is framed as the Scenarios page frames it — the rise over the grid's own unshocked point, then where it lands — never the standing figure alone", () => {
+  const dm = stressPreview(waterfall, "debt_manager");
+  if (dm.kind !== "view") throw new Error("expected a view");
+  // The unshocked point carries $239.60 of standing bad debt; ETH −30% carries $1,427.72.
+  expect(dm.lines.map((l) => l.text)).toEqual([
+    "ETH −10%: no new liquidatable debt · bad debt +$396.03, to $635.64",
+    "ETH −20%: no new liquidatable debt · bad debt +$792.07, to $1,031",
+    "ETH −30%: no new liquidatable debt · bad debt +$1,188, to $1,427",
+    "ETH −40%: no new liquidatable debt · bad debt +$1,584, to $1,823",
+    "ETH −50%: no new liquidatable debt · bad debt +$1,980, to $2,219",
+  ]);
+  expect(dm.lines[0]?.deltaBadDebt).toBe(635_643_565n - 239_603_961n);
+  // No rise is said as such, at the figure it holds; a fall carries U+2212, never a hyphen and never a "+".
+  const aave = stressPreview(waterfall, "aave_v3_etherfi");
+  if (aave.kind !== "view") throw new Error("expected a view");
+  expect(aave.lines[0]?.text).toBe("ETH −10%: +$6,000 liquidatable · 1 account · bad debt unchanged at $0");
+  const falling = structuredClone(waterfall);
+  at(falling, 1, "debt_manager").cumulative_bad_debt_usd = "100000000";
+  const fell = stressPreview(falling, "debt_manager");
+  if (fell.kind !== "view") throw new Error("expected a view");
+  expect(fell.lines[0]?.text).toBe("ETH −10%: no new liquidatable debt · bad debt −$139.60, to $100");
+  // The line never points: an arrow on this product means a link to another page, and the line's own words say what moved.
+  for (const line of [...dm.lines, ...aave.lines]) expect(line.text).not.toContain("→");
+});
+
+test("a shock is named by the one name builder: the grid's axis word and the factor's own exact percent; an axis this product does not name prints the wire's id", () => {
+  const ethfi = { ...structuredClone(waterfall), axis: "asset_usd", axis_asset: "0xE0080D2F853ECDDBD81A643DC10DA075DF26FD3F" };
+  const named = stressPreview(ethfi, "debt_manager");
+  if (named.kind !== "view") throw new Error("expected a view");
+  expect(named.lines.map((l) => l.shock)).toEqual(["ETHFI −10%", "ETHFI −20%", "ETHFI −30%", "ETHFI −40%", "ETHFI −50%"]);
+  const unnamed = stressPreview({ ...structuredClone(waterfall), axis: "stable_usd" }, "debt_manager");
+  if (unnamed.kind !== "view") throw new Error("expected a view");
+  expect(unnamed.lines[0]?.shock).toBe("stable_usd −10%");
+  // A factor off the tenths is printed exactly, never truncated to a whole percent.
+  const odd = structuredClone(waterfall);
+  const second = odd.points[1];
+  if (second === undefined) throw new Error("fixture invariant");
+  second.factor = "875000000000000000";
+  const exact = stressPreview(odd, "debt_manager");
+  if (exact.kind !== "view") throw new Error("expected a view");
+  expect(exact.lines[0]?.shock).toBe("ETH −12.5%");
 });
 
 test("an engine absent from the grid is absent, never a zero line", () => {
@@ -99,15 +142,15 @@ test("positions the stress arithmetic excluded ride the preview, named beside th
   const dm = stressPreview(waterfall, "debt_manager", coverage);
   expect(dm.kind).toBe("view");
   if (dm.kind !== "view") return;
-  expect(dm.unmeasured).toEqual({ count: 1, bookWide: 1, causes: ["could not be rebuilt for the stress arithmetic"] });
+  expect(dm.unmeasured).toEqual({ count: 1, bookWide: 1, causes: ["could not be rebuilt for the stress arithmetic"], noun: "account" });
   expect(unmeasuredSentence(dm.unmeasured)).toBe(
-    "1 position on this engine is excluded from the stress arithmetic (could not be rebuilt for the stress arithmetic); its movement is unmeasured and no line above speaks for it.",
+    "1 account on this engine is excluded from the stress arithmetic (could not be rebuilt for the stress arithmetic); its movement is unmeasured and no line above speaks for it.",
   );
   // The lines themselves are unchanged: the exclusion is carried beside them, not folded into a figure.
-  expect(dm.lines[0]?.text).toBe("ETH −10% → no new liquidatable debt · bad debt $635.64");
+  expect(dm.lines[0]?.text).toBe("ETH −10%: no new liquidatable debt · bad debt +$396.03, to $635.64");
   const aave = stressPreview(waterfall, "aave_v3_etherfi", coverage);
   if (aave.kind !== "view") throw new Error("expected a view");
-  expect(aave.unmeasured).toEqual({ count: 0, bookWide: 1, causes: [] });
+  expect(aave.unmeasured).toEqual({ count: 0, bookWide: 1, causes: [], noun: "position" });
   expect(unmeasuredSentence(aave.unmeasured)).toBe("1 position on the book is excluded from the stress arithmetic, none on this engine.");
   // Nothing excluded: nothing said.
   const none = stressPreview(waterfall, "debt_manager", BOOK.coverage);

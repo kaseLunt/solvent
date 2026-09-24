@@ -4,18 +4,16 @@
 /* One explicit column that can shrink: an implicit `auto` column would size to the tiles' max-content and overrun a narrow viewport. */
 .workspace { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
 .notice { margin: 0; color: var(--warn-text); font-size: var(--type-small); }
-.banner { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 14px; border: 1px dashed var(--warn); border-radius: 8px; color: var(--ink); font-size: var(--type-body); }
 .dim { color: var(--ink-3); font-size: var(--type-small); margin: 6px 0 0; }
 .mono { font-family: var(--mono); font-size: var(--type-mono); color: var(--ink); text-decoration: none; }
-.legacy { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--panel); }
-.legacy > summary { cursor: pointer; font-size: var(--type-body); font-weight: var(--w-medium); color: var(--ink); }
-.legacyBody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 12px; }
-.legacyInCard { margin-top: 12px; }
 /* A chart's budget is this frame's content box; below the chart's minimum the frame scrolls rather than the chart shrinking. */
 .plotFrame { width: 100%; min-width: 0; overflow-x: auto; }
 .tilesPair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.method { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; font-size: var(--type-body); color: var(--ink); }
-.method h3 { margin: 8px 0 0; font-size: var(--type-card); }
-.method code { font-family: var(--mono); font-size: var(--type-mono-sm); }
-.method ul { margin: 0; padding-left: 18px; }
-@media (max-width: 900px) { .page { grid-template-columns: 1fr; } }
+.detail { display: block; color: var(--ink-3); font-size: var(--type-floor); white-space: normal; }
+/* A room over its cap: the crit ink on the cell's own figure. */
+.over { color: var(--crit-text); }
+/* On a phone the answer comes first — header, tiles, heatmap — and the library after it. */
+@media (max-width: 900px) {
+  .page { grid-template-columns: 1fr; }
+  .libCol { order: 2; }
+}

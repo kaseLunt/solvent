@@ -1,7 +1,16 @@
 "use client";
 
+import { ToggleGroup, type ToggleOption } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { ACTIVITY_SINCE_FULL, ACTIVITY_SINCE_SHORT, ALL_ENGINES, LEDGER_TYPES_NOTE, typeLabel } from "@/lib/activity-view";
+import {
+  ACTIVITY_COPY,
+  ACTIVITY_SINCE_FULL,
+  ACTIVITY_SINCE_SHORT,
+  ALL_ENGINES,
+  LEDGER_TYPES_NOTE,
+  typeLabel,
+  typedBlock,
+} from "@/lib/activity-view";
 import {
   EVENT_DISPLAY_TYPES,
   FEED_ENGINES,
@@ -26,16 +35,32 @@ export interface ActivityControlsProps {
   onApplySince: () => void;
 }
 
-const BTN = `${kit.btn} ${kit.btnGhost} ${styles.chipBtn}`;
+type EngineChoice = FeedEngine | "all";
+
+const ENGINE_OPTIONS: readonly ToggleOption<EngineChoice>[] = [
+  { value: "all", label: ALL_ENGINES },
+  ...FEED_ENGINES.map((engine) => ({ value: engine, label: engineName(engine) })),
+];
+
+const VIEW_OPTIONS: readonly ToggleOption<"all" | "ledger">[] = [
+  { value: "all", label: ACTIVITY_COPY.allActions },
+  { value: "ledger", label: ACTIVITY_COPY.ledger },
+];
+
+/** The wire's own classes, never invented, in the page's words — the wire's word on hover. */
+const TYPE_OPTIONS: readonly ToggleOption<EventDisplayType>[] = EVENT_DISPLAY_TYPES.map((type) => ({
+  value: type,
+  label: typeLabel(type),
+  title: type,
+}));
 
 /**
- * The walk's scope as pressed ghost buttons, in two rows: engine (all engines or one of the two, named as the page
- * names them) and view (every action or the liquidations ledger, which pins the type); then the type vocabulary (the
- * wire's own classes, never invented, printed in the page's words with the wire's word as the title) and the
- * since-block bound — a real control only with one engine chosen; with
- * none it is a stated impossibility in short form (what would be here and how to get it), its full sentence in the
- * title and the drawer: a property of chains, not a disabled control and not an error. The pressed look is the kit's
- * one toggle grammar. The surface owns what each press does to the walk; this component only names the choices.
+ * The walk's scope as the kit's toggle groups, each under its visible name, in two rows: the engine (every engine as
+ * a side-by-side list, or one of the two — Cash first; one pressed) with the since-block bound beside it — a real
+ * control only with one engine chosen, and with none a stated impossibility in short form (its full sentence in the
+ * title and the drawer): a property of chains, not a disabled control and not an error; then the view (every action or
+ * the liquidations ledger, which pins the type; one pressed) and the type vocabulary (any number pressed). The surface
+ * owns what each press does to the walk; this component only names the choices.
  */
 export function ActivityControls({
   engine,
@@ -54,102 +79,29 @@ export function ActivityControls({
   return (
     <>
       <div className={styles.controls}>
-        <span className={styles.group}>
-          <span className={styles.groupLabel}>engine</span>
-          <button
-            type="button"
-            className={BTN}
-            aria-pressed={engine === null}
-            data-testid="activity-engine-all"
-            onClick={() => {
-              onEngine(null);
-            }}
-          >
-            {ALL_ENGINES}
-          </button>
-          {FEED_ENGINES.map((candidate) => (
-            <button
-              key={candidate}
-              type="button"
-              className={BTN}
-              aria-pressed={candidate === engine}
-              data-testid={`activity-engine-${candidate}`}
-              onClick={() => {
-                onEngine(candidate);
-              }}
-            >
-              {engineName(candidate)}
-            </button>
-          ))}
-        </span>
-
-        <span className={styles.group}>
-          <span className={styles.groupLabel}>view</span>
-          <button
-            type="button"
-            className={BTN}
-            aria-pressed={view === "all"}
-            data-testid="activity-view-all"
-            onClick={() => {
-              onView("all");
-            }}
-          >
-            all actions
-          </button>
-          <button
-            type="button"
-            className={BTN}
-            aria-pressed={view === "ledger"}
-            data-testid="activity-view-ledger"
-            onClick={() => {
-              onView("ledger");
-            }}
-          >
-            liquidations ledger
-          </button>
-        </span>
-      </div>
-
-      <div className={styles.controls}>
-        {view === "ledger" ? (
-          <span className={styles.impossible} data-testid="activity-types-note">
-            {LEDGER_TYPES_NOTE}
-          </span>
-        ) : (
-          <span className={styles.group} data-testid="activity-types">
-            <span className={styles.groupLabel}>type</span>
-            {EVENT_DISPLAY_TYPES.map((candidate) => (
-              <button
-                key={candidate}
-                type="button"
-                className={BTN}
-                aria-pressed={types.includes(candidate)}
-                data-testid={`activity-type-${candidate}`}
-                title={candidate}
-                onClick={() => {
-                  onType(candidate);
-                }}
-              >
-                {typeLabel(candidate)}
-              </button>
-            ))}
-          </span>
-        )}
+        <ToggleGroup
+          label={ACTIVITY_COPY.engine}
+          options={ENGINE_OPTIONS}
+          isPressed={(value) => (value === "all" ? engine === null : value === engine)}
+          onToggle={(value) => onEngine(value === "all" ? null : value)}
+          testId="activity-engine"
+          optionTestId={(value) => `activity-engine-${value}`}
+        />
 
         <span
-          className={scoped ? styles.group : styles.impossible}
+          className={scoped ? styles.since : styles.impossible}
           data-testid="activity-since"
           data-possible={scoped}
           title={scoped ? undefined : ACTIVITY_SINCE_FULL}
         >
           {scoped ? (
             <>
-              <span className={styles.groupLabel}>since block</span>
+              <span className={styles.sinceLabel}>{ACTIVITY_COPY.sinceLabel}</span>
               <input
                 className={styles.sinceInput}
                 inputMode="numeric"
-                aria-label="since block"
-                placeholder="block number"
+                aria-label={ACTIVITY_COPY.sinceLabel}
+                placeholder={ACTIVITY_COPY.sincePlaceholder}
                 value={sinceDraft}
                 data-testid="activity-since-input"
                 onChange={(changeEvent) => {
@@ -159,12 +111,12 @@ export function ActivityControls({
                   if (keyEvent.key === "Enter") onApplySince();
                 }}
               />
-              <button type="button" className={BTN} onClick={onApplySince} data-testid="activity-since-apply">
-                apply
+              <button type="button" className={`${kit.btn} ${kit.btnGhost} ${styles.apply}`} onClick={onApplySince} data-testid="activity-since-apply">
+                {ACTIVITY_COPY.apply}
               </button>
               {sinceBlock !== null && (
                 <span className={styles.applied} data-testid="activity-since-applied">
-                  ≥ {String(sinceBlock)}
+                  ≥ {typedBlock(sinceBlock)}
                 </span>
               )}
             </>
@@ -172,6 +124,31 @@ export function ActivityControls({
             ACTIVITY_SINCE_SHORT
           )}
         </span>
+      </div>
+
+      <div className={styles.controls}>
+        <ToggleGroup
+          label={ACTIVITY_COPY.view}
+          options={VIEW_OPTIONS}
+          isPressed={(value) => value === view}
+          onToggle={onView}
+          testId="activity-view"
+          optionTestId={(value) => `activity-view-${value}`}
+        />
+        {view === "ledger" ? (
+          <span className={styles.impossible} data-testid="activity-types-note">
+            {LEDGER_TYPES_NOTE}
+          </span>
+        ) : (
+          <ToggleGroup
+            label={ACTIVITY_COPY.type}
+            options={TYPE_OPTIONS}
+            isPressed={(value) => types.includes(value)}
+            onToggle={onType}
+            testId="activity-types"
+            optionTestId={(value) => `activity-type-${value}`}
+          />
+        )}
       </div>
     </>
   );

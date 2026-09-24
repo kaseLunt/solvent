@@ -3,7 +3,7 @@
  * cause in ink-2, the error's words behind a disclosure, and one ghost button. A view that threw is named, never blank
  * and never a zero. */
 .routeRefusal {
-  margin: var(--frame-top) auto;
+  margin: 0 auto;
   padding: 18px 20px;
   max-width: 560px;
   border: 1px dashed var(--ink-3);

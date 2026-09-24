@@ -7,15 +7,15 @@
 //
 //   - `aave_scaled` / `dm_normalized_debt` render the exact custodied value
 //     WITH the unit named beside it, plus what converting would take;
-//   - `opaque` (and any tag outside the known closed set) renders the RAW
-//     integer verbatim — even `amount_decimals` is an interpretation the
-//     unit does not license;
+//   - `opaque` (and any tag outside the known closed set) prints the RAW
+//     integer unscaled, grouped for reading — even `amount_decimals` is an
+//     interpretation the unit does not license;
 //   - a null amount is "record-only" — a different statement from zero;
 //   - an amount the wire's Decimal pattern refuses is "unreadable": its bytes
 //     are never printed, scaled or named in a unit;
 //   - an ABSENT tag (a wire outside the 1.2.0 contract, which made
-//     `amount_unit` required) is WIRE DRIFT: the raw integer renders
-//     verbatim with the drift named — never formatted through a scale the
+//     `amount_unit` required) is WIRE DRIFT: the raw integer prints
+//     unscaled with the drift named — never placed through a scale the
 //     wire did not license.
 //
 // Nothing in this module produces a "$" — that is asserted in
@@ -24,6 +24,7 @@
 import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "./format";
 import { groupDecimalString } from "./book-format";
 import {
+  EVENT_DISPLAY_TYPES,
   isKnownAmountUnit,
   splitUntimedTail,
   type EventDisplayType,
@@ -87,7 +88,7 @@ export interface FeedAmountScale {
   engineValueDecimals?: number | null;
 }
 
-/** The tag rendered beside a verbatim integer — never a silent raw number. */
+/** The tag rendered beside an unscaled integer — never a silent raw number. */
 export const RAW_UNITS_TAG = "raw units";
 
 /**
@@ -102,9 +103,23 @@ export const RECORD_ONLY_TITLE = "record only: this event carries no amount";
 /** The word a figure the wire's Decimal pattern refuses prints as: its bytes are never a figure. */
 const UNREADABLE = "unreadable";
 
+/**
+ * What every unscaled arm's hover says the figure is. It must stay true of `unscaled`: grouping is for reading and
+ * places nothing, so the hover never calls the figure verbatim or unformatted.
+ */
+const UNSCALED_PRINT = "the raw integer prints unscaled (grouped for reading, every digit the wire's)";
+
 /** Exact placement + thousands separators, via the shared money formatter. Call ONLY on a guarded value and scale. */
 function scaled(amount: string, decimals: number): string {
   return groupDecimalString(renderNullableDecimal(amount, { decimals }));
+}
+
+/**
+ * A guarded wire integer no scale placed, grouped for reading and nothing more: "180,771,428". Every digit is the
+ * wire's, in its place — grouping is not scaling — and a sign is the display minus.
+ */
+function unscaled(amount: string): string {
+  return groupDecimalString(amount);
 }
 
 export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): FeedAmount {
@@ -127,14 +142,13 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
 
   if (unit === undefined) {
     // A wire outside the 1.2.0 contract (the field is required there). The
-    // raw integer renders verbatim with the drift NAMED — formatting it
+    // raw integer prints unscaled with the drift NAMED — placing it
     // through amount_decimals would assert a scale nobody licensed.
     return {
       kind: "amount",
-      display: event.amount,
+      display: unscaled(event.amount),
       unitChip: "no unit tag",
-      unitTitle:
-        "the wire carried no amount_unit, required since contract 1.2.0. Rendered verbatim as wire drift, never formatted through an unlicensed scale",
+      unitTitle: `the wire carried no amount_unit, required since contract 1.2.0: this is wire drift, so ${UNSCALED_PRINT}, never placed through an unlicensed scale`,
       symbol,
       rawUnits: true,
     };
@@ -145,10 +159,9 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
     // never coerced into a unit we would then be lying about.
     return {
       kind: "amount",
-      display: event.amount,
+      display: unscaled(event.amount),
       unitChip: unit,
-      unitTitle:
-        "unit tag outside the known closed set (dm_normalized_debt / aave_scaled / none / opaque), rendered verbatim, never interpreted",
+      unitTitle: `unit tag outside the known closed set (dm_normalized_debt / aave_scaled / none / opaque): the tag shows as the wire sent it and ${UNSCALED_PRINT}, never interpreted`,
       symbol,
       rawUnits: true,
     };
@@ -160,20 +173,18 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
       // drift — shown raw with the tag verbatim rather than guessed at.
       return {
         kind: "amount",
-        display: event.amount,
+        display: unscaled(event.amount),
         unitChip: "none",
-        unitTitle:
-          "the wire tagged this row record-only (unit `none`) yet carried an amount, so it renders raw, never interpreted",
+        unitTitle: `the wire tagged this row record-only (unit \`none\`) yet carried an amount, so ${UNSCALED_PRINT}, never interpreted`,
         symbol,
         rawUnits: true,
       };
     case "opaque":
       return {
         kind: "amount",
-        display: event.amount,
+        display: unscaled(event.amount),
         unitChip: "opaque units",
-        unitTitle:
-          "the delta's unit could not be established from custody, so the raw integer renders verbatim; even decimals would be an interpretation",
+        unitTitle: `the delta's unit could not be established from custody, so ${UNSCALED_PRINT}; even decimals would be an interpretation`,
         symbol,
         rawUnits: true,
       };
@@ -185,11 +196,11 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
       const decimals = isWireScale(event.amount_decimals) ? event.amount_decimals : null;
       return {
         kind: "amount",
-        display: decimals === null ? event.amount : scaled(event.amount, decimals),
+        display: decimals === null ? unscaled(event.amount) : scaled(event.amount, decimals),
         unitChip: "aave-scaled",
         unitTitle:
           decimals === null
-            ? "ray-scaled aToken/variableDebtToken units, and this row carries no readable decimals for the leg, so the raw integer renders verbatim rather than through the engine's base-currency scale, which is a different unit. The nominal token amount is rayMul(scaled, live index); never a USD figure"
+            ? `ray-scaled aToken/variableDebtToken units, and this row carries no readable decimals for the leg, so ${UNSCALED_PRINT} rather than through the engine's base-currency scale, which is a different unit. The nominal token amount is rayMul(scaled, live index); never a USD figure`
             : "ray-scaled aToken/variableDebtToken units. The nominal token amount is rayMul(scaled, live index); not converted here, never a USD figure",
         symbol,
         rawUnits: decimals === null,
@@ -203,11 +214,11 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
       const decimals = own ?? (isWireScale(scale.engineValueDecimals) ? scale.engineValueDecimals : null);
       return {
         kind: "amount",
-        display: decimals === null ? event.amount : scaled(event.amount, decimals),
+        display: decimals === null ? unscaled(event.amount) : scaled(event.amount, decimals),
         unitChip: "normalized debt",
         unitTitle:
           decimals === null
-            ? "Debt Manager normalized debt units, and this deployment's value_decimals are not known to this page yet, so the raw integer renders verbatim rather than through a guessed scale. The USD view is value × interest index ÷ 1e18 at the event's index; never a USD figure"
+            ? `Debt Manager normalized debt units, and this deployment's value_decimals are not known to this page yet, so ${UNSCALED_PRINT} rather than through a guessed scale. The USD view is value × interest index ÷ 1e18 at the event's index; never a USD figure`
             : "Debt Manager normalized debt units at the engine's own value_decimals. The USD view is value × interest index ÷ 1e18 at the event's index; not converted here, never a USD figure",
         symbol,
         rawUnits: decimals === null,
@@ -227,12 +238,23 @@ export const TYPE_WORDS: Readonly<Partial<Record<EventDisplayType, string>>> = {
 };
 
 /**
- * A display type as the page prints it — in a button, a cell, a chip and the headline alike; a word outside the
+ * A display type as a sentence says it, lower case: "filtered to bad debt realized and borrow". A word outside the
  * vocabulary prints as the wire sent it, never guessed at. The lookup is the table's OWN keys: a wire word such as
  * `__proto__` or `toString` would otherwise read Object.prototype, which is not a word and cannot render.
  */
-export function typeLabel(type: string): string {
+export function typeWord(type: string): string {
   return Object.hasOwn(TYPE_WORDS, type) ? ((TYPE_WORDS as Readonly<Record<string, string>>)[type] ?? type) : type;
+}
+
+/**
+ * A display type as a label prints it — a table cell, a toggle, a tile — in sentence case: "Borrow", "Bad debt
+ * realized". A word outside the contract's vocabulary prints exactly as the wire sent it: it is not a word this page
+ * knows, so it is not dressed as one.
+ */
+export function typeLabel(type: string): string {
+  if (!(EVENT_DISPLAY_TYPES as readonly string[]).includes(type)) return type;
+  const words = typeWord(type);
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
 /**
@@ -240,17 +262,17 @@ export function typeLabel(type: string): string {
  * a phrase ("bad debt realized") is a statement and takes none.
  */
 function typeInSentence(type: string): string {
-  const words = typeLabel(type);
+  const words = typeWord(type);
   return words === type ? `a ${type}` : words;
 }
 
 /**
- * Severity per the canon (color + form, not color alone): a liquidation and
- * the pool's own bad-debt realization are crit; everything else is the plain
- * informational tag. The class string itself always renders VERBATIM.
+ * A historical chain action is a record, and a record is ink. A liquidation and the pool's own bad-debt realization
+ * are the KEY records — set apart by weight, never by a verdict's colour: what happened on the chain is not a health
+ * judgement about the book now. Everything else is the plain record. The class string itself always renders VERBATIM.
  */
-export function feedTagTone(type: EventDisplayType): "crit" | "info" {
-  return type === "liquidation" || type === "deficit_created" ? "crit" : "info";
+export function feedTagTone(type: EventDisplayType): "key" | "info" {
+  return type === "liquidation" || type === "deficit_created" ? "key" : "info";
 }
 
 /** Stable row identity: the event's own chain coordinates. */
@@ -272,7 +294,7 @@ type LiquidationExtract = NonNullable<FeedChainEvent["liquidation"]>;
 
 /** The words a liquidation's extract is said in, on the Activity table and the Inspector's card alike. */
 export const LIQUIDATION_WORDS = {
-  liquidator: "liquidator",
+  liquidator: "Liquidator",
   repaid: "debt repaid",
   seized: "seized",
   bonusRealized: "bonus realized",
@@ -297,7 +319,7 @@ export interface LiquidationFigure {
 function payloadFigure(value: string | null, decimals: number | null, unit: string): LiquidationFigure {
   if (value === null) return { figure: EM_DASH, unit: null };
   if (!isWireDecimal(value)) return { figure: UNREADABLE, unit: null };
-  if (!isWireScale(decimals)) return { figure: value, unit: RAW_UNITS_TAG };
+  if (!isWireScale(decimals)) return { figure: unscaled(value), unit: RAW_UNITS_TAG };
   return { figure: scaled(value, decimals), unit };
 }
 
@@ -431,7 +453,7 @@ export function feedTakeaway(
     emphasis = `No liquidation among the ${loaded} loaded,`;
   } else {
     emphasis = `${loaded} loaded,`;
-    filtered = `filtered to ${joinAnd(types.map(typeLabel))}; `;
+    filtered = `filtered to ${joinAnd(types.map(typeWord))}; `;
   }
 
   const claim =

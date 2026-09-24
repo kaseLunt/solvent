@@ -1,13 +1,13 @@
 // The Scenarios verdict header's sentences (spec §3.5 templates).
-// Every state the workspace can be in has its own sentence; a definition, a
-// run in flight and every refusal use the dashed tone, because none of them is
-// a verdict. Money is the Book's tiers: a book-level figure is never printed to the cent.
+// Every state the workspace can be in has its own sentence. None of the states without a result is a verdict: a
+// refusal by the service or the engine wears the refused register, and every other absence — not run, running, not
+// served, a failed fetch — the absent one, because a fetch that failed is never a refusal. Money is the Book's tiers:
+// a book-level figure is never printed to the cent.
 import { humanUsd, MINUS } from "./human-usd";
 import { engineName } from "./inspector-headline";
 import { LEGACY } from "./inspector-position";
 import type { CompareRow, CompareView } from "./lab-compare";
 import type { HeatmapView } from "./lab-transitions";
-import { formatTenths } from "./percent";
 import { groupInt, joinAnd } from "./prose";
 
 export interface LabHeadline {
@@ -15,10 +15,6 @@ export interface LabHeadline {
   readonly rest: string;
   readonly tone: "crit" | "warn" | "ok" | "neutral" | "refused" | "absent";
   readonly dek: string;
-}
-
-export function signedUsd(value: bigint, decimals: number): string {
-  return value < 0n ? `${MINUS}${humanUsd(-value, decimals)}` : `+${humanUsd(value, decimals)}`;
 }
 
 /** The text as given, ended with a full stop unless it already ends a sentence. */
@@ -35,8 +31,10 @@ export function sentence(text: string): string {
 }
 
 const accounts = (n: number): string => `${groupInt(n)} account${n === 1 ? "" : "s"}`;
-/** A refusal's headline: the dashed tone and no rest — the shape every non-verdict on the page shares, in book mode and one-address mode alike. */
+/** A refusal's headline — the service or the engine declined to answer: the refused register and no rest, in book mode and one-address mode alike. */
 export const refused = (emphasis: string, dek: string): LabHeadline => ({ emphasis, rest: "", tone: "refused", dek });
+/** No answer here — not run, running, not served, a fetch that failed: the absent register, never worn as a refusal. */
+export const absent = (emphasis: string, dek: string): LabHeadline => ({ emphasis, rest: "", tone: "absent", dek });
 
 /** A signed count in the money formatters' convention: a negative prints the true minus; a count at or above zero prints as the count it is — no plus, because a count is not a delta. */
 export function signedCount(n: number): string {
@@ -125,17 +123,20 @@ export function resultHeadline(f: ResultFigures): LabHeadline {
   return { emphasis: `No Cash account becomes liquidatable under ${f.label},`, rest: `but ${groupInt(moves)} change${moves === 1 ? "s" : ""} band.`, tone, dek };
 }
 
-export function notRunHeadline(def: { label: string; description: string; path_assumption: string; shocks: number }): LabHeadline {
-  const shocks =
-    def.shocks === 0
-      ? "no committed shock (a market-realization or projection scenario)"
-      : `${String(def.shocks)} committed shock${def.shocks === 1 ? "" : "s"}`;
-  // The path assumption is the wire's own clause after "Path:", quoted as given, not recapitalised.
-  return { emphasis: def.label, rest: `— ${shocks}, not run yet.`, tone: "refused", dek: `${sentence(def.description)} Path: ${terminated(def.path_assumption)}` };
+/**
+ * A served scenario that has not been run: the absent register and the one way forward, which the Run button beside
+ * it takes. A scenario that does not model Cash is never promised a Cash answer. The definition's own description and
+ * path assumption are the drawer's.
+ */
+export function notRunHeadline(name: string, coversCash: boolean): LabHeadline {
+  return absent(
+    `${name} has not been run.`,
+    coversCash ? "Run it to see how much Cash debt becomes liquidatable and which accounts move." : "It does not model the Cash book; run it to see the legacy market’s result below.",
+  );
 }
 
-export const runningHeadline = (label: string): LabHeadline =>
-  refused(`Running ${label}…`, "One evaluation against the newest complete batch; nothing is written.");
+export const runningHeadline = (name: string): LabHeadline =>
+  absent(`Running ${name}…`, "One evaluation against the newest complete batch; nothing is written.");
 
 export const withheldHeadline = (label: string, cause: string): LabHeadline =>
   refused(`Cannot say — the Cash book is withheld under ${label}.`, `${sentence(cause)} A withheld book is not a computed book, and this page never fills it in.`);
@@ -145,14 +146,14 @@ const modelled = (id: string): string => (id === LEGACY ? `the ${engineName(id)}
 
 export function notCoveredHeadline(label: string, engines: readonly string[], legacyBelow: boolean): LabHeadline {
   const models = engines.length === 0 ? "It models no engine this deployment serves." : `It models ${joinAnd(engines.map(modelled))}.`;
-  return refused(`${label} does not model the Cash book.`, legacyBelow ? `${models} The legacy result is below.` : models);
+  return absent(`${label} does not model the Cash book.`, legacyBelow ? `${models} The legacy result is below.` : models);
 }
 
 export const contradictoryHeadline = (label: string, reasons: readonly string[]): LabHeadline =>
   refused(`The result for ${label} contradicts itself.`, `${reasons.join("; ")}. Nothing from it is drawn.`);
 
 export const definitionChangedHeadline = (label: string, fields: readonly string[]): LabHeadline =>
-  refused(`${label} changed since this result was computed.`, `Changed: ${joinAnd(fields)}. Run it again for the current definition.`);
+  absent(`${label} changed since this result was computed.`, `Changed: ${joinAnd(fields)}. Run it again for the current definition.`);
 
 export type FailureKind = "not-served" | "no-batch" | "rate-limited" | "busy" | "unreachable" | "failed" | "refused-locally";
 export interface FailureDetail {
@@ -172,23 +173,28 @@ export function failureHeadline(kind: Exclude<FailureKind, "failed">, d: Failure
 export function failureHeadline(kind: FailureKind, d: FailureDetail): LabHeadline {
   switch (kind) {
     case "not-served":
-      return refused("Book-wide stress is not served by this deployment.", "The contract defines the run, and this deployment answered 404. That is a statement about the deployment, not about the book.");
+      return absent("Book-wide stress is not served by this deployment.", "The contract defines the run, and this deployment answered 404. That is a statement about the deployment, not about the book.");
     case "no-batch":
-      return refused("No servable batch.", `${sentence(d.message ?? "no complete risk batch is available").replace(/\.$/, "")} (503). ${retry(d.retryAfterSeconds)}`);
+      return absent("No servable batch.", `${sentence(d.message ?? "no complete risk batch is available").replace(/\.$/, "")} (503). ${retry(d.retryAfterSeconds)}`);
+    // A throttle and a busy slot are reads that did not complete, not the service declining the book: the absent
+    // register, as every other surface prints the same status.
     case "rate-limited":
-      return refused("Rate limited (429).", retry(d.retryAfterSeconds));
+      return absent("Rate limited (429).", retry(d.retryAfterSeconds));
     case "busy": {
       const slots =
         typeof d.inFlight === "number" && typeof d.maxInFlight === "number"
           ? `${String(d.inFlight)} of ${String(d.maxInFlight)} slots in use.`
           : "The service did not state its capacity.";
-      return refused("The evaluator is busy.", `${sentence(d.message ?? "busy")} ${slots}`);
+      return absent("The evaluator is busy.", `${sentence(d.message ?? "busy")} ${slots}`);
     }
     case "unreachable":
-      return refused("The service could not be reached.", sentence(d.message ?? "no HTTP response"));
-    case "failed":
-      // The overload makes the status a requirement of this arm: "answered" never prints without its number.
-      return refused(`The service answered ${String(d.status)}.`, sentence(d.message ?? "without the contract's error envelope"));
+      return absent("The service could not be reached.", sentence(d.message ?? "no HTTP response"));
+    case "failed": {
+      // The overload makes the status a requirement of this arm: "answered" never prints without its number. A 4xx is
+      // the service declining the request; a 5xx is an answer that did not come.
+      const status = d.status ?? 0;
+      return (status >= 500 ? absent : refused)(`The service answered ${String(d.status)}.`, sentence(d.message ?? "without the contract's error envelope"));
+    }
     case "refused-locally":
       return refused("Nothing was sent.", sentence(d.message ?? "the request was refused before dispatch"));
   }
@@ -261,6 +267,7 @@ export function staleBannerLine(b: StaleBannerInput): string {
 const compareBook = (engine: string): string => (engine === LEGACY ? "legacy" : engineName(engine));
 
 const COMPARE_KIND_WORD: Record<Exclude<CompareRow["kind"], "point" | "not-covered">, string> = {
+  projection: "projection, no spot pass",
   withheld: "withheld",
   unmeasurable: "unmeasurable",
   contradictory: "contradictory",
@@ -282,38 +289,12 @@ export function compareRowWords(row: CompareRow, engine: string): string {
   return `${word}${reason}${delta}`;
 }
 
-type ComparePoint = CompareRow & { readonly deltaUsd: bigint; readonly shareTenths: bigint };
-const isComparePoint = (r: CompareRow): r is ComparePoint => r.kind === "point" && r.deltaUsd !== null && r.shareTenths !== null;
-/** A point's share of the book, unsigned — the sign is the delta's word: "4.5%", "under 0.1%" for a nonzero delta the tenths cannot resolve, "0%" for a measured zero. */
-function shareOfBook(p: ComparePoint): string {
-  if (p.deltaUsd === 0n) return "0%";
-  if (p.shareTenths === 0n) return "under 0.1%";
-  return formatTenths(p.shareTenths < 0n ? -p.shareTenths : p.shareTenths);
+/** A compare row's words as its value cell prints them: a standalone line, so it starts with a capital. */
+export function compareCellWords(row: CompareRow, engine: string): string {
+  const words = compareRowWords(row, engine);
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/**
- * The Compare card's finding: the largest share by magnitude named first with its absolute figure and its share of
- * the book, then the rest in rank order (the view's own order), then every refused row named as refused. When no row
- * is a share, the sentence says so and names each refusal; nothing is a dot at zero.
- */
-export function compareHeadline(view: CompareView): string {
-  const book = compareBook(view.engine);
-  const points = view.rows.filter(isComparePoint);
-  const refused = view.rows.filter((r) => !isComparePoint(r));
-  const first = points[0];
-  if (first === undefined) {
-    if (refused.length === 0) return "No scenario was compared.";
-    return `No scenario could be evaluated for the ${book} book: ${refused.map((r) => `${r.label} ${compareRowWords(r, view.engine)}`).join("; ")}.`;
-  }
-  const debt = `liquidatable ${book} debt`;
-  const lead =
-    first.deltaUsd === 0n
-      ? `${joinAnd(points.map((p) => p.label))} ${points.length === 1 ? "leaves" : "leave"} ${debt} unchanged.`
-      : `${first.label} moves the most: ${first.deltaText} ${first.deltaUsd > 0n ? "more" : "less"} ${debt}, ${shareOfBook(first)} of the book.`;
-  const rest = first.deltaUsd === 0n ? [] : points.slice(1).map((p) => `${p.label}: ${p.deltaText}, ${shareOfBook(p)}.`);
-  const refusals = refused.map((r) => `${r.label} could not be evaluated: ${compareRowWords(r, view.engine)}.`);
-  return [lead, ...rest, ...refusals].join(" ");
-}
 
 /** The wire's freshness states other than the newest, in the caption's words: what was true of the evaluated batch when the response was built. */
 const COMPARE_FRESHNESS: Record<Exclude<CompareView["freshness"], "still_newest">, string> = {
@@ -345,13 +326,13 @@ export const setMembershipHeadline = (faults: readonly string[]): LabHeadline =>
 export const setUnreadableHeadline = (faults: readonly string[]): LabHeadline =>
   refused("The set cannot be read.", `Faults: ${terminated(faults.join("; "))} Nothing from it is drawn.`);
 
-export const LISTING_LOADING: LabHeadline = refused(
+export const LISTING_LOADING: LabHeadline = absent(
   "Loading the committed scenarios…",
   "The library is the committed, versioned set this deployment serves. Nothing runs until it is listed.",
 );
 
 export const listingUnavailableHeadline = (message: string): LabHeadline =>
-  refused("The committed scenarios could not be listed.", `${sentence(message)} Nothing can run until the listing answers.`);
+  absent("The committed scenarios could not be listed.", `${sentence(message)} Nothing can run until the listing answers.`);
 
 /**
  * A listing that answered and cannot be read: not a failed fetch ("could not be listed") and not an empty set — the
@@ -360,4 +341,5 @@ export const listingUnavailableHeadline = (message: string): LabHeadline =>
 export const listingUnreadableHeadline = (faults: readonly string[]): LabHeadline =>
   refused("The committed scenarios could not be read.", `Faults: ${terminated(faults.join("; "))} Nothing can run until the listing reads.`);
 
-export const EMPTY_LISTING: LabHeadline = refused("No committed scenarios are listed.", "This deployment serves an empty committed set. Nothing can run.");
+/** An empty listing is the listing's own answer, stated in ink. */
+export const EMPTY_LISTING: LabHeadline = { emphasis: "No committed scenarios are listed.", rest: "", tone: "neutral", dek: "This deployment serves an empty committed set. Nothing can run." };

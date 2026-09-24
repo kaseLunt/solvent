@@ -82,7 +82,8 @@ export function belowLineSentence(
   if (n === 0) return null;
   const line = `$${MATERIAL_LINE_USD.toString()}`;
   const sum = humanUsd(sums.belowLine, decimals);
-  // The line is per position: each row sits under it, and their sum — which may exceed it — is stated together, never "below" it.
-  if (n === 1) return `1 more position is technically liquidatable, under the ${line} line — ${sum} — and not headlined.`;
-  return `${groupInt(n)} more positions are technically liquidatable, each under the ${line} line — ${sum} together — and not headlined.`;
+  // The line is per account (one Cash position is one account): each sits under it, and their sum — which may exceed
+  // it — is stated together, never "below" it.
+  if (n === 1) return `1 more account is technically liquidatable, under the ${line} line — ${sum} — and not headlined.`;
+  return `${groupInt(n)} more accounts are technically liquidatable, each under the ${line} line — ${sum} together — and not headlined.`;
 }

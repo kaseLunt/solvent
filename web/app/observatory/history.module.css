@@ -1,18 +1,15 @@
-/* History: one engine's durable record, set in the Console register. Page-local rules only — the header, tiles,
- * card, table and drawer are the kit's, and so is the pressed toggle (a pressed ghost button wears the kit's accent;
- * no page restates it). These are the page grid, the two selector rows at chip size, the sparse-window state line,
- * the 1:1 chart frame, the bucket record's key-value grid and folds, and the drawer body. Tokens throughout; every
- * figure on the page is the wire's or the view model's. */
-.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; padding: 28px 0 24px; }
+/* History: one engine's durable record, set in the Console register. Page-local rules only — the header, toggle
+ * groups, tiles, state card, chart card, table and drawer are the kit's. These are the page grid, the metric switch's
+ * place in the card, the sparse-window state line, the 1:1 chart frame, the hour record's rows and folds. Tokens
+ * throughout; every figure on the page is the wire's or the view model's. The shell owns the page's top offset. */
+.page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; padding: 0 0 24px; }
+/* The page grid spaces its blocks; the kit's tile row carries no second offset of its own here. */
+.page > [data-testid="history-tiles"] { margin-top: 0; }
 
-/* ---- selectors: the engine switcher (one engine per view) and the metric row inside the chart card — the kit's
- * ghost buttons at chip size, the same size as every filter toggle on the product ---- */
-.controls { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
-.controls button { padding: 4px 10px; font-size: var(--type-small); }
-.metrics { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
-.metrics button { font-size: var(--type-small); padding: var(--sp-1) var(--sp-3); }
+/* ---- the metric switch inside the chart card, under the finding line ---- */
+.metrics { margin-top: var(--sp-3); }
 
-/* ---- the finding line and, beside it, the key to the chart's two hole marks (the same glyphs the plot draws) ---- */
+/* ---- the finding line and, beside it, the key to the chart's hole marks (the same glyphs the plot draws) ---- */
 .findingRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-4); }
 .marks { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: 0 0 0 auto; padding: 0; list-style: none; color: var(--ink-2); font-size: var(--type-small); white-space: nowrap; }
 .marks li { display: inline-flex; align-items: center; gap: var(--sp-1); }
@@ -22,35 +19,34 @@
 .state { margin: var(--sp-2) 0 0; color: var(--ink-2); font-size: var(--type-small); }
 .plotFrame { width: 100%; min-width: 0; overflow-x: auto; margin-top: var(--sp-3); }
 
-/* ---- the bucket record: the takeaway, then the wire's own rows ---- */
+/* ---- the hour record: the takeaway, then the wire's own rows — a name on the left, its value on the right, one
+ * hairline between rows: the record pattern the Verification subjects share. A figure is the page's tabular sans; an
+ * identifier is mono. ---- */
 .takeaway { margin: var(--sp-2) 0 0; color: var(--ink); font-size: var(--type-body); }
-.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-1) var(--sp-4); margin: var(--sp-3) 0 0; font-size: var(--type-body); }
-.kv dt { color: var(--ink-2); font-size: var(--type-label); align-self: baseline; }
-.kv dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
-.mono { font-family: var(--mono); font-size: var(--type-mono); }
+.rows { margin: var(--sp-3) 0 0; }
+.row { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-top: 1px solid var(--line); font-size: var(--type-body); }
+.row:first-child { border-top: 0; }
+.k { color: var(--ink-2); flex: none; max-width: 45%; }
+.v { margin: 0; min-width: 0; text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.mono { font-family: var(--mono); font-size: var(--type-mono-sm); }
 .dim { color: var(--ink-3); font-size: var(--type-small); }
 /* A clause that states WHY a figure is missing, withheld or unreadable is a state, and a state is never set in the
  * caption ink (reserved for ornament): it takes the secondary ink at the same size. */
 .stateNote { color: var(--ink-2); font-size: var(--type-small); }
 .crit { color: var(--crit-text); }
-.note { margin: var(--sp-3) 0 0; color: var(--ink-3); font-size: var(--type-small); }
-.rates { margin-top: var(--sp-3); min-width: 0; max-width: 100%; overflow-x: auto; }
+.note { margin: var(--sp-3) 0 0; color: var(--ink-2); font-size: var(--type-small); }
+.rates { margin-top: var(--sp-3); min-width: 0; max-width: 100%; }
 .forensics { margin-top: var(--sp-3); border-top: 1px solid var(--line); }
 .forensics > summary { cursor: pointer; padding: var(--sp-2) 0; color: var(--ink-2); font-size: var(--type-small); }
 
-/* ---- drawer body: the doctrine, paragraph by paragraph ---- */
-.method { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); color: var(--ink); font-size: var(--type-body); }
-.method p { margin: 0; }
-
-/* A phone's width. The page never scrolls sideways: the record's rows stack, the rate table scrolls inside its own
- * container (.rates; the kit's table is its own scroller below 900px as well), the plot inside its frame, and an
- * identity chip whose value is longer than the screen wraps inside itself instead of pushing the page out. */
+/* A phone's width. The page never scrolls sideways: the record's rows stack, the rate table and the plot scroll inside
+ * their own frames, and an identity chip whose value is longer than the screen wraps inside itself. */
 @media (max-width: 640px) {
-  /* A token longer than the screen (a URL inside a failure's own message, a key) breaks at the edge; break-word
-   * leaves every intrinsic width as it was, so nothing that fits is re-flowed. */
+  /* A token longer than the screen (a key) breaks at the edge; break-word leaves every intrinsic width as it was. */
   .page { overflow-wrap: break-word; }
-  .kv { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
-  .kv dd { margin-bottom: var(--sp-2); }
+  .row { flex-direction: column; gap: 2px; }
+  .k { max-width: none; }
+  .v { text-align: left; }
   .page [data-slot="identity"] > [data-chip] { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
   .marks { white-space: normal; }
 }

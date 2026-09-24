@@ -5,6 +5,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 import { BOOK, POSITIONS_DM_PAGE_1 } from "../fixtures/book";
 import { META } from "../fixtures/meta";
 import { EVIDENCE_MANIFEST } from "../fixtures/proof";
+import { CASH_PRICE_SOURCE, CASH_PRICE_SOURCE_CHIP, PIPELINE_STEPS } from "../../lib/prose";
 
 const CORS = { "access-control-allow-origin": "*" };
 const json = (route: Route, body: unknown, status = 200) =>
@@ -31,22 +32,43 @@ test("hero, live strip, entries and pipeline render from the fixtures", async ({
   await expect(page.getByTestId("overview-live-headline")).toHaveText(
     "$4,200 of Cash debt is liquidatable right now, across 1 account.",
   );
-  await expect(live.getByTestId("overview-live-identity")).toContainText("Batch 1");
+  // The live strip carries the mockup's three chips — no "Current" chip — and one line of facts, not the Book's dek.
+  const identity = live.getByTestId("overview-live-identity");
+  await expect(identity).toContainText("Batch 1");
+  await expect(identity.locator("[data-chip]")).toHaveCount(3);
+  await expect(identity).not.toContainText("Current");
+  await expect(page.getByTestId("overview-live-line")).toHaveText("1 with no verdict");
+  // The live card's kicker is the kit's, like the Book's: the same words, a live dot once the book is read.
+  await expect(live.locator("p").first()).toHaveText("Cash book · right now");
   for (const id of ["book", "inspector", "scenarios"]) {
     await expect(page.getByTestId(`overview-entry-${id}`)).toBeVisible();
   }
+  // The Inspector entry: one ellipsis, and an over-cap room worded as the Book words it — never a minus on dollars.
+  await expect(page.getByTestId("overview-entry-inspector")).toContainText("Try 0xccCc…0003 — over cap by $1,000");
+  // The projected micro-stat wears the PROJECTION badge its card promises.
+  const scenarios = page.getByTestId("overview-entry-scenarios");
+  await expect(scenarios.locator('[data-tone="projection"]')).toHaveText("PROJECTION");
+  await expect(scenarios).toContainText("ETH −30%: no new liquidatable debt · bad debt +$1,188, to $1,427");
   await expect(page.getByRole("link", { name: "Architecture & verification →" })).toHaveAttribute("href", "/proof#architecture");
   const dm = META.watermark_vector.find((w) => w.engine === "debt_manager");
   if (dm === undefined) throw new Error("meta fixture must carry the debt_manager watermark");
-  await expect(page.getByTestId("pipeline-index")).toHaveAttribute("data-value", dm.last_block.toLocaleString("en-US"));
-  await expect(page.getByTestId("pipeline-compute")).toContainText(`batch ${BOOK.batch.id.toLocaleString("en-US")}`);
+  // The steps are the kit's strip, named by the one pipeline vocabulary.
+  for (const [key, name] of Object.entries(PIPELINE_STEPS)) {
+    await expect(page.getByTestId(`pipeline-${key}`)).toContainText(name.ordinal);
+    await expect(page.getByTestId(`pipeline-${key}`)).toContainText(name.name);
+  }
+  await expect(page.getByTestId("pipeline-index")).toContainText(`OP block ${dm.last_block.toLocaleString("en-US")}`);
+  await expect(page.getByTestId("pipeline-compute")).toContainText(`Batch ${BOOK.batch.id.toLocaleString("en-US")}`);
   const recon = EVIDENCE_MANIFEST.reconcile;
   if (recon === null || recon === undefined) throw new Error("evidence fixture must carry a reconcile receipt");
-  await expect(page.getByTestId("pipeline-verify")).toHaveAttribute(
-    "data-value",
+  await expect(page.getByTestId("pipeline-verify")).toContainText(
     `${recon.gated_exact.toLocaleString("en-US")}/${recon.gated_rows.toLocaleString("en-US")}`,
   );
   await expect(page.getByTestId("pipeline-serve")).toContainText("17 endpoints");
+  // One true price source: Cash's own contract. No sentence names a feed this system does not read.
+  await expect(page.getByTestId("pipeline-compute")).toContainText(CASH_PRICE_SOURCE);
+  await expect(page.locator("body")).toContainText(CASH_PRICE_SOURCE_CHIP);
+  await expect(page.locator("body")).not.toContainText(/redstone/i);
   // Never summed: the two engines' debts never appear as one figure
   // (6,000 legacy at 8 decimals + 4,200 Cash at 6 decimals).
   await expect(page.locator("body")).not.toContainText("$10,200");
@@ -58,15 +80,21 @@ test("with the API unreachable the hero still renders and the strip refuses hone
   await expect(page.getByRole("heading", { level: 1 })).toContainText("People borrow against crypto to spend on a Visa card.");
   await expect(page.getByTestId("overview-live")).toHaveAttribute("data-variant", "refused");
   await expect(page.getByTestId("overview-live-headline")).toHaveText("The Cash book could not be loaded.");
+  // A fetch failure is no refusal: the whole headline in the absent register.
+  await expect(page.getByTestId("overview-live-headline")).toHaveAttribute("data-register", "absent");
   for (const id of ["index", "verify"]) {
-    await expect(page.getByTestId(`pipeline-${id}`)).toHaveAttribute("data-value", "unavailable");
+    await expect(page.getByTestId(`pipeline-${id}`)).toHaveAttribute("data-state", "unavailable");
+    await expect(page.getByTestId(`pipeline-${id}`)).toContainText("Unavailable");
+    await expect(page.getByTestId(`pipeline-${id}`)).not.toHaveAttribute("data-tone", "refused");
   }
   await expect(page.locator("body")).not.toContainText("$0 of Cash debt");
-  // An unread book refused nothing: the strip's census is a dash, its chip says unavailable, and the engine's word
+  // An unread book refused nothing: the strip's census says unavailable — never a dash — and the engine's word
   // "not computed" is nowhere on the page.
-  await expect(page.getByTestId("overview-live-accounts")).toContainText("—");
+  await expect(page.getByTestId("overview-live-accounts")).toContainText("Unavailable");
+  await expect(page.getByTestId("overview-live-accounts")).not.toContainText("—");
   await expect(page.getByTestId("overview-live-accounts")).not.toContainText(/\d/);
   await expect(page.getByTestId("overview-live-identity")).toContainText("Identity unavailable");
+  await expect(page.getByTestId("overview-live-identity").locator('[data-chip="Identity"]')).not.toHaveClass(/chipRefused/);
   await expect(page.locator("main")).not.toContainText(/not computed/i);
 });
 
@@ -96,7 +124,7 @@ test("a withheld Cash engine refuses the strip — its census included — and t
   await expect(page.locator("body")).not.toContainText("liquidatable now");
   // The strip's "Accounts" and its Coverage chip: the census is withheld with the engine — never the card's 0, so
   // the strip cannot say "Accounts 0" above a pipeline step that says the census is withheld.
-  await expect(page.getByTestId("overview-live-accounts")).toContainText("—");
+  await expect(page.getByTestId("overview-live-accounts")).toContainText("Withheld");
   await expect(page.getByTestId("overview-live-accounts")).not.toContainText(/\d/);
   const identity = page.getByTestId("overview-live-identity");
   await expect(identity).toContainText("Coverage withheld");
@@ -125,8 +153,8 @@ test("a withheld Cash engine: the pipeline's compute step prints the batch and n
   await page.goto("/");
   await expect(page.getByTestId("overview-live")).toHaveAttribute("data-variant", "refused");
   const compute = page.getByTestId("pipeline-compute");
-  await expect(compute).toHaveAttribute("data-value", BOOK.batch.id.toLocaleString("en-US"));
-  await expect(compute).toContainText(`batch ${BOOK.batch.id.toLocaleString("en-US")} · Cash accounts withheld`);
+  await expect(compute.locator("b")).toHaveText(BOOK.batch.id.toLocaleString("en-US"));
+  await expect(compute).toContainText(`Batch ${BOOK.batch.id.toLocaleString("en-US")} · Cash accounts withheld`);
   await expect(compute).not.toContainText("0 Cash accounts");
   await expect(page.locator("body")).not.toContainText("0 Cash accounts");
   // The withheld step wears the refused register, not only its words: its line is not the ink of a step that stands.
@@ -169,9 +197,11 @@ test("a refused stress preview is named on the Scenarios entry — never 'Commit
   await page.goto("/");
   await expect(page.getByTestId("overview-entry-scenarios")).toContainText("Preview withheld: collateral sweep failed");
   await expect(page.getByTestId("overview-entry-scenarios")).not.toContainText("Committed scenarios");
+  // A withheld preview projects nothing: no PROJECTION badge.
+  await expect(page.getByTestId("overview-entry-scenarios").locator('[data-tone="projection"]')).toHaveCount(0);
 });
 
-test("a malformed Cash debt on the strip is a dash, never $0", async ({ page }) => {
+test("a malformed Cash debt on the strip is named unreadable — never a dash, never $0", async ({ page }) => {
   const book = { ...BOOK, engines: BOOK.engines.map((e) => (e.engine === "debt_manager" ? { ...e, total_debt: "" } : e)) };
   await page.route("**/v1/stream**", (route) => route.abort());
   await page.route("**/v1/book", (route) => json(route, book));
@@ -181,7 +211,8 @@ test("a malformed Cash debt on the strip is a dash, never $0", async ({ page }) 
   await page.goto("/");
   const strip = page.getByTestId("overview-live");
   await expect(strip).toContainText("Cash debt outstanding");
-  await expect(strip).toContainText("—");
+  await expect(page.getByTestId("overview-live-debt")).toContainText("Unreadable");
+  await expect(page.getByTestId("overview-live-debt")).not.toContainText("—");
   await expect(strip).not.toContainText("$0");
 });
 
@@ -200,7 +231,9 @@ test("over a Cash book the engine computed none of, the strip prints no debt or 
   await expect(page.getByTestId("overview-live-headline")).toHaveText("No Cash account could be computed this batch.");
   const strip = page.getByTestId("overview-live");
   await expect(strip).toContainText("Cash debt outstanding");
-  await expect(strip).toContainText("—");
+  // No figure over nothing computed: the population's word, never a dash, never "$0".
+  await expect(page.getByTestId("overview-live-debt")).toContainText("No verdict");
+  await expect(page.getByTestId("overview-live-collateral")).toContainText("No verdict");
   await expect(strip).not.toContainText("$0");
   await expect(page.getByTestId("overview-entry-book")).toContainText("No account could be computed this batch");
   await expect(page.getByTestId("overview-entry-book")).not.toContainText("within 10% of cap");
@@ -210,7 +243,8 @@ test("the address field refuses a non-address inline and routes a real one to th
   await mockAll(page);
   await page.route("**/v1/address/**", (route) => route.abort());
   await page.goto("/");
-  const field = page.getByTestId("overview-address");
+  // The kit's address field: the same control, hint and refusal the Inspector uses.
+  const field = page.getByTestId("overview-address-input");
   await field.fill("not an address");
   await field.press("Enter");
   await expect(page.getByTestId("overview-address-refused")).toBeVisible();
@@ -243,7 +277,7 @@ test("first viewport at 1440×900 holds the entries whole (reference faces)", as
   expect(bottom).toBeLessThanOrEqual(900);
 });
 
-test("a read in flight has not failed: while meta and evidence have not answered, their steps are pending in ink — never 'unavailable', never the refused register; a failed read then says unavailable", async ({ page }) => {
+test("a read in flight has not failed: while meta and evidence have not answered, their steps are pending in ink — never 'unavailable', never the refused register; a failed read then says Unavailable, still never refused", async ({ page }) => {
   await page.route("**/v1/stream**", (route) => route.abort());
   await page.route("**/v1/book", (route) => json(route, BOOK));
   await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
@@ -258,16 +292,18 @@ test("a read in flight has not failed: while meta and evidence have not answered
   for (const key of ["index", "verify"]) {
     const step = page.getByTestId(`pipeline-${key}`);
     await expect(step).toHaveAttribute("aria-busy", "true");
-    await expect(step).toHaveAttribute("data-value", "pending");
+    await expect(step).toHaveAttribute("data-state", "pending");
     await expect(step).not.toHaveAttribute("data-tone", "refused");
-    await expect(step).not.toContainText("unavailable");
+    await expect(step).not.toContainText(/unavailable/i);
   }
   expect(held.length).toBeGreaterThanOrEqual(2);
   await Promise.all(held.map((route) => route.abort()));
   for (const key of ["index", "verify"]) {
     const step = page.getByTestId(`pipeline-${key}`);
     await expect(step).not.toHaveAttribute("aria-busy", "true");
-    await expect(step).toHaveAttribute("data-tone", "refused");
-    await expect(step).toContainText("unavailable");
+    // A fetch failure is never the refused register: the unavailable state, its word, in ink-2.
+    await expect(step).toHaveAttribute("data-state", "unavailable");
+    await expect(step).not.toHaveAttribute("data-tone", "refused");
+    await expect(step).toContainText("Unavailable");
   }
 });

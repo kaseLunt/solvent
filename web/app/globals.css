@@ -53,11 +53,12 @@ strong {
 /* The app shell: header is full-bleed, content is centered. Width steps live
  * on --shell-max in tokens.css (canon §02) so every consumer steps together.
  * The side gutter is the token the header aligns its brand and status to, so
- * the header and the content share one edge at every width. */
+ * the header and the content share one edge at every width. The top offset is the
+ * shell's alone, so every page's first line sits at one height; pages add none. */
 .shell {
   max-width: var(--shell-max);
   margin: 0 auto;
-  padding: 0 var(--gutter) 120px;
+  padding: var(--frame-top) var(--gutter) 120px;
 }
 
 @media (max-width: 640px) {

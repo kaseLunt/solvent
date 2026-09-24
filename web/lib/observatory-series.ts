@@ -39,7 +39,7 @@
 
 import { formatUnits } from "@solvent/client";
 import { renderUsdAmount } from "./book-format";
-import { EM_DASH, formatBlock } from "./format";
+import { EM_DASH, MINUS, formatBlock } from "./format";
 import { humanUsd } from "./human-usd";
 import { humanUtc } from "./human-utc";
 import type {
@@ -144,12 +144,39 @@ export function buildBucketAxis(response: ObservatorySeriesResponse): BucketAxis
 /** The four charted metrics of a bucket row. */
 export type BucketMetric = "debt_usd" | "collateral_usd" | "accounts" | "liquidatable_positions";
 
-export const METRIC_LABELS: Record<BucketMetric, string> = {
-  debt_usd: "debt (usd)",
-  collateral_usd: "collateral (usd)",
-  accounts: "accounts",
-  liquidatable_positions: "liquidatable positions",
-};
+/**
+ * The noun a liquidatable count takes on its engine. On Cash one position is one account (the risk tables key a
+ * position by batch, engine and account), so Cash's reader copy says "accounts"; the legacy market keeps "positions".
+ */
+const liquidatableNoun = (engine: string): string => (engine === "debt_manager" ? "accounts" : "positions");
+
+/** A metric as a label names it — a toggle, a record key — in sentence case, the currency stated once. */
+export function metricLabel(metric: BucketMetric, engine: string): string {
+  switch (metric) {
+    case "debt_usd":
+      return "Debt (USD)";
+    case "collateral_usd":
+      return "Collateral (USD)";
+    case "accounts":
+      return "Accounts";
+    case "liquidatable_positions":
+      return `Liquidatable ${liquidatableNoun(engine)}`;
+  }
+}
+
+/** A metric as a sentence says it, lower case: "debt rose by $1.8M", "liquidatable accounts rose by 1". */
+export function metricWord(metric: BucketMetric, engine: string): string {
+  switch (metric) {
+    case "debt_usd":
+      return "debt";
+    case "collateral_usd":
+      return "collateral";
+    case "accounts":
+      return "accounts";
+    case "liquidatable_positions":
+      return `liquidatable ${liquidatableNoun(engine)}`;
+  }
+}
 
 /**
  * gap vocabulary, per entry (null where a finite value is plotted):
@@ -276,7 +303,7 @@ export function buildMetricSeries(
     if (point.refused) {
       values.push(null);
       titles.push(
-        `${entry.bucketStart} · WITHHELD · ${point.refusal_code ?? "unnamed"} @ block ${formatBlock(point.last_block)} · totals are null for that reason, never 0`,
+        `${entry.bucketStart} · Withheld · ${point.refusal_code ?? "unnamed"} @ block ${formatBlock(point.last_block)} · totals are null for that reason, never 0`,
       );
       gapKinds.push("withheld");
       continue;
@@ -287,7 +314,7 @@ export function buildMetricSeries(
       // contract allows. It is drawn as a gap with its own mark — never placed, never zero, never a throw.
       values.push(null);
       titles.push(
-        `${entry.bucketStart} · ${METRIC_LABELS[metric]} is ${UNREADABLE} in this bucket: the wire's value is not an exact decimal (unreadable is not zero)`,
+        `${entry.bucketStart} · ${metricWord(metric, response.engine)} is ${UNREADABLE} in this bucket: the wire's value is not an exact decimal (unreadable is not zero)`,
       );
       gapKinds.push("unreadable");
       continue;
@@ -296,14 +323,14 @@ export function buildMetricSeries(
     if (raw === null || value === null) {
       values.push(null);
       titles.push(
-        `${entry.bucketStart} · ${METRIC_LABELS[metric]} is null in this bucket (null is not zero)`,
+        `${entry.bucketStart} · ${metricWord(metric, response.engine)} is null in this bucket (null is not zero)`,
       );
       gapKinds.push("null");
       continue;
     }
     values.push(value);
     titles.push(
-      `${entry.bucketStart} · ${METRIC_LABELS[metric]} ${displayMetric(point, metric, response.usd_decimals)} @ block ${formatBlock(point.last_block)} · captured from the newest complete batch in this bucket`,
+      `${entry.bucketStart} · ${metricWord(metric, response.engine)} ${displayMetric(point, metric, response.usd_decimals)} @ block ${formatBlock(point.last_block)} · captured from the newest complete batch in this bucket`,
     );
     gapKinds.push(null);
   }
@@ -329,28 +356,47 @@ export function strideWord(stepSeconds: number | null): string {
 /** The stride's method sentence — the chip's title and a drawer paragraph. A stride never averages: each hour served is verbatim. */
 export function describeStride(stepSeconds: number | null): string {
   if (stepSeconds === null) {
-    return "native hourly record · every recorded hour is served verbatim";
+    return "Native hourly record: every recorded hour is served verbatim.";
   }
   // A served stride is a wire population, guarded at the read.
-  return `stride ${String(readWirePopulation(stepSeconds, "step_seconds"))}s · the service serves at most one recorded hour per stride, each VERBATIM; skipped hours are never averaged`;
+  return `Stride ${String(readWirePopulation(stepSeconds, "step_seconds"))}s: the service serves at most one recorded hour per stride, each verbatim; skipped hours are never averaged.`;
 }
 
-/** The served range, disclosed. Absent bounds are unbounded, and say so. */
+/** The served range on the exact layer — the chip's title: the wire's own instants, an absent bound said as unbounded. */
 export function describeRange(from: string | null, to: string | null): string {
   return `${from ?? "unbounded"} → ${to ?? "unbounded"}`;
 }
 
+/**
+ * The served range in the reader's words — the chip's face: each bound through humanUtc against the envelope's own
+ * served_at, an open start the earliest hour on record and an open end the latest.
+ */
+export function rangeWords(from: string | null, to: string | null, servedAt: string): string {
+  return `${from === null ? "earliest" : humanUtc(from, servedAt)} → ${to === null ? "latest" : humanUtc(to, servedAt)}`;
+}
+
+/**
+ * An axis end's compact form: the reader's instant with its clock dropped ("Aug 1"), printed only where the full
+ * ends would run together — the full instant stays the end's title. An instant humanUtc could not read is its own
+ * compact form: nothing is cut from text that is not a well-formed instant.
+ */
+export function compactInstant(words: string): string {
+  return words.replace(/, \d{2}:\d{2} UTC$/, "");
+}
+
 // ---------------------------------------------------------------------------
 // The direct labels the chart draws, derived (never retyped): no figure lives
-// only in a hover, and every label says which point it belongs to.
+// only in a hover, and every label says which point it belongs to. The labels
+// speak the book register — the tiles' and the headline's tier — and each
+// point's exact figure stays one hover away, in its mark's title, and in its
+// hour's record.
 // ---------------------------------------------------------------------------
 
 /**
  * A labelled point of one metric series: the index into the axis, the drawn
  * geometry at that index, and the exact display string of the SAME wire row
- * through `displayMetric` — the formatter the bucket record prints with, so a
- * label on the chart and that hour's record are one string. (The tiles above
- * read the same wire row in the compact tier.)
+ * through `displayMetric` — the formatter the bucket record prints with, and
+ * the string the point's own title carries.
  */
 export interface SeriesLabelledPoint {
   /** Index into `axis.entries` / `series.values`. */
@@ -362,12 +408,56 @@ export interface SeriesLabelledPoint {
 }
 
 /** The word the chart's y-max label opens with: it is the window's highest plotted value, and says so. */
-export const PEAK_WORD = "peak";
+export const PEAK_WORD = "Peak";
 
 /** `seriesMaxPoint`'s result: the highest plotted point, plus the label the chart prints for it. */
 export interface SeriesMaxPoint extends SeriesLabelledPoint {
-  /** The chart's direct label: "peak {label}" — a bare figure at the plot's left edge reads as the starting value. */
+  /** The chart's direct label: "Peak $27.9M" — a bare figure at the plot's left edge reads as the starting value. */
   directLabel: string;
+}
+
+/** The money figure a point states, through its guard; null for a count, a null figure or one that fails the guard. */
+function moneyOf(point: ObservatorySeriesPoint, metric: BucketMetric): bigint | null {
+  if (!isMoneyMetric(metric)) return null;
+  const raw = rawMetric(point, metric);
+  return raw === null || !isWireDecimal(raw) ? null : wireBigInt(raw);
+}
+
+const groupWhole = (whole: bigint): string => whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+/**
+ * Money in the book register with `extra` more significant digits than it prints by default — truncated toward zero,
+ * like every register: "$27.9M" → "$27.94M" → "$27.942M". Used only to tell two labels apart whose figures differ but
+ * print alike; the default (extra 0) IS humanUsd.
+ */
+export function bookMoneyAt(value: bigint, decimals: number, extra: number): string {
+  if (extra <= 0) return humanUsd(value, decimals);
+  if (value < 0n) return `${MINUS}${bookMoneyAt(-value, decimals, extra)}`;
+  const dollar = 10n ** BigInt(decimals);
+  const dollars = value / dollar;
+  const tier =
+    dollars >= 1_000_000_000n
+      ? { unit: 1_000_000_000n, places: 1, suffix: "B" }
+      : dollars >= 1_000_000n
+        ? { unit: 1_000_000n, places: 1, suffix: "M" }
+        : dollars >= 10_000n
+          ? { unit: 1_000n, places: 0, suffix: "K" }
+          : dollars >= 1_000n
+            ? { unit: 1n, places: 0, suffix: "" }
+            : { unit: 1n, places: 2, suffix: "" };
+  if (dollars < 1_000n && value * 100n < dollar) return humanUsd(value, decimals);
+  const scale = dollar * tier.unit;
+  const places = tier.places + extra;
+  const whole = value / scale;
+  const fraction = ((value % scale) * 10n ** BigInt(places)) / scale;
+  return `$${groupWhole(whole)}.${fraction.toString().padStart(places, "0")}${tier.suffix}`;
+}
+
+/** A point's figure at chart altitude: money in the book register (with `extra` digits when two labels collide), a count grouped. */
+function bookFigure(point: ObservatorySeriesPoint, metric: BucketMetric, decimals: number, extra = 0): string {
+  const money = moneyOf(point, metric);
+  if (money !== null) return bookMoneyAt(money, decimals, extra);
+  return displayMetric(point, metric, decimals);
 }
 
 function labelledPointAt(
@@ -385,9 +475,9 @@ function labelledPointAt(
 /**
  * The point the drawn y-max belongs to. The chart's y-domain is [0, max of
  * finite values] (the zero floor is always drawn), so the max label IS this
- * point's display string — derived from the drawn domain, never invented —
- * named for what it is: the window's PEAK, not its first value. Ties keep the
- * first (oldest) occurrence; null when nothing plots.
+ * point's figure — derived from the drawn domain, never invented — named for
+ * what it is: the window's PEAK, not its first value. Ties keep the first
+ * (oldest) occurrence; null when nothing plots.
  */
 export function seriesMaxPoint(
   axis: BucketAxis,
@@ -405,7 +495,9 @@ export function seriesMaxPoint(
   });
   if (bestIndex < 0) return null;
   const point = labelledPointAt(axis, response, metric, bestIndex, bestValue);
-  return point === null ? null : { ...point, directLabel: `${PEAK_WORD} ${point.label}` };
+  const wire = axis.entries[bestIndex]?.point;
+  if (point === null || wire === null || wire === undefined) return null;
+  return { ...point, directLabel: `${PEAK_WORD} ${bookFigure(wire, metric, response.usd_decimals)}` };
 }
 
 /**
@@ -413,30 +505,30 @@ export function seriesMaxPoint(
  * label the chart prints at it. ONE-SOURCE LAW, both arms:
  *
  *   - when the last plotted point IS the newest axis entry, `directLabel`
- *     is `label` VERBATIM — that hour's exact figure, as its record prints it;
+ *     is that hour's figure in the book register;
  *   - when it is NOT (the newest bucket is withheld, or carries this metric
- *     as null or unreadable), `directLabel` is that SAME string plus a
- *     "(last captured {bucket})" qualifier naming which row the figure
+ *     as null or unreadable), `directLabel` is that SAME figure plus a
+ *     "(last captured {hour})" qualifier naming which row the figure
  *     belongs to. The tile above shows the newest bucket's dash and its
  *     word, and the chart must never print an older number unqualified
  *     beside it.
- *
- * The qualifier's bucket hour is the entry's own `bucketStart`, the same
- * UTC string the tiles' subs and the x-axis extents print.
  */
 export interface SeriesNewestPoint extends SeriesLabelledPoint {
   /** True exactly when the last plotted point IS the newest axis entry. */
   atNewestBucket: boolean;
-  /** The chart's direct label: `label` verbatim, or `label` + the qualifier. */
+  /** The chart's direct label: the figure, or the figure + the qualifier. */
   directLabel: string;
 }
 
+/** The qualifier that names which hour an older label belongs to, in the reader's words. */
+const lastCaptured = (bucketStart: string, servedAt: string): string => `(last captured ${humanUtc(bucketStart, servedAt)})`;
+
 /**
  * The NEWEST captured point of one metric series (the last finite value on
- * the axis), with its exact display string — the same wire row the newest
- * hour's tile reads in the compact tier — and the direct label the chart
- * prints (see `SeriesNewestPoint`: qualified whenever the last plotted
- * point is not the newest axis entry). Null when nothing plots.
+ * the axis), with its exact display string — the string its hour's record and
+ * its mark's title print — and the direct label the chart prints (see
+ * `SeriesNewestPoint`: qualified whenever the last plotted point is not the
+ * newest axis entry). Null when nothing plots.
  */
 export function seriesNewestPoint(
   axis: BucketAxis,
@@ -449,18 +541,62 @@ export function seriesNewestPoint(
     if (value !== null && value !== undefined && Number.isFinite(value)) {
       const point = labelledPointAt(axis, response, metric, index, value);
       const entry = axis.entries[index];
-      if (point === null || entry === undefined) return null;
+      if (point === null || entry === undefined || entry.point === null) return null;
       const atNewestBucket = index === series.values.length - 1;
+      const figure = bookFigure(entry.point, metric, response.usd_decimals);
       return {
         ...point,
         atNewestBucket,
-        directLabel: atNewestBucket
-          ? point.label
-          : `${point.label} (last captured ${entry.bucketStart})`,
+        directLabel: atNewestBucket ? figure : `${figure} ${lastCaptured(entry.bucketStart, response.served_at)}`,
       };
     }
   }
   return null;
+}
+
+/** The chart's two direct labels, decided together so they can never print one figure for two different values. */
+export interface SeriesDirectLabels {
+  /** The peak's label, or null when nothing plots, the peak is the newest point itself, or nothing rises above zero. */
+  readonly peak: SeriesMaxPoint | null;
+  readonly newest: SeriesNewestPoint | null;
+}
+
+/**
+ * The peak's and the newest point's labels. One point, one label: when the peak IS the newest point, only the newest
+ * label prints, and a peak at zero is the floor's own "0". When both print and their book figures read alike while the
+ * two values differ — "$27.9M" beside "$27.9M" for two different hours — both take one more significant digit, and a
+ * second when one is not enough, so a reader never sees two different values printed as one.
+ */
+export function seriesDirectLabels(
+  axis: BucketAxis,
+  response: ObservatorySeriesResponse,
+  metric: BucketMetric,
+  series: BucketMetricSeries,
+): SeriesDirectLabels {
+  const newest = seriesNewestPoint(axis, response, metric, series);
+  const max = seriesMaxPoint(axis, response, metric, series);
+  const peak = max !== null && max.value > 0 && (newest === null || max.index !== newest.index) ? max : null;
+  if (peak === null || newest === null) return { peak, newest };
+  const peakWire = axis.entries[peak.index]?.point;
+  const newestWire = axis.entries[newest.index]?.point;
+  if (peakWire === null || peakWire === undefined || newestWire === null || newestWire === undefined) return { peak, newest };
+  const a = moneyOf(peakWire, metric);
+  const b = moneyOf(newestWire, metric);
+  if (a === null || b === null || a === b) return { peak, newest };
+  const decimals = response.usd_decimals;
+  let extra = 0;
+  while (extra < 2 && bookMoneyAt(a, decimals, extra) === bookMoneyAt(b, decimals, extra)) extra += 1;
+  if (extra === 0) return { peak, newest };
+  const newestFigure = bookFigure(newestWire, metric, decimals, extra);
+  const newestEntry = axis.entries[newest.index];
+  return {
+    peak: { ...peak, directLabel: `${PEAK_WORD} ${bookFigure(peakWire, metric, decimals, extra)}` },
+    newest: {
+      ...newest,
+      directLabel:
+        newest.atNewestBucket || newestEntry === undefined ? newestFigure : `${newestFigure} ${lastCaptured(newestEntry.bucketStart, response.served_at)}`,
+    },
+  };
 }
 
 /**
@@ -479,35 +615,27 @@ export function sparseCaptureLine(series: BucketMetricSeries): string | null {
   const unreadable = series.gapKinds.filter((kind) => kind === "unreadable").length;
   const parts = [
     plotted === 1
-      ? "1 captured bucket plots in this window"
-      : `${String(plotted)} captured buckets plot in this window`,
+      ? "1 captured hour plots in this window"
+      : `${String(plotted)} captured hours plot in this window`,
   ];
   if (absent > 0) {
-    parts.push(
-      absent === 1
-        ? "1 absent bucket renders as a gap"
-        : `${String(absent)} absent buckets render as gaps`,
-    );
+    parts.push(absent === 1 ? "1 absent hour renders as a gap" : `${String(absent)} absent hours render as gaps`);
   }
   if (withheld > 0) {
-    parts.push(
-      withheld === 1
-        ? "1 withheld bucket stays a named refusal"
-        : `${String(withheld)} withheld buckets stay named refusals`,
-    );
+    parts.push(withheld === 1 ? "1 withheld hour stays a named refusal" : `${String(withheld)} withheld hours stay named refusals`);
   }
   if (nulls > 0) {
     parts.push(
       nulls === 1
-        ? "1 served bucket carries a null value (null is not zero)"
-        : `${String(nulls)} served buckets carry null values (null is not zero)`,
+        ? "1 recorded hour states this figure as null (null is not zero)"
+        : `${String(nulls)} recorded hours state this figure as null (null is not zero)`,
     );
   }
   if (unreadable > 0) {
     parts.push(
       unreadable === 1
-        ? "1 served bucket carries an unreadable value (unreadable is not zero)"
-        : `${String(unreadable)} served buckets carry unreadable values (unreadable is not zero)`,
+        ? "1 recorded hour states this figure unreadably (unreadable is not zero)"
+        : `${String(unreadable)} recorded hours state this figure unreadably (unreadable is not zero)`,
     );
   }
   return parts.join(" · ");
@@ -517,11 +645,9 @@ export function sparseCaptureLine(series: BucketMetricSeries): string | null {
 // The computed sentences. One source each: the view model prints these parts
 // by identity and no component composes a word. Headline and finding speak
 // the reader's tier (humanUsd, grouped counts, humanUtc against the
-// envelope's own served_at); the exact values stay one glance away — the
-// instant verbatim in the tiles' subs, the figures in the chart's labels and
-// the bucket record.
+// envelope's own served_at); the exact values stay one glance away — in each
+// mark's title and in the hour's record.
 // ---------------------------------------------------------------------------
-
 
 /** The debt a headline counts, by engine: one engine per sentence, never a sum or a comparison across the two. */
 const DEBT_OF: Record<ObservatoryEngine, string> = {
@@ -529,6 +655,11 @@ const DEBT_OF: Record<ObservatoryEngine, string> = {
   aave_v3_etherfi: "legacy Aave v3 debt",
 };
 
+/** The same subject opening a sentence. */
+const DEBT_SUBJECT: Record<ObservatoryEngine, string> = {
+  debt_manager: "Cash debt",
+  aave_v3_etherfi: "Legacy Aave v3 debt",
+};
 
 /** The window's unit: an hour at the native stride, a sampled hour when the service applied a larger one. */
 const hourUnit = (axis: BucketAxis): string =>
@@ -551,42 +682,32 @@ function refusalCause(code: string | null): string {
 
 /**
  * The window's holes, as the dek states them. Three carriers keep a missing
- * hour from vanishing — this sentence, the census chip, the chart's marks —
- * and this is the one that GLOSSES the two words: an absent hour is one no
- * complete batch was observed in (the rollup wrote no row: nothing existed to
- * observe, or nothing observed), a withheld hour is a row whose figures were
- * refused. Either clause drops at a count of zero; each hole is "a gap on the
- * chart, never a zero". When the headline already carries the recorded count
- * (`promoted`), the dek keeps only what each hole is.
+ * hour from vanishing — this sentence, the census chip, the chart's marks (whose
+ * key glosses each mark) — so the sentence counts them and says what each is on
+ * the chart: a gap. When the headline already carries the recorded count
+ * (`promoted`), the dek keeps only the holes.
  */
 function windowHoles(axis: BucketAxis, promoted: boolean): string {
   const unit = hourUnit(axis);
   const total = axis.entries.length;
-  const sentences: string[] = [];
-  if (!promoted) {
-    if (total === 1) {
-      sentences.push(`The only ${unit} in this window was ${axis.capturedCount === 1 ? "" : "not "}recorded.`);
-    } else if (axis.capturedCount === total) {
-      sentences.push(`All ${groupInt(total)} ${unit}s in this window were recorded.`);
-    } else if (axis.capturedCount === 0) {
-      sentences.push(`None of the ${groupInt(total)} ${unit}s in this window was recorded.`);
-    } else {
-      sentences.push(`${recordedOf(axis)}.`);
-    }
-  }
   const absent =
-    axis.absentCount > 0
-      ? `${groupInt(axis.absentCount)} ${axis.absentCount === 1 ? "is" : "are"} absent — no complete batch was observed`
-      : null;
+    axis.absentCount > 0 ? `${groupInt(axis.absentCount)} ${axis.absentCount === 1 ? "is" : "are"} absent` : null;
   const withheld =
-    axis.withheldCount > 0
-      ? `${groupInt(axis.withheldCount)} ${axis.withheldCount === 1 ? "was" : "were"} withheld`
-      : null;
-  const gaps = absent !== null && withheld !== null ? `${absent} — and ${withheld}` : (absent ?? withheld);
-  if (gaps !== null) {
-    const each = axis.absentCount + axis.withheldCount === 1 ? "it is" : "each is";
-    sentences.push(`${gaps}; ${each} a gap on the chart, never a zero.`);
+    axis.withheldCount > 0 ? `${groupInt(axis.withheldCount)} ${axis.withheldCount === 1 ? "was" : "were"} withheld` : null;
+  const holes = axis.absentCount + axis.withheldCount;
+  const gaps =
+    absent === null && withheld === null
+      ? null
+      : `${[absent, withheld].filter((part): part is string => part !== null).join(" and ")}, ${holes === 1 ? "a gap" : "each a gap"} on the chart`;
+  let recorded: string | null = null;
+  if (!promoted) {
+    if (total === 1) recorded = `The only ${unit} in this window was ${axis.capturedCount === 1 ? "" : "not "}recorded`;
+    else if (axis.capturedCount === total) recorded = `All ${groupInt(total)} ${unit}s in this window were recorded`;
+    else if (axis.capturedCount === 0) recorded = `None of the ${groupInt(total)} ${unit}s in this window was recorded`;
+    else recorded = `${groupInt(axis.capturedCount)} of ${groupInt(total)} ${unit}s ${axis.capturedCount === 1 ? "was" : "were"} recorded`;
   }
+  const first = recorded === null ? gaps : gaps === null ? recorded : `${recorded}; ${gaps}`;
+  const sentences = first === null ? [] : [`${first.charAt(0).toUpperCase()}${first.slice(1)}.`];
   if (axis.strideSeconds > NATIVE_BUCKET_SECONDS) {
     // What the stride is, as the service applies it: a recorded hour is served only when it starts at least one
     // stride after the last one served — so "at most one in every N", never "every Nth" (a hole shifts the grid).
@@ -608,21 +729,33 @@ export interface ObservatoryTakeaway {
   readonly rest: string;
   /** The window's holes as the dek states them; "" when the window holds no hour at all. */
   readonly holes: string;
-  /** The dek: a withheld latest hour's cause, then the holes; or the missing record's own words. */
+  /** The dek: the other figures' movement and the holes; a withheld latest hour's cause; or the missing record's own words. */
   readonly dek: string;
   /** True exactly when the latest recorded hour stated a debt figure and the headline printed it. */
   readonly answered: boolean;
 }
 
+/** The recorded hours the window's movement is read between: captured and not withheld, oldest first. */
+function recordedHours(axis: BucketAxis): ObservatorySeriesPoint[] {
+  return axis.entries.flatMap((entry) => (entry.point !== null && !entry.point.refused ? [entry.point] : []));
+}
+
+/** The movement of the two counts beside the debt, as one sentence of the dek: the liquidatable count, then the accounts. */
+function countsMoved(first: ObservatorySeriesPoint, last: ObservatorySeriesPoint, engine: string): string {
+  const liquidatable = countMove(metricWord("liquidatable_positions", engine), first.liquidatable_positions, last.liquidatable_positions);
+  return `${liquidatable.charAt(0).toUpperCase()}${liquidatable.slice(1)}; ${countMove("accounts", first.accounts, last.accounts)}.`;
+}
+
 /**
- * The surface takeaway, for ONE engine: how much debt the latest recorded
- * hour states and across how many accounts, "in the hour starting" that
- * hour's own instant — the rollup observes the newest complete batch INTO the
- * hour it is observed in, so the hour is the honest claim, not an as-of. The
- * window's holes ride the dek by law: an hour with no record is an unknowable,
- * and a takeaway that omitted it would invite reading the series as
- * continuous. When the record is more hole than hour
- * (`captured * 2 <= total`) the recorded count is promoted into the headline.
+ * The surface takeaway, for ONE engine: the change leads. Between the first and
+ * the latest recorded hours, how the engine's debt moved — "Cash debt rose $1.8M
+ * since Aug 1, 21:00 UTC, to $27.8M." — one bigint subtraction of two figures
+ * of one engine at one scale, each through its guard; the other two figures'
+ * movement and the window's holes ride the dek. A window with one recorded hour,
+ * or whose first recorded hour states no readable debt, has no change to lead
+ * with: the headline states the latest hour's level instead. When the record
+ * is more hole than hour (`captured * 2 <= total`) the recorded count is
+ * promoted into the headline.
  *
  * A withheld latest hour states the withholding and its cause — an older
  * hour's figure never stands in. A latest hour that states no debt figure
@@ -678,21 +811,47 @@ export function observatoryTakeaway(
       answered: false,
     };
   }
+  // More hole than record: the count of recorded hours is the finding's own scope, so it rides the headline and
+  // the dek keeps only the holes.
+  const promoted = axis.capturedCount * 2 <= axis.entries.length;
+  const holes = windowHoles(axis, promoted);
+  const but = promoted ? ` — but only ${recordedOf(axis)}` : "";
+  const recorded = recordedHours(axis);
+  const first = recorded[0];
+  const firstDebt = first === undefined || first === newest || first.debt_usd === null ? null : wireBigInt(first.debt_usd);
+  const decimals = response.usd_decimals;
+  if (first !== undefined && first !== newest && firstDebt !== null) {
+    const since = humanUtc(first.bucket_start, response.served_at);
+    const dek = [countsMoved(first, newest, engine), holes].filter((part) => part !== "").join(" ");
+    if (debt === firstDebt) {
+      return {
+        emphasis: `${DEBT_SUBJECT[engine]} was unchanged since ${since},`,
+        rest: `at ${humanUsd(debt, decimals)}${but}.`,
+        holes,
+        dek,
+        answered: true,
+      };
+    }
+    const rose = debt > firstDebt;
+    return {
+      emphasis: `${DEBT_SUBJECT[engine]} ${rose ? "rose" : "fell"} ${humanUsd(rose ? debt - firstDebt : firstDebt - debt, decimals)} since ${since},`,
+      rest: `to ${humanUsd(debt, decimals)}${but}.`,
+      holes,
+      dek,
+      answered: true,
+    };
+  }
   const scope =
     newest.accounts === null
       ? `in the hour starting ${at}; the account count was not stated`
       : `across ${plural(readWirePopulation(newest.accounts, "accounts"), "account")} in the hour starting ${at}`;
-  // More hole than record: the count of recorded hours is the finding's own scope, so it rides the headline and
-  // the dek keeps only what each hole is.
-  const promoted = axis.capturedCount * 2 <= axis.entries.length;
-  const holes = windowHoles(axis, promoted);
+  const dek =
+    first !== undefined && first !== newest ? [countsMoved(first, newest, engine), holes].filter((part) => part !== "").join(" ") : holes;
   return {
-    emphasis: `${humanUsd(debt, response.usd_decimals)} of ${DEBT_OF[engine]} is outstanding,`,
-    rest: promoted
-      ? `${scope} — but only ${recordedOf(axis)}.`
-      : `${scope}.`,
+    emphasis: `${humanUsd(debt, decimals)} of ${DEBT_OF[engine]} is outstanding,`,
+    rest: `${scope}${but}.`,
     holes,
-    dek: holes,
+    dek,
     answered: true,
   };
 }
@@ -702,7 +861,7 @@ function humanUtcSpan(first: string, last: string, referenceIso: string): string
   const a = humanUtc(first, referenceIso);
   const b = humanUtc(last, referenceIso);
   // humanUtc returns a malformed instant verbatim, so an end it rewrote is an end it parsed — and ends with its zone.
-  const zone = /\u00a0UTC$/;
+  const zone = / UTC$/;
   return a !== first && b !== last && zone.test(a) ? `${a.replace(zone, "")} → ${b}` : `${a} → ${b}`;
 }
 
@@ -740,49 +899,44 @@ function countMove(name: string, first: number | null, last: number | null): str
 }
 
 /**
- * The chart's finding: movement between the FIRST and LAST recorded hours of
- * the window, as deltas in the reader's tier. It reads only what was recorded
- * — refusals and absences are the takeaway's job — and the exact values it
- * leans on are the chart's own end labels and any hour's record. Each
- * movement carries its own comma, so the three are joined by semicolons.
+ * The chart's finding: the drawn metric's movement between the FIRST and LAST
+ * recorded hours of the window, as a delta in the reader's tier. It reads only
+ * what was recorded — refusals and absences are the takeaway's job — and the
+ * exact values it leans on are each mark's own title and any hour's record.
  */
 export function gridReadingLine(
   response: ObservatorySeriesResponse,
   axis: BucketAxis,
+  metric: BucketMetric = "debt_usd",
 ): string {
-  const captured = axis.entries.filter(
-    (entry) => entry.point !== null && !entry.point.refused,
-  );
-  const first = captured[0]?.point;
-  const last = captured[captured.length - 1]?.point;
-  if (first === undefined || first === null || last === undefined || last === null) {
+  const captured = recordedHours(axis);
+  const first = captured[0];
+  const last = captured[captured.length - 1];
+  if (first === undefined || last === undefined) {
     return "No hour in this window was recorded, so there is no movement to read.";
   }
   if (captured.length === 1) {
     return `Only one hour in this window was recorded (${humanUtc(first.bucket_start, response.served_at)}), so there is no movement to state.`;
   }
-  return (
-    `Between the first and last recorded hours (${humanUtcSpan(first.bucket_start, last.bucket_start, response.served_at)}), ` +
-    `${moneyMove("debt", first.debt_usd, last.debt_usd, response.usd_decimals)}; ` +
-    `${countMove("accounts", first.accounts, last.accounts)}; ` +
-    `and ${countMove("liquidatable positions", first.liquidatable_positions, last.liquidatable_positions)}.`
-  );
+  const name = metricWord(metric, response.engine);
+  const move = isMoneyMetric(metric)
+    ? moneyMove(name, rawMetric(first, metric) as string | null, rawMetric(last, metric) as string | null, response.usd_decimals)
+    : countMove(name, rawMetric(first, metric) as number | null, rawMetric(last, metric) as number | null);
+  return `Between the first and last recorded hours (${humanUtcSpan(first.bucket_start, last.bucket_start, response.served_at)}), ${move}.`;
 }
 
 /**
- * The bucket record's one-line state — the takeaway of the forensic panel.
+ * The hour record's one-line state — the takeaway of the forensic panel. The
+ * hour itself is the record's title, so the line says what the hour holds.
  * ABSENT and WITHHELD arms are hazards and never soften.
  */
 export function pointDetailTakeaway(entry: BucketEntry): string {
   if (entry.point === null) {
-    return `ABSENT · no complete batch was observed in this bucket (${entry.bucketStart}).`;
+    return "Absent: no complete batch was observed in this hour.";
   }
   if (entry.point.refused) {
-    return (
-      `withheld (${entry.point.refusal_code ?? "unnamed"}) at ${entry.point.bucket_start} — ` +
-      `the engine's whole book was refused at capture time; no numbers served.`
-    );
+    return `Withheld (${entry.point.refusal_code ?? "unnamed"}): the engine's whole book was refused at capture time, so no figures were served.`;
   }
-  // last_block is the engine's balances watermark at capture — the bucket's own as-of, never a chain head seen later.
-  return `captured at ${entry.point.bucket_start} · balances as of block ${formatBlock(entry.point.last_block)}.`;
+  // last_block is the engine's balances watermark at capture — the hour's own as-of, never a chain head seen later.
+  return `Captured · balances as of block ${formatBlock(entry.point.last_block)}.`;
 }

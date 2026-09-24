@@ -3,7 +3,7 @@
 // mocked from committed fixtures; strings come from lib/book-headline.ts.
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { refinePositionSummary } from "@solvent/client";
-import { DEBT_UNREADABLE, readCashRow, REFUSED_DEBT_UNSERVED } from "../../lib/cash-rows";
+import { byRoom, DEBT_UNREADABLE, readCashRow, REFUSED_DEBT_UNSERVED } from "../../lib/cash-rows";
 import {
   bandsFinding,
   belowLineToggleLabel,
@@ -60,13 +60,18 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   await expect(page.getByTestId("book-verdict-headline")).toHaveText(
     "$4,200 of Cash debt is liquidatable right now, across 1 account.",
   );
+  // The dek states facts; the doctrine ("counted, not hidden") is the drawer's, said once.
   await expect(page.getByTestId("book-verdict-dek")).toHaveText(
-    "No account is within 10% of its borrow cap. 1 position has no verdict in this batch and is counted, not hidden.",
+    "No account is within 10% of its borrow cap. 1 account has no verdict in this batch.",
   );
   const identity = page.getByTestId("book-verdict-identity");
   await expect(identity).toContainText("Batch 1");
   await expect(identity).toContainText("Coverage 1 / 2 computed");
-  await expect(identity).toContainText("Current");
+  // The label-only chip says the whole phrase and bolds none of it; a fresh snapshot is a record, in ink.
+  const current = identity.locator('[data-chip="Current, not projected"]');
+  await expect(current).toHaveText("Current, not projected");
+  await expect(current.locator("b")).toHaveCount(0);
+  await expect(identity.locator('[data-chip="Snapshot"]')).not.toHaveClass(/chipOk/);
 
   await expect(page.getByTestId("book-kpi-debt")).toContainText("$4,200");
   await expect(page.getByTestId("book-kpi-liquidatable")).toHaveAttribute("data-tone", "crit");
@@ -77,13 +82,23 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   await expect(page.getByTestId("book-kpi-near")).toContainText("0 accounts");
   await expect(page.getByTestId("book-kpi-baddebt")).toContainText("$239.60");
   await expect(page.getByTestId("book-kpi-notcomputed")).toHaveAttribute("data-tone", "refused");
-  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("collateral never read");
+  // One state word for the engine-refused population: the tile, the row's pill and the dek all say "No verdict".
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("No verdict");
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("Collateral never read");
 
   const rows = page.getByTestId("book-attention").locator("tbody tr");
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toContainText("Liquidatable");
-  await expect(rows.nth(1)).toContainText("Not computed");
+  await expect(rows.nth(1)).toContainText("No verdict");
   await expect(rows.nth(1)).toHaveClass(/dim/);
+  // One unit in the Room to cap column: percent of the cap, over cap negative (U+2212), the dollars in its title.
+  await expect(page.getByTestId("book-attention").locator("thead th")).toHaveText(["Account", "Room to cap", "Debt", "Status"]);
+  const room = rows.nth(0).locator("td").nth(1).locator("span");
+  await expect(room).toHaveText("−31.3%");
+  await expect(room).toHaveAttribute("title", "over cap by $1,000");
+  // The account is shortened with one ellipsis, and the whole address rides its title.
+  await expect(rows.nth(0).locator("a")).toHaveText("0xccCc…0003");
+  await expect(rows.nth(0).locator("a")).toHaveAttribute("title", "0xccCc000000000000000000000000000000000003");
   await expect(page.getByTestId("book-dust-toggle")).toHaveCount(0); // nothing below the line
   await expect(page.getByTestId("book-near-toggle")).toHaveCount(0); // nothing near the cap to hide
 
@@ -93,12 +108,18 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   const previewLinks = page.getByTestId("book-stress-preview").locator("a");
   expect(await previewLinks.count()).toBeGreaterThan(1);
   for (const link of await previewLinks.all()) await expect(link).toHaveAttribute("href", "/lab?scenario=eth_minus_30");
+  // The projected container wears one PROJECTION badge; its lines frame bad debt as the rise over the unshocked point.
+  const stress = page.getByTestId("book-stress-preview");
+  await expect(stress.locator('[data-tone="projection"]')).toHaveText("PROJECTION");
+  await expect(stress).toContainText("ETH −10%: no new liquidatable debt · bad debt +$396.03, to $635.64");
+  await expect(stress.locator("li").first()).not.toContainText("→");
 
   const legacy = page.getByTestId("book-legacy");
   await expect(legacy).not.toHaveAttribute("open", /.*/);
-  await expect(legacy.locator("summary")).toContainText("Legacy · Aave v3 market");
+  // The kit's fold, titled once for every page; the lib's summary beside the title.
+  await expect(legacy.locator("summary span").first()).toHaveText("Legacy · Aave v3 market");
   // The market's own finding over the positions it computed: 1 of the 2 was refused and is counted on its own.
-  await expect(legacy.locator("summary")).toHaveText("Legacy · Aave v3 market — 0 of 1 computed position is liquidatable · $6,000 debt · 1 refused");
+  await expect(legacy.locator("summary span").nth(1)).toHaveText("0 of 1 computed position is liquidatable · $6,000 debt · 1 refused");
   // The section head states the census and anchors to the legacy block that is on the page.
   await expect(page.getByTestId("book-section-cash")).toContainText("Debt Manager engine · OP Mainnet · 2 borrowing accounts");
   await expect(page.getByTestId("book-section-cash").getByRole("link", { name: "Legacy Aave v3 market ↓" })).toHaveAttribute("href", "#legacy");
@@ -111,6 +132,9 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("debt_manager");
   await expect(dialog).toContainText("$100");
+  // The doctrine the dek no longer carries lives here, once.
+  await expect(dialog).toContainText("An account with no verdict is counted, not hidden");
+  await expect(page.getByTestId("book-verdict-dek")).not.toContainText("counted, not hidden");
 });
 
 test("demo scale: money-first headline, the dust toggle restates the count, bands sum to the computed population", async ({
@@ -121,9 +145,9 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
   await expect(page.getByTestId("book-verdict-headline")).toHaveText(
     "$6,840 of Cash debt is liquidatable right now, across 2 accounts.",
   );
-  // The $100 line is per position: each of the 47 sits under it, and their sum is stated together — never "below" the line.
+  // The $100 line is per account: each of the 47 sits under it, and their sum is stated together — never "below" the line.
   const below = belowLineSentence(DEMO_SUMMARY.liquidatable.counts, DEMO_SUMMARY.liquidatable.sums, 6);
-  expect(below).toBe("47 more positions are technically liquidatable, each under the $100 line — $109.45 together — and not headlined.");
+  expect(below).toBe("47 more accounts are technically liquidatable, each under the $100 line — $109.45 together — and not headlined.");
   await expect(page.getByTestId("book-verdict-dek")).toContainText(below ?? "");
   await expect(page.getByTestId("book-verdict-dek")).not.toContainText("below the $100 line");
   // Read whole, the tile states the batch aggregate's 49 liquidatable positions: 2 material + 47 under the line.
@@ -133,8 +157,14 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
   await expect(tile).toContainText("2 accounts · 47 more under $100 · 49 in all");
   await expect(page.getByTestId("book-kpi-near")).toContainText("27 accounts");
   const toggle = page.getByTestId("book-dust-toggle");
-  expect(belowLineToggleLabel(DEMO_SUMMARY.belowLine.count, DEMO_SUMMARY.belowLine.sum, 6)).toBe("Show 47 small & dust positions ($109.45)");
-  await expect(toggle).toContainText("Show 47 small & dust positions ($109.45)");
+  expect(belowLineToggleLabel(DEMO_SUMMARY.belowLine.count, DEMO_SUMMARY.belowLine.sum, 6)).toBe("Show 47 accounts under $100 ($109.45)");
+  await expect(toggle).toContainText("Show 47 accounts under $100 ($109.45)");
+  // The chart reconciles its over-cap bar with the headline's two accounts.
+  await expect(page.getByTestId("book-bands-card")).toContainText("the over-cap bar includes the 47 accounts under $100");
+  // One precision in the Debt column: whole dollars in every row, since the column holds figures over $1,000.
+  for (const cell of await page.getByTestId("book-attention").locator("tbody tr:not([class*='dim']) td:nth-child(3)").allInnerTexts()) {
+    expect(cell.trim()).toMatch(/^\$[\d,]+$/);
+  }
   const before = await page.getByTestId("book-attention").locator("tbody tr").count();
   await toggle.click();
   await expect(page.getByTestId("book-attention").locator("tbody tr")).toHaveCount(before + 47);
@@ -153,12 +183,10 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
     await expect(row.locator("td").nth(2).locator("[title]")).toHaveAttribute("title", REFUSED_DEBT_UNSERVED);
   }
   // The dek sizes the blind spot in words — their debt is not known — and never as a figure or a sum.
-  await expect(page.getByTestId("book-verdict-dek")).toContainText(
-    "6 positions have no verdict in this batch and are counted, not hidden. No debt figure is served for a position the engine could not compute, so their debt is not known.",
-  );
+  await expect(page.getByTestId("book-verdict-dek")).toContainText("6 accounts have no verdict in this batch; their debt is not known.");
   // The legacy fold's line states the market's own finding over its computed positions — never summed with Cash.
-  await expect(page.getByTestId("book-legacy").locator("summary")).toHaveText(
-    "Legacy · Aave v3 market — 46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused",
+  await expect(page.getByTestId("book-legacy").locator("summary span").nth(1)).toHaveText(
+    "46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused",
   );
 });
 
@@ -170,11 +198,6 @@ test("the near-cap fold shows the rows the table hides: collapsed it is today's 
   const rows = page.getByTestId("book-attention").locator("tbody tr");
   const ids = () => rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
   // The lib's own partition of the demo walk: material first by room, then near cap by room, then the rows with no verdict.
-  const byRoom = (a: { roomTenths: bigint | null }, b: { roomTenths: bigint | null }) => {
-    const x = a.roomTenths ?? 0n;
-    const y = b.roomTenths ?? 0n;
-    return x < y ? -1 : x > y ? 1 : 0;
-  };
   const material = [...DEMO_SUMMARY.liquidatable.material].sort(byRoom).map((r) => `book-row-${r.account}`);
   const near = DEMO_SUMMARY.nearCapRows.map((r) => `book-row-${r.account}`);
   const refusedAccounts = [...DEMO_POSITIONS_DM_PAGE_1.positions, ...DEMO_POSITIONS_DM_PAGE_2.positions]
@@ -233,20 +256,23 @@ test("a Cash book whose every account the engine refused one by one: no verdict,
   await page.route("**/v1/positions*", (route) => json(route, { ...POSITIONS_DM_PAGE_1, total_positions: 1, positions: refusedOnly }));
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("No Cash account could be computed this batch.");
-  // The three tiles a sum over computed positions would fill: a dash in the refused register, and the words why.
-  // The median room reads the same decision: no room was read, and the tile says why rather than a neutral dash.
+  // The tiles a sum over computed positions would fill: no figure — the population's word, "No verdict", in the refused
+  // register, and the words why. The median room reads the same decision: no room was read.
   for (const id of ["debt", "liquidatable", "near", "median"]) {
     const tile = page.getByTestId(`book-kpi-${id}`);
     await expect(tile).toHaveAttribute("data-tone", "refused");
-    await expect(tile).toContainText("—");
-    await expect(tile).toContainText("no account computed");
+    await expect(tile).toHaveAttribute("data-state", "refused");
+    await expect(tile).toContainText("No verdict");
+    await expect(tile).toContainText("No account computed");
+    await expect(tile).not.toContainText("—");
     await expect(tile).not.toContainText("$0");
     await expect(tile).not.toContainText(/\b0 accounts?\b|\b0 more\b|in all/);
   }
   // The census stands as served: one account, counted where the engine refused it.
   await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("1");
-  // No bad-debt line is served for the engine: the tile names the absence, never a zero.
-  await expect(page.getByTestId("book-kpi-baddebt")).toContainText("—");
+  // No bad-debt line is served for the engine: the tile names the absence, never a zero, never a dash.
+  await expect(page.getByTestId("book-kpi-baddebt")).toContainText("Not reported");
+  await expect(page.getByTestId("book-kpi-baddebt")).toHaveAttribute("data-state", "not-served");
   await expect(page.getByTestId("book-kpi-baddebt")).not.toContainText("$0");
   // The distance chart reads it too: the finding says no account was computed, and no bar prints "$0 · 0".
   const distance = bandsFinding(
@@ -269,16 +295,17 @@ test("a Cash book whose every account the engine refused one by one: no verdict,
   await expect(page.getByTestId("book-bands-note")).toHaveText(distance.barsNote ?? "");
   // The legacy fold reads one decision: its line and its tiles say not computed, and no zero stands in for either.
   const legacy = page.getByTestId("book-legacy");
-  await expect(legacy.locator("summary")).toHaveText("Legacy · Aave v3 market — 1 position · debt not computed · 1 refused");
+  await expect(legacy.locator("summary span").nth(1)).toHaveText("1 position · debt not computed · 1 refused");
   await legacy.locator("summary").click();
   for (const id of ["debt", "liquidatable"]) {
     const tile = page.getByTestId(`book-legacy-kpi-${id}`);
     await expect(tile).toBeVisible();
     await expect(tile).toHaveAttribute("data-tone", "refused");
-    await expect(tile).toContainText("—");
+    await expect(tile).toContainText("No verdict");
+    await expect(tile).not.toContainText("—");
     await expect(tile).not.toContainText(/\$0|\b0\b/);
   }
-  await expect(page.getByTestId("book-legacy-kpi-liquidatable")).toContainText("not computed");
+  await expect(page.getByTestId("book-legacy-kpi-liquidatable")).toContainText("No position computed");
   // Its histogram's zeros count nothing either: no bar is drawn, and the fold says why in the lib's words.
   await expect(page.getByTestId("book-legacy-bands")).toHaveCount(0);
   await expect(page.getByTestId("book-legacy-bands-note")).toHaveText(LEGACY_BANDS_NONE_COMPUTED);
@@ -318,21 +345,26 @@ test("the Cash engine withheld whole: refused headline, refused tiles, nothing r
   await expect(identity).not.toContainText("computed");
   await expect(identity.locator('[data-chip="Coverage"]')).toHaveClass(/chipRefused/);
   const notComputed = page.getByTestId("book-kpi-notcomputed");
-  await expect(notComputed).toContainText("—");
+  await expect(notComputed).toContainText("Withheld");
+  await expect(notComputed).not.toContainText("—");
   await expect(notComputed).not.toContainText(/\b0\b/);
   await expect(page.locator("main")).not.toContainText("0 borrowing accounts");
   await expect(page.locator("main")).not.toContainText("0 / 0");
   for (const id of ["debt", "liquidatable", "near", "median", "baddebt"]) {
     await expect(page.getByTestId(`book-kpi-${id}`)).toHaveAttribute("data-tone", "refused");
-    await expect(page.getByTestId(`book-kpi-${id}`)).toContainText("—");
+    await expect(page.getByTestId(`book-kpi-${id}`)).toHaveAttribute("data-state", "refused");
+    await expect(page.getByTestId(`book-kpi-${id}`)).toContainText("Withheld");
+    await expect(page.getByTestId(`book-kpi-${id}`)).not.toContainText("—");
   }
-  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("collateral-flag custody unproven");
-  await expect(page.getByTestId("book-bands-card")).toContainText("Not computed.");
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("Collateral-flag custody unproven");
+  await expect(page.getByTestId("book-bands-card")).toContainText("Withheld.");
   await expect(page.getByTestId("book-bands")).toHaveCount(0);
   await expect(page.getByTestId("book-attention")).toHaveCount(0);
   await expect(page.getByTestId("book-stress-preview")).toContainText("Preview withheld");
   // A withheld preview names no scenario: its link is the workspace, never an id the batch did not publish a view for.
   await expect(page.getByTestId("book-stress-preview").locator("a")).toHaveAttribute("href", "/lab");
+  // Nothing on a withheld preview is projected: it wears no PROJECTION badge.
+  await expect(page.getByTestId("book-stress-preview").locator('[data-tone="projection"]')).toHaveCount(0);
   // No liquidatable pill anywhere, and no "$0" standing in for a figure the engine withheld.
   await expect(page.locator('main [data-tone="crit"]')).toHaveCount(0);
   await expect(page.getByTestId("book-bands-card")).not.toContainText("$0");
@@ -364,11 +396,13 @@ test("no servable batch (503): the load-failure headline names the reason", asyn
   await mockCommitted(page, BOOK_ERROR_UNAVAILABLE, 503);
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be loaded.");
+  // A book that could not be loaded is no refusal: the headline states there is no answer, in the absent register.
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "absent");
   await expect(page.getByTestId("book-verdict-dek")).toContainText(BOOK_ERROR_UNAVAILABLE.error.message.slice(1, 20));
-  await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("—");
-  // A book that could not be read refused nothing and computed nothing: the tile says "unavailable" — never the
-  // engine's word "not computed" (the tile's LABEL is "Not computed"; the pin is on its sub), never "nothing refused".
-  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("unavailable");
+  await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("Unavailable");
+  // A book that could not be read refused nothing and computed nothing: the tile says "Unavailable" — never the
+  // engine's words "not computed" or "withheld", never "nothing refused".
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("Unavailable");
   await expect(page.getByTestId("book-kpi-notcomputed")).not.toContainText("not computed");
   await expect(page.getByTestId("book-kpi-notcomputed")).not.toContainText("nothing refused");
 });
@@ -381,12 +415,17 @@ test("a fetch failure is an unread book: every tile, the chart card and the tabl
   await page.route("**/v1/**", (route) => route.abort("failed"));
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be loaded.");
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "absent");
+  // The identity strip's chip is drawn solid: a fetch failure is never the refused register.
+  await expect(page.getByTestId("book-verdict-identity").locator('[data-chip="Identity"]')).not.toHaveClass(/chipRefused/);
   for (const id of TILES) {
     const tile = page.getByTestId(`book-kpi-${id}`);
-    await expect(tile).toHaveAttribute("data-tone", "refused");
-    await expect(tile).toContainText("—");
-    await expect(tile).toContainText("unavailable");
-    await expect(tile).not.toContainText("not computed");
+    // The unavailable register — solid, never the refused one — and its word where the figure would be.
+    await expect(tile).toHaveAttribute("data-state", "unavailable");
+    await expect(tile).not.toHaveAttribute("data-tone", "refused");
+    await expect(tile).toContainText("Unavailable");
+    await expect(tile).not.toContainText("—");
+    await expect(tile).not.toContainText(/not computed|withheld/i);
   }
   await expect(page.getByTestId("book-bands-card")).toContainText("Unavailable.");
   await expect(page.getByTestId("book-bands")).toHaveCount(0);
@@ -399,7 +438,7 @@ test("a fetch failure is an unread book: every tile, the chart card and the tabl
   await expect(page.getByRole("link", { name: "Legacy Aave v3 market ↓" })).toHaveCount(0);
 });
 
-test("a read in flight has not failed and refused nothing: the tiles say 'loading…' — never 'unavailable', never 'not computed'", async ({ page }) => {
+test("a read in flight has not failed and refused nothing: the tiles are pending — never 'unavailable', never 'not computed'", async ({ page }) => {
   await page.route("**/v1/stream**", (route) => route.abort());
   await page.route("**/v1/meta*", (route) => json(route, META));
   await page.route("**/v1/book", () => new Promise<void>(() => undefined));
@@ -407,9 +446,10 @@ test("a read in flight has not failed and refused nothing: the tiles say 'loadin
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("Loading the Cash book…");
   for (const id of TILES) {
     const tile = page.getByTestId(`book-kpi-${id}`);
-    await expect(tile).toContainText("loading…");
-    await expect(tile).not.toContainText("unavailable");
-    await expect(tile).not.toContainText("not computed");
+    await expect(tile).toHaveAttribute("aria-busy", "true");
+    await expect(tile).toHaveAttribute("data-state", "pending");
+    await expect(tile).toContainText("…");
+    await expect(tile).not.toContainText(/unavailable|not computed|withheld|—/i);
   }
   await expect(page.getByTestId("book-bands-card")).toContainText("Loading…");
   await expect(page.getByTestId("book-section-cash")).toContainText("accounts loading…");
@@ -449,10 +489,11 @@ test("a transport failure mid-walk is stated with a retry that re-walks", async 
   await expect(failure).toBeVisible();
   // A walk that stopped on page one has read nothing: the headline names the stop and no tile prints a zero.
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be fully read this batch.");
-  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "refused");
-  await expect(page.getByTestId("book-kpi-near")).toContainText("—");
-  await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("data-tone", "refused");
-  await expect(page.getByTestId("book-kpi-median")).toContainText("walk stopped");
+  // A stopped walk is no refusal: the absent register.
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "absent");
+  await expect(page.getByTestId("book-kpi-near")).toContainText("Unavailable");
+  await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("data-state", "unavailable");
+  await expect(page.getByTestId("book-kpi-median")).toContainText("Walk stopped");
   await expect(page.getByTestId("book-attention")).toContainText("no account is cleared");
   await expect(page.locator("body")).not.toContainText("Nothing material");
   await expect(page.locator("body")).not.toContainText("No account is within 10%");
@@ -497,7 +538,8 @@ test("while the walk is still running the verdict is pending — never 'Nothing 
   await page.route("**/v1/positions*", () => new Promise<void>(() => undefined));
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("Walking the Cash book…");
-  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "refused");
+  // A walk in flight has refused nothing: the absent register, never the refused one.
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "absent");
   await expect(page.getByTestId("book-kpi-liquidatable")).toHaveAttribute("aria-busy", "true");
   await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("aria-busy", "true");
   await expect(page.getByTestId("book-attention")).toContainText("Walking the book…");
@@ -539,9 +581,9 @@ test("a refused positions page is the engine's refusal — never an empty, healt
   await expect(page.getByTestId("book-verdict-dek")).toHaveText("Collateral sweep failed.");
   for (const id of ["debt", "liquidatable", "near", "median"]) {
     await expect(page.getByTestId(`book-kpi-${id}`)).toHaveAttribute("data-tone", "refused");
-    await expect(page.getByTestId(`book-kpi-${id}`)).toContainText("—");
+    await expect(page.getByTestId(`book-kpi-${id}`)).toContainText("Withheld");
   }
-  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("collateral sweep failed");
+  await expect(page.getByTestId("book-kpi-notcomputed")).toContainText("Collateral sweep failed");
   await expect(page.getByTestId("book-attention")).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText("No account needs attention");
   await expect(page.locator("body")).not.toContainText("Nothing material");
@@ -562,9 +604,9 @@ test("a terminal page short of the advertised census stops the walk by name — 
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("lower bound, walk stopped");
   // A stopped walk claims no total: the partition's "in all" is said only over a book read whole.
   await expect(page.getByTestId("book-kpi-liquidatable")).not.toContainText("in all");
-  await expect(page.getByTestId("book-kpi-near")).toContainText("—");
-  await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("data-tone", "refused");
-  await expect(page.getByTestId("book-kpi-median")).toContainText("walk stopped");
+  await expect(page.getByTestId("book-kpi-near")).toContainText("Unavailable");
+  await expect(page.getByTestId("book-kpi-near")).toHaveAttribute("data-state", "unavailable");
+  await expect(page.getByTestId("book-kpi-median")).toContainText("Walk stopped");
   await expect(page.getByTestId("book-bands-card")).toContainText(
     "— within 10% of the cap: a zero is claimed only by a complete walk · the walk stopped",
   );
@@ -725,7 +767,7 @@ test("a duplicate account never satisfies the census: page one returns A, the la
   await expect(page.getByTestId("book-walk-failure")).toContainText(twice);
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("$4,200 of Cash debt is liquidatable right now, across 1 account.");
   await expect(page.getByTestId("book-verdict-dek")).toHaveText(
-    `1 position has no verdict in this batch and is counted, not hidden. The walk was served an account twice (${twice}); pages that repeat an account do not partition the book, so no figure here is a total or a lower bound.`,
+    `1 account has no verdict in this batch. The walk was served an account twice (${twice}); pages that repeat an account do not partition the book, so no figure here is a total or a lower bound.`,
   );
   // Counted once: the account's debt is never doubled, in the tile, the bar or the table.
   await expect(page.getByTestId("book-kpi-liquidatable")).toContainText("$4,200");
@@ -755,26 +797,29 @@ test("an unreadable computed row blocks every all-clear: counted in the headline
   const book = cashEngineOf(BOOK, { positions: 1, computed_positions: 1, refused_positions: 0, refusals: [] });
   await mockWith(page, book, { ...POSITIONS_DM_PAGE_1, total_positions: 1, positions: [{ ...a, total_debt: "1e6" }] });
   await page.goto("/book");
-  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "refused");
+  // The engine refused nothing: a row this page could not read is an absent answer, never a refusal.
+  await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "absent");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book could not be fully read this batch.");
   await expect(page.getByTestId("book-verdict-dek")).toHaveText(
-    "1 position the engine calls computed could not be read by this page and is counted, not cleared. No verdict is claimed over it.",
+    "1 account the engine calls computed could not be read by this page. No verdict is claimed over it.",
   );
   // Every negative the page can say, withheld.
   const body = page.locator("body");
-  for (const negative of ["Nothing material", "No position is liquidatable", "No computed position", "No account is within 10%", "No account needs attention"]) {
+  for (const negative of ["Nothing material", "No account is liquidatable", "No computed account", "No account is within 10%", "No account needs attention"]) {
     await expect(body).not.toContainText(negative);
   }
   // The sixth tile counts it, in its own word — the engine refused nothing, and the tile never reads "0 · nothing refused" alone.
   const notComputed = page.getByTestId("book-kpi-notcomputed");
   await expect(notComputed).toContainText("1");
-  await expect(notComputed).toContainText("nothing refused · 1 unreadable");
-  // No zero is a finished count: the walk-derived tiles are dashes in the refused register, wearing the lower-bound note.
+  await expect(notComputed).toContainText("Nothing refused · 1 unreadable");
+  // No zero is a finished count: the walk-derived tiles state no figure — the unreadable register, its word, never a
+  // dash — wearing the lower-bound note.
   for (const id of ["liquidatable", "near"]) {
     const tile = page.getByTestId(`book-kpi-${id}`);
-    await expect(tile).toContainText("—");
+    await expect(tile).toHaveAttribute("data-state", "unreadable");
+    await expect(tile).toContainText("Unreadable");
+    await expect(tile).not.toContainText("—");
     await expect(tile).not.toContainText("$0");
-    await expect(tile).toHaveAttribute("data-tone", "refused");
     await expect(tile).toContainText("lower bound, 1 row unreadable");
   }
   await expect(page.getByTestId("book-bands-card")).toContainText(
@@ -785,14 +830,14 @@ test("an unreadable computed row blocks every all-clear: counted in the headline
   await expect(page.getByTestId("book-bands-note")).toHaveText(
     "1 row could not be read: every bar and every count is a lower bound over the accounts this page could read.",
   );
-  // The row stays on the table, dimmed, under its own standing — never the engine's "Not computed".
+  // The row stays on the table, dimmed, under its own standing — never the engine-refused population's "No verdict".
   const rows = page.getByTestId("book-attention").locator("tbody tr");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("Unreadable");
-  await expect(rows.first()).not.toContainText("Not computed");
+  await expect(rows.first()).not.toContainText("No verdict");
   await expect(rows.first()).toHaveClass(/dim/);
   // Its debt was served and failed the guard: the cell says so and names the fault — never the dash of a debt not served.
-  await expect(rows.first().locator("td").nth(2)).toHaveText("unreadable");
+  await expect(rows.first().locator("td").nth(2)).toHaveText("Unreadable");
   await expect(rows.first().locator("td").nth(2).locator("[title]")).toHaveAttribute("title", DEBT_UNREADABLE);
   // The walk itself completed: nothing is busy, and no walk failure is claimed.
   await expect(page.locator("[aria-busy='true']")).toHaveCount(0);
@@ -809,15 +854,15 @@ test("a first answer that is not a book is a NAMED unreadable failure — never 
     await mockWith(page, body, POSITIONS_DM_PAGE_1);
     await page.goto("/book");
     await expect(page.getByTestId("book-verdict-headline")).toHaveText("The Cash book's answer could not be read.");
+    await expect(page.getByTestId("book-verdict")).toHaveAttribute("data-variant", "absent");
     await expect(page.getByTestId("book-verdict-dek")).toHaveText(`The service answered, and the body is not a book: ${fault}.`);
     await expect(page.getByTestId("book-verdict-identity")).toContainText("Identity unreadable");
     await expect(page.getByTestId("book-section-cash")).toContainText("accounts unreadable");
     for (const id of TILES) {
       const tile = page.getByTestId(`book-kpi-${id}`);
-      await expect(tile).toHaveAttribute("data-tone", "refused");
-      await expect(tile).toContainText("unreadable");
-      await expect(tile).not.toContainText("unavailable");
-      await expect(tile).not.toContainText("not computed");
+      await expect(tile).toHaveAttribute("data-state", "unreadable");
+      await expect(tile).toContainText("Unreadable");
+      await expect(tile).not.toContainText(/unavailable|not computed|withheld/i);
     }
     await expect(page.getByTestId("book-bands-card")).toContainText("Unreadable.");
     await expect(page.getByTestId("route-refusal")).toHaveCount(0);
@@ -930,9 +975,9 @@ test("a liquidatable position under the $100 line is hidden by the display rule,
   await mockWith(page, book, small);
   await page.goto("/book");
   await expect(page.getByTestId("book-verdict-headline")).toHaveText("Nothing material is liquidatable on the Cash book right now.");
-  await expect(page.getByTestId("book-verdict-dek")).toContainText("1 more position is technically liquidatable, under the $100 line — $50 — and not headlined.");
+  await expect(page.getByTestId("book-verdict-dek")).toContainText("1 more account is technically liquidatable, under the $100 line — $50 — and not headlined.");
   await expect(page.getByTestId("book-attention")).toContainText(
-    "Nothing material needs attention; 1 liquidatable position under $100 ($50) is behind the small & dust toggle.",
+    "Nothing material needs attention; 1 liquidatable account under $100 ($50) is folded under the toggle below.",
   );
   await expect(page.locator("body")).not.toContainText("No account needs attention");
   await page.getByTestId("book-dust-toggle").click();
@@ -944,8 +989,7 @@ test("the legacy engine withheld whole: its cause is named, no population, no hi
   await mockWith(page, BOOK_ENGINE_REFUSED, POSITIONS_DM_PAGE_1);
   await page.goto("/book");
   const legacy = page.getByTestId("book-legacy");
-  await expect(legacy).toHaveAttribute("data-withheld", "true");
-  await expect(legacy.locator("summary")).toContainText("withheld this batch: collateral-flag custody unproven");
+  await expect(legacy.locator("summary span").nth(1)).toHaveText("Withheld this batch: collateral-flag custody unproven");
   await expect(legacy.locator("summary")).not.toContainText("0 positions");
   await expect(legacy.locator("summary")).not.toContainText("0 liquidatable");
   await expect(page.getByTestId("book-legacy-bands")).toHaveCount(0);
@@ -958,9 +1002,10 @@ test("a malformed wire money string is named, never coerced: '' is not $0", asyn
   await mockWith(page, cashEngineOf(BOOK, { total_debt: "" }), POSITIONS_DM_PAGE_1);
   await page.goto("/book");
   const tile = page.getByTestId("book-kpi-debt");
-  await expect(tile).toContainText("—");
+  await expect(tile).toContainText("Unreadable");
+  await expect(tile).toHaveAttribute("data-state", "unreadable");
   await expect(tile).toContainText("engines[debt_manager].total_debt is not a wire decimal");
-  await expect(tile).toHaveAttribute("data-tone", "refused");
+  await expect(tile).not.toContainText("—");
   await expect(tile).not.toContainText("$0");
 });
 
@@ -998,7 +1043,7 @@ test("positions the stress arithmetic excluded are named beside the preview and 
   };
   await mockWith(page, book, POSITIONS_DM_PAGE_1);
   await page.goto("/book");
-  await expect(page.getByTestId("book-stress-unmeasured")).toContainText("1 position on this engine is excluded from the stress arithmetic");
+  await expect(page.getByTestId("book-stress-unmeasured")).toContainText("1 account on this engine is excluded from the stress arithmetic");
   await page.getByTestId("book-methodology").click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("1 excluded from the stress arithmetic");
@@ -1017,4 +1062,33 @@ test("first viewport at 1440×900 holds the verdict, the tiles and the top of th
   expect(chartTop).toBeLessThan(900);
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(width).toBeLessThanOrEqual(1440); // no primary horizontal scroll
+});
+
+test("one named-area grid: the chart card is only as tall as its bars, stress and bad debt stack under it, and the Needs attention table spans them — no card stretches to a void", async ({ page }) => {
+  await mockDemo(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/book");
+  await expect(page.getByTestId("book-kpi-near")).not.toHaveAttribute("aria-busy", "true");
+  const box = (id: string) =>
+    page.getByTestId(id).evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+    });
+  const chart = await box("book-bands-card");
+  const attention = await page.getByTestId("book-attention").evaluate((el) => {
+    const card = el.closest("section");
+    if (card === null) throw new Error("the attention table sits in a card");
+    const r = card.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, left: r.left };
+  });
+  const stress = await box("book-stress-preview");
+  const bad = await box("book-baddebt");
+  // Side by side at the top; stress and bad debt stacked under the chart, in its column, beside the table.
+  expect(Math.abs(attention.top - chart.top)).toBeLessThanOrEqual(1);
+  expect(attention.left).toBeGreaterThan(chart.right);
+  expect(stress.top).toBeGreaterThan(chart.bottom);
+  expect(bad.top).toBeGreaterThan(stress.bottom);
+  expect(Math.abs(stress.left - chart.left)).toBeLessThanOrEqual(1);
+  // The chart card holds its bars and its words, not the table's height.
+  expect(chart.bottom - chart.top).toBeLessThan(attention.bottom - attention.top);
 });

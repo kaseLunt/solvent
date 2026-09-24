@@ -7,8 +7,11 @@
 //   - scaled / normalized units render the exact value WITH the unit named;
 //   - NOTHING here ever produces a "$" — a fake USD figure is the exact lie
 //     the unit tag exists to prevent;
-//   - severity: liquidation and deficit_created are crit (color + form);
-//     the display class itself always renders verbatim.
+//   - a historical liquidation or bad-debt realization is a key RECORD —
+//     ink, set apart by weight, never a crit verdict; the display class
+//     itself always renders verbatim;
+//   - a raw integer is grouped for reading ("180,771,428") and never scaled:
+//     grouping moves no digit, and the sign is the display minus.
 //
 // The law includes SCALE-BY-PROVENANCE. This API serves `amount_decimals: null`
 // on every row, and a raw integer reads as a different amount — a $22 borrow
@@ -38,9 +41,10 @@ import {
   liquidationSeized,
   renderBps,
   typeLabel,
+  typeWord,
 } from "../../lib/feed-view";
 import { joinAnd, plural } from "../../lib/prose";
-import { EM_DASH, truncateAddress } from "../../lib/format";
+import { EM_DASH, MINUS, truncateAddress } from "../../lib/format";
 import { EVENT_DISPLAY_TYPES, type FeedChainEvent } from "../../lib/feed-data";
 import { FEED_LIQUIDATIONS, FEED_UNITS } from "../fixtures/feed";
 
@@ -71,7 +75,7 @@ test.describe("feedAmount", () => {
     const amount = feedAmount(opaque as FeedChainEvent);
     expect(amount.kind).toBe("amount");
     if (amount.kind !== "amount") return;
-    expect(amount.display).toBe("123456789");
+    expect(amount.display).toBe("123,456,789");
     expect(amount.display).not.toContain(".");
     expect(amount.unitChip).toBe("opaque units");
   });
@@ -82,7 +86,7 @@ test.describe("feedAmount", () => {
     );
     expect(amount.kind).toBe("amount");
     if (amount.kind !== "amount") return;
-    expect(amount.display).toBe("5000000"); // raw — decimals not applied
+    expect(amount.display).toBe("5,000,000"); // raw — decimals not applied, only grouped
     expect(amount.unitChip).toBe("engine_v9_units"); // the wire's own word
     expect(amount.unitTitle).toContain("never interpreted");
   });
@@ -95,7 +99,7 @@ test.describe("feedAmount", () => {
     const amount = feedAmount(scaled as FeedChainEvent, { engineValueDecimals: 8 });
     expect(amount.kind).toBe("amount");
     if (amount.kind !== "amount") return;
-    expect(amount.display).toBe("1500000000000000000");
+    expect(amount.display).toBe("1,500,000,000,000,000,000");
     expect(amount.rawUnits).toBe(true);
     expect(amount.unitChip).toBe("aave-scaled");
     expect(amount.unitTitle).toContain("rayMul");
@@ -132,7 +136,7 @@ test.describe("feedAmount", () => {
     const amount = feedAmount(normalized as FeedChainEvent);
     expect(amount.kind).toBe("amount");
     if (amount.kind !== "amount") return;
-    expect(amount.display).toBe("1199403000");
+    expect(amount.display).toBe("1,199,403,000");
     expect(amount.rawUnits).toBe(true);
     expect(amount.unitTitle).toContain("raw integer");
   });
@@ -166,6 +170,24 @@ test.describe("feedAmount", () => {
     }
   });
 
+  test("an unscaled integer's hover says what is printed — unscaled, grouped for reading — never that it is verbatim or unformatted", () => {
+    const unscaledCases: FeedChainEvent[] = [
+      row({ amount: "180771428", amount_decimals: 6, amount_unit: undefined }),
+      row({ amount: "5000000", amount_decimals: 6, amount_unit: "engine_v9_units" }),
+      row({ amount: "42", amount_decimals: 18, amount_unit: "none" }),
+      row({ amount: "123456789", amount_decimals: 6, amount_unit: "opaque" }),
+      row({ amount: "180771428", amount_decimals: null, amount_unit: "aave_scaled" }),
+      row({ amount: "252733333", amount_decimals: null, amount_unit: "dm_normalized_debt" }),
+    ];
+    for (const event of unscaledCases) {
+      const amount = feedAmount(event);
+      if (amount.kind !== "amount") throw new Error("an amount arm");
+      expect(amount.rawUnits).toBe(true);
+      expect(amount.unitTitle).toContain("prints unscaled (grouped for reading, every digit the wire's)");
+      expect(amount.unitTitle).not.toMatch(/verbatim|never formatted/i);
+    }
+  });
+
   test("`none` with a non-null amount is wire drift — raw + tag verbatim", () => {
     const amount = feedAmount(row({ amount: "42", amount_decimals: 18, amount_unit: "none" }));
     expect(amount.kind).toBe("amount");
@@ -183,7 +205,7 @@ test.describe("feedAmount", () => {
     // amount_decimals are NOT applied: the field is required since 1.2.0, so
     // its absence means the wire is outside the contract and no scale is
     // licensed for the figure.
-    expect(amount.display).toBe("-2500000000");
+    expect(amount.display).toBe(`${MINUS}2,500,000,000`);
     expect(amount.unitChip).toBe("no unit tag");
     expect(amount.unitTitle).toContain("wire drift");
   });
@@ -217,14 +239,14 @@ test.describe("feedAmount", () => {
   test("a scale the guard refuses licenses nothing: a malformed leg scale leaves the integer raw and tagged, a malformed row scale yields to the engine's own, a malformed engine scale to none — never a throw", () => {
     for (const decimals of [-1, 1.5, 1001, -0]) {
       const aave = feedAmount(row({ amount: "1500000000000000000", amount_decimals: decimals, amount_unit: "aave_scaled" }));
-      expect(aave).toMatchObject({ display: "1500000000000000000", rawUnits: true });
+      expect(aave).toMatchObject({ display: "1,500,000,000,000,000,000", rawUnits: true });
       if (aave.kind === "amount") expect(aave.unitTitle).toContain("no readable decimals for the leg");
       const dmOwn = feedAmount(row({ amount: "1199403000", amount_decimals: decimals, amount_unit: "dm_normalized_debt" }), { engineValueDecimals: 6 });
       expect(dmOwn).toMatchObject({ display: "1,199.403", rawUnits: false });
       const dmNeither = feedAmount(row({ amount: "1199403000", amount_decimals: decimals, amount_unit: "dm_normalized_debt" }));
-      expect(dmNeither).toMatchObject({ display: "1199403000", rawUnits: true });
+      expect(dmNeither).toMatchObject({ display: "1,199,403,000", rawUnits: true });
       const dmEngine = feedAmount(row({ amount: "1199403000", amount_decimals: null, amount_unit: "dm_normalized_debt" }), { engineValueDecimals: decimals });
-      expect(dmEngine).toMatchObject({ display: "1199403000", rawUnits: true });
+      expect(dmEngine).toMatchObject({ display: "1,199,403,000", rawUnits: true });
     }
   });
 });
@@ -270,10 +292,10 @@ test.describe("liquidationRepaid · liquidationSeized · LIQUIDATION_WORDS", () 
     }
   });
 
-  test("no licensed scale: the wire's digits verbatim, the raw tag and NO currency or token unit — on either engine", () => {
+  test("no licensed scale: the wire's digits, grouped and never scaled, the raw tag and NO currency or token unit — on either engine", () => {
     for (const decimals of [null, -1, 1.5, 1001]) {
-      expect(liquidationRepaid({ engine: "debt_manager", symbol: "USDC" }, { ...cashDetail, debt_repaid: "358120", debt_decimals: decimals })).toEqual({ figure: "358120", unit: RAW_UNITS_TAG });
-      expect(liquidationRepaid({ engine: "aave_v3_etherfi", symbol: "USDC" }, { ...legacyDetail, debt_repaid: "2500000000", debt_decimals: decimals })).toEqual({ figure: "2500000000", unit: RAW_UNITS_TAG });
+      expect(liquidationRepaid({ engine: "debt_manager", symbol: "USDC" }, { ...cashDetail, debt_repaid: "358120", debt_decimals: decimals })).toEqual({ figure: "358,120", unit: RAW_UNITS_TAG });
+      expect(liquidationRepaid({ engine: "aave_v3_etherfi", symbol: "USDC" }, { ...legacyDetail, debt_repaid: "2500000000", debt_decimals: decimals })).toEqual({ figure: "2,500,000,000", unit: RAW_UNITS_TAG });
     }
   });
 
@@ -284,14 +306,14 @@ test.describe("liquidationRepaid · liquidationSeized · LIQUIDATION_WORDS", () 
     expect(liquidationSeized({ seized: [weeth] })).toBe("0.65625 weETH");
     expect(liquidationSeized({ seized: [weeth, { ...weeth, symbol: "wstETH", amount: "100000000000000000" }] })).toBe("0.65625 weETH, 0.1 wstETH");
     expect(liquidationSeized({ seized: [{ ...weeth, symbol: undefined }] })).toBe(`0.65625 ${truncateAddress(weeth.asset)}`);
-    expect(liquidationSeized({ seized: [{ ...weeth, decimals: -1 }] })).toBe(`656250000000000000 ${RAW_UNITS_TAG} (weETH)`);
+    expect(liquidationSeized({ seized: [{ ...weeth, decimals: -1 }] })).toBe(`656,250,000,000,000,000 ${RAW_UNITS_TAG} (weETH)`);
     expect(liquidationSeized({ seized: [{ ...weeth, amount: "6.5e17" }] })).toBe("unreadable (weETH)");
     expect(liquidationSeized({ seized: [] })).toBe(`${EM_DASH} (no seizure legs carried)`);
   });
 
   test("the extract's words are one set, the lib's", () => {
     expect(LIQUIDATION_WORDS).toEqual({
-      liquidator: "liquidator",
+      liquidator: "Liquidator",
       repaid: "debt repaid",
       seized: "seized",
       bonusRealized: "bonus realized",
@@ -300,24 +322,46 @@ test.describe("liquidationRepaid · liquidationSeized · LIQUIDATION_WORDS", () 
   });
 });
 
-test.describe("typeLabel", () => {
+test.describe("typeLabel · typeWord", () => {
   test("an own-property lookup: a wire word that names an Object.prototype member prints verbatim, as a string", () => {
     for (const word of ["__proto__", "constructor", "toString", "hasOwnProperty", "valueOf"]) {
       expect(typeLabel(word)).toBe(word);
+      expect(typeWord(word)).toBe(word);
       expect(typeof typeLabel(word)).toBe("string");
     }
     expect(feedTakeaway([row({ type: "__proto__" as FeedChainEvent["type"] })], "engine-scoped", false).rest).toContain("a __proto__");
   });
 
   test("one spelling: the pool's bad-debt event is realized, as the wire spells realized_bonus_bps", () => {
-    expect(typeLabel("deficit_created")).toBe("bad debt realized");
+    expect(typeWord("deficit_created")).toBe("bad debt realized");
+    expect(typeLabel("deficit_created")).toBe("Bad debt realized");
+  });
+
+  test("a label (a cell, a button) is sentence case, a word inside a sentence lower case; a word outside the vocabulary is the wire's, untouched", () => {
+    const labels: Record<string, string> = {
+      borrow: "Borrow",
+      repay: "Repay",
+      supply: "Supply",
+      withdraw: "Withdraw",
+      liquidation: "Liquidation",
+      collateral_enabled: "Collateral enabled",
+      collateral_disabled: "Collateral disabled",
+      deficit_created: "Bad debt realized",
+    };
+    expect(Object.keys(labels).sort()).toEqual([...EVENT_DISPLAY_TYPES].sort());
+    for (const type of EVENT_DISPLAY_TYPES) {
+      expect(typeLabel(type)).toBe(labels[type]);
+      expect(typeWord(type)).toBe(labels[type]?.toLowerCase());
+    }
+    expect(typeLabel("flash_thing")).toBe("flash_thing");
+    expect(typeWord("flash_thing")).toBe("flash_thing");
   });
 });
 
 test.describe("severity + bps", () => {
-  test("liquidation and deficit_created are crit; ordinary actions are not", () => {
-    expect(feedTagTone("liquidation")).toBe("crit");
-    expect(feedTagTone("deficit_created")).toBe("crit");
+  test("a liquidation and a bad-debt realization are key records — ink set apart by weight, never a crit verdict; ordinary actions are plain", () => {
+    expect(feedTagTone("liquidation")).toBe("key");
+    expect(feedTagTone("deficit_created")).toBe("key");
     expect(feedTagTone("borrow")).toBe("info");
     expect(feedTagTone("collateral_enabled")).toBe("info");
   });
@@ -481,7 +525,7 @@ test.describe("feedTakeaway", () => {
       emphasis: "2 chain actions loaded,",
       rest: `filtered to bad debt realized and collateral enabled; the newest at ${nb("Jul 29, 09:57 UTC")}; that is every action matching this filter.`,
     });
-    expect(feedTakeaway(rows, "cross-engine", false, { ...at, types }).rest).toContain(`filtered to ${joinAnd(types.map(typeLabel))};`);
+    expect(feedTakeaway(rows, "cross-engine", false, { ...at, types }).rest).toContain(`filtered to ${joinAnd(types.map(typeWord))};`);
     // One row: a type the page says as a phrase is a statement and takes no article; a type that is a noun keeps "a".
     expect(feedTakeaway(rows.slice(0, 1), "engine-scoped", false).rest).toBe(
       "bad debt realized, at block 25,635,601; that is the only action matching this filter.",
@@ -496,7 +540,7 @@ test.describe("feedTakeaway", () => {
     }
     // The page's words for the three wire ids, and a word outside the vocabulary as the wire sent it.
     expect(Object.keys(TYPE_WORDS).sort()).toEqual(["collateral_disabled", "collateral_enabled", "deficit_created"]);
-    expect(typeLabel("deficit_created")).toBe("bad debt realized");
+    expect(typeWord("deficit_created")).toBe("bad debt realized");
     expect(typeLabel("flash_thing")).toBe("flash_thing");
   });
 

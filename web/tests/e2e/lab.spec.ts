@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { compareRows } from "../../lib/lab-compare";
 import { moversCaption, moversTable } from "../../lib/lab-movers";
+import { scenarioGist } from "../../lib/scenario-name";
 import {
   ASSUMPTIONS_BUTTON,
   ASSUMPTIONS_LEFT_OUT,
@@ -224,26 +225,43 @@ test("cold load: the library from the listing, the first scenario's definition, 
   await expect(rows).toHaveCount(DEMO_SCENARIOS.scenarios.length);
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "not-run");
   await expect(row(page, "eth_minus_30")).toContainText("Not run yet");
-  await expect(row(page, "eth_minus_30")).toContainText(firstScenario().description);
+  // The row carries the scenario's name and its one-line gist; the full description is the drawer's.
+  await expect(row(page, "eth_minus_30")).toContainText("ETH −30%");
+  await expect(row(page, "eth_minus_30")).toContainText(scenarioGist(firstScenario()));
+  await expect(row(page, "eth_minus_30")).not.toContainText(firstScenario().description);
   // The mode toggle says what each mode does.
   await expect(page.getByTestId("lab-mode-book")).toHaveText("Whole book");
   await expect(page.getByTestId("lab-mode-address")).toHaveText("One address");
-  await expect(headline(page)).toHaveText("ETH -30 percent — 1 committed shock, not run yet.");
+  // Served and not run: the absent register, the whole line; the way to run it stands beside the sentence that asks.
+  await expect(headline(page)).toHaveText("ETH −30% has not been run.");
+  await expect(page.getByTestId("lab-verdict")).toHaveAttribute("data-variant", "absent");
+  await expect(dek(page)).toHaveText("Run it to see how much Cash debt becomes liquidatable and which accounts move.");
+  await expect(page.getByTestId("lab-header-run")).toHaveText("Run ETH −30%");
+  // The scenario's name keeps its own case under the kicker's capitals.
+  await expect(page.getByTestId("lab-verdict").locator("p").first()).toContainText("ETH −30%");
   await expect(page.getByTestId("lab-projection")).toContainText("PROJECTION");
-  await expect(page.getByTestId("lab-run")).toHaveText("Run ETH -30 percent");
+  await expect(page.getByTestId("lab-run")).toHaveText("Run ETH −30%");
   for (const key of ["newly", "debt", "baddebt", "moved"]) {
-    await expect(tile(page, key)).toContainText("—");
-    await expect(tile(page, key)).toContainText("not run");
-    await expect(tile(page, key)).toHaveAttribute("data-tone", "refused");
+    await expect(tile(page, key)).toContainText("Not run");
+    await expect(tile(page, key)).toHaveAttribute("data-state", "not-run");
+    await expect(tile(page, key)).not.toContainText("—");
   }
   await expect(page.getByTestId("lab-transitions-finding")).toHaveText("Run a scenario to see where accounts move.");
   await expect(page.getByTestId("lab-transitions")).toContainText("No result yet.");
   await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
   await expect(page.getByTestId("lab-movers")).toHaveCount(0);
-  await expect(page.getByTestId("lab-drawer")).toHaveCount(0);
+  // The drawer opens on the definition itself: its full description, word for word, before any run.
+  await page.getByTestId("lab-drawer").click();
+  await expect(page.getByTestId("lab-drawer-body")).toContainText(firstScenario().description);
+  await page.keyboard.press("Escape");
+  // The header's Run runs the scenario it names, exactly as the library's does.
   await page.waitForTimeout(300);
   expect(counts.runs()).toBe(0);
   expect(counts.sets()).toBe(0);
+  await page.getByTestId("lab-header-run").click();
+  await expect(surface(page)).toHaveAttribute("data-state", "result");
+  expect(counts.runs()).toBe(1);
+  await expect(page.getByTestId("lab-header-run")).toHaveCount(0);
 });
 
 test("one click, one POST: the demo result — the §3.5 headline, the dek, the identity chips, the four tiles, the library's outcome word", async ({ page }) => {
@@ -258,21 +276,24 @@ test("one click, one POST: the demo result — the §3.5 headline, the dek, the 
   await expect(chip(page, "Result for batch")).toContainText("18,251");
   await expect(chip(page, "Scenario")).toContainText("eth_minus_30 · v1");
   await expect(chip(page, "Computed")).toContainText("ago");
-  await expect(chip(page, "Engines")).toContainText("Aave v3 market (legacy) and Cash");
+  await expect(chip(page, "Engines")).toContainText("Cash · legacy market below");
   await expect(chip(page, "Config")).toContainText("v1");
   await expect(tile(page, "newly")).toContainText("118");
   await expect(tile(page, "newly")).toContainText("was 49, now 167");
   await expect(tile(page, "newly")).toHaveAttribute("data-tone", "crit");
   await expect(tile(page, "debt")).toContainText("+$1.2M");
-  await expect(tile(page, "debt")).toContainText("$6,949 → $1.2M");
+  // A tile sub is no link, so it carries no arrow.
+  await expect(tile(page, "debt")).toContainText("Was $6,949, now $1.2M");
   await expect(tile(page, "baddebt")).toContainText("+$40K");
-  await expect(tile(page, "baddebt")).toContainText("$239.60 → $41K");
+  await expect(tile(page, "baddebt")).toContainText("Was $239.60, now $41K");
   await expect(tile(page, "baddebt")).toHaveAttribute("data-tone", "warn");
-  await expect(tile(page, "moved")).toContainText("941");
-  await expect(tile(page, "moved")).toContainText("of 1,406 measured · 0 improved");
-  // The tile counts rows whose lane changed — not the movers (118), not the dek's band count (425) — and says so.
+  // The tile counts the heatmap's own population — the dek's 425 band changes — and keeps the service's finer bucket
+  // count (941) in its title: both counts stay on the page, and the two figures above the fold never disagree.
+  await expect(tile(page, "moved")).toContainText("425");
+  await expect(tile(page, "moved")).toContainText("Of 1,406 measured · none improve");
+  await expect(tile(page, "moved")).toHaveAttribute("title", "941 accounts change risk bucket among the service's 8");
   await expect(tile(page, "moved")).toContainText(LANE_TILE_LABEL);
-  await expect(tile(page, "moved")).toContainText("Accounts changing risk bucket");
+  await expect(tile(page, "moved")).toContainText("Accounts changing band");
   await expect(tile(page, "moved")).not.toContainText(/\bmoved\b/i);
   // No page defines "lane": the tile names the service's bucket, and the grid says its bands are made from those buckets.
   await expect(tile(page, "moved")).not.toContainText(/\blane\b/i);
@@ -294,7 +315,7 @@ test("where accounts move: the wire's lanes merged into seven room bands with th
   await runIt(page);
   const grid = page.getByTestId("lab-heatmap");
   await expect(grid).toHaveAttribute("data-merged", "true");
-  await expect(grid.locator("[role='columnheader']")).toHaveText(["over cap", "< 4.76%", "4.76% – 9.09%", "9.09% – 20%", "≥ 20%", "no debt", "not measured"]);
+  await expect(grid.locator("[role='columnheader']")).toHaveText(["Over cap", "< 4.76%", "4.76% – 9.09%", "9.09% – 20%", "≥ 20%", "No debt", "Not measured"]);
   await expect(cell(page, 0, 0)).toHaveAttribute("data-count", "49");
   await expect(cell(page, 0, 0)).toHaveAttribute("data-movement", "held");
   await expect(cell(page, 1, 0)).toHaveText("14");
@@ -307,8 +328,12 @@ test("where accounts move: the wire's lanes merged into seven room bands with th
   await expect(cell(page, 0, 4)).toHaveAttribute("data-count", "0");
   await expect(cell(page, 0, 4)).toHaveText("");
   await expect(page.getByTestId("lab-transitions-finding")).toHaveText(
-    "Rows: room under cap today, in 5 bands made from the service's 8 risk buckets · columns: after the shock · cells are accounts. 425 accounts change band; 118 cross the cap; none improve. 6 not measured.",
+    "Rows: room under cap today, in 5 bands made from the service's 8 risk buckets · columns: after the shock · cells are accounts. 425 accounts change band; 118 cross the cap; none improve. 6 not measured. Bands follow the service's risk buckets, so their edges fall at 4.76%, 9.09% and 20% of cap, not at the Book's 10% line.",
   );
+  // One opacity means one count in every movement class: the 18 and the 135 worse cells read apart, both under the 932 held.
+  const heat = async (from: number, to: number) => Number(await cell(page, from, to).evaluate((n) => getComputedStyle(n).getPropertyValue("--heat")));
+  expect(await heat(4, 0)).toBeLessThan(await heat(4, 1));
+  expect(await heat(4, 1)).toBeLessThan(await heat(4, 4));
 });
 
 test("most affected accounts: the wire's movers, 20 of 118, listed largest debt first, rows open the Inspector, the verdict pill, the caption names which accounts they are, their order and the service's cap", async ({ page }) => {
@@ -321,7 +346,9 @@ test("most affected accounts: the wire's movers, 20 of 118, listed largest debt 
   if (first === undefined) throw new Error("the demo run carries no movers");
   const firstRow = page.getByTestId(`lab-movers-row-${first.account}`);
   await expect(firstRow.locator("a")).toHaveAttribute("href", `/inspector/${first.account}`);
-  await expect(firstRow).toContainText("Yes");
+  // Every Cash mover becomes liquidatable by definition: no column says "Yes" twenty times.
+  await expect(page.getByTestId("lab-movers-table").locator("thead th")).toHaveText(["Account", "Room today", "Room after", "Debt"]);
+  await expect(firstRow).not.toContainText("Yes");
   // The rows are listed largest debt first whatever order the wire sends them in: the caption names that order,
   // and a reader takes a caption's order for the table's.
   const debt = (m: Engine["movers"][number]) => {
@@ -337,13 +364,25 @@ test("most affected accounts: the wire's movers, 20 of 118, listed largest debt 
   // bounded by the contract's stated cap of 20: never "moved", the dek's word for the web's band count.
   await expect(page.getByTestId("lab-movers-caption")).toHaveText(moversCaption(moversTable(cashEngine()), "debt_manager"));
   await expect(page.getByTestId("lab-movers-caption")).toHaveText(
-    "the 20 largest of the 118 accounts that become liquidatable, by debt · listed largest debt first · the service returns at most 20",
+    "The 20 largest of the 118 accounts that become liquidatable, by debt · listed largest debt first · the service returns at most 20",
   );
   await expect(page.getByTestId("lab-movers-caption")).toHaveAttribute("title", cashEngine().movers_note);
   await expect(page.getByTestId("lab-movers").locator("h2")).toHaveText(`${MOVERS_TITLE}${MOVERS_QUALIFIER}`);
-  await expect(page.getByTestId("lab-movers").locator("h2 small")).toHaveText("room today → after the shock · ranked by the service");
-  // The heatmap card's link to the section names it in the same words.
+  await expect(page.getByTestId("lab-movers").locator("h2 small")).toHaveText("Room today and after the shock");
+  // The heatmap card's link to the section names it in the same words, and "↓": it is further down this page.
   await expect(page.getByTestId("lab-transitions").getByRole("link", { name: MOVERS_LINK })).toHaveAttribute("href", "#movers");
+  await expect(page.getByTestId("lab-transitions").getByRole("link", { name: MOVERS_LINK })).toHaveText("Most affected accounts ↓");
+  // The table sits in a card. Its scroll frame is plain layout while the table fits (four columns fit even a phone),
+  // and a region named for the section once the table overflows it: narrowed past the table, it becomes one.
+  const frame = page.getByTestId("lab-movers-table").locator("xpath=..");
+  await expect(frame.locator("xpath=..")).toHaveClass(/__card(\s|$)/);
+  await expect(frame).toHaveAttribute("data-overflow", "false");
+  await expect(page.getByRole("region", { name: MOVERS_TITLE })).toHaveCount(0);
+  await frame.evaluate((el) => {
+    (el as HTMLElement).style.width = "160px";
+  });
+  await expect(frame).toHaveAttribute("data-overflow", "true");
+  await expect(page.getByRole("region", { name: MOVERS_TITLE })).toBeVisible();
 });
 
 test("a second click while a run is in flight is ignored: one POST, the button disabled, the running state", async ({ page }) => {
@@ -352,7 +391,7 @@ test("a second click while a run is in flight is ignored: one POST, the button d
   const run = page.getByTestId("lab-run");
   await run.click();
   await expect(surface(page)).toHaveAttribute("data-state", "running");
-  await expect(headline(page)).toHaveText("Running ETH -30 percent…");
+  await expect(headline(page)).toHaveText("Running ETH −30%…");
   await expect(run).toBeDisabled();
   await expect(tile(page, "newly")).toHaveAttribute("aria-busy", "true");
   await expect(row(page, "eth_minus_30")).toContainText("Running…");
@@ -418,15 +457,15 @@ test("a selection names itself in the URL: the address bar names the scenario on
   await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
   await expect(page).toHaveURL(/\/lab\?scenario=ethfi_minus_50$/);
   await expect(surface(page)).toHaveAttribute("data-state", "not-run");
-  await expect(headline(page)).toContainText("ETHFI -50 percent");
+  await expect(headline(page)).toContainText("ETHFI −50%");
   await page.waitForTimeout(300);
   expect(counts.runs()).toBe(1);
   // Reload: the same subject. The link is a ?scenario= link like any other, so it runs the scenario it names.
   await page.reload();
   await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "eth_minus_30")).not.toHaveAttribute("data-selected", "true");
-  await expect(page.getByTestId("lab-verdict")).toContainText("ETHFI -50 percent");
-  await expect(page.getByTestId("lab-run")).toHaveText("Run ETHFI -50 percent");
+  await expect(page.getByTestId("lab-verdict")).toContainText("ETHFI −50%");
+  await expect(page.getByTestId("lab-run")).toHaveText("Run ETHFI −50%");
   await expect.poll(() => counts.runs()).toBe(2);
   await expect(page).toHaveURL(/\/lab\?scenario=ethfi_minus_50$/);
 
@@ -438,7 +477,7 @@ test("a selection names itself in the URL: the address bar names the scenario on
   await page.reload();
   await expect(surface(page)).toHaveAttribute("data-state", "rows");
   await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
-  await expect(headline(page)).toContainText("ETHFI -50 percent");
+  await expect(headline(page)).toContainText("ETHFI −50%");
 
   // A set link: one URL names one scenario or a set, never both, so the selection takes the set's place in it — and
   // the notice about the link that was opened stands, because the page's own write is no link to decide again.
@@ -456,7 +495,7 @@ test("the selection is per scenario and a result stays with its scenario", async
   await runIt(page);
   await row(page, "ethfi_minus_50").getByRole("button").click();
   await expect(surface(page)).toHaveAttribute("data-state", "not-run");
-  await expect(headline(page)).toContainText("ETHFI -50 percent");
+  await expect(headline(page)).toContainText("ETHFI −50%");
   await expect(row(page, "eth_minus_30")).toContainText("+$1.2M liquidatable · 118 accounts");
   await row(page, "eth_minus_30").getByRole("button").click();
   await expect(surface(page)).toHaveAttribute("data-state", "result");
@@ -474,9 +513,9 @@ test("withheld: the Cash book excluded is a named refusal — no grid, dashed ti
   await page.goto("/lab");
   await page.getByTestId("lab-run").click();
   await expect(surface(page)).toHaveAttribute("data-state", "withheld");
-  await expect(headline(page)).toHaveText("Cannot say — the Cash book is withheld under ETH -30 percent.");
-  await expect(tile(page, "newly")).toContainText("withheld");
-  await expect(tile(page, "newly")).toHaveAttribute("data-tone", "refused");
+  await expect(headline(page)).toHaveText("Cannot say — the Cash book is withheld under ETH −30%.");
+  await expect(tile(page, "newly")).toContainText("Withheld");
+  await expect(tile(page, "newly")).toHaveAttribute("data-state", "refused");
   await expect(chip(page, "Engines")).toContainText("Cash withheld");
   await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
   await expect(page.getByTestId("lab-legacy")).toBeVisible();
@@ -490,9 +529,9 @@ test("a hole is withheld by name, never an empty healthy book: the Cash book in 
   await page.goto("/lab");
   await page.getByTestId("lab-run").click();
   await expect(surface(page)).toHaveAttribute("data-state", "withheld");
-  await expect(headline(page)).toHaveText("Cannot say — the Cash book is withheld under ETH -30 percent.");
+  await expect(headline(page)).toHaveText("Cannot say — the Cash book is withheld under ETH −30%.");
   await expect(dek(page)).toContainText("no row for this engine and no refusal");
-  await expect(tile(page, "newly")).toContainText("withheld");
+  await expect(tile(page, "newly")).toContainText("Withheld");
   await expect(tile(page, "debt")).not.toContainText("$0");
   await expect(row(page, "eth_minus_30")).toContainText("Withheld");
   await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
@@ -509,7 +548,7 @@ test("a hole is withheld by name, never an empty healthy book: the Cash book in 
   await page.goto("/lab");
   await page.getByTestId("lab-run").click();
   await expect(surface(page)).toHaveAttribute("data-state", "withheld");
-  await expect(tile(page, "newly")).toContainText("withheld");
+  await expect(tile(page, "newly")).toContainText("Withheld");
   await expect(tile(page, "newly")).not.toContainText("118");
   await expect(page.locator("main")).not.toContainText("+$1.2M");
 
@@ -529,10 +568,10 @@ test("a malformed wire field is refused by name: the contradictory state, the fi
   await page.goto("/lab");
   await page.getByTestId("lab-run").click();
   await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
-  await expect(headline(page)).toHaveText("The result for ETH -30 percent contradicts itself.");
+  await expect(headline(page)).toHaveText("The result for ETH −30% contradicts itself.");
   await expect(dek(page)).toContainText("eligible_debt_delta_usd is outside the wire contract");
-  await expect(tile(page, "debt")).toContainText("—");
-  await expect(tile(page, "debt")).toContainText("contradictory");
+  await expect(tile(page, "debt")).not.toContainText("—");
+  await expect(tile(page, "debt")).toHaveAttribute("data-state", "unreadable");
   await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
   await expect(page.getByTestId("lab-movers")).toHaveCount(0);
   await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
@@ -566,6 +605,12 @@ test("the fetch failures each name themselves: 404 not served, 503 no batch with
   await page.getByTestId("lab-run").click();
   await expect(surface(page)).toHaveAttribute("data-state", "rate-limited");
   await expect(headline(page)).toHaveText("Rate limited (429).");
+  // A throttle is a read that did not complete, as the Inspector and one-address mode print it: never the refused register.
+  await expect(page.getByTestId("lab-verdict")).toHaveAttribute("data-variant", "absent");
+  for (const key of ["newly", "debt", "baddebt", "moved"]) {
+    await expect(tile(page, key)).toHaveAttribute("data-state", "unavailable");
+    await expect(tile(page, key)).toContainText("Unavailable");
+  }
 
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await mockLab(page, { runBook: { error: { code: "internal", message: "internal" } }, runBookStatus: 500 });
@@ -654,8 +699,9 @@ test("a superseded batch keeps the result under a banner; a drifted listing mark
   await page.goto("/lab");
   await page.getByTestId("lab-run").click();
   await expect(surface(page)).toHaveAttribute("data-state", "definition-changed");
-  await expect(headline(page)).toHaveText("ETH -30 percent changed since this result was computed.");
-  await expect(tile(page, "newly")).toContainText("—");
+  await expect(headline(page)).toHaveText("ETH −30% changed since this result was computed.");
+  await expect(tile(page, "newly")).toContainText("Not run");
+  await expect(tile(page, "newly")).not.toContainText("—");
 });
 
 test("a matrix that contradicts itself is not drawn, and the page says why", async ({ page }) => {
@@ -663,7 +709,7 @@ test("a matrix that contradicts itself is not drawn, and the page says why", asy
   await page.goto("/lab");
   await page.getByTestId("lab-run").click();
   await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
-  await expect(headline(page)).toHaveText("The result for ETH -30 percent contradicts itself.");
+  await expect(headline(page)).toHaveText("The result for ETH −30% contradicts itself.");
   await expect(dek(page)).toContainText("total_rows");
   await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
   await expect(row(page, "eth_minus_30")).toContainText("Contradictory");
@@ -722,7 +768,9 @@ test("one-address mode via ?address=: the Inspector's reading — before/after t
   await page.goto(`/lab?address=${DEMO_NEAR_ADDR}`);
   await expect(surface(page)).toHaveAttribute("data-mode", "address");
   await expect(surface(page)).toHaveAttribute("data-state", "rows");
-  await expect(headline(page)).toHaveText("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
+  // The account is the kicker's: the sentence names the scenario, and its colour sits on the verdict phrase alone.
+  await expect(headline(page)).toHaveText("Becomes liquidatable under ETH −30%: over cap by $1,069.");
+  await expect(page.getByTestId("lab-verdict-headline").locator("b")).toHaveText("Becomes liquidatable under ETH −30%:");
   // The identity: the account in the kicker, the batch and the scenario as chips.
   await expect(page.getByTestId("lab-verdict")).toContainText("0x7a3f…c21e");
   await expect(chip(page, "Result for batch")).toContainText("18,251");
@@ -730,19 +778,25 @@ test("one-address mode via ?address=: the Inspector's reading — before/after t
   await expect(page.getByTestId("lab-address-kpi-debt-before")).toContainText("$4,822");
   await expect(page.getByTestId("lab-address-kpi-cap-before")).toContainText("$5,012");
   await expect(page.getByTestId("lab-address-kpi-room-before")).toContainText("$190.50");
+  await expect(page.getByTestId("lab-address-kpi-room-before")).toContainText("Room left");
   await expect(page.getByTestId("lab-address-kpi-status-before")).toContainText("Near cap");
   await expect(page.getByTestId("lab-address-kpi-status-after")).toContainText("Liquidatable");
-  await expect(page.getByTestId("lab-address-kpi-room-after")).toContainText("over cap by $");
+  // Over the cap in words, the dollars under them — the prose's "over cap by", never a minus on a dollar figure.
+  await expect(page.getByTestId("lab-address-kpi-room-after")).toContainText("Over cap");
+  await expect(page.getByTestId("lab-address-kpi-room-after")).toContainText("By $1,069");
+  await expect(page.getByTestId("lab-address-kpi-room-after")).not.toContainText("−$");
+  // The section wears the one PROJECTION badge; its table sits in a card.
+  await expect(page.getByTestId("lab-address-section").locator("h2")).toContainText("PROJECTION");
   await expect(page.getByTestId("lab-address-table").locator("tbody tr")).toHaveCount(DEMO_STRESS_NEAR.scenarios.length);
   // The projection that holds reads as it does on the Inspector under the same header: through its longest horizon, never a bare "No".
-  const holding = page.getByTestId("lab-address-table").locator("tbody tr").filter({ hasText: "Debt Manager borrow APY +200bps" }).locator("td").nth(3);
-  await expect(holding).toHaveText("Not within 90d");
+  const holding = page.getByTestId("lab-address-table").locator("tbody tr").filter({ hasText: "Cash borrow APY +200 bps" }).locator("td").nth(3);
+  await expect(holding).toHaveText("Not within 90\u00a0d");
   await expect(holding.locator("[title]")).toHaveAttribute("title", "a projection speaks only through its longest horizon");
   // The library's words are the rows' own verdicts, not book-mode outcomes.
   await expect(row(page, "eth_minus_30")).toContainText("Becomes liquidatable");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "result");
   await expect(row(page, "ethfi_minus_50")).toContainText("Becomes liquidatable");
-  await expect(row(page, "dm_rate_horizon_plus_200bps")).toContainText("Stays inside its cap through 90d");
+  await expect(row(page, "dm_rate_horizon_plus_200bps")).toContainText("Stays inside its cap through 90\u00a0d");
   await expect(row(page, "weeth_market_depeg_oracles_held")).toContainText("Not on this address");
   await expect(row(page, "weeth_market_depeg_oracles_held")).toHaveAttribute("data-outcome", "not-covered");
   await expect(page.getByTestId("lab-library-check-eth_minus_30")).toHaveCount(0);
@@ -801,17 +855,18 @@ test("one-address mode: a stress result that names no readable batch is not comp
   await expect(chip(page, "Stress for batch")).toContainText("not readable");
   await expect(headline(page)).toHaveText("Cannot say — the stress result names no readable batch; the position above is batch 18,251.");
   await expect(dek(page)).toHaveText("The scenarios below are the stress result's own. A stress result and a position are compared only when both name the same batch.");
-  // No tile sets the position beside a stress nobody can place: every one is the refused dash, none a figure.
+  // No tile sets the position beside a stress nobody can place: every one names the refusal, none a figure, none a dash.
   for (const key of ["debt", "cap", "room", "status"]) {
     for (const side of ["before", "after"]) {
       const kpi = page.getByTestId(`lab-address-kpi-${key}-${side}`);
-      await expect(kpi).toContainText("—");
+      await expect(kpi).toContainText("Not compared");
+      await expect(kpi).toHaveAttribute("data-state", "refused");
       await expect(kpi).not.toContainText("$");
     }
   }
   // The rows are the stress result's own and stay, under a qualifier that says what is not known of them.
   await expect(page.getByTestId("lab-address-table").locator("tbody tr")).toHaveCount(DEMO_STRESS_NEAR.scenarios.length);
-  await expect(page.getByTestId("lab-address-section")).toContainText("applied to this account at a batch the stress result does not name readably · the position above is batch 18,251");
+  await expect(page.getByTestId("lab-address-section")).toContainText("Applied to this account at a batch the stress result does not name readably · the position above is batch 18,251");
 });
 
 test("one-address mode: an invalid address is an inline refusal and never a request; a not-found address is a complete answer", async ({ page }) => {
@@ -857,6 +912,10 @@ test("the first viewport at 1440×900 holds the library head, the verdict, the t
   await page.setViewportSize({ width: 390, height: 800 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+  // On a phone the answer comes first: the header, the tiles and the heatmap stand above the library.
+  const y = async (id: string) => (await page.getByTestId(id).boundingBox())?.y ?? Number.NaN;
+  expect(await y("lab-verdict")).toBeLessThan(await y("lab-kpi-newly"));
+  expect(await y("lab-transitions")).toBeLessThan(await y("lab-library"));
 });
 
 test("not covered: a scenario that models only the legacy market does not model the Cash book — the engines named, the tiles refuse, the legacy result its own, and nothing says withheld", async ({ page }) => {
@@ -866,15 +925,15 @@ test("not covered: a scenario that models only the legacy market does not model 
   await page.goto("/lab?scenario=eth_minus_30");
   await expect(surface(page)).toHaveAttribute("data-state", "not-covered");
   await expect(surface(page)).not.toHaveAttribute("data-banner", /.+/);
-  await expect(headline(page)).toHaveText("ETH -30 percent does not model the Cash book.");
+  await expect(headline(page)).toHaveText("ETH −30% does not model the Cash book.");
   await expect(dek(page)).toHaveText("It models the Aave v3 market (legacy). The legacy result is below.");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-outcome", "not-covered");
   await expect(row(page, "eth_minus_30")).toContainText("Not modelled for Cash");
   await expect(row(page, "eth_minus_30")).toContainText("Aave v3 market (legacy)");
   for (const key of ["newly", "debt", "baddebt", "moved"]) {
-    await expect(tile(page, key)).toContainText("—");
-    await expect(tile(page, key)).toContainText("not modelled");
-    await expect(tile(page, key)).toHaveAttribute("data-tone", "refused");
+    await expect(tile(page, key)).toContainText("Not modelled");
+    await expect(tile(page, key)).toHaveAttribute("data-state", "not-run");
+    await expect(tile(page, key)).not.toContainText("—");
     await expect(tile(page, key)).not.toContainText("0");
   }
   await expect(page.getByTestId("lab-transitions-finding")).toHaveText("This scenario does not model Cash.");
@@ -921,7 +980,8 @@ test("a failed re-run over a held result keeps the held result's own condition b
   await expect(surface(page)).toHaveAttribute("data-banner", "retained-refused");
   await expect(banner).toContainText("A result for batch 18,251 is retained but not shown: the definition's version changed since it was computed.");
   await expect(banner).toContainText("The failure above is this request's own.");
-  await expect(tile(page, "newly")).toContainText("—");
+  await expect(tile(page, "newly")).toContainText("Not served");
+  await expect(tile(page, "newly")).toHaveAttribute("data-state", "not-served");
   await expect(tile(page, "newly")).not.toContainText("118");
   await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
   await expect(row(page, "eth_minus_30")).toContainText("Not served");
@@ -951,11 +1011,21 @@ test("compare: two ticks enable the button, one POST posts exactly those ids, th
   await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
   expect(counts.sets()).toBe(1);
   expect(counts.posted()[0]).toBe('{"scenario_ids":["eth_minus_30","ethfi_minus_50"]}');
-  // The finding leads the card in the lib's words; the caption is one plain line naming the batch; the value column is headed and the axis captioned.
-  await expect(page.getByTestId("lab-compare-state")).toHaveText("ETH -30 percent moves the most: +$1.2M more liquidatable Cash debt, 4.5% of the book. ETHFI -50 percent: +$9,800, under 0.1%.");
-  await expect(page.getByTestId("lab-compare-caption")).toHaveText("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251).");
-  await expect(page.getByTestId("lab-dotplot")).toContainText("share · change");
-  await expect(page.getByTestId("lab-dotplot")).toContainText("share of the Cash book");
+  // The page leads with the comparison: one header telling one story, in the set run's own identity.
+  await expect(surface(page)).toHaveAttribute("data-view", "compare");
+  await expect(headline(page)).toHaveText("ETH −30% moves the most: $1.2M more Cash debt becomes liquidatable, 4.5% of the book.");
+  await expect(page.getByTestId("lab-verdict")).toHaveAttribute("data-variant", "crit");
+  await expect(dek(page)).toHaveText("ETHFI −50%: +$9,800, under 0.1% of the book.");
+  await expect(chip(page, "Result for batch")).toContainText("18,251");
+  await expect(chip(page, "Computed")).toBeVisible();
+  // The single run's tiles and grid do not stand beside the comparison's answer.
+  await expect(tile(page, "newly")).toHaveCount(0);
+  await expect(page.getByTestId("lab-transitions")).toHaveCount(0);
+  // The card's finding says what its shares are of; the value column is headed and the axis captioned.
+  await expect(page.getByTestId("lab-compare-state")).toHaveText("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251).");
+  await expect(page.getByTestId("lab-compare-caption")).toHaveCount(0);
+  await expect(page.getByTestId("lab-dotplot")).toContainText("Share · change");
+  await expect(page.getByTestId("lab-dotplot")).toContainText("Share of the Cash book");
   await expect(page.getByTestId("lab-compare-superseded")).toHaveCount(0);
   // The rows are the answered set's own — the two asked ids and no other — in the order compareRows ranks them: |share|, then |Δ|, then wire order.
   const asked = ["eth_minus_30", "ethfi_minus_50"];
@@ -1002,8 +1072,10 @@ test("compare: two ticks enable the button, one POST posts exactly those ids, th
   await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toHaveAttribute("data-kind", "point");
   await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toContainText("+0.3% · +$6,000");
   await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toHaveAttribute("data-kind", "refused");
-  await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toContainText("not modelled for the legacy market");
+  await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toContainText("Not modelled for the legacy market");
   await expect(legacy).toContainText("never added together");
+  // The legacy fold is a sibling after the Cash comparison, never inside its card.
+  await expect(page.getByTestId("lab-compare-card").getByTestId("lab-compare-legacy")).toHaveCount(0);
   // The set is Compare's; the workspace itself has run nothing.
   await expect(surface(page)).toHaveAttribute("data-state", "not-run");
   expect(counts.runs()).toBe(0);
@@ -1013,6 +1085,20 @@ test("compare: two ticks enable the button, one POST posts exactly those ids, th
   await expect.poll(() => frameOf("lab-dotplot").evaluate((n) => n.scrollWidth > n.clientWidth)).toBe(true);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+  // Selecting a scenario returns the focus to the run: the comparison's card stays, and its legacy shares never vanish
+  // from beside it — still their own fold, a sibling after the card, never inside it.
+  await page.getByTestId("lab-library-row-ethfi_minus_50").getByRole("button").click();
+  await expect(surface(page)).toHaveAttribute("data-view", "single");
+  await expect(page.getByTestId("lab-compare-state")).toHaveAttribute("data-kind", "ok");
+  await expect(legacy).toHaveCount(1);
+  await expect(page.getByTestId("lab-compare-card").getByTestId("lab-compare-legacy")).toHaveCount(0);
+  const legacyAfterCard = await page
+    .getByTestId("lab-compare-card")
+    .evaluate((card) => {
+      const fold = document.querySelector("[data-testid='lab-compare-legacy']");
+      return fold !== null && (card.compareDocumentPosition(fold) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+  expect(legacyAfterCard).toBe(true);
 });
 
 test("compare: a scenario the set withheld for Cash is a dashed row with its word — no dot, no zero, no money", async ({ page }) => {
@@ -1026,15 +1112,17 @@ test("compare: a scenario the set withheld for Cash is a dashed row with its wor
   const row = page.getByTestId("lab-compare-row-ethfi_minus_50");
   await expect(row).toHaveAttribute("data-kind", "refused");
   await expect(row.locator("circle")).toHaveCount(0);
-  // The value column says only the word: not a share, not a dollar.
-  await expect(row.locator("css=text").last()).toHaveText("withheld");
-  await expect(row).not.toContainText("%");
+  // The value column says only the word: not a share, not a dollar. The row is its name and that word, nothing else.
+  await expect(row.locator("css=text").last()).toHaveText("Withheld");
+  await expect(row).toHaveText("ETHFI −50%Withheld");
   await expect(row).not.toContainText("$");
   // Ranked after every point, and the points keep their figures; the finding names the refusal as refused.
   const ids = await page.locator("[data-testid^='lab-compare-row-']").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-testid")));
   expect(ids[ids.length - 1]).toBe("lab-compare-row-ethfi_minus_50");
   await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
-  await expect(page.getByTestId("lab-compare-state")).toHaveText("ETH -30 percent moves the most: +$1.2M more liquidatable Cash debt, 4.5% of the book. ETHFI -50 percent could not be evaluated: withheld.");
+  // The header ranks only what answered; the refused member is named in the dek.
+  await expect(headline(page)).toHaveText("ETH −30% moves the most: $1.2M more Cash debt becomes liquidatable, 4.5% of the book.");
+  await expect(dek(page)).toHaveText("ETHFI −50% could not be evaluated: withheld.");
 });
 
 test("compare: a busy evaluator fails the set by name and frees the button; a second Compare during a set is ignored; a superseded evaluation is labelled", async ({ page }) => {
@@ -1073,7 +1161,8 @@ test("compare: a busy evaluator fails the set by name and frees the button; a se
   const superseded = page.getByTestId("lab-compare-superseded");
   await expect(superseded).toHaveAttribute("data-freshness", "superseded");
   await expect(superseded).toContainText("evaluated on batch 18,251; the newest servable batch is 18,252");
-  await expect(page.getByTestId("lab-compare-caption")).toHaveText("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251 — superseded).");
+  await expect(state).toHaveText("Change in liquidatable Cash debt per scenario, as a share of the Cash book (batch 18,251 — superseded).");
+  await expect(chip(page, "Result for batch")).toContainText("18,251 · superseded");
 });
 
 test("compare: one-address mode has no Compare, and the ticks and the result survive the round trip back to the book", async ({ page }) => {
@@ -1128,20 +1217,22 @@ test("one-address mode: the table's verdict column is the row's own verdict and 
   await expect(surface(page)).toHaveAttribute("data-state", "rows");
   const table = page.getByTestId("lab-address-table");
   const rowFor = (label: string) => table.locator("tbody tr").filter({ hasText: label });
-  const eth = rowFor("ETH -30 percent");
-  const ethfi = rowFor("ETHFI -50 percent");
-  const projection = rowFor("Debt Manager borrow APY +200bps");
-  // The room cells in the tiles' own words: a negative room is "over cap by", never a minus on a dollar figure.
-  await expect(eth.locator("td").nth(1)).toHaveText("$190.50");
-  await expect(eth.locator("td").nth(2)).toHaveText("over cap by $1,069");
+  const eth = rowFor("ETH −30%");
+  const ethfi = rowFor("ETHFI −50%");
+  const projection = rowFor("Cash borrow APY +200 bps");
+  // The room cells in one unit: a signed percent of the cap, floored, the dollar room in the title in the prose's words.
+  await expect(eth.locator("td").nth(1)).toHaveText("3.8%");
+  await expect(eth.locator("td").nth(1).locator("[title]")).toHaveAttribute("title", "Room $190.50");
+  await expect(eth.locator("td").nth(2)).toHaveText("−28.6%");
+  await expect(eth.locator("td").nth(2).locator("[title]")).toHaveAttribute("title", "Over cap by $1,069");
   await expect(eth.locator("td").nth(3)).toHaveText("Yes");
   await expect(eth.locator("td").nth(3).locator("[data-tone='crit']")).toHaveCount(1);
   // A projection judged by its horizons: the verdict names the horizon in the warn tone the headline and the library use.
-  await expect(projection.locator("td").nth(3)).toHaveText("Within 90d");
+  await expect(projection.locator("td").nth(3)).toHaveText("Within 90\u00a0d");
   await expect(projection.locator("td").nth(3).locator("[data-tone='warn']")).toHaveCount(1);
-  await expect(row(page, "dm_rate_horizon_plus_200bps")).toContainText("Becomes liquidatable within 90d");
+  await expect(row(page, "dm_rate_horizon_plus_200bps")).toContainText("Becomes liquidatable within 90\u00a0d");
   // A side that is not a position: no verdict word and no figure, whatever the wire's booleans say.
-  await expect(ethfi.locator("td").nth(2)).toHaveText("not computed");
+  await expect(ethfi.locator("td").nth(2)).toHaveText("Not computed");
   await expect(ethfi.locator("td").nth(3)).toHaveText("Cannot say");
   await expect(ethfi.locator("td").nth(3).locator("[data-tone='refused']")).toHaveCount(1);
   await expect(ethfi).not.toContainText("$4,822");
@@ -1153,7 +1244,7 @@ test("a net count at or below zero states the net and the gross: the headline na
   await mockLab(page, { runBook: withCash((e) => ({ ...e, newly_eligible_accounts: -3 })) });
   await page.goto("/lab");
   await runIt(page);
-  await expect(headline(page)).toHaveText("Net, 3 fewer Cash accounts are liquidatable under ETH -30 percent, though 118 accounts cross the cap.");
+  await expect(headline(page)).toHaveText("Net, 3 fewer Cash accounts are liquidatable under ETH −30%, though 118 accounts cross the cap.");
   await expect(page.getByTestId("lab-verdict")).toHaveAttribute("data-variant", "warn");
   await expect(dek(page)).toContainText("425 accounts move to a worse band; none improve.");
   await expect(tile(page, "newly")).toContainText("−3");
@@ -1170,26 +1261,26 @@ test("one-address mode: the highlighted library row is the workspace's subject �
   await mockLab(page);
   await page.goto(`/lab?address=${DEMO_NEAR_ADDR}&scenario=weeth_market_depeg_oracles_held`);
   await expect(surface(page)).toHaveAttribute("data-state", "rows");
-  await expect(headline(page)).toHaveText("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
+  await expect(headline(page)).toHaveText("Becomes liquidatable under ETH −30%: over cap by $1,069.");
   await expect(chip(page, "Scenario")).toContainText("eth_minus_30");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "weeth_market_depeg_oracles_held")).not.toHaveAttribute("data-selected", "true");
   // The fallback is never silent: the page says which scenario was not evaluated and which is shown. The link itself
   // is left exactly as it arrived — an opened link is never rewritten to a scenario nobody asked for.
   const fallback = page.getByTestId("lab-address-fallback");
-  await expect(fallback).toHaveText("weETH market depeg to 0.95 (oracles held) was not evaluated for 0x7a3f…c21e: the stress response carries no result for it. ETH -30 percent is shown instead — the first scenario this address carries.");
+  await expect(fallback).toHaveText("weETH depeg to 0.95, oracles held was not evaluated for 0x7a3f…c21e: the stress response carries no result for it. ETH −30% is shown instead — the first scenario this address carries.");
   await page.waitForTimeout(300);
   expect(new URL(page.url()).search).toBe(`?address=${DEMO_NEAR_ADDR}&scenario=weeth_market_depeg_oracles_held`);
   // A row the address carries moves the subject and the highlight together.
   await row(page, "ethfi_minus_50").getByRole("button").click();
-  await expect(headline(page)).toContainText("ETHFI -50 percent");
+  await expect(headline(page)).toContainText("ETHFI −50%");
   await expect(fallback).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`/lab\\?address=${DEMO_NEAR_ADDR}&scenario=ethfi_minus_50$`));
   await expect(row(page, "ethfi_minus_50")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "eth_minus_30")).not.toHaveAttribute("data-selected", "true");
   // A row not on the address: the subject falls back to the first row the address carries, and the highlight follows the subject — never the row clicked.
   await row(page, "weeth_market_depeg_oracles_held").getByRole("button").click();
-  await expect(headline(page)).toHaveText("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
+  await expect(headline(page)).toHaveText("Becomes liquidatable under ETH −30%: over cap by $1,069.");
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
   await expect(row(page, "ethfi_minus_50")).not.toHaveAttribute("data-selected", "true");
   await expect(row(page, "weeth_market_depeg_oracles_held")).not.toHaveAttribute("data-selected", "true");
@@ -1209,7 +1300,7 @@ test("a re-run that answers a body which does not read never replaces the result
   await page.getByTestId("lab-run").click();
   const banner = page.getByTestId("lab-banner");
   await expect(banner).toHaveAttribute("data-kind", "rerun-failed");
-  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. eligible_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
+  await expect(banner).toContainText("Run again failed — The result for ETH −30% contradicts itself. eligible_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
   await expect(banner).toContainText("The result below stands for batch 18,251.");
   await expect(surface(page)).toHaveAttribute("data-state", "result");
   await expect(headline(page)).toContainText("$1.2M more Cash debt becomes liquidatable");
@@ -1262,9 +1353,9 @@ test("compare: a legacy market withheld or not modelled in every scenario still 
   await legacy.locator("summary").click();
   await expect(page.getByTestId("lab-dotplot-legacy").locator("circle")).toHaveCount(0);
   await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toHaveAttribute("data-kind", "refused");
-  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toContainText("withheld");
+  await expect(page.getByTestId("lab-compare-legacy-row-eth_minus_30")).toContainText("Withheld");
   await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toHaveAttribute("data-kind", "refused");
-  await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toContainText("not modelled for the legacy market");
+  await expect(page.getByTestId("lab-compare-legacy-row-ethfi_minus_50")).toContainText("Not modelled for the legacy market");
   await expect(legacy).not.toContainText("$");
   // The Cash plot is untouched by the legacy refusal.
   await expect(page.getByTestId("lab-compare-row-eth_minus_30")).toContainText("+4.5% · +$1.2M");
@@ -1279,7 +1370,7 @@ test("?address= with something that is not an address is the invalid state: its 
   await expect(dek(page)).toHaveText("An address is 0x followed by exactly 40 hex characters. Nothing was looked up.");
   // No scenario row: the table carries only its empty word, the headline's own.
   await expect(page.getByTestId("lab-address-table")).toContainText("Not an address.");
-  await expect(page.getByTestId("lab-address-table")).not.toContainText("ETH -30 percent");
+  await expect(page.getByTestId("lab-address-table")).not.toContainText("ETH −30%");
   await page.waitForTimeout(300);
   expect(counts.lookups()).toBe(0);
 });
@@ -1297,8 +1388,9 @@ test("compare: a row without a denominator keeps the wire's delta beside its wor
   const r = page.getByTestId("lab-compare-row-ethfi_minus_50");
   await expect(r).toHaveAttribute("data-kind", "refused");
   await expect(r.locator("circle")).toHaveCount(0);
-  await expect(r.locator("css=text").last()).toHaveText("no denominator · +$5");
-  await expect(r).not.toContainText("%");
+  await expect(r.locator("css=text").last()).toHaveText("No denominator · +$5");
+  // The row is its name and that word with the wire's delta: no share.
+  await expect(r).toHaveText("ETHFI −50%No denominator · +$5");
 });
 
 test("two asks in one tick are one POST: a second click before the first has committed is refused by the request in flight, for a run and for a set", async ({ page }) => {
@@ -1328,24 +1420,26 @@ test("the envelope is classified before any read: a 2xx run-book without its bat
   await page.goto("/lab");
   await page.getByTestId("lab-run").click();
   await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
-  await expect(headline(page)).toHaveText("The result for ETH -30 percent contradicts itself.");
+  await expect(headline(page)).toHaveText("The result for ETH −30% contradicts itself.");
   await expect(dek(page)).toHaveText("batch is outside the wire contract. Nothing from it is drawn.");
   for (const key of ["newly", "debt", "baddebt", "moved"]) {
-    await expect(tile(page, key)).toContainText("—");
-    await expect(tile(page, key)).toContainText("contradictory");
-    await expect(tile(page, key)).toHaveAttribute("data-tone", "refused");
+    await expect(tile(page, key)).toContainText(/Unreadable|Contradictory/);
+    await expect(tile(page, key)).toHaveAttribute("data-state", "unreadable");
+    await expect(tile(page, key)).not.toContainText("—");
   }
-  // Nothing of the body is printed: no batch chip, no age, no drawer onto a body that cannot be read, no grid, no movers.
+  // Nothing of the body is printed: no batch chip, no age, no grid, no movers — the drawer holds the definition alone.
   await expect(chip(page, "Result for batch")).toHaveCount(0);
   await expect(chip(page, "Computed")).toHaveCount(0);
   await expect(chip(page, "Engines")).toHaveCount(0);
   await expect(chip(page, "Scenario")).toContainText("eth_minus_30 · v1");
-  await expect(page.getByTestId("lab-drawer")).toHaveCount(0);
+  await page.getByTestId("lab-drawer").click();
+  await expect(page.getByTestId("lab-drawer-body")).not.toContainText("Applied shocks");
+  await page.keyboard.press("Escape");
   await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
   await expect(page.getByTestId("lab-movers")).toHaveCount(0);
   await expect(page.getByTestId("lab-banner")).toHaveCount(0);
   // The legacy fold refuses by the same name; the library's word follows.
-  await expect(page.getByTestId("lab-legacy-kpi-newly")).toContainText("contradictory");
+  await expect(page.getByTestId("lab-legacy-kpi-newly")).toHaveAttribute("data-state", "unreadable");
   await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
   await expectNoCashZero(page);
   // The route stays live: the shell and the library are still on the page, and the run can be asked again.
@@ -1382,7 +1476,7 @@ test("two consecutive answers that do not read keep the last result that read: a
   await expect(banner).toContainText("The result below stands for batch 18,251.");
   // The second answer that does not read: the hold is still the result that read, never the first malformed body.
   await page.getByTestId("lab-banner-rerun").click();
-  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. bad_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
+  await expect(banner).toContainText("Run again failed — The result for ETH −30% contradicts itself. bad_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
   await expect(banner).toContainText("The result below stands for batch 18,251.");
   await expect(banner).not.toContainText("18,252");
   expect(answers).toBe(2);
@@ -1435,11 +1529,12 @@ test("a service that answered 200 is never unreachable: a run-book without its e
   await page.goto("/lab");
   await page.getByTestId("lab-run").click();
   await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
-  await expect(headline(page)).toHaveText("The result for ETH -30 percent contradicts itself.");
+  await expect(headline(page)).toHaveText("The result for ETH −30% contradicts itself.");
   await expect(dek(page)).toHaveText("engines is outside the wire contract. Nothing from it is drawn.");
   await expect(page.getByTestId("lab-verdict")).not.toContainText("could not be reached");
   await expect(page.getByTestId("lab-verdict")).not.toContainText("Cannot read properties");
-  await expect(tile(page, "newly")).toContainText("contradictory");
+  await expect(tile(page, "newly")).toHaveAttribute("data-state", "unreadable");
+  await expect(tile(page, "newly")).toContainText(/Unreadable|Contradictory/);
   await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
   await expect(row(page, "eth_minus_30")).not.toContainText("Unreachable");
   await expectNoCashZero(page);
@@ -1459,13 +1554,13 @@ test("a service that answered 200 is never unreachable: a run-book without its e
   const banner = page.getByTestId("lab-banner");
   await page.getByTestId("lab-run").click();
   await expect(banner).toHaveAttribute("data-kind", "rerun-failed");
-  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. engines is outside the wire contract. Nothing from it is drawn.");
+  await expect(banner).toContainText("Run again failed — The result for ETH −30% contradicts itself. engines is outside the wire contract. Nothing from it is drawn.");
   await expect(banner).toContainText("The result below stands for batch 18,251.");
   await expect(banner).not.toContainText("could not be reached");
   await expect(surface(page)).toHaveAttribute("data-state", "result");
   await expect(tile(page, "newly")).toContainText("118");
   await page.getByTestId("lab-banner-rerun").click();
-  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. The response body is not a JSON object. Nothing from it is drawn.");
+  await expect(banner).toContainText("Run again failed — The result for ETH −30% contradicts itself. The response body is not a JSON object. Nothing from it is drawn.");
   await expect(banner).toContainText("The result below stands for batch 18,251.");
   expect(answers).toBe(2);
   await expect(surface(page)).toHaveAttribute("data-state", "result");
@@ -1519,14 +1614,15 @@ test("the hold's one predicate covers what the result draws: a re-run with a mov
   };
   // valid → a mover's ratio that does not read: the fault is named, the result stands.
   await page.getByTestId("lab-run").click();
-  await expect(banner).toContainText("Run again failed — The result for ETH -30 percent contradicts itself. movers[0].hf_after_num is outside the wire contract. Nothing from it is drawn.");
+  await expect(banner).toContainText("Run again failed — The result for ETH −30% contradicts itself. movers[0].hf_after_num is outside the wire contract. Nothing from it is drawn.");
   await stands();
   // → the legacy row alone does not read: the same, named under its engine — the Cash figures beside it never stand in for the result.
   await page.getByTestId("lab-banner-rerun").click();
   await expect(banner).toContainText("Aave v3 market (legacy): bad_debt_delta_usd is outside the wire contract.");
   await stands();
   await page.getByTestId("lab-legacy").locator("summary").click();
-  await expect(page.getByTestId("lab-legacy-kpi-newly")).not.toContainText("contradictory");
+  await expect(page.getByTestId("lab-legacy-kpi-newly")).not.toHaveAttribute("data-state", "unreadable");
+  await expect(page.getByTestId("lab-legacy-kpi-newly")).not.toContainText(/contradictory|unreadable/i);
   // → a transport failure: neither body above moved into the hold, so the result that stands is still the first.
   await page.getByTestId("lab-banner-rerun").click();
   await expect(banner).toContainText("Run again failed — No servable batch.");
@@ -1541,7 +1637,10 @@ test("the hold's one predicate covers what the result draws: a re-run with a mov
   await expect(surface(page)).toHaveAttribute("data-state", "contradictory");
   await expect(dek(page)).toHaveText("Aave v3 market (legacy): bad_debt_delta_usd is outside the wire contract. Nothing from it is drawn.");
   await expect(page.getByTestId("lab-banner")).toHaveCount(0);
-  for (const key of ["newly", "debt", "baddebt", "moved"]) await expect(tile(page, key)).toContainText("contradictory");
+  for (const key of ["newly", "debt", "baddebt", "moved"]) {
+    await expect(tile(page, key)).toHaveAttribute("data-state", "unreadable");
+    await expect(tile(page, key)).toContainText(/Unreadable|Contradictory/);
+  }
   await expect(page.getByTestId("lab-movers")).toHaveCount(0);
   await expect(page.getByTestId("lab-heatmap")).toHaveCount(0);
   await expect(row(page, "eth_minus_30")).toContainText("Unreadable");
@@ -1685,7 +1784,7 @@ test("a link nobody selected from is never rewritten: an opened link that names 
   await expect(row(page, "eth_minus_30")).toHaveAttribute("data-selected", "true");
   await expect(surface(page)).toHaveAttribute("data-state", "not-run");
   const notice = page.getByTestId("lab-deeplink-notice");
-  await expect(notice).toHaveText("This link names ?scenario=ghost, and this deployment publishes no scenario of that id. Nothing was run for it, and the link is left as it arrived. ETH -30 percent is shown instead.");
+  await expect(notice).toHaveText("This link names ?scenario=ghost, and this deployment publishes no scenario of that id. Nothing was run for it, and the link is left as it arrived. ETH −30% is shown instead.");
   await page.waitForTimeout(300);
   expect(new URL(page.url()).search).toBe("?scenario=ghost");
   expect(counts.runs()).toBe(0);
@@ -1699,7 +1798,7 @@ test("a link nobody selected from is never rewritten: an opened link that names 
   // The reader's own selection: now the bar names the subject shown, and a selection runs nothing.
   await row(page, "ethfi_minus_50").getByRole("button").click();
   await expect(page).toHaveURL(/\/lab\?scenario=ethfi_minus_50$/);
-  await expect(notice).toContainText("ETHFI -50 percent is shown instead.");
+  await expect(notice).toContainText("ETHFI −50% is shown instead.");
   await page.waitForTimeout(300);
   expect(counts.runs()).toBe(0);
 
@@ -1707,8 +1806,8 @@ test("a link nobody selected from is never rewritten: an opened link that names 
   const linked = `?address=${DEMO_NEAR_ADDR}&scenario=weeth_market_depeg_oracles_held`;
   await page.goto(`/lab${linked}`);
   await expect(surface(page)).toHaveAttribute("data-state", "rows");
-  await expect(page.getByTestId("lab-address-fallback")).toContainText("weETH market depeg to 0.95 (oracles held) was not evaluated for 0x7a3f…c21e");
-  await expect(page.getByTestId("lab-address-fallback")).toContainText("ETH -30 percent is shown instead");
+  await expect(page.getByTestId("lab-address-fallback")).toContainText("weETH depeg to 0.95, oracles held was not evaluated for 0x7a3f…c21e");
+  await expect(page.getByTestId("lab-address-fallback")).toContainText("ETH −30% is shown instead");
   await page.waitForTimeout(300);
   expect(new URL(page.url()).search).toBe(linked);
   // A published id names itself: no unlisted-id notice beside the fallback's own disclosure.

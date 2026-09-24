@@ -125,15 +125,15 @@ test("the proof drawer speaks the page's word — checked rows — and keeps the
   const drawer = proofSubjectEvidence(EVIDENCE_MANIFEST);
   const rows = drawer.sections.flatMap((section) => section.rows);
   const said = rows.map((row) => `${row.label} | ${row.value}`);
-  expect(drawer.sections[0]?.rows[0]).toEqual({ label: "status", value: "ACCEPTED · every checked row matched the chain exactly", tone: "ok" });
-  expect(said).toContain("checked rows | 87/87 exact · 0 drifted");
+  expect(drawer.sections[0]?.rows[0]).toEqual({ label: "Status", value: "Accepted · every checked row matched the chain exactly", tone: "ok" });
+  expect(said).toContain("Checked rows | 87/87 exact · 0 drifted");
   expect(said).toContain("Cash · account comparisons | 29/29 exact");
   expect(said).toContain("Aave v3 market (legacy) · account comparisons | 14/14 exact");
-  expect(said).toContain("account comparisons | count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
-  expect(said).toContain("feeds registry | identical to the service's registry fingerprint, by construction");
+  expect(said).toContain("Account comparisons | count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
+  expect(said).toContain("Feeds registry | identical to the service's registry fingerprint, by construction");
   // The receipt's own term survives in one row, its gloss beside it; the verbatim comparator keeps the wire's field names.
-  const gated = rows.filter((row) => /gated/.test(`${row.label} ${row.value}`));
-  expect(gated).toEqual([{ label: "gated", value: "checked rows — the rows that must match for the run to pass", tone: "dim" }]);
+  const gated = rows.filter((row) => /gated/i.test(`${row.label} ${row.value}`));
+  expect(gated).toEqual([{ label: "Gated", value: "checked rows — the rows that must match for the run to pass", tone: "dim" }]);
   expect(drawer.comparator).toContain("gated_exact == gated_rows");
   expect(JSON.stringify(rows)).not.toMatch(/weld ·|fingerprint weld|drift \d/);
 });
@@ -141,10 +141,10 @@ test("the proof drawer speaks the page's word — checked rows — and keeps the
 test("the live descriptor is OPERATIONAL unconditionally — even beside an accepted proof", () => {
   const live = liveSubjectEvidence(EVIDENCE_MANIFEST);
   expect(live.marker).toBe("operational");
-  expect(live.markerNote).toContain("does NOT inherit");
+  expect(live.markerNote).toContain("does not inherit");
   // The live chain never wears the proof vocabulary.
-  expect(live.subject).not.toContain("PROOF");
-  expect(live.subject).not.toContain("EXACT");
+  expect(live.subject).toBe("Batch 1 · live, watermarked");
+  expect(live.subject).not.toMatch(/proof|exact/i);
 });
 
 test("the proof pin is the receipt's own comparison sha, shortened", () => {
@@ -152,7 +152,7 @@ test("the proof pin is the receipt's own comparison sha, shortened", () => {
   const pin = proofPin(EVIDENCE_MANIFEST.reconcile);
   expect(pin).toHaveLength(8);
   expect(EVIDENCE_MANIFEST.reconcile.comparison_sha256.startsWith(pin)).toBe(true);
-  expect(proofSubjectEvidence(EVIDENCE_MANIFEST).subject).toBe(`PROOF · EXACT @ ${pin}`);
+  expect(proofSubjectEvidence(EVIDENCE_MANIFEST).subject).toBe(`Proof exact @ ${pin}`);
 });
 
 test("no batch ⇒ no materialization key anywhere in the live chain — never fabricated", () => {
@@ -172,12 +172,15 @@ test("no batch ⇒ no materialization key anywhere in the live chain — never f
   expect(allValues).not.toContain(realKey);
 });
 
-test("a rejected or absent receipt renders its status LOUDLY (crit tone on the status row)", () => {
-  for (const manifest of [EVIDENCE_PROOF_FAILED, EVIDENCE_NO_RECEIPT]) {
+test("a rejected or absent receipt never renders its status quietly: a failed run is crit, an absent receipt the dashed refused register — the page's one receipt map", () => {
+  for (const [manifest, tone] of [
+    [EVIDENCE_PROOF_FAILED, "crit"],
+    [EVIDENCE_NO_RECEIPT, "refused"],
+  ] as const) {
     const descriptor = proofSubjectEvidence(manifest);
     const statusRow = descriptor.sections[0]?.rows[0];
-    expect(statusRow?.tone).toBe("crit");
-    expect(descriptor.markerNote).toContain("NOT PROVEN");
+    expect(statusRow?.tone).toBe(tone);
+    expect(descriptor.markerNote).toContain("Not proven");
   }
 });
 
@@ -203,7 +206,7 @@ test("findEndpointLeaks: URIs and DSNs are leaks; env-var NAMES are the sanction
 
   const refused = publishable("dsn postgres://u:p@h/db");
   expect(refused.ok).toBe(false);
-  if (!refused.ok) expect(refused.refusal).toContain("WITHHELD");
+  if (!refused.ok) expect(refused.refusal).toContain("Withheld");
 });
 
 test("a publishability refusal counts its fragments in a real plural: one fragment, two fragments, never \"(s)\"", () => {
@@ -214,8 +217,8 @@ test("a publishability refusal counts its fragments in a real plural: one fragme
   };
   const one = refusalOf("dsn postgres://u:p@h/db");
   const two = refusalOf("see https://a.example and wss://b.example");
-  expect(one).toBe("WITHHELD · 1 endpoint/DSN-shaped fragment refused at render (this surface publishes env-var names only)");
-  expect(two).toBe("WITHHELD · 2 endpoint/DSN-shaped fragments refused at render (this surface publishes env-var names only)");
+  expect(one).toBe("Withheld · 1 endpoint/DSN-shaped fragment refused at render (this surface publishes env-var names only)");
+  expect(two).toBe("Withheld · 2 endpoint/DSN-shaped fragments refused at render (this surface publishes env-var names only)");
   for (const refusal of [one, two]) expect(refusal).not.toContain("(s)");
 });
 
@@ -374,9 +377,9 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
     for (const claim of ["All 0", "matched", "exactly"]) expect(proofTakeaway(NO_ROWS_GATED)).not.toContain(claim);
     const drawer = proofSubjectEvidence(NO_ROWS_GATED);
     expect(drawer.marker).toBe("operational");
-    expect(drawer.subject).toBe("RECEIPT CHECKED NO ROWS");
-    expect(drawer.subject).not.toContain("PROOF · EXACT");
-    expect(drawer.markerNote).toContain("NOT PROVEN");
+    expect(drawer.subject).toBe("Receipt checked no rows");
+    expect(drawer.subject).not.toContain("Proof exact");
+    expect(drawer.markerNote).toContain("Not proven");
     // A count the population guard refuses is refused by name before it is judged empty.
     expect(() => receiptCheckedNothing({ ...NO_ROWS_GATED.reconcile, gated_rows: -0 } as NonNullable<EvidenceManifest["reconcile"]>)).toThrow(/gated_rows/);
   });
@@ -390,7 +393,7 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
       r.welds = r.welds.map((weld) => ({ ...weld, rows_compared: 0, rows_exact: 0 }));
     });
     expect(proofSubjectStatus(zeroWelds).kind).toBe("accepted");
-    const receipt = proofSubjectEvidence(zeroWelds).sections.find((section) => section.title === "RECEIPT · COMMITTED ARTIFACT");
+    const receipt = proofSubjectEvidence(zeroWelds).sections.find((section) => section.title === "Receipt · committed artifact");
     expect(receipt?.rows.filter((row) => row.label.endsWith(" · account comparisons")).map((row) => [row.label, row.value, row.tone])).toEqual([
       ["Cash · account comparisons", "0/0 exact", "dim"],
       ["Aave v3 market (legacy) · account comparisons", "0/0 exact", "dim"],
@@ -401,7 +404,7 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
     expect(tones(EVIDENCE_MANIFEST).filter((tone) => tone === "ok")).toHaveLength(5);
     // A registry that does not match is a hazard, and no receipt dims it.
     const mismatched: EvidenceManifest = { ...structuredClone(zeroWelds), feeds_registry: { ...zeroWelds.feeds_registry, registry_fingerprint: "0".repeat(64) } };
-    expect(proofSubjectEvidence(mismatched).sections.at(-1)?.rows.at(-1)).toMatchObject({ label: "feeds registry", tone: "crit" });
+    expect(proofSubjectEvidence(mismatched).sections.at(-1)?.rows.at(-1)).toMatchObject({ label: "Feeds registry", tone: "crit" });
   });
 
   test("a missing receipt says NOTHING IS PROVEN in the head — an absence named as an absence", () => {

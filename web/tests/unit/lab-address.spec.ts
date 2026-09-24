@@ -48,27 +48,33 @@ const cashRowEdited = (body: typeof DEMO_ADDRESS_NEAR, edit: (p: Position) => Po
   ...body,
   positions: body.positions.map((p) => (p.engine === "debt_manager" ? edit(p) : p)),
 });
-const PROJECTION_LABEL = "Debt Manager borrow APY +200bps (PROJECTION)";
-const PROJECTION_DEK = "Room today $190.50; 30d: +$7.92 interest; 90d: +$23.77 interest.";
-const REFUSED = { value: "—", tone: "refused" };
-const NOT_COMPUTED = { value: "Not computed", tone: "refused" };
+const PROJECTION_LABEL = "Cash borrow APY +200 bps";
+const PROJECTION_DEK = "Room today $190.50; 30\u00a0d: +$7.92 interest; 90\u00a0d: +$23.77 interest.";
+/** A tile with no figure names its absence in its register — never a dash. */
+const REFUSED = { value: "Not computed", tone: "refused", state: "refused" };
+const NOT_COMPUTED = REFUSED;
 
 test("idle and invalid: no address is a prompt, a bad address is a refusal; nothing is looked up", () => {
   const idle = addressWorkspace({ address: "", view: null, selectedId: null });
   expect(idle.state).toBe("idle");
-  expect(idle.headline).toEqual({ emphasis: "Stress one address.", rest: "", tone: "refused", dek: "Enter an address; the committed scenarios are applied to its Cash position." });
+  expect(idle.headline).toEqual({ emphasis: "Stress one address.", rest: "", tone: "absent", dek: "Enter an address; the committed scenarios are applied to its Cash position." });
   expect(idle.rows).toEqual([]);
   expect(idle.tiles).toBeNull();
+  expect(idle.tileAbsence).toEqual({ value: "No address", tone: "refused", state: "not-run" });
   const invalid = addressWorkspace({ address: "0xnope", view: view({ address: "0xnope", valid: false }), selectedId: null });
   expect(invalid.state).toBe("invalid");
   expect(invalid.headline.emphasis).toBe("Not an address.");
   expect(invalid.headline.dek).toBe("An address is 0x followed by exactly 40 hex characters. Nothing was looked up.");
+  expect(invalid.headline.tone).toBe("refused");
 });
 
 test("loading and unavailable follow the lookup, then the stress lookup", () => {
   const l = addressWorkspace({ address: DEMO_NEAR_ADDR, view: view({}), selectedId: null });
   expect(l.state).toBe("loading");
   expect(l.headline.emphasis).toBe("Looking up 0x7a3f…c21e…");
+  // A read in flight is pending — never failed, never refused.
+  expect(l.headline.tone).toBe("absent");
+  expect(l.tileAbsence).toEqual({ value: "…", tone: "refused", state: "pending" });
   const stressLoading = addressWorkspace({ address: DEMO_NEAR_ADDR, view: view({ lookup: { phase: "ready", value: lookup(DEMO_ADDRESS_NEAR) } }), selectedId: null });
   expect(stressLoading.state).toBe("loading");
   expect(stressLoading.headline.emphasis).toBe("Running the committed scenarios for 0x7a3f…c21e…");
@@ -76,6 +82,9 @@ test("loading and unavailable follow the lookup, then the stress lookup", () => 
   expect(u.state).toBe("unavailable");
   expect(u.headline.emphasis).toBe("The lookup for 0x7a3f…c21e could not be completed.");
   expect(u.headline.dek).toBe("Rate limited (429), retry after 30s. Nothing about this address is known from a failed lookup.");
+  // A fetch that failed is unavailable, never a refusal.
+  expect(u.headline.tone).toBe("absent");
+  expect(u.tileAbsence).toEqual({ value: "Unavailable", tone: "refused", state: "unavailable" });
   const su = addressWorkspace({ address: DEMO_NEAR_ADDR, view: view({ lookup: { phase: "ready", value: lookup(DEMO_ADDRESS_NEAR) }, stress: { phase: "error", message: "rate limited (429), retry after 30s" } }), selectedId: null });
   expect(su.state).toBe("unavailable");
   expect(su.headline.emphasis).toBe("The scenarios for 0x7a3f…c21e could not be run.");
@@ -91,7 +100,9 @@ test("no position and withheld are the stress reading's own words", () => {
   // The negative is the stress response's, so the batch it names is that response's own (18,251) — never the lookup's (1).
   expect(none.headline.emphasis).toBe(`No Cash position for ${NOT_FOUND_ADDR.slice(0, 6)}…${NOT_FOUND_ADDR.slice(-4)} in batch 18,251.`);
   expect(none.headline.dek).toBe("That is the stress response's own answer, for its own batch; the lookup above is batch 1 and holds no Cash position either.");
-  expect(none.headline.tone).toBe("refused");
+  // Both answers agree: an empty answer, stated in ink.
+  expect(none.headline.tone).toBe("neutral");
+  expect(none.tileAbsence).toEqual({ value: "No position", tone: "neutral" });
   const withheld = addressWorkspace({
     address: DEMO_NEAR_ADDR,
     view: view({
@@ -112,18 +123,18 @@ test("rows: the demo near account under its three scenarios, the selection, the 
   expect(w.selected?.id).toBe("eth_minus_30");
   expect(w.batchId).toBe(18251);
   expect(w.decimals).toBe(6);
-  expect(w.headline.emphasis).toBe("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
-  expect(w.headline.tone).toBe("crit");
-  expect(w.headline.dek).toBe("Room today $190.50; after the shock, over cap by $1,069.");
+  // The account is the kicker's: the sentence names the scenario, and its colour sits on the verdict phrase alone.
+  expect(w.headline).toEqual({ emphasis: "Becomes liquidatable under ETH −30%:", rest: "over cap by $1,069.", tone: "crit", dek: "Room today $190.50." });
+  expect(w.tileAbsence).toBeNull();
   const t = w.tiles!;
   expect(t.debtBefore).toEqual({ value: "$4,822", tone: "neutral" });
   expect(t.capBefore).toEqual({ value: "$5,012", tone: "neutral" });
-  expect(t.roomBefore).toEqual({ value: "$190.50", tone: "warn" });
+  expect(t.roomBefore).toEqual({ value: "$190.50", tone: "warn", sub: "Room left" });
   expect(t.statusBefore).toEqual({ value: "Near cap", tone: "warn" });
   expect(t.debtAfter.value).toBe("$4,822");
   expect(t.capAfter.value).toBe("$3,752");
-  expect(t.roomAfter.value).toMatch(/^over cap by \$/);
-  expect(t.roomAfter.tone).toBe("crit");
+  // Over the cap: the tile says so over the dollars — the prose's "over cap by", never a minus on a dollar figure.
+  expect(t.roomAfter).toEqual({ value: "Over cap", tone: "crit", sub: "By $1,069" });
   expect(t.statusAfter).toEqual({ value: "Liquidatable", tone: "crit" });
   // A selection the address does not carry falls back to the first row; a null selection too.
   expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "ghost" }).selected?.id).toBe("eth_minus_30");
@@ -131,21 +142,21 @@ test("rows: the demo near account under its three scenarios, the selection, the 
   // The projection row is judged by its horizons, not by its after (the spot): no horizon flips, so the account holds through the longest.
   const proj = addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "dm_rate_horizon_plus_200bps" });
   expect(proj.selected?.projection).not.toBeNull();
-  expect(proj.headline).toEqual({ emphasis: `0x7a3f…c21e stays inside its cap through 90d under ${PROJECTION_LABEL}.`, rest: "", tone: "ok", dek: PROJECTION_DEK });
+  expect(proj.headline).toEqual({ emphasis: "Stays inside its cap through 90\u00a0d", rest: `under ${PROJECTION_LABEL}.`, tone: "ok", dek: PROJECTION_DEK });
   // Its after is the spot, which the Inspector reads as near cap: the after status follows the band, and the room beside it carries the same tone.
   expect(proj.tiles?.statusAfter).toEqual({ value: "Near cap", tone: "warn" });
-  expect(proj.tiles?.roomAfter).toEqual({ value: "$190.50", tone: "warn" });
+  expect(proj.tiles?.roomAfter).toEqual({ value: "$190.50", tone: "warn", sub: "Room left" });
 });
 
 test("a projection's horizons decide: a liquidatable horizon is named in the warn tone, an unknowable one is a refusal naming it", () => {
   const within = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(projected(1, true)), selectedId: "dm_rate_horizon_plus_200bps" });
-  expect(within.headline).toEqual({ emphasis: `0x7a3f…c21e becomes liquidatable within 90d under ${PROJECTION_LABEL}.`, rest: "", tone: "warn", dek: PROJECTION_DEK });
+  expect(within.headline).toEqual({ emphasis: "Becomes liquidatable within 90\u00a0d", rest: `under ${PROJECTION_LABEL}.`, tone: "warn", dek: PROJECTION_DEK });
   const unknown = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(projected(0, null)), selectedId: "dm_rate_horizon_plus_200bps" });
   expect(unknown.headline).toEqual({
-    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    emphasis: `Cannot say whether this account becomes liquidatable under ${PROJECTION_LABEL}.`,
     rest: "",
     tone: "refused",
-    dek: `${PROJECTION_DEK} The 30d horizon carries no verdict.`,
+    dek: `${PROJECTION_DEK} The 30\u00a0d horizon carries no verdict.`,
   });
 });
 
@@ -163,7 +174,7 @@ test("a refused Cash position prints no before figure; a negative wire figure pr
   expect(t.roomBefore).toEqual(REFUSED);
   expect(t.statusBefore).toEqual(NOT_COMPUTED);
   for (const tile of Object.values(t)) expect(tile.value).not.toContain("$");
-  expect(r.headline).toEqual({ emphasis: "ETH -30 percent does not apply to 0x4444…4404.", rest: "", tone: "refused", dek: "Not evaluated for this account." });
+  expect(r.headline).toEqual({ emphasis: "ETH −30% does not apply to this account.", rest: "", tone: "absent", dek: "Not evaluated for this account." });
   const negative = addressWorkspace({
     address: DEMO_NEAR_ADDR,
     view: nearWith(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, debt_usd: "-4822000000" } }))),
@@ -176,7 +187,7 @@ test("a refused Cash position prints no before figure; a negative wire figure pr
   expect(negative.tiles?.statusAfter).toEqual(NOT_COMPUTED);
   // The reader's flip still reads true from the wire's booleans; the headline refuses it, as the tiles do, because the figures are not a position.
   expect(negative.headline).toEqual({
-    emphasis: "Cannot say whether 0x7a3f…c21e becomes liquidatable under ETH -30 percent.",
+    emphasis: "Cannot say whether this account becomes liquidatable under ETH −30%.",
     rest: "",
     tone: "refused",
     dek: "Room today $190.50; after the shock, not computed. The shocked figures are not a position.",
@@ -232,7 +243,7 @@ test("an unknowable after verdict refuses its figures beside Not computed, and t
   expect(u.tiles?.statusAfter).toEqual(NOT_COMPUTED);
   // The dek uses the tiles' own word for the unknowable side: no room figure prints beside a refused register.
   expect(u.headline).toEqual({
-    emphasis: "Cannot say whether 0x7a3f…c21e becomes liquidatable under ETH -30 percent.",
+    emphasis: "Cannot say whether this account becomes liquidatable under ETH −30%.",
     rest: "",
     tone: "refused",
     dek: "Room today $190.50; after the shock, not computed. One side of the comparison is withheld or unknowable.",
@@ -247,7 +258,7 @@ test("a projection over an uncomputable spot yields no verdict word: the horizon
   const negative = addressWorkspace({ address: DEMO_NEAR_ADDR, view: spot({ debt_usd: "-4822000000" }), selectedId: "dm_rate_horizon_plus_200bps" });
   expect(negative.selected?.projection).not.toBeNull();
   expect(negative.headline).toEqual({
-    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    emphasis: `Cannot say whether this account becomes liquidatable under ${PROJECTION_LABEL}.`,
     rest: "",
     tone: "refused",
     dek: "Room today $190.50; under the projection, not computed. The projected figures are not a position.",
@@ -257,7 +268,7 @@ test("a projection over an uncomputable spot yields no verdict word: the horizon
   // The same gate for an unknowable spot verdict, in its own words — and in projection words, never shock words.
   const unknown = addressWorkspace({ address: DEMO_NEAR_ADDR, view: spot({ liquidatable: null }), selectedId: "dm_rate_horizon_plus_200bps" });
   expect(unknown.headline).toEqual({
-    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    emphasis: `Cannot say whether this account becomes liquidatable under ${PROJECTION_LABEL}.`,
     rest: "",
     tone: "refused",
     dek: "Room today $190.50; under the projection, not computed. One side of the comparison is withheld or unknowable.",
@@ -276,7 +287,7 @@ test("a projection beside a missing side yields no verdict word: a side the tile
   expect(noAfter.selected?.after).toBeNull();
   // The horizons are not consulted: the projected side is absent, and the dek says so in the tiles' own word.
   expect(noAfter.headline).toEqual({
-    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    emphasis: `Cannot say whether this account becomes liquidatable under ${PROJECTION_LABEL}.`,
     rest: "",
     tone: "refused",
     dek: "Room today $190.50; under the projection, not computed. One side of the comparison is withheld or unknowable.",
@@ -291,7 +302,7 @@ test("a projection beside a missing side yields no verdict word: a side the tile
   });
   expect(noBefore.selected?.before).toBeNull();
   expect(noBefore.headline).toEqual({
-    emphasis: `Cannot say whether 0x7a3f…c21e becomes liquidatable under ${PROJECTION_LABEL}.`,
+    emphasis: `Cannot say whether this account becomes liquidatable under ${PROJECTION_LABEL}.`,
     rest: "",
     tone: "refused",
     dek: "Room today not computed; under the projection, $190.50. One side of the comparison is withheld or unknowable.",
@@ -359,9 +370,9 @@ test("rowOutcome: the library word is the row's own verdict — the same judgeme
   expect(eth.flips).toBe(true);
   expect(rowOutcome(eth)).toEqual({ key: "result", text: "Becomes liquidatable", tone: "crit" });
   // A projection speaks through its horizons: inside through the longest, or liquidatable within the first that flips.
-  expect(rowOutcome(dm)).toEqual({ key: "result", text: "Stays inside its cap through 90d", tone: "ok" });
+  expect(rowOutcome(dm)).toEqual({ key: "result", text: "Stays inside its cap through 90\u00a0d", tone: "ok" });
   const flipsAt30d = near(projected(0, true)).find((r) => r.id === "dm_rate_horizon_plus_200bps");
-  expect(rowOutcome(flipsAt30d)).toEqual({ key: "result", text: "Becomes liquidatable within 30d", tone: "warn" });
+  expect(rowOutcome(flipsAt30d)).toEqual({ key: "result", text: "Becomes liquidatable within 30\u00a0d", tone: "warn" });
   // A side the tiles refuse yields no verdict word, whatever the wire's booleans say.
   const unreadable = near(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, debt_usd: "-4822000000" } }))).find((r) => r.id === "eth_minus_30")!;
   expect(unreadable.flips).toBe(true);
@@ -382,12 +393,12 @@ test("the table's cells are the lib's own words — the one verdict word functio
   const dm = rows.find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
   expect(cellWords(eth)).toEqual({ text: "Yes", tone: "crit", title: null });
   // A projection answers in its horizons' terms on both pages: it holds "Not within" its longest horizon — never a bare "No".
-  expect(cellWords(dm)).toEqual({ text: "Not within 90d", tone: null, title: "a projection speaks only through its longest horizon" });
+  expect(cellWords(dm)).toEqual({ text: "Not within 90\u00a0d", tone: null, title: "a projection speaks only through its longest horizon" });
   // A projection whose horizon flips names the horizon, in the projection's warn tone — never a "No" read off its unchanged spot side, never a bare "Yes".
   const within = near(projected(1, true)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
   expect(within.flips).toBe(false);
-  expect(cellWords(within)).toEqual({ text: "Within 90d", tone: "warn", title: null });
-  expect(cellWords(near(projected(0, null)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!)).toEqual({ text: "Cannot say", tone: "refused", title: "the 30d horizon carries no verdict" });
+  expect(cellWords(within)).toEqual({ text: "Within 90\u00a0d", tone: "warn", title: null });
+  expect(cellWords(near(projected(0, null)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!)).toEqual({ text: "Cannot say", tone: "refused", title: "the 30\u00a0d horizon carries no verdict" });
   // A side that is not a position: no verdict word, whatever the wire's booleans say.
   const negative = near(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, debt_usd: "-4822000000" } }))).find((r) => r.id === "eth_minus_30")!;
   expect(negative.flips).toBe(true);
@@ -395,8 +406,8 @@ test("the table's cells are the lib's own words — the one verdict word functio
   expect(cellWords({ ...eth, after: null })).toEqual({ text: "Cannot say", tone: "refused", title: "one side of the comparison is withheld or unknowable" });
   expect(cellWords({ ...eth, flips: false })).toEqual({ text: "Already liquidatable", tone: "crit", title: "liquidatable before the shock and after it" });
   expect(cellWords({ ...eth, flips: false, after: eth.before })).toEqual({ text: "No", tone: null, title: null });
-  expect(cellWords({ ...eth, applicable: false, reason: "no Cash position" })).toEqual({ text: "no Cash position", tone: null, title: null });
-  expect(cellWords({ ...eth, applicable: false, reason: null })).toEqual({ text: "the engine gave no reason", tone: null, title: null });
+  expect(cellWords({ ...eth, applicable: false, reason: "no Cash position" })).toEqual({ text: "No Cash position", tone: null, title: null });
+  expect(cellWords({ ...eth, applicable: false, reason: null })).toEqual({ text: "The engine gave no reason", tone: null, title: null });
   // The room cells: the tiles' words — a negative room "over cap by", a refused side "not computed", an unreadable scale its word; never a minus on a dollar figure.
   expect(sideRoomWords(eth.before, 6)).toBe("$190.50");
   expect(sideRoomWords(eth.after, 6)).toBe("over cap by $1,069");
@@ -461,8 +472,8 @@ test("one row, one header, one set of words on both pages: the verdict words the
   const rowsOf = (body: StressBody) => spaceOf(body).rows;
   const holding = rowsOf(DEMO_STRESS_NEAR).find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
   const flipping = rowsOf(projected(1, true)).find((r) => r.id === "dm_rate_horizon_plus_200bps")!;
-  expect(stressVerdictWords(rowVerdict(holding))).toEqual({ text: "Not within 90d", tone: null, title: "a projection speaks only through its longest horizon" });
-  expect(stressVerdictWords(rowVerdict(flipping))).toEqual({ text: "Within 90d", tone: "warn", title: null });
+  expect(stressVerdictWords(rowVerdict(holding))).toEqual({ text: "Not within 90\u00a0d", tone: null, title: "a projection speaks only through its longest horizon" });
+  expect(stressVerdictWords(rowVerdict(flipping))).toEqual({ text: "Within 90\u00a0d", tone: "warn", title: null });
   // A projection never answers a bare "Yes" or "No" on either page: those are a spot shock's words.
   for (const row of [holding, flipping]) expect(["Yes", "No"]).not.toContain(stressVerdictWords(rowVerdict(row)).text);
   // At runtime, for every shared demo row — the served body and the flipping one, a spot shock that flips, one that
@@ -502,7 +513,7 @@ test("a stress result that names no readable batch is not compared: the chip say
   expect(w.headline.tone).toBe("refused");
   expect(w.headline.emphasis).toBe("Cannot say — the stress result names no readable batch; the position above is batch 18,251.");
   expect(w.headline.dek).toBe("The scenarios below are the stress result's own. A stress result and a position are compared only when both name the same batch.");
-  expect(w.qualifier).toBe("applied to this account at a batch the stress result does not name readably · the position above is batch 18,251 · shocked figures are projections, not readings");
+  expect(w.qualifier).toBe("Applied to this account at a batch the stress result does not name readably · the position above is batch 18,251");
   // After a resume repair the dek is the Inspector's disclosure, as it is for two readable batches.
   const kept = deriveInspectorView(reading({ lookup: { phase: "ready", value: lookup(DEMO_ADDRESS_NEAR) }, stress: { phase: "ready", value: lookup(unreadable) }, lookupRepaired: true }), TIER_FALLBACK);
   const k = addressWorkspace({ address: DEMO_NEAR_ADDR, view: kept, selectedId: "eth_minus_30" });
@@ -510,9 +521,9 @@ test("a stress result that names no readable batch is not compared: the chip say
   expect(k.stressBatchChip).toBe("not readable · stress from the previous lookup");
   expect(k.headline.dek).toBe(stressBatchNote(kept)?.disclosure);
   // The section's qualifier is the lib's in every arm: one batch, two batches.
-  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "eth_minus_30" }).qualifier).toBe("applied to this account · shocked figures are projections, not readings");
+  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "eth_minus_30" }).qualifier).toBe("Applied to this account");
   const other = { ...DEMO_STRESS_NEAR, batch: { ...DEMO_STRESS_NEAR.batch, id: DEMO_STRESS_NEAR.batch.id + 1 } };
-  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(other), selectedId: "eth_minus_30" }).qualifier).toBe("applied to this account at batch 18,252 · the position above is batch 18,251 · shocked figures are projections, not readings");
+  expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(other), selectedId: "eth_minus_30" }).qualifier).toBe("Applied to this account at batch 18,252 · the position above is batch 18,251");
 });
 
 test("where there is no scale to print at, the workspace carries the TRUE cause and the cells say it — 'unreadable scale' only for a scale that was read and refused", () => {
@@ -582,19 +593,19 @@ test("a stress response that reports no position is the STRESS response's negati
       view: view({ address: NOT_FOUND_ADDR, lookup: { phase: "ready", value: lookup(ADDRESS_NOT_FOUND) }, stress: { phase: "ready", value: lookup({ ...DEMO_STRESS_NEAR, address: NOT_FOUND_ADDR, batch: { ...DEMO_STRESS_NEAR.batch, id: batchId as number }, found: false, scenarios: [] }) } }),
       selectedId: null,
     });
-  expect(none(1).headline).toEqual({ emphasis: "No Cash position for 0xBBbB…0002 in batch 1.", rest: "", tone: "refused", dek: "The lookup is complete: there is nothing to stress." });
+  expect(none(1).headline).toEqual({ emphasis: "No Cash position for 0xBBbB…0002 in batch 1.", rest: "", tone: "neutral", dek: "The lookup is complete: there is nothing to stress." });
   expect([none(1).batchId, none(1).stressBatchChip]).toEqual([null, null]);
   expect(none(2).headline).toEqual({
     emphasis: "No Cash position for 0xBBbB…0002 in batch 2.",
     rest: "",
-    tone: "refused",
+    tone: "neutral",
     dek: "That is the stress response's own answer, for its own batch; the lookup above is batch 1 and holds no Cash position either.",
   });
   expect(none("x").headline.emphasis).toBe("No Cash position for 0xBBbB…0002 in a batch the stress response does not name readably.");
 });
 
 test("a named scenario the address was not stressed under is never the silent subject: the workspace shows the first row the address carries and SAYS so — what was not evaluated, what is shown instead; a named scenario that is the subject, or no name at all, discloses nothing", () => {
-  const depeg = { id: "weeth_market_depeg_oracles_held", label: "weETH market depeg to 0.95 (oracles held)" };
+  const depeg = { id: "weeth_market_depeg_oracles_held", label: "weETH depeg to 0.95, oracles held" };
   // The listing names it; the address's stress response does not carry it.
   const carried = near().stress;
   if (carried?.kind !== "rows") throw new Error("the demo address carries stress rows");
@@ -602,9 +613,9 @@ test("a named scenario the address was not stressed under is never the silent su
   const w = addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: depeg.id, named: depeg });
   expect(w.state).toBe("rows");
   expect(w.selected?.id).toBe("eth_minus_30");
-  expect(w.fallback).toBe("weETH market depeg to 0.95 (oracles held) was not evaluated for 0x7a3f…c21e: the stress response carries no result for it. ETH -30 percent is shown instead — the first scenario this address carries.");
+  expect(w.fallback).toBe("weETH depeg to 0.95, oracles held was not evaluated for 0x7a3f…c21e: the stress response carries no result for it. ETH −30% is shown instead — the first scenario this address carries.");
   // The headline is the shown subject's, as before: the disclosure stands beside it, never in its place.
-  expect(w.headline.emphasis).toBe("0x7a3f…c21e becomes liquidatable under ETH -30 percent.");
+  expect(w.headline.emphasis).toBe("Becomes liquidatable under ETH −30%:");
   // A named scenario the address carries is the subject; no name is no disclosure, whatever the listing's default is.
   expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "ethfi_minus_50", named: { id: "ethfi_minus_50", label: "ETHFI -50 percent" } }).fallback).toBeNull();
   expect(addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: depeg.id }).fallback).toBeNull();

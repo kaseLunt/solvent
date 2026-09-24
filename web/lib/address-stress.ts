@@ -4,12 +4,15 @@
 // verdict and its room words are decided here, for the Inspector's table and
 // the Scenarios page's one-address mode alike.
 import type { StressLookup } from "@solvent/client";
+import { headroomTenths } from "./headroom";
 import { humanUsdFull } from "./human-price";
 import { engineName } from "./inspector-headline";
 import { CASH } from "./inspector-position";
 import { UNREADABLE_SCALE } from "./lab-headline";
+import { formatTenths } from "./percent";
 import { plainCause } from "./refusal-phrasebook";
-import { isWireDecimal, isWirePopulation } from "./wireGuard";
+import { scenarioName } from "./scenario-name";
+import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
 type Scenario = StressLookup["response"]["scenarios"][number];
 type Result = Scenario["results"][number];
@@ -39,6 +42,9 @@ export interface StressShortfall {
 
 export interface StressRow {
   readonly id: string;
+  /** The scenario's one name, built from its definition (`scenarioName`). */
+  readonly name: string;
+  /** The wire's own label, verbatim: the name's title. */
   readonly label: string;
   readonly applicable: boolean;
   readonly reason: string | null;
@@ -75,8 +81,14 @@ function side(state: State | null): StressSide | null {
   return { debt, cap, room: debt === null || cap === null ? null : cap - debt, verdict: state.liquidation_verdict };
 }
 
+/** The scenario's name from its own shocks; a shocks list that is not a list of objects is never read, and the wire's label stands. */
+function nameOf(scenario: Scenario): string {
+  const shocks: unknown = scenario.shocks;
+  return Array.isArray(shocks) && shocks.every((shock) => typeof shock === "object" && shock !== null) ? scenarioName(scenario) : scenario.label;
+}
+
 function inapplicable(scenario: Scenario, reason: string): StressRow {
-  return { id: scenario.id, label: scenario.label, applicable: false, reason, before: null, after: null, flips: null, projection: null, projectionNote: null, marketRealization: null };
+  return { id: scenario.id, name: nameOf(scenario), label: scenario.label, applicable: false, reason, before: null, after: null, flips: null, projection: null, projectionNote: null, marketRealization: null };
 }
 
 function row(scenario: Scenario, account: string): StressRow {
@@ -109,6 +121,7 @@ function row(scenario: Scenario, account: string): StressRow {
     mr === null ? null : { shortfall: wireInt(mr.execution_shortfall_usd), badDebt: wireInt(mr.bad_debt_at_liquidation_usd), decimals: mr.usd_decimals };
   return {
     id: scenario.id,
+    name: nameOf(scenario),
     label: scenario.label,
     applicable: result.applicable,
     reason: result.reason ?? null,
@@ -196,8 +209,47 @@ export function sideRoomWords(side: StressSide | null, decimals: number | null, 
   return decimals === null ? scaleAbsenceWords(absence) : roomWords(figures.room, decimals);
 }
 
+/** A table cell is a standalone line: it starts with a capital. */
+const cellCase = (words: string): string => `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+
+/** A table's room cell: the text, the dollar room behind it, and whether it is over the cap (crit ink). */
+export interface RoomCell {
+  readonly text: string;
+  readonly title: string | null;
+  readonly over: boolean;
+}
+
+/**
+ * A room cell as every table prints it — one unit down the column: the room as a signed percent of the cap, floored
+ * to a fixed tenth (the Book's headroom rule, so an over-cap room is never friendlier than it is), over the cap
+ * negative, and the dollar room in the title in the prose's own words. A zero cap over debt has no percent and says
+ * so. A side that is not computable prints no figure; with no scale the cell names the true cause.
+ */
+export function roomCell(side: StressSide | null, decimals: number | null, absence: ScaleAbsence | null = null): RoomCell {
+  const figures = computableSide(side);
+  if (figures === null) return { text: "Not computed", title: null, over: false };
+  if (decimals === null) return { text: cellCase(scaleAbsenceWords(absence)), title: null, over: false };
+  const over = figures.room < 0n;
+  const title = over ? cellCase(roomWords(figures.room, decimals)) : `Room ${roomWords(figures.room, decimals)}`;
+  const tenths = headroomTenths(figures.cap, figures.debt);
+  if (tenths === null) return figures.debt > 0n ? { text: "Over cap", title, over: true } : { text: "No debt", title: null, over: false };
+  return { text: formatTenths(tenths, { fixed: true }), title, over };
+}
+
+/**
+ * The market-realization axis under a row's room, where the scenario publishes one: its shortfall and its bad debt at
+ * the wire's own scale, as a sentence-case line. Null when the axis is absent, its scale unreadable, or it states
+ * neither figure.
+ */
+export function realizationWords(m: StressShortfall | null): string | null {
+  if (m === null || !isWireScale(m.decimals)) return null;
+  const part = (label: string, v: bigint | null): string | null => (v === null ? null : `${label} ${humanUsdFull(v, m.decimals)}`);
+  const parts = [part("shortfall", m.shortfall), part("bad debt", m.badDebt)].filter((p): p is string => p !== null);
+  return parts.length === 0 ? null : cellCase(parts.join(" · "));
+}
+
 /** The projection cell of a projection that lists no horizon — the cell's own words beside the verdict's "Cannot say". */
-const NO_HORIZON_WORDS = "no horizon in the projection";
+const NO_HORIZON_WORDS = "No horizon in the projection";
 
 /**
  * A projection's cell: each horizon's extra interest at the position's scale, a dash for a horizon that carries none.
@@ -207,7 +259,7 @@ const NO_HORIZON_WORDS = "no horizon in the projection";
  */
 export function projectionWords(horizons: readonly StressHorizon[], decimals: number | null, absence: ScaleAbsence | null = null): string {
   if (horizons.length === 0) return NO_HORIZON_WORDS;
-  if (decimals === null) return scaleAbsenceWords(absence);
+  if (decimals === null) return cellCase(scaleAbsenceWords(absence));
   return horizons.map((h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null ? "—" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`).join(" · ");
 }
 
@@ -280,7 +332,7 @@ export interface StressVerdictWords {
 export function stressVerdictWords(verdict: RowVerdict): StressVerdictWords {
   switch (verdict.kind) {
     case "not-applicable":
-      return { text: verdict.reason, tone: null, title: null };
+      return { text: cellCase(verdict.reason), tone: null, title: null };
     case "cannot-say":
       return { text: "Cannot say", tone: "refused", title: cannotSayTitle(verdict) };
     case "liquidatable":
@@ -302,19 +354,22 @@ const DAY = 86_400;
 /** The refused word for a duration the population guard did not admit: never a plausible length of time. */
 export const UNREADABLE_HORIZON = "—";
 
+/** A number and its unit never part across a line: the age grammar's joiner (U+00A0). */
+const NBSP = "\u00a0";
+
 /**
- * A projection horizon as a label, in integer arithmetic only — every quotient is an exact division of a
- * multiple, never a rounded float: whole days ("30d"), a day-plus remainder in hours ("1d 12h"), hours under
- * a day ("3h"), minutes under an hour ("30m"). Truncation, so a horizon is never printed longer than it is.
- * The duration is a wire population first: a fraction or a negative reaches no comparison, remainder or
- * division, and prints the refused word — "60.5" is never "1m", "-1" never "<1m".
+ * A projection horizon as a label, in the age grammar ("30 min", "3 h") and integer arithmetic only — every
+ * quotient is an exact division of a multiple, never a rounded float: whole days ("30 d"), a day-plus remainder in
+ * hours ("1 d 12 h"), hours under a day ("3 h"), minutes under an hour ("30 min"). Truncation, so a horizon is never
+ * printed longer than it is. The duration is a wire population first: a fraction or a negative reaches no
+ * comparison, remainder or division, and prints the refused word — "60.5" is never "1 min", "-1" never "<1 min".
  */
 export function horizonLabel(seconds: number): string {
   if (!isWirePopulation(seconds)) return UNREADABLE_HORIZON;
-  if (seconds < MINUTE) return "<1m";
-  if (seconds < HOUR) return `${String((seconds - (seconds % MINUTE)) / MINUTE)}m`;
-  if (seconds < DAY) return `${String((seconds - (seconds % HOUR)) / HOUR)}h`;
+  if (seconds < MINUTE) return `<1${NBSP}min`;
+  if (seconds < HOUR) return `${String((seconds - (seconds % MINUTE)) / MINUTE)}${NBSP}min`;
+  if (seconds < DAY) return `${String((seconds - (seconds % HOUR)) / HOUR)}${NBSP}h`;
   const days = (seconds - (seconds % DAY)) / DAY;
   const restHours = ((seconds % DAY) - (seconds % HOUR)) / HOUR;
-  return restHours === 0 ? `${String(days)}d` : `${String(days)}d ${String(restHours)}h`;
+  return restHours === 0 ? `${String(days)}${NBSP}d` : `${String(days)}${NBSP}d ${String(restHours)}${NBSP}h`;
 }
