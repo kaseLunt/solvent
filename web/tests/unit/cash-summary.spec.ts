@@ -542,13 +542,18 @@ test("the median room tile is the lib's decision: over a book the engine compute
   expect(uncapped).toMatchObject({ whole: true, computed: 1, notComputed: 0, percentiles: { median: null, p10: null } });
   expect(medianRoomTile(uncapped)).toEqual({
     value: "",
-    sub: "No account has a borrow cap to measure room against",
+    sub: "No computed account has a positive borrow cap to measure room against",
     tone: "neutral",
     pending: false,
     state: "unavailable",
     stateWord: "Not measurable",
   });
   expect(JSON.stringify(medianRoomTile(uncapped))).not.toContain("No accounts");
+  // Beside an account the engine refused, the sentence still speaks only of the computed ones: a refused account's cap is
+  // unknown, never absent, so no whole-book negative is claimed over it.
+  const mixed = summarizeCash({ rows: [capless, refusedRow], decimals: 6, refusedPositions: 1, ...settled });
+  expect(mixed).toMatchObject({ computed: 1, notComputed: 1, percentiles: { median: null } });
+  expect(medianRoomTile(mixed)).toMatchObject({ state: "unavailable", stateWord: "Not measurable", sub: "No computed account has a positive borrow cap to measure room against" });
   // Walking: the median so far, busy. Stopped: no figure, in the unavailable register, the stop said.
   const walking = summarizeCash({ rows, decimals: 6, refusedPositions: 1, walkComplete: false, walkStopped: null, walkStopKind: null, refusedWhole: null });
   const { median, p10 } = walking.percentiles;

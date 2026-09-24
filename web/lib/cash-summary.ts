@@ -182,7 +182,7 @@ export const NO_VERDICT = "No verdict";
 export const ROOM_NOT_MEASURABLE = "Not measurable";
 
 /** What the median room tile says beneath that word. */
-export const ROOM_NOT_MEASURABLE_SUB = "No account has a borrow cap to measure room against";
+export const ROOM_NOT_MEASURABLE_SUB = "No computed account has a positive borrow cap to measure room against";
 
 /** The liquidatable tile's label: the material line it headlines, from the one constant that places it. */
 export const liquidatableTileLabel = `Liquidatable · ≥ $${MATERIAL_LINE_USD.toString()}`;
