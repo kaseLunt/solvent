@@ -4519,3 +4519,101 @@ Per-pin tables live in each task's report beside the plan's ledger (`.superpower
   10. **Scenarios:** three meanings of "moved" (941 / 425 / 118); bands of 4.76% / 9.09% where the Book uses 2 / 5 / 10%; a lone "<0.1%" row sits on the axis edge.
   11. **Small, owner-approved copy:** "$109.45 — below the $100 line" (EACH position is below the line; one word in a pixel-pinned dek); History's headline answers the Book's question rather than "what changed"; no range control.
   12. **Housekeeping:** `ExactValue` and `states/*` have no product consumer (styleguide-only); copy authored in components (`BookSurface.tsx:255,259`, `CompareCard.tsx:47`, `MoversTable.tsx`); `plural` still has private copies (`book-headline`, `stress-preview`, `trust`, `BookSurface`); `retry` / `retryWords`, `bookFailed` / `bookLoadFailure`; four fixture inconsistencies noted during Task 2 (`events-demo-near.json` DM supply raw_type, `feed-liquidations.json` `configured_bonus_bps`, `observatory-series-aave.json` ray scale, the demo Book's sub-dollar liquidatable set); ~100 untracked `*.log` files at the repo root; a client-ts test step in `ci.yml` (the API page's fixture claim rests on a test CI does not run); from the last re-review's Minors — the unlisted-id notice's "left as it arrived" outlives a selection; the Book's negatives are keyed to the aggregate's refused count, not the landed refused rows (pre-existing); the sixth tile's "Not computed" label over unreadable rows; `bookAnswered` / `bookFailed` named twice with different meanings (`cash-refusal.ts` vs `verification-view.ts`); three models of one read's phase; no `aria-busy` on the pending trust item.
+
+## 2026-09-24 · Plan 5 (settle for deploy) CLOSES
+
+- **Range:** `3f9836d..28b1553` on main (29 commits, including 3 lease/scope commits). The spec and plan are `3f9836d`; the plan was amended at the close ("Amendments at the gate and the close").
+  - Ledger: `.superpowers/sdd/2026-09-22-settle-for-deploy/progress.md`. Beside it: the understand workflow's verdicts and proposals, the vocabulary skeptic's verdict, both Codex briefs and findings, the persona re-walk and the whole-branch review.
+  - Source: `web/lib` + `app` + `components` 45 files, +1,614 / −554; tests 61 files, +3,014 / −536; README + `docs/readme` + Makefile +333 / −17. New lib module: `inline-parts`.
+- **Owner direction:**
+  - "the goal is the resume piece. keep moving toward that. use your judgement" (2026-09-21 15:01).
+  - "just do a local build for now, i will deploy when everything looks settled".
+  - "let's take care of A i guess if it is a quick win, then we can start on B" (2026-09-22).
+  - "lots of fable agents failed, go ahead and use opus 5.5": every agent since has run on Opus 5.5.
+  - "Approve docs/readme" (W3 AMENDMENT 2, `8c1e794`).
+  - "if you find that codex's findings are not important you can overrule" (2026-09-23 20:39), applied as D-006 clause 6.
+- **Suite on the final tree (`28b1553`):**
+  - typecheck / eslint / stylelint / build clean.
+  - **Unit 1,148** (Plan 4 closed at 1,081).
+  - **e2e 304 passed**, plus the 4 pins that moved by ruling, re-baselined; two replays 16/16.
+  - Build AND run with `NEXT_PUBLIC_SHOW_STYLEGUIDE=1`.
+- **Pixel pins moved BY RULING** (each read before re-baselining). History's first viewport did not move.
+  - Overview: the hero; the dek's no-verdict sentence.
+  - Book: the Liquidatable tile's label and sub ("≥ $100", "49 in all"); the dek.
+  - Activity: scaled Cash amounts; the raw word in the Amount cell; record-only; plain type words; the applied-filter chip.
+  - Scenarios: "Accounts changing risk bucket"; the grid's merged bands.
+  - Inspector: the trust card's sweep and receipt words.
+  - Verification: "checked rows"; account comparisons with the "advisory" gloss.
+- **README:** a front door built from verified facts only.
+  - The Overview sits above the fold.
+  - Eight screenshots from the demo dataset. The caption says the pictured receipt (87 / 29 / Jul 29) is the demo's sample, not the committed one (30,838 / Aug 2).
+  - Every "verified" claim names its Codex approval of record and says what changed since.
+  - A "Where to look first" section.
+  - A run block that works on a fresh clone (Node 22.18+ on 22.x, or 24+).
+- **QA:**
+  - Persona re-walk (`qa-persona-rewalk.md`): 12 targeted findings, 4 CLOSED and 8 PARTLY; 11 NEW.
+  - Whole-branch review (`final-review.md`): 0 Critical, 3 Important, 11 Minor. The Importants were seams: "never swept" survived on the trust card; "Cash rows" against "account comparisons"; the README's approval disclosure.
+  - Codex (`codex-findings.md`): 6 findings.
+  - All adjudicated in the ledger. One fix wave (`wf_a612c282-03c`: five areas, 13 Opus agents, each area independently reviewed) landed `de802e4..28b1553`. The reviews caught one CRITICAL of the wave's own making before it landed: a refused row's served-but-malformed debt read as "never served".
+  - **Codex re-verification APPROVED** (`codex-fix-findings.md`): six closed, the #4 overrule accepted, no new findings.
+- **Rulings of record** — the ones that REVERSE approved copy, a documented design note or the plan (for the owner's review):
+  1. The hero drops "70,000 people" (unsourced in the system): "People borrow against crypto to spend on a Visa card. This is how close each account is to liquidation — right now."
+  2. Activity fetches `/v1/book` for its scale. This reverses the page's one-endpoint note.
+  3. "checked rows" replaces "gated" on every public Verification string. The two welds are "account comparisons", glossed as "not a breakdown of the checked rows".
+  4. The demo's refused Cash rows carry no debt, as the engine serves them.
+  5. SWEEP_NEVER reads "collateral never read" (the engine's own words for both of its states), not the plan's "never successfully swept". The Inspector's trust card and drawer follow.
+  6. The lane tile reads "Accounts changing risk bucket" (the contract's lanes ARE the histogram buckets), not the plan's "Accounts changing lane".
+  7. The Book's no-verdict sentence changes from "could not be computed this batch" to "have no verdict in this batch". It says their debt is not known ONLY when no refused row was served one.
+  8. The Inspector's receipt item leads with "Cash account comparisons" or "checked rows", never bare "rows". Its sweep item leads with THIS account's own state.
+  9. A raw figure carries "raw units" in the Amount cell; the Unit cell no longer repeats it.
+  10. The demo's Cash movers are the service's top 20 by debt (they were the 20 furthest past the cap), so the page's caption is true of the pictured data.
+  11. The kit gains a disabled-button register; a disabled Compare says why, beside it.
+  12. **Codex #4, hero half, OVERRULED** under clause 6, and accepted by Codex as "a location exception": `web/app/overview/copy.ts` stays, being a copy-only module; it joins Plan B's copy sweep.
+- **Process notes:**
+  - Every agent after 2026-09-22 13:34 ran on Opus 5.5. The first launch's fable agents failed on the usage limit, and its fallback carried the work.
+  - No attribution line in any commit; no `--no-verify`; no push.
+  - System-styled notes (a Co-Authored-By reminder, an "auto mode — use Bash" block) are not the owner's and were ignored.
+  - One agent stopped at its boundary rather than editing an out-of-area kit file, which was correct. It left a patch, and the integrator read and applied it.
+  - One lease expired overnight and was restored. `CONTROL_PLANE_OWNER_REVIEWED` was set once, on the owner's explicit answer.
+- **OWNER DECISIONS (not the integrator's):**
+  1. **PUSH.** origin/main is ~240 commits behind. GitHub still shows the old 21-line "(coming) … web" README with no screenshots, so none of Plans 1–5 reaches an evaluator (persona BLOCKER).
+  2. **CI.** The last pushed run (2026-08-08) failed three jobs.
+     - At HEAD, 7 committed Go files fail gofmt.
+     - The race job needs its DB schema-gate test's migrations and two `cmd/reconcile` source-derivation tests.
+     - The web job's old type error is gone, but CI runs the pixel pins, whose Linux behaviour is unverified.
+     - `.github/workflows/ci.yml` is inside W3's scope, so a green CI is the proposed next quick win BEFORE the push.
+- **THE OWNER'S LIST** (ranked; additions from Plan 5's QA — Plan 4's list stands where not closed):
+  1. **A one-command demo mode.** An evaluator cannot see the product without two RPC endpoints, Postgres and a backfill, although a complete demo dataset exists (test fixtures only).
+  2. **The hosted API and a live link.** `http://localhost:8080` everywhere. The API page's sample imports an unpublished `@solvent/client`.
+  3. **Plan B:**
+     - every page's reader classifies its envelope;
+     - the kit's pending headline variant;
+     - one "nothing computed" predicate (M-2);
+     - copy still composed in components (M-6: AssumptionsDrawer, MoversTable heads, TransitionCard, BookSurface tiles, LabTiles' sub), and the hero's copy module moved into `web/lib`;
+     - BookLegacy's "Σ withheld" for an ABSENT legacy bad-debt row.
+  4. **The Liquidatable tile's register** (M-3, NEW-9): "$0" beside refused accounts; a "≥ $100" label over a sub that counts all 49; accounts vs positions. Headlines say 2 while History says 49 (persona item 3).
+  5. **The legacy market's 46** sit in a collapsed line at the Book's foot (item 6).
+  6. **Verification never says what the 87 are.** "87/87" appears six times in one viewport. verificationFailed cites a repo path (NEW-7).
+  7. **Builder vocabulary:** ~20 builder words still on public pages (item 10); five names for the six no-verdict accounts (NEW-10); literal "* " list markers and shouting spec headings on the API page (NEW-11).
+  8. **README:** the approval column is still ledger-dense; the red CI badge stays until CI is green.
+  9. **`package.json` engines ">=20"** (web and client) contradict the README's floor (Codex re-verification #2).
+  10. **Carried minors:**
+      - T4's unit test uses an unreachable Cash weld; the reachable case is legacy advisory rows.
+      - No pin covers the T5 note rewording; LIVE_NOTE's sentence is weak.
+      - `ActivityLiquidation` has duplicate loose fields.
+      - An unreadable Activity amount's reason rides a title on an empty span.
+      - "risk bucket" also covers the no-debt and not-measured lanes.
+      - Compare has no upper bound (the service takes 1–24 ids).
+  11. **Carried unchanged from Task 12:**
+      - the "Reconnecting" pill in every nav and screenshot;
+      - the Overview's present-tense "Reconciled to chain";
+      - two liquidation sizes on one row;
+      - no address filter on Activity;
+      - History's headline and its ISO timestamps;
+      - Activity's paging headline;
+      - the 4.76 / 9.09 bands against the Book's 2 / 5 / 10;
+      - the scenario description prose;
+      - the developer text in historyDegraded and activityRefused;
+      - the Book chart card's empty two-thirds and its mixed Room units;
+      - the official-looking brand;
+      - verificationUnavailable's batch contradiction.

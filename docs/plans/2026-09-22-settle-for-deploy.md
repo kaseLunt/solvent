@@ -334,3 +334,59 @@ Reader: understand.json "README" + its verdict (the skeptic's corrections are bi
 - **Placeholders:** none — every word a page will print is in a test above; where a builder name depends on the existing spec file the task says to use that file's builder.
 - **Types:** `liquidatableTileSub`, `liquidatableTileLabel`, `nearCapToggleLabel`, `belowLineToggleLabel` (cash-summary.ts); `inlineParts` / `InlinePart` (api-view.ts); `moversCaption(t, engine)` and the lab-view constants; `typeLabel` / `appliedFilter` (activity-view.ts) — each defined once, in the task that produces it.
 - **Parallel safety:** areas own disjoint files; the one phrase pinned across four areas' specs (SWEEP_NEVER) is swept by the integrator after the areas land (Task 9).
+
+---
+
+## Amendments at the gate and the close
+
+These supersede the lines they name. The landed code and its specs are the authority. Each amendment follows from QA (a
+persona re-walk, a whole-branch review and a Codex round) and the fix wave that followed it (ledger:
+`.superpowers/sdd/2026-09-22-settle-for-deploy/progress.md`, "ADJUDICATION").
+
+- **Task 9 — SWEEP_NEVER** is `"collateral never read"`, not `"never successfully swept"`. These are the engine's own
+  words for both of its SWEEP_NEVER states (`internal/riskfeed/assemble.go:1002-1006`). The Inspector's trust item
+  and drawer use the same phrase ("collateral never read · collateral clock absent"; "none (collateral never read)").
+  A refusal for another code that also has sweep block 0 is given no cause the engine did not state.
+- **Task 5 — the lane tile** is `"Accounts changing risk bucket"`, not `"Accounts changing lane"`. The contract's lanes
+  are the `hf_histogram` buckets. The transition grid says its 5 bands are merged from the service's 8 risk buckets.
+- **Task 5 — the movers caption** also says how the list is ordered: `… by debt · listed largest debt first · the
+  service returns at most 20` (the legacy engine says "largest drop first"). The web now sorts movers by the
+  service's own key (debt on Cash, `hf_drop_wad` on the legacy market). The demo's Cash movers are the service's top
+  20 by debt, under the service's own truncation sentence (`cmd/api/p5_runbook.go:1148-1151`).
+- **Task 5 — the disabled Compare** shows its reason beside the button and exposes it as the button's accessible
+  description: "Tick two or more scenarios to compare them." / "Tick one more scenario to compare." / "A comparison is
+  running." (`compareControl`, `components/kit/ScenarioLibrary.tsx`).
+- **Task 6 — `deficit_created`** reads `"bad debt realized"`, one spelling with the wire's `realized_bonus_bps`.
+- **Task 6 — the liquidation extract.** Activity and the Inspector read one repaid figure (`feed-view.ts`):
+  - null gives "—";
+  - a value off the wire-decimal pattern gives "unreadable";
+  - an unscaled value gives its raw digits, with no currency or token unit;
+  - a scaled value prints exactly, never truncated.
+
+  The bonus bps are guarded the same way. The extract's words live in the lib. The wire's note renders through
+  `inlineParts`, which now lives in `web/lib/inline-parts.ts` (`api-view` re-exports it).
+- **Task 6 — raw amounts.** An unscaled figure carries its "raw units" word in the Amount cell, beside the digits. The
+  Unit cell no longer repeats it (e.g. "aave-scaled · USDC").
+- **Task 2 — the Book's not-computed sentence** reads "N positions have no verdict in this batch and are counted, not
+  hidden.", true for every refusal code. It adds "No debt figure is served for a position the engine could not
+  compute, so their debt is not known." only when no refused row was served a debt. A served-but-malformed debt reads
+  "unreadable", never unserved.
+- **Task 7 — the Inspector's sweep item** first states what the account's own evidence says, then the engine-wide
+  tally: "this account's latest sweep succeeded · engine-wide, 1 of 3 attempted accounts failed". The title carries the
+  stamp. "Succeeded" is claimed only for a computed row.
+- **Task 7 / Task 3 — the Inspector's receipt item** uses Verification's nouns: "29/29 Cash account comparisons exact",
+  or "87/87 checked rows exact" when no Cash weld is carried. A comparison that is not exact is "not exact", never
+  "drifted"; "drifted" is kept for checked-row drift only.
+- **Task 3 — the empty receipt** (0 checked rows) never says "nothing was compared". A weld may still carry advisory
+  comparisons. Every string now says the run checked no rows and nothing is proven, and `receiptComparedNothing` is
+  renamed `receiptCheckedNothing`. "reconcile-welded" and the dotted `service.registry_fingerprint` are gone from
+  public copy. The account-comparisons row glosses "advisory" from `cmd/reconcile/main.go:1343-1361`.
+- **Task 7 — History's legend** says "click any hour for its record".
+- **Task 8 — the README.**
+  - Each claim names its approval of record and says whether the component changed since.
+  - The Node floor is "22 (22.18 or later) or 24 and later".
+  - The Overview picture sits above the fold.
+  - The gallery comes before the run block. Its caption says the pictured receipt is the demo's sample, not the
+    committed one.
+  - Verification is included, and there is a "Where to look first" section.
+  - The Makefile's run-api comment matches `config.Load`.
