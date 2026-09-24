@@ -11,10 +11,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kaselunt/solvent/internal/store"
@@ -62,10 +64,11 @@ func TestSchemaGateRefusesAMismatchedDatabase(t *testing.T) {
 // TestLiveDatabaseSchemaGateRefusesUntilMigrated is the read-only live smoke.
 //
 // It runs ONLY when SOLVENT_DATABASE_URL is exported, opens the live database
-// strictly read-only (one SELECT against goose_db_version), and asserts that the
-// gate's verdict MATCHES the database's actual state — refusal when the versions
-// differ, and a clean pass once the maintenance window has applied the
-// migrations. It never writes and never migrates.
+// strictly read-only (whether goose_db_version exists, then one SELECT against
+// it), and asserts that the gate's verdict MATCHES the database's actual state —
+// refusal when the database was never migrated or the versions differ, and a
+// clean pass once the maintenance window has applied the migrations. It never
+// writes and never migrates.
 func TestLiveDatabaseSchemaGateRefusesUntilMigrated(t *testing.T) {
 	dsn := os.Getenv("SOLVENT_DATABASE_URL")
 	if dsn == "" {
@@ -82,10 +85,26 @@ func TestLiveDatabaseSchemaGateRefusesUntilMigrated(t *testing.T) {
 
 	want, err := store.ExpectedSchemaVersion()
 	require.NoError(t, err)
+
+	// A database that was never migrated has no version table at all (a fresh CI service, a new operator's
+	// database): that is a state too, and the gate's verdict on it must be refusal, not a pass or a crash.
+	var versionTable *string
+	require.NoError(t, st.Querier().QueryRow(ctx, `SELECT to_regclass('goose_db_version')::text`).Scan(&versionTable))
+	s := &server{store: st}
+	if versionTable == nil {
+		err = s.requireSchema(ctx)
+		require.Error(t, err, "a database with no migration history must be refused: this build expects version %d", want)
+		// The refusal is the missing table itself (undefined_table), not any failure that happens to name it.
+		var pgErr *pgconn.PgError
+		require.True(t, errors.As(err, &pgErr), "the refusal must carry the database's own error, got %v", err)
+		require.Equal(t, "42P01", pgErr.Code, "the refusal must be the missing goose_db_version relation, got %v", err)
+		t.Logf("no goose_db_version on this connection's search_path (never migrated): the gate REFUSES, as it must, until version %d is applied", want)
+		return
+	}
+
 	got, err := store.SchemaVersion(ctx, st.Querier())
 	require.NoError(t, err)
 
-	s := &server{store: st}
 	err = s.requireSchema(ctx)
 	if got == want {
 		require.NoError(t, err,
