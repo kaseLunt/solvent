@@ -1,7 +1,7 @@
-// The API page's one view model: header, chips, tiles, the endpoint index,
+// The API page's one view model: header, chips, the census, the endpoint index,
 // error rows and doctrine, derived once from the generated contract extract
 // (lib/proof-contract.gen.ts). Every figure here is the extract's own count or
-// version — the page cannot say what the contract does not, and a tile's sub
+// version — the page cannot say what the contract does not, and the census
 // is counted from the extract, never typed beside it. The one
 // deployment-specific value is the base URL, stated once.
 import { readFileSync } from "node:fs";
@@ -31,18 +31,15 @@ import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS } from "../../lib/proof-cont
 
 const BASE = "http://x";
 
-test("tiles: the endpoint count and the error-response count — the extract's own, each with a sub counted from the same extract; the version is the kicker's and the chip's, never a third tile", () => {
+test("no tiles: the census line above the index says what the index holds — the verb census and the error statuses, counted from the extract; the version is the kicker's and the chip's", () => {
   const v = deriveApiView(BASE);
-  expect(v.tiles).toEqual({
-    operations: { label: "Endpoints", value: String(OPERATIONS.length), sub: verbCensus() },
-    errors: { label: "Error responses", value: String(ERROR_RESPONSES.length), sub: errorStatuses() },
-  });
-  for (const tile of Object.values(v.tiles)) expect(`${tile.value} ${tile.sub}`).not.toContain(CONTRACT_META.version);
-  // No tile without a sub.
-  for (const tile of Object.values(v.tiles)) expect(tile.sub.length).toBeGreaterThan(0);
+  expect(v).not.toHaveProperty("tiles");
+  expect(v.census).toBe(`${verbCensus()} · error responses ${errorStatuses()}`);
+  expect(v.census).toBe("15 GET · 2 POST · error responses 400 · 404 · 409 · 429 · 500 · 503");
+  expect(v.census).not.toContain(CONTRACT_META.version);
 });
 
-test("the tile subs are computed, never typed: the verb census sums to the endpoint count in the contract's order; the status list is the error envelope's own", () => {
+test("the census is computed, never typed: the verb census sums to the endpoint count in the contract's order; the status list is the error envelope's own", () => {
   // The demo literals — what today's contract computes to.
   expect(verbCensus()).toBe("15 GET · 2 POST");
   expect(errorStatuses()).toBe("400 · 404 · 409 · 429 · 500 · 503");
@@ -69,14 +66,14 @@ test("header: the kicker names the contract's version once; the headline counts 
     dek: apiDek(),
   });
   expect(`${v.headline.emphasis} ${v.headline.rest}`).toBe("17 read-only endpoints, every money value an exact decimal string.");
-  // One word product-wide: the OpenAPI noun leaves the header and the tiles.
+  // One word product-wide: the OpenAPI noun leaves the header and the census.
   const printed = [
     v.kicker,
     v.headline.emphasis,
     v.headline.rest,
     v.headline.dek,
     v.endpointsQualifier,
-    ...Object.values(v.tiles).flatMap((tile) => [tile.label, tile.sub]),
+    v.census,
     ...v.chips.flatMap((chip) => [chip.label, chip.value]),
   ];
   for (const text of printed) expect(text).not.toMatch(/operations?/i);

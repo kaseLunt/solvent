@@ -1,7 +1,7 @@
 "use client";
 
 import { DotPlot, LegacyFold, type DotPlotRow } from "@/components/kit";
-import { COMPARE_AXIS, COMPARE_VALUE_HEADER, LEGACY_COMPARE_FOOTNOTE, LEGACY_COMPARE_SUMMARY } from "@/lib/lab-view";
+import { COMPARE_AXIS, COMPARE_VALUE_HEADER, LEGACY_COMPARE_FOOTNOTE } from "@/lib/lab-view";
 import { LEGACY_FOLD_TITLE } from "@/lib/prose";
 import { useMeasuredWidth } from "@/lib/useMeasuredWidth";
 import styles from "./lab.module.css";
@@ -14,10 +14,10 @@ export const PLOT_MEASURE = { min: 480, max: 1280, fallback: 880 };
  * own component so the measured frame exists at its own mount: the width hook attaches its observer once, at mount,
  * and a frame that mounts later inside another component is never measured.
  */
-export function LegacyCompare({ rows }: { rows: readonly DotPlotRow[] }) {
+export function LegacyCompare({ rows, summary }: { rows: readonly DotPlotRow[]; summary: string }) {
   const { ref, width } = useMeasuredWidth<HTMLDivElement>(PLOT_MEASURE);
   return (
-    <LegacyFold title={LEGACY_FOLD_TITLE} summary={LEGACY_COMPARE_SUMMARY} testId="lab-compare-legacy">
+    <LegacyFold title={LEGACY_FOLD_TITLE} summary={summary} testId="lab-compare-legacy">
       <div ref={ref} className={styles.plotFrame}>
         <DotPlot
           rows={rows}

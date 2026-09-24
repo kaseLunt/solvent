@@ -81,7 +81,10 @@ test("the page's engines: Cash first — the page opens on it — then the legac
   expect([...HISTORY_ENGINES].sort()).toEqual([...OBSERVATORY_ENGINES].sort());
 });
 
-test("ok, Cash: state ok; the kicker names the engine; the headline's parts and the dek ARE observatoryTakeaway's, in ink — the change leads; the finding IS gridReadingLine for the drawn metric", () => {
+/** The chart's caption over the demo week: what a point and a gap are, over the recorded span. */
+const DEMO_CAPTION = `Each point is one recorded hour, ${nb("Aug 1, 21:00")} – ${nb("Aug 8, 20:00 UTC")}; a gap is an hour with no figures to draw.`;
+
+test("ok, Cash: state ok; the kicker names the engine; the headline's parts and the dek ARE observatoryTakeaway's, in ink — the change leads; the finding IS gridReadingLine, the same for every metric", () => {
   const v = deriveHistoryView(ok(DEMO_OBSERVATORY_DM));
   const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
   const takeaway = observatoryTakeaway(DEMO_OBSERVATORY_DM, axis, "debt_manager");
@@ -96,10 +99,10 @@ test("ok, Cash: state ok; the kicker names the engine; the headline's parts and 
     dek: "Liquidatable accounts rose by 1, to 49; accounts fell by 52, to 1,412. 165 of 168 hours were recorded; 2 are absent and 1 was withheld, each a gap on the chart.",
   });
   expect(chip(v, "Hours")?.tone).toBe("warn");
-  expect(v.finding).toBe(gridReadingLine(DEMO_OBSERVATORY_DM, axis, "debt_usd"));
-  expect(v.finding).toBe(`Between the first and last recorded hours (${nb("Aug 1, 21:00")} → ${nb("Aug 8, 20:00 UTC")}), debt rose by $1.8M, to $27.8M.`);
-  // The finding follows the drawn metric.
-  expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM, "accounts")).finding).toBe(gridReadingLine(DEMO_OBSERVATORY_DM, axis, "accounts"));
+  expect(v.finding).toBe(gridReadingLine(DEMO_OBSERVATORY_DM, axis));
+  expect(v.finding).toBe(DEMO_CAPTION);
+  // The caption says what the chart draws, not what the headline already says: every metric reads it alike.
+  expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM, "accounts")).finding).toBe(DEMO_CAPTION);
   expect(v.chartLabel).toBe("Debt (USD) for Cash, hour by hour");
   expect(deriveHistoryView(ok(DEMO_OBSERVATORY_DM, "liquidatable_positions")).chartLabel).toBe("Liquidatable accounts for Cash, hour by hour");
   expect(v.stateCard).toBeNull();
@@ -167,7 +170,7 @@ test("chips: Stride · Range · Hours · Served, in that order — no chip resta
     value: rangeWords(DEMO_OBSERVATORY_DM.from, DEMO_OBSERVATORY_DM.to, DEMO_OBSERVATORY_DM.served_at),
     title: describeRange(DEMO_OBSERVATORY_DM.from, DEMO_OBSERVATORY_DM.to),
   });
-  expect(chip(v, "Range")?.value).toBe(`${nb("Aug 1, 21:00 UTC")} → latest`);
+  expect(chip(v, "Range")?.value).toBe(`${nb("Aug 1, 21:00 UTC")} – latest`);
   expect(chip(v, "Hours")).toEqual({ label: "Hours", value: "165 recorded · 1 withheld · 2 absent", tone: "warn" });
   expect(chip(v, "Served")).toEqual({ label: "Served", value: nb("Aug 8, 20:22 UTC"), title: DEMO_OBSERVATORY_DM.served_at });
   for (const c of v.chips) expect(`${c.label} ${c.value}`.length).toBeLessThanOrEqual(48);
@@ -260,7 +263,8 @@ test("a debt figure that fails its wire guard, THROUGH the view: the page stands
     });
     expect(tile(v, "debt")).toEqual({ key: "debt", label: "Debt", ...gap("Unreadable", "unreadable") });
     for (const key of ["collateral", "accounts", "liquidatable"]) expect(tile(v, key).tone).toBe("neutral");
-    expect(v.finding).toContain("debt unreadable at one end, so no change is given");
+    // An unreadable hour is still a recorded hour: the caption's span holds, and its mark says what it is.
+    expect(v.finding).toBe(DEMO_CAPTION);
     expect(v.marks.map((m) => m.mark)).toEqual(["absent", "withheld", "unreadable"]);
     expect(`${v.headline.emphasis} ${v.headline.rest} ${v.finding ?? ""}`).not.toMatch(/\$0\b|NaN/);
   }
@@ -275,7 +279,7 @@ test("a debt figure that fails its wire guard, THROUGH the view: the page stands
     "withheld",
     "unreadable",
   ]);
-  // An OLDER hour that cannot be read: no change can lead, so the latest level answers; the finding says the end is unreadable.
+  // An OLDER hour that cannot be read: no change can lead, so the latest level answers; the caption still spans the recorded hours.
   const firstBad = {
     ...DEMO_OBSERVATORY_DM,
     points: DEMO_OBSERVATORY_DM.points.map((p, i) => (i === 0 ? { ...p, debt_usd: "25955929.42377" } : p)),
@@ -285,7 +289,7 @@ test("a debt figure that fails its wire guard, THROUGH the view: the page stands
   expect(older.headline.emphasis).toBe("$27.8M of Cash debt is outstanding,");
   expect(tile(older, "debt").tone).toBe("neutral");
   expect(tile(older, "debt").sub).toBe("Latest recorded hour");
-  expect(older.finding).toContain("debt unreadable at one end, so no change is given");
+  expect(older.finding).toBe(DEMO_CAPTION);
 });
 
 test("money is judged as money whatever its type, THROUGH the view: a debt figure served as a JSON number is the named hole a malformed string is; never plotted, never labelled as a count, never a throw", () => {
@@ -301,7 +305,7 @@ test("money is judged as money whatever its type, THROUGH the view: a debt figur
     expect(v.headline.tone).toBe("refused");
     expect(tile(v, "debt")).toEqual({ key: "debt", label: "Debt", ...gap("Unreadable", "unreadable") });
     for (const key of ["collateral", "accounts", "liquidatable"]) expect(tile(v, key).tone).toBe("neutral");
-    expect(v.finding).toContain("debt unreadable at one end, so no change is given");
+    expect(v.finding).toBe(DEMO_CAPTION);
     expect(v.marks.map((m) => m.mark)).toEqual(["absent", "withheld", "unreadable"]);
     const entry = buildBucketAxis(debtAt(newest, bad)).entries.at(-1)!;
     const row = pointRecord(entry, debtAt(newest, bad)).answer.find((r) => r.key === "debt")!;
@@ -411,8 +415,9 @@ test("degraded — not served on this deployment: the absent register, never a r
   expect(v.headline.dek).not.toContain(message);
   expect(v.stateCard).toEqual({
     state: "not-served",
-    title: "No hourly history on this deployment",
-    cause: "The hourly rollup is not available on this deployment's database.",
+    // What fills the page, said once: the headline, dek and chip already say the record is not here.
+    title: "What fills this page",
+    cause: "When this deployment builds its hourly record, each recorded hour appears here as a point and a missing hour as a gap.",
     serviceSaid: { label: SERVICE_SAID, text: verbatim },
     action: "book",
   });

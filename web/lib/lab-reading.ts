@@ -77,7 +77,7 @@ export function withSettled(runs: ReadonlyMap<string, RunRecord>, id: string, ou
 function heldSetOf(prev: SetRecord | null): HeldSet | null {
   if (prev === null) return null;
   if (prev.phase === "settled" && prev.outcome.kind === "ok" && setFault(prev.ids, prev.outcome.response) === null) {
-    return { ids: prev.ids, response: prev.outcome.response, at: prev.at };
+    return { ids: prev.ids, response: prev.outcome.response, at: prev.at, atMonotonicMs: prev.atMonotonicMs };
   }
   return prev.held;
 }
@@ -92,9 +92,9 @@ export function withSetRunning(prev: SetRecord | null, ids: readonly string[], n
  * asks, of everything the comparison draws — so a 2xx set with a figure outside the contract is a failure the hold
  * stands behind, exactly like a transport failure.
  */
-export function withSetSettled(prev: SetRecord | null, ids: readonly string[], outcome: SetRunOutcome, now: number): SetRecord {
+export function withSetSettled(prev: SetRecord | null, ids: readonly string[], outcome: SetRunOutcome, now: number, monotonicNow: number): SetRecord {
   const reads = outcome.kind === "ok" && setFault(ids, outcome.response) === null;
-  return { phase: "settled", ids, outcome, at: now, held: reads ? null : heldSetOf(prev) };
+  return { phase: "settled", ids, outcome, at: now, atMonotonicMs: monotonicNow, held: reads ? null : heldSetOf(prev) };
 }
 
 export function useLabReading(): LabReading {
@@ -176,12 +176,12 @@ export function useLabReading(): LabReading {
       (outcome) => {
         if (controller.signal.aborted) return;
         slot.controller = null;
-        setSet((prev) => withSetSettled(prev, asked, outcome, Date.now()));
+        setSet((prev) => withSetSettled(prev, asked, outcome, Date.now(), monotonicNowMs()));
       },
       (cause: unknown) => {
         if (controller.signal.aborted) return;
         slot.controller = null;
-        setSet((prev) => withSetSettled(prev, asked, { kind: "unreachable", message: describeLookupError(cause) }, Date.now()));
+        setSet((prev) => withSetSettled(prev, asked, { kind: "unreachable", message: describeLookupError(cause) }, Date.now(), monotonicNowMs()));
       },
     );
   }, []);

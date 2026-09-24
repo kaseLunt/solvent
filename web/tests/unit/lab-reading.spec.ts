@@ -33,7 +33,7 @@ test("withSettled replaces the running record with the outcome and keeps every o
 test("canDispatchSet: only when no set is in flight", () => {
   expect(canDispatchSet(null)).toBe(true);
   expect(canDispatchSet({ phase: "running", ids: ["a"], startedAt: 1, held: null })).toBe(false);
-  expect(canDispatchSet({ phase: "settled", ids: ["a"], outcome: { kind: "not-served" }, at: 2, held: null })).toBe(true);
+  expect(canDispatchSet({ phase: "settled", ids: ["a"], outcome: { kind: "not-served" }, at: 2, atMonotonicMs: 2, held: null })).toBe(true);
 });
 
 test("a computed result is held through a re-run and stands beside a failed one; the hold survives an ok settle, and the newest result moves into it on the next run", () => {
@@ -62,22 +62,22 @@ const demoSetFor = (ids: readonly string[]): typeof DEMO_RUN_BOOK_SET => {
 test("a set that answered its request is held through a failed Compare and released only by a new set that answers; a set that does not answer is never held", () => {
   const asked = ["eth_minus_30", "ethfi_minus_50"];
   const answering = demoSetFor(asked);
-  const first = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: answering }, 2);
-  expect(first).toEqual({ phase: "settled", ids: asked, outcome: { kind: "ok", response: answering }, at: 2, held: null });
+  const first = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: answering }, 2, 2);
+  expect(first).toEqual({ phase: "settled", ids: asked, outcome: { kind: "ok", response: answering }, at: 2, atMonotonicMs: 2, held: null });
   const again = withSetRunning(first, asked, 3);
-  expect(again).toEqual({ phase: "running", ids: asked, startedAt: 3, held: { ids: asked, response: answering, at: 2 } });
+  expect(again).toEqual({ phase: "running", ids: asked, startedAt: 3, held: { ids: asked, response: answering, at: 2, atMonotonicMs: 2 } });
   expect(canDispatchSet(again)).toBe(false);
-  const failed = withSetSettled(again, asked, { kind: "rate-limited", message: "m", retryAfterSeconds: 3 }, 4);
-  expect(failed.held).toEqual({ ids: asked, response: answering, at: 2 });
+  const failed = withSetSettled(again, asked, { kind: "rate-limited", message: "m", retryAfterSeconds: 3 }, 4, 4);
+  expect(failed.held).toEqual({ ids: asked, response: answering, at: 2, atMonotonicMs: 2 });
   expect(canDispatchSet(failed)).toBe(true);
   // A body that does not answer the request is a failure too: the hold stands, and the unanswering body is never held.
-  const unanswering = withSetSettled(withSetRunning(failed, asked, 5), asked, { kind: "ok", response: DEMO_RUN_BOOK_SET }, 6);
-  expect(unanswering.held).toEqual({ ids: asked, response: answering, at: 2 });
-  expect(withSetRunning(unanswering, asked, 7).held).toEqual({ ids: asked, response: answering, at: 2 });
+  const unanswering = withSetSettled(withSetRunning(failed, asked, 5), asked, { kind: "ok", response: DEMO_RUN_BOOK_SET }, 6, 6);
+  expect(unanswering.held).toEqual({ ids: asked, response: answering, at: 2, atMonotonicMs: 2 });
+  expect(withSetRunning(unanswering, asked, 7).held).toEqual({ ids: asked, response: answering, at: 2, atMonotonicMs: 2 });
   // A new set that answers releases the hold, and is what the next Compare holds.
-  const fresh = withSetSettled(withSetRunning(unanswering, asked, 7), asked, { kind: "ok", response: answering }, 8);
+  const fresh = withSetSettled(withSetRunning(unanswering, asked, 7), asked, { kind: "ok", response: answering }, 8, 8);
   expect(fresh.held).toBeNull();
-  expect(withSetRunning(fresh, asked, 9).held).toEqual({ ids: asked, response: answering, at: 8 });
+  expect(withSetRunning(fresh, asked, 9).held).toEqual({ ids: asked, response: answering, at: 8, atMonotonicMs: 8 });
 });
 
 test("the hold survives consecutive answers that do not read: only a body that reads as an answer moves into the hold, so two malformed 200s keep the last result that read", () => {
@@ -136,10 +136,10 @@ test("a settled body that is not a JSON object, or a refusal without a code, nev
   // The set: the updater that settles a null body answers "does not answer its request" instead of throwing, and the comparison it had stands.
   const asked = ["eth_minus_30", "ethfi_minus_50"];
   const answering = demoSetFor(asked);
-  let set = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: answering }, 2);
+  let set = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: answering }, 2, 2);
   for (const body of [null, 7, "ok", []]) {
-    set = withSetSettled(withSetRunning(set, asked, 3), asked, { kind: "ok", response: body as unknown as typeof answering }, 4);
-    expect(set.held).toEqual({ ids: asked, response: answering, at: 2 });
+    set = withSetSettled(withSetRunning(set, asked, 3), asked, { kind: "ok", response: body as unknown as typeof answering }, 4, 4);
+    expect(set.held).toEqual({ ids: asked, response: answering, at: 2, atMonotonicMs: 2 });
   }
 });
 
@@ -152,7 +152,7 @@ const withEngineOf = (set: typeof DEMO_RUN_BOOK_SET, scenarioId: string, engine:
 test("the set's one predicate covers what the comparison draws, not membership alone: a set that answers its request with an engine figure outside the contract, or with parts that do not partition a result's coverage, is a failed Compare like any other — the comparison that read stands behind it however many follow, and it never becomes the next hold", () => {
   const asked = ["eth_minus_30", "ethfi_minus_50"];
   const answering = demoSetFor(asked);
-  const held = { ids: asked, response: answering, at: 2 };
+  const held = { ids: asked, response: answering, at: 2, atMonotonicMs: 2 };
   const garbageCash = withEngineOf(answering, "eth_minus_30", "debt_manager", { eligible_debt_delta_usd: "garbage" });
   const garbageLegacy = withEngineOf(answering, "eth_minus_30", "aave_v3_etherfi", { total_debt_usd_before: "" });
   const brokenCensus = { ...answering, results: answering.results.map((r) => (r.scenario_id === "ethfi_minus_50" ? { ...r, withheld_engines: ["debt_manager"] } : r)) };
@@ -167,22 +167,22 @@ test("the set's one predicate covers what the comparison draws, not membership a
   expect(setFault(asked, DEMO_RUN_BOOK_SET)?.faults).toEqual(setMembership(asked, DEMO_RUN_BOOK_SET));
 
   // valid → garbage → garbage → a broken census → a transport failure: the same comparison stands throughout.
-  let set = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: answering }, 2);
+  let set = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: answering }, 2, 2);
   expect(set.held).toBeNull();
   for (const body of [garbageCash, garbageCash, garbageLegacy, brokenCensus]) {
     const running = withSetRunning(set, asked, 3);
     expect(running.held).toEqual(held);
-    set = withSetSettled(running, asked, { kind: "ok", response: body }, 4);
+    set = withSetSettled(running, asked, { kind: "ok", response: body }, 4, 4);
     expect(set.held).toEqual(held);
   }
-  set = withSetSettled(withSetRunning(set, asked, 5), asked, { kind: "rate-limited", message: "m", retryAfterSeconds: 3 }, 6);
+  set = withSetSettled(withSetRunning(set, asked, 5), asked, { kind: "rate-limited", message: "m", retryAfterSeconds: 3 }, 6, 6);
   expect(set.held).toEqual(held);
   // A new set that reads releases the hold, and is what the next Compare holds.
-  const fresh = withSetSettled(withSetRunning(set, asked, 7), asked, { kind: "ok", response: answering }, 8);
+  const fresh = withSetSettled(withSetRunning(set, asked, 7), asked, { kind: "ok", response: answering }, 8, 8);
   expect(fresh.held).toBeNull();
-  expect(withSetRunning(fresh, asked, 9).held).toEqual({ ids: asked, response: answering, at: 8 });
+  expect(withSetRunning(fresh, asked, 9).held).toEqual({ ids: asked, response: answering, at: 8, atMonotonicMs: 8 });
   // With nothing held, a set that does not read is never what the next Compare holds.
-  const bare = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: garbageCash }, 2);
+  const bare = withSetSettled(withSetRunning(null, asked, 1), asked, { kind: "ok", response: garbageCash }, 2, 2);
   expect(bare.held).toBeNull();
   expect(withSetRunning(bare, asked, 3).held).toBeNull();
 });

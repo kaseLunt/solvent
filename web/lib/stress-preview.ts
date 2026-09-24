@@ -1,8 +1,8 @@
 // web/lib/stress-preview.ts
 import type { components } from "@solvent/client";
 import { formatFactor } from "./factor";
-import { bookMoney, signedBookMoney } from "./money";
-import { plural } from "./prose";
+import { bookMoney, bookMoneyPair } from "./money";
+import { groupInt, plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import { shockWord } from "./scenario-name";
 import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
@@ -139,15 +139,17 @@ export function stressPreview(waterfall: Waterfall, engine: string, coverage?: C
   if (unmeasured !== null && "refused" in unmeasured) return { kind: "refused", reason: unmeasured.refused };
   const baseBadDebt = BigInt(base.at.cumulative_bad_debt_usd);
   const money = bookMoney(decimals);
-  const signed = signedBookMoney(decimals);
   const lines: StressLine[] = points.slice(1).map((p) => {
     const deltaDebt = BigInt(p.at.cumulative_debt_eligible_usd) - baseDebt;
     const deltaAccounts = p.at.cumulative_eligible_accounts - baseAccounts;
     const badDebt = BigInt(p.at.cumulative_bad_debt_usd);
     const deltaBadDebt = badDebt - baseBadDebt;
     const shock = shockName(waterfall, BigInt(p.factor), scale);
-    const head = deltaDebt > 0n ? `+${money(deltaDebt)} liquidatable · ${plural(deltaAccounts, "account")}` : "no new liquidatable debt";
-    const bad = deltaBadDebt === 0n ? `bad debt unchanged at ${money(badDebt)}` : `bad debt ${signed(deltaBadDebt)}, to ${money(badDebt)}`;
+    // A no-break space: the count and its noun are one unit, never split across a wrapped line.
+    const accounts = `${groupInt(deltaAccounts)} account${deltaAccounts === 1 ? "" : "s"}`;
+    const head = deltaDebt > 0n ? `+${money(deltaDebt)} liquidatable · ${accounts}` : "no new liquidatable debt";
+    const pair = bookMoneyPair(deltaBadDebt, badDebt, decimals);
+    const bad = deltaBadDebt === 0n ? `bad debt unchanged at ${money(badDebt)}` : `bad debt ${pair.change}, to ${pair.level}`;
     // A colon, not an arrow: on this product an arrow is a link to another page.
     return { shock, deltaDebt, deltaAccounts, badDebt, deltaBadDebt, decimals, text: `${shock}: ${head} · ${bad}` };
   });

@@ -151,8 +151,8 @@ test("cold load: the page opens on Cash, Cash first in the switch; state ok; the
   await expect(chip(page, "Stride")).toHaveAttribute("title", describeStride(DEMO_OBSERVATORY_DM.step_seconds));
   await expect(chip(page, "Stride")).not.toContainText("verbatim");
   // Every instant is the reader's; its wire ISO is the chip's title.
-  await expect(chip(page, "Range")).toHaveText("Range Aug 1, 21:00 UTC → latest");
-  await expect(chip(page, "Range")).toHaveAttribute("title", `${DEMO_OBSERVATORY_DM.from ?? "unbounded"} → unbounded`);
+  await expect(chip(page, "Range")).toHaveText("Range Aug 1, 21:00 UTC – latest");
+  await expect(chip(page, "Range")).toHaveAttribute("title", `${DEMO_OBSERVATORY_DM.from ?? "unbounded"} – unbounded`);
   // The window is counted in hours, in the dek's own words ("recorded", "withheld", "absent").
   await expect(chip(page, "Hours")).toContainText("165 recorded · 1 withheld · 2 absent");
   await expect(chip(page, "Buckets")).toHaveCount(0);
@@ -308,7 +308,8 @@ test("the degraded rollup is a NAMED not-served state: the absent register, a re
   const card = page.getByTestId("history-state");
   await expect(card).toHaveAttribute("data-state", "not-served");
   await expect(card).toHaveAttribute("data-frame", "solid");
-  await expect(card.getByRole("heading", { name: "No hourly history on this deployment" })).toBeVisible();
+  await expect(card.getByRole("heading", { name: "What fills this page" })).toBeVisible();
+  await expect(card).toContainText("each recorded hour appears here as a point and a missing hour as a gap");
   await expect(card.locator("summary")).toHaveText(SERVICE_SAID);
   await expect(card.locator("details")).toContainText("observatory_points does not exist on this database");
   await expect(card.locator("details")).toContainText("503");
@@ -352,19 +353,18 @@ test("the doctrine lives in the drawer, verbatim — the intro, the chart's meth
   await expect(page.getByTestId("history-drawer")).toBeFocused();
 });
 
-test("the metric switch redraws the chart: the pressed metric, the chart's name, the newest figure's label and the finding are that metric's; the switch speaks the engine's noun", async ({
+test("the metric switch redraws the chart: the pressed metric, the chart's name and the newest figure's label are that metric's, the caption the same for every metric; the switch speaks the engine's noun", async ({
   page,
 }) => {
   await mockHistory(page);
   await page.goto("/observatory");
   const axis = buildBucketAxis(DEMO_OBSERVATORY_DM);
   const chart = page.getByTestId("history-chart");
-  await expect(page.getByTestId("history-chart-finding")).toHaveText(gridReadingLine(DEMO_OBSERVATORY_DM, axis, "debt_usd"));
-  // The finding states a DELTA on one engine at one scale — the compact tier would flatten an "A → B" pair — and
-  // says its change and its end apart ("rose by 1, to 49" — never "rose 1 to 49", which reads as a range).
-  await expect(page.getByTestId("history-chart-finding")).toHaveText(
-    "Between the first and last recorded hours (Aug 1, 21:00 → Aug 8, 20:00 UTC), debt rose by $1.8M, to $27.8M.",
-  );
+  await expect(page.getByTestId("history-chart-finding")).toHaveText(gridReadingLine(DEMO_OBSERVATORY_DM, axis));
+  // The caption says what the chart draws — the recorded span, a range's en dash (an arrow is a link) — and leaves the
+  // change to the headline and the tiles, so it never restates the H1.
+  const caption = "Each point is one recorded hour, Aug 1, 21:00 – Aug 8, 20:00 UTC; a gap is an hour with no figures to draw.";
+  await expect(page.getByTestId("history-chart-finding")).toHaveText(caption);
   // The switch is the kit's group, under its own name, each option in sentence case.
   await expect(page.getByTestId("history-metric")).toContainText("Show");
   await expect(page.locator('[data-testid^="history-metric-"]')).toHaveText(["Debt (USD)", "Collateral (USD)", "Accounts", "Liquidatable accounts"]);
@@ -385,10 +385,7 @@ test("the metric switch redraws the chart: the pressed metric, the chart's name,
   await expect(chart.locator("svg[role='img']")).toHaveAttribute("aria-label", "Accounts for Cash, hour by hour");
   await expect(chart.getByTestId("obs-newest-value")).toHaveText(accountsNewest.directLabel);
   expect(accountsNewest.directLabel).not.toBe(debtNewest.directLabel);
-  // The finding follows the drawn metric.
-  await expect(page.getByTestId("history-chart-finding")).toHaveText(
-    "Between the first and last recorded hours (Aug 1, 21:00 → Aug 8, 20:00 UTC), accounts fell by 52, to 1,412.",
-  );
+  await expect(page.getByTestId("history-chart-finding")).toHaveText(caption);
   // The tiles above are not the chart's: they hold.
   await expect(page.getByTestId("history-kpi-debt")).toHaveAttribute("data-tone", "neutral");
 });
@@ -419,9 +416,22 @@ test("W-OBS: the direct labels — the drawn y-max and the newest figure in the 
   await expect(chart.locator(`[data-testid="obs-point"][data-index="${String(newestPoint.index)}"] title`)).toContainText(newestPoint.label);
   await expect(chart.locator(`[data-testid="obs-point"][data-index="${String(maxPoint.index)}"] title`)).toContainText("$27,942,906.330446");
   // The demo's peak is nine hours before the newest hour: over the peak the label would run into the newest figure's
-  // label, so it keeps the plot's left edge — where its word still says what it is.
+  // label, so it takes the row above — at the peak's own x, never the plot's far edge, where a figure reads as the
+  // window's starting value. A dot marks the datum it names, the exact figure its title.
   expect(newestPoint.index - maxPoint.index).toBe(9);
-  await expect(chart.getByTestId("obs-ymax-label")).toHaveAttribute("data-place", "edge");
+  const peakLabel = chart.getByTestId("obs-ymax-label");
+  await expect(peakLabel).toHaveAttribute("data-place", "raised");
+  await expect(peakLabel).toHaveAttribute("text-anchor", "middle");
+  const peakDot = chart.getByTestId("obs-peak-dot");
+  await expect(peakDot.locator("title")).toHaveText(maxPoint.label);
+  const peakPoint = chart.locator(`[data-testid="obs-point"][data-index="${String(maxPoint.index)}"]`);
+  expect(Number(await peakDot.getAttribute("cx"))).toBeCloseTo(Number(await peakPoint.getAttribute("cx")), 3);
+  expect(Number(await peakDot.getAttribute("cy"))).toBeCloseTo(Number(await peakPoint.getAttribute("cy")), 3);
+  const labelX = Number(await peakLabel.getAttribute("x"));
+  const peakX = Number(await peakPoint.getAttribute("cx"));
+  // Centred on the peak — clamped inside the plot at most, so the label always spans its datum.
+  const halfWidth = ((await peakLabel.boundingBox())?.width ?? 0) / 2;
+  expect(Math.abs(labelX - peakX)).toBeLessThan(halfWidth + 1);
 
   // No label is struck through. Each sits ABOVE the reference it names — its baseline over the floor rule, over the
   // highest plotted point, over the newest point — and all three are painted after the line and the points, haloed.
@@ -450,8 +460,9 @@ test("W-OBS: the direct labels — the drawn y-max and the newest figure in the 
   expect(geometry.newestY).toBeLessThan(geometry.newestPointY);
   expect(geometry.paintedLast).toBe(true);
   expect(geometry.haloed).toBe(true);
-  // The plot is sized to what it shows: 120px of plot plus the one extents strip (the selection is the newest hour).
-  expect(geometry.height).toBe(134);
+  // The plot is sized to what it shows: 120px of plot, the peak label's own 16px row, and the one extents strip (the
+  // selection is the newest hour).
+  expect(geometry.height).toBe(150);
   // A week of hours at rest reads as a line, not a bead chain: the visible dot is small; the click target is not.
   expect(geometry.dotRadius).toBe(1.5);
 
@@ -746,9 +757,9 @@ test("a malformed newest hour: the debt is not an exact decimal — the page sta
   await expect(chart.getByTestId("obs-newest-value")).toHaveText(newestPoint.directLabel);
   await expect(chart.getByTestId("obs-newest-value")).toContainText("(last captured ");
 
-  // The finding gives no change for the metric it cannot read.
+  // The chart's caption states what a point is, never a change: nothing on the page gives a change for a metric it cannot read.
   await expect(page.getByTestId("history-chart-finding")).toHaveText(view.finding ?? "NEVER");
-  await expect(page.getByTestId("history-chart-finding")).toContainText("debt unreadable at one end, so no change is given.");
+  await expect(page.getByTestId("history-chart-finding")).not.toContainText(/rose|fell|since/);
 
   // The record (open on the newest hour): captured, its debt a dash with the true cause, its collateral exact.
   const record = page.getByTestId("history-point");
@@ -964,6 +975,29 @@ test("a failed fetch is the unavailable state, never a refusal: the absent regis
   await card.getByTestId("history-retry").click();
   await expect(page.getByTestId("history-surface")).toHaveAttribute("data-state", "ok");
   await expect(page.getByTestId("history-state")).toHaveCount(0);
+});
+
+test("the hour record reads in pairs at a scannable measure: two columns of name and value on a wide screen, one on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockHistory(page);
+  await page.goto("/observatory");
+  await expect(page.getByTestId("history-point")).toBeVisible();
+  const rows = page.getByTestId("history-point").locator("dl").first().locator(":scope > div");
+  const box = async (index: number) => {
+    const b = await rows.nth(index).boundingBox();
+    if (b === null) throw new Error(`record row ${String(index)} has no box`);
+    return b;
+  };
+  const count = await rows.count();
+  expect(count).toBeGreaterThan(1);
+  const [first, last] = [await box(0), await box(count - 1)];
+  // The later rows continue in a second column, and no pair runs the page's width.
+  expect(last.x).toBeGreaterThan(first.x + first.width);
+  expect(first.width).toBeLessThan(640);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const [narrowFirst, narrowLast] = [await box(0), await box(count - 1)];
+  expect(narrowLast.x).toBeCloseTo(narrowFirst.x, 0);
+  expect(narrowLast.y).toBeGreaterThan(narrowFirst.y);
 });
 
 test("answer before evidence: header above the engine switcher above the tiles above the chart above the bucket record", async ({

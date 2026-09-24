@@ -121,6 +121,7 @@ export function HistoryChart({
           onSelect={onSelect}
           yMaxLabel={labels.peak?.directLabel}
           yMaxIndex={labels.peak?.index}
+          yMaxExact={labels.peak?.label}
           xStartLabel={xStart}
           xEndLabel={xEnd}
           xStartCompact={xStart === undefined ? undefined : compactInstant(xStart)}

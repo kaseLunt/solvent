@@ -7,7 +7,7 @@
 // welds to api/openapi.yaml; every sentence is lib/api-view.ts's.
 //
 // What this pins: the verdict header in ink and its three identity chips; the
-// two tiles, each with a sub counted from the extract; the base URL stated
+// census line above the index, counted from the extract; the base URL stated
 // once; every operation rendered, in the endpoint index and as a card, none
 // dropped, the index a column of plain anchors walked by Tab in order; curl
 // and sample fidelity against the page's own base URL; the copy affordance
@@ -78,20 +78,14 @@ test("the base URL is stated once: the header's mono chip carries it in full, th
   await expect(page.getByTestId("api-quickstart")).toContainText(`baseUrl: "${baseUrl}"`);
 });
 
-test("two tiles: endpoints and error responses — the extract's own figures, each with a sub counted from the extract; the version is the kicker's, never a third tile", async ({ page }) => {
+test("no tiles: one census line above the index — the verb census and the error statuses, counted from the extract; the version is the kicker's", async ({ page }) => {
   await open(page);
   const view = deriveApiView(await statedBaseUrl(page));
-  const endpoints = page.getByTestId("api-kpi-operations");
-  await expect(endpoints).toContainText("Endpoints");
-  await expect(endpoints).toContainText(String(OPERATIONS.length));
-  await expect(endpoints).toContainText(view.tiles.operations.sub);
-  await expect(endpoints).toContainText("15 GET · 2 POST");
-  const errors = page.getByTestId("api-kpi-errors");
-  await expect(errors).toContainText(String(ERROR_RESPONSES.length));
-  await expect(errors).toContainText(view.tiles.errors.sub);
-  await expect(errors).toContainText("400 · 404 · 409 · 429 · 500 · 503");
-  await expect(page.getByTestId("api-kpi-version")).toHaveCount(0);
-  await expect(page.locator("[data-testid^='api-kpi-']")).toHaveCount(2);
+  const census = page.getByTestId("api-census");
+  await expect(census).toHaveText(view.census);
+  await expect(census).toHaveText("15 GET · 2 POST · error responses 400 · 404 · 409 · 429 · 500 · 503");
+  await expect(census).not.toContainText(CONTRACT_META.version);
+  await expect(page.locator("[data-testid^='api-kpi-']")).toHaveCount(0);
 });
 
 test("every contract operation renders — in the endpoint index and as a card; none added, none dropped", async ({ page }) => {
@@ -315,11 +309,11 @@ test("the doctrine lives in the drawer, verbatim: the intro, the base-URL note, 
   await expect(page.getByTestId("api-drawer")).toBeFocused();
 });
 
-test("answer before evidence: header above tiles above the endpoint index above the quickstart above the endpoints above the errors", async ({ page }) => {
+test("answer before evidence: header above the census above the endpoint index above the quickstart above the endpoints above the errors", async ({ page }) => {
   await open(page);
   const y = async (id: string) => (await page.getByTestId(id).boundingBox())?.y ?? Number.NaN;
-  expect(await y("api-verdict")).toBeLessThan(await y("api-kpi-operations"));
-  expect(await y("api-kpi-operations")).toBeLessThan(await y("api-toc"));
+  expect(await y("api-verdict")).toBeLessThan(await y("api-census"));
+  expect(await y("api-census")).toBeLessThan(await y("api-toc"));
   expect(await y("api-toc")).toBeLessThan(await y("api-quickstart"));
   expect(await y("api-quickstart")).toBeLessThan(await y("api-endpoint-getBook"));
   expect(await y("api-endpoint-getBook")).toBeLessThan(await y("api-errors"));

@@ -679,7 +679,7 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       await expect(page.getByTestId("verification-surface")).toHaveAttribute("data-receipt", "failed");
-      await expect(page.getByTestId("verification-proof-status")).toContainText("Receipt rejected");
+      await expect(page.getByTestId("verification-proof-status")).toContainText("Receipt failed");
       // The live subject keeps ITS truth — serving continues, unconflated.
       await expect(page.getByTestId("verification-live-status")).toContainText("Serving");
       await expect(page.locator("body")).not.toContainText(/proof exact @/i);

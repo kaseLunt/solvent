@@ -1,23 +1,24 @@
 // The Verification page's one view model: the verdict header, the four
-// architecture steps the Overview also prints, the receipt line, the two
-// subject cards, the probe rows and the drawer's doctrine — derived once, read
+// architecture steps the Overview also prints, the two subject cards, the
+// probe rows and the drawer's doctrine — derived once, read
 // by the surface and by these pins alike. The step strings are the Overview's
 // own law (tests/e2e/overview.spec.ts pins them in the browser against the same
 // fixtures); a read in flight is pending and has not failed, a read that
 // failed prints "unavailable" — never a zero, and never an absence the wire
 // did not state.
 import { expect, test } from "@playwright/test";
-import { UnavailableError } from "@solvent/client";
-import { proofSubjectEvidence, proofTakeaway, proofTakeawayArms } from "../../lib/evidence";
+import { MalformedResponseError, UnavailableError } from "@solvent/client";
+import { proofSubjectEvidence, proofTakeaway, proofTakeawayArms, REGISTRY_MATCH, WELDS_NOTE } from "../../lib/evidence";
 import { OPERATIONS } from "../../lib/proof-contract.gen";
 import { PIPELINE_STEPS } from "../../lib/prose";
-import type { EvidenceResponse } from "../../lib/proof-data";
+import { ProofFetchError, type EvidenceResponse } from "../../lib/proof-data";
 import {
   BOOK_LOADING,
   bookAnswered,
   bookFailed,
   cashCensus,
   deriveVerificationView,
+  evidenceFailed,
   markerLine,
   pipelineSteps,
   PROBES_EMPTY,
@@ -177,8 +178,8 @@ test("one word for the receipt's rows: checked rows; the welds are account compa
   expect(rows).toContain("Checked rows | 87/87 exact · 0 drifted");
   expect(rows).toContain("Cash · account comparisons | 29/29 exact");
   expect(rows).toContain("Aave v3 market (legacy) · account comparisons | 14/14 exact");
-  expect(rows).toContain("Account comparisons | count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
-  expect(rows).toContain("Feeds registry | identical to the service's registry fingerprint, by construction");
+  expect(rows).toContain("Account comparisons | Counts every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); not a breakdown of the checked rows.");
+  expect(rows).toContain("Feeds registry | Identical to the service's registry fingerprint, by construction");
   // The disclosure follows the last weld and wears no verdict's colour: it is a statement about what the tallies are, not a tally.
   const labels = proof.rows.map((r) => r.label);
   expect(labels.indexOf("Account comparisons")).toBe(labels.indexOf("Aave v3 market (legacy) · account comparisons") + 1);
@@ -193,7 +194,7 @@ test("one word for the receipt's rows: checked rows; the welds are account compa
   expect(subjectCards(weldless).proof.rows.map((r) => r.label)).not.toContain("Account comparisons");
 });
 
-test("a rejected receipt names its fault in the page's words — the checked rows' tally, a short weld by its engine's name — on the status row, the Receipt chip's title, the receipt strip and the drawer; never the receipt's term or an engine's wire id", () => {
+test("a drifted receipt names its fault in the page's words — the checked rows' tally, a short weld by its engine's name — on the status row, the Receipt chip's title and the drawer, under the one word for its state; never the receipt's term or an engine's wire id", () => {
   const rejected = (edit: (reconcile: NonNullable<EvidenceResponse["reconcile"]>) => void): EvidenceResponse => {
     const manifest = structuredClone(EVIDENCE_MANIFEST);
     if (manifest.reconcile === null) throw new Error("fixture invariant: reconcile expected");
@@ -204,25 +205,25 @@ test("a rejected receipt names its fault in the page's words — the checked row
   const legacyShort = rejected((r) => {
     r.welds = r.welds.map((w) => (w.engine === "aave_v3_etherfi" ? { ...w, rows_exact: 13 } : w));
   });
-  const cases: readonly [string, EvidenceResponse, string][] = [
-    ["a checked row short", rejected((r) => Object.assign(r, { gated_exact: 86 })), "checked rows 86/87 exact · 0 drifted"],
-    ["a checked row drifted", rejected((r) => Object.assign(r, { gated_exact: 86, gated_drift: 1 })), "checked rows 86/87 exact · 1 drifted"],
-    ["the legacy weld short", legacyShort, "Aave v3 market (legacy) · account comparisons 13/14 exact"],
+  const cases: readonly [string, EvidenceResponse, string, string][] = [
+    ["a checked row short", rejected((r) => Object.assign(r, { gated_exact: 86 })), "checked rows 86/87 exact · 0 drifted", "drifted · 86/87"],
+    ["a checked row drifted", rejected((r) => Object.assign(r, { gated_exact: 86, gated_drift: 1 })), "checked rows 86/87 exact · 1 drifted", "drifted · 86/87"],
+    ["the legacy weld short", legacyShort, "Aave v3 market (legacy) · account comparisons 13/14 exact", "drifted · 87/87"],
   ];
-  for (const [name, manifest, detail] of cases) {
+  for (const [name, manifest, detail, chipValue] of cases) {
     const v = view(ok(manifest));
     const { proof } = subjectCards(manifest);
     const drawer = proofSubjectEvidence(manifest);
-    // A passing verdict whose own tallies disagree is drift: warn, on the card and in the drawer alike.
-    expect(proof.rows[0], name).toEqual({ label: "Status", value: `Rejected · ${detail}`, tone: "warn" });
-    expect(v.chips.find((c) => c.label === "Receipt")?.title, name).toBe(detail);
-    expect(drawer.subject, name).toBe(`Receipt rejected · ${detail}`);
-    expect(drawer.sections[0]?.rows[0], name).toEqual({ label: "Status", value: `Rejected · ${detail}`, tone: "warn" });
+    // A passing verdict whose own tallies disagree is drift: warn, and one word for it, on the card and in the drawer alike.
+    expect(proof.status, name).toEqual({ text: "Receipt drifted", tone: "warn" });
+    expect(proof.rows[0], name).toEqual({ label: "Status", value: `Drifted · ${detail}`, tone: "warn" });
+    expect(v.chips.find((c) => c.label === "Receipt"), name).toMatchObject({ value: chipValue, tone: "warn", title: detail });
+    expect(drawer.subject, name).toBe(`Receipt drifted · ${detail}`);
+    expect(drawer.sections[0]?.rows[0], name).toEqual({ label: "Status", value: `Drifted · ${detail}`, tone: "warn" });
     const said = [
       v.headline.emphasis,
       v.headline.rest,
       v.headline.dek,
-      v.receiptLine,
       ...v.chips.map((c) => `${c.label} ${c.value} ${c.title ?? ""}`),
       ...v.steps.map((s) => `${s.sub} ${s.sentence}`),
       proof.status.text,
@@ -231,16 +232,15 @@ test("a rejected receipt names its fault in the page's words — the checked row
     ];
     expect(said.join("\n"), name).not.toMatch(/gated|weld|debt_manager|aave_v3_etherfi/);
   }
-  // The strip carries the weld's fault in the same words, beside the checked tally it does not break.
-  expect(view(ok(legacyShort)).receiptLine).toBe(
-    "Reconcile receipt: 87 of 87 checked rows matched, 0 drifted, but Aave v3 market (legacy) · account comparisons 13/14 exact; no proof badge.",
-  );
   expect(view(ok(legacyShort)).headline.rest).toBe("Aave v3 market (legacy) matched 13 of 14 account comparisons.");
 });
 
 test("the line beneath the welds states their counting rule, true of every receipt: beside welds that compared no row it claims nothing about what the rows hold", () => {
   const note = (manifest: EvidenceResponse) => subjectCards(manifest).proof.rows.find((r) => r.id === "welds-note");
-  const RULE = "count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows";
+  const RULE = "Counts every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); not a breakdown of the checked rows.";
+  expect(WELDS_NOTE.value).toBe(RULE);
+  // A row's value opens with a capital, as every standalone line does.
+  expect(REGISTRY_MATCH).toBe("Identical to the service's registry fingerprint, by construction");
   expect(note(EVIDENCE_MANIFEST)).toEqual({ label: "Account comparisons", value: RULE, tone: "dim", id: "welds-note" });
   // Welds of 0/0: the rule still holds, and no row is said to be advisory.
   const vacuous = structuredClone(EVIDENCE_MANIFEST);
@@ -261,7 +261,6 @@ test("the accepted step says every checked row matched and none drifted; the Ind
   expect(byKey(steps, "compute").sentence).toBe(`Batch 1, computed ${nb("Jul 29, 10:00 UTC")}: every position's health from exact integers, never floats.`);
   // The Overview prints the same tally in the same words.
   expect(byKey(steps, "verify").line).toEqual({ before: "", figure: "87/87", after: " checked rows exact · 0 drifted" });
-  expect(view(ok(EVIDENCE_MANIFEST)).receiptLine).toBe("Reconcile passed: 87 of 87 checked rows matched the chain exactly, 0 drifted.");
 });
 
 test("a count is a real plural: one provenance row, fifteen provenance rows; one probe record, one note", () => {
@@ -306,19 +305,71 @@ test("the demo dataset's numbers group their thousands: block, batch and account
   expect(byKey(steps, "compute").sub).toBe("batch · 1,412 Cash accounts");
 });
 
-test("a read that FAILED is unavailable: its own solid register and word, the could-not-be-read sentence — never an absence, never the refused register, and never pending", () => {
+test("a read that FAILED is unavailable: its own solid register and word, the could-not-be-fetched sentence — never an absence, never the refused register, never the unreadable words, and never pending", () => {
   const steps = pipelineSteps(null, null, FAILED);
   const UNAVAILABLE_STEP = { value: "—", sub: "unavailable", tone: "neutral", state: "unavailable", stateWord: "Unavailable", pending: false } as const;
   expect(byKey(steps, "index")).toMatchObject(UNAVAILABLE_STEP);
   expect(byKey(steps, "index").line).toEqual({ before: "OP block ", figure: "unavailable", after: " · Ethereum block unavailable" });
-  expect(byKey(steps, "compute")).toMatchObject({ ...UNAVAILABLE_STEP, sentence: "The batch could not be read." });
+  expect(byKey(steps, "compute")).toMatchObject({ ...UNAVAILABLE_STEP, sentence: "The batch could not be fetched." });
   expect(byKey(steps, "compute").line).toEqual({ before: "", figure: "unavailable", after: "" });
-  expect(byKey(steps, "verify")).toMatchObject({ ...UNAVAILABLE_STEP, sentence: "The receipt could not be read." });
+  expect(byKey(steps, "verify")).toMatchObject({ ...UNAVAILABLE_STEP, sentence: "The receipt could not be fetched." });
   expect(byKey(steps, "verify").line).toEqual({ before: "", figure: "unavailable", after: " checked rows exact" });
   expect(byKey(steps, "serve")).toMatchObject({ value: "17", tone: "neutral", pending: false });
   expect(JSON.stringify(steps)).not.toContain("No batch is servable");
   expect(JSON.stringify(steps)).not.toContain("No reconcile receipt is committed");
   expect(JSON.stringify(steps)).not.toContain("Reading the");
+  expect(JSON.stringify(steps)).not.toContain("could not be read");
+});
+
+test("a body the page could not read is said as such — 'could not be read' — and only then: the book's and the manifest's alike", () => {
+  const garbled = new MalformedResponseError("http://api/v1/book", 200, "<html>", "not the book's envelope");
+  const unreadable = bookFailed(garbled);
+  expect(unreadable.phase).toBe("error");
+  expect(unreadable.failure?.unreadable).toBe(true);
+  expect(bookFailed(new Error("Failed to fetch")).failure?.unreadable).toBeUndefined();
+  expect(byKey(pipelineSteps(null, null, unreadable), "compute").sentence).toBe("The batch could not be read.");
+  const v = deriveVerificationView({
+    state: { phase: "error", message: "not the evidence envelope", retryAfterSeconds: null, status: 200, unreadable: true },
+    meta: META,
+    metaInFlight: false,
+    book: read(BOOK),
+  });
+  expect(v.headline).toMatchObject({ emphasis: "The verification record could not be read.", tone: "absent" });
+  expect(v.headline.dek).toBe("The proof request was answered with a body this page could not read, so there is no proof to show.");
+  expect(byKey(v.steps, "verify").sentence).toBe("The receipt could not be read.");
+  expect(v.stateCard).toMatchObject({ state: "unreadable", title: "Proof record unreadable", cause: "Both subject cards are read from this record, so neither is shown." });
+  // The manifest's 2xx body that is not JSON is held as unreadable, its status kept.
+  const garbledManifest = evidenceFailed(new MalformedResponseError("http://api/v1/evidence", 200, "<html>", "a 200 response body was not JSON: Unexpected token"));
+  expect(garbledManifest).toEqual({ phase: "error", message: "a 200 response body was not JSON: Unexpected token", retryAfterSeconds: null, status: 200, unreadable: true });
+});
+
+test("a proxy's error page on a non-2xx answer is a request that failed, not a body the page could not read: the status in the dek, the fetched words on every step, the solid card — the book's and the manifest's alike", () => {
+  const gateway = (url: string) =>
+    new MalformedResponseError(url, 502, "<html>502 Bad Gateway</html>", "a 502 response did not carry the contract's error envelope ({ error: { code, message } })");
+  const book = bookFailed(gateway("http://api/v1/book"));
+  expect(book.phase).toBe("error");
+  expect(book.failure?.unreadable).toBeUndefined();
+  expect(byKey(pipelineSteps(null, null, book), "compute").sentence).toBe("The batch could not be fetched.");
+  const state = evidenceFailed(gateway("http://api/v1/evidence"));
+  expect(state).toMatchObject({ phase: "error", retryAfterSeconds: null, status: 502, unreadable: false });
+  const v = deriveVerificationView({ state, meta: META, metaInFlight: false, book });
+  expect(v.headline).toMatchObject({ emphasis: "The verification record could not be fetched.", tone: "absent" });
+  expect(v.headline.dek).toBe("The service did not answer the proof request (HTTP 502), so there is no proof to show.");
+  expect(v.stateCard).toMatchObject({
+    state: "unavailable",
+    title: "Proof record unavailable",
+    cause: "Both subject cards are read from this record, so neither is shown until the service answers.",
+  });
+  expect(byKey(v.steps, "compute").sentence).toBe("The batch could not be fetched.");
+  expect(byKey(v.steps, "verify").sentence).toBe("The receipt could not be fetched.");
+  expect(JSON.stringify([v.headline, v.stateCard, v.steps])).not.toMatch(/could not (be )?read|unreadable/);
+});
+
+test("the manifest's failure as the page holds it: the envelope's status and retry hint when the service answered, no status for a request that never reached it, and neither is unreadable", () => {
+  const refused = new ProofFetchError("http://api/v1/evidence", 503, "no_batch", "no complete risk batch is available", 30);
+  expect(evidenceFailed(refused)).toEqual({ phase: "error", message: refused.message, retryAfterSeconds: 30, status: 503, unreadable: false });
+  expect(evidenceFailed(new TypeError("Failed to fetch"))).toEqual({ phase: "error", message: "Failed to fetch", retryAfterSeconds: null, status: null, unreadable: false });
+  expect(evidenceFailed("aborted")).toEqual({ phase: "error", message: "aborted", retryAfterSeconds: null, status: null, unreadable: false });
 });
 
 test("a read IN FLIGHT has not failed: its step is pending — the pending word, the reading sentence, no refused tone — and 'could not be read' waits for a failure", () => {
@@ -330,17 +381,17 @@ test("a read IN FLIGHT has not failed: its step is pending — the pending word,
   expect(byKey(flying, "serve").pending).toBe(false);
   // What the page prints of a step — its sub, its sentence, its tone — says nothing of a failure, a refusal or an absence.
   const said = JSON.stringify(flying.map((s) => [s.sub, s.sentence, s.tone]));
-  for (const words of ["could not be read", "unavailable", "refused", "No batch is servable", "No reconcile receipt is committed"]) expect(said).not.toContain(words);
+  for (const words of ["could not be read", "could not be fetched", "unavailable", "refused", "No batch is servable", "No reconcile receipt is committed"]) expect(said).not.toContain(words);
   // The book's phase is the book's own word: it is pending whoever calls, while a null meta or manifest from a caller that says nothing is the weaker claim — unavailable — never a pending it did not make.
   const silent = pipelineSteps(null, null, UNREAD);
   expect(byKey(silent, "compute")).toMatchObject({ sub: "pending", tone: "neutral", pending: true, sentence: "Reading the batch…" });
   expect(byKey(silent, "index")).toMatchObject({ sub: "unavailable", tone: "neutral", state: "unavailable", pending: false });
-  expect(byKey(silent, "verify")).toMatchObject({ sub: "unavailable", tone: "neutral", state: "unavailable", pending: false, sentence: "The receipt could not be read." });
+  expect(byKey(silent, "verify")).toMatchObject({ sub: "unavailable", tone: "neutral", state: "unavailable", pending: false, sentence: "The receipt could not be fetched." });
   expect(byKey(flying, "compute")).toMatchObject({ state: "pending" });
   // In flight is said of a read that has not answered — an answer, or a failure beside it, is never pending.
   const answered = pipelineSteps(META, EVIDENCE_MANIFEST, read(BOOK), { meta: true, evidence: true });
   expect(answered.map((s) => s.pending)).toEqual([false, false, false, false]);
-  expect(byKey(pipelineSteps(null, null, FAILED, { meta: false, evidence: false }), "compute").sentence).toBe("The batch could not be read.");
+  expect(byKey(pipelineSteps(null, null, FAILED, { meta: false, evidence: false }), "compute").sentence).toBe("The batch could not be fetched.");
   // The Overview's print does not move: every figure it does not have stays "unavailable", in flight or failed.
   expect(flying.map((s) => s.line)).toEqual(pipelineSteps(null, null, FAILED).map((s) => s.line));
 });
@@ -354,8 +405,7 @@ test("the view hands each reader's flight to the steps: a loading manifest and a
     "Reading the receipt…",
     "17 read-only endpoints, every money value a decimal string.",
   ]);
-  expect(loading.receiptLine).toBe("Reading the reconcile receipt…");
-  expect(JSON.stringify([loading.steps.map((s) => [s.sentence, s.sub]), loading.receiptLine, loading.headline])).not.toMatch(/could not|unavailable|failed/);
+  expect(JSON.stringify([loading.steps.map((s) => [s.sentence, s.sub]), loading.headline])).not.toMatch(/could not|unavailable|failed/);
   // The manifest answered while the book and meta are still in flight: only their steps are pending.
   const partial = deriveVerificationView({ state: ok(EVIDENCE_MANIFEST), meta: null, metaInFlight: true, book: UNREAD });
   expect(partial.steps.map((s) => s.pending)).toEqual([true, true, false, false]);
@@ -363,8 +413,8 @@ test("the view hands each reader's flight to the steps: a loading manifest and a
   const failed = deriveVerificationView({ state: { phase: "error", message: "Failed to fetch", retryAfterSeconds: null }, meta: null, metaInFlight: false, book: FAILED });
   expect(failed.steps.map((s) => s.pending)).toEqual([false, false, false, false]);
   expect(failed.steps.map((s) => s.sub)).toEqual(["unavailable", "unavailable", "unavailable", "endpoints · typed TypeScript client"]);
-  expect(byKey(failed.steps, "compute").sentence).toBe("The batch could not be read.");
-  expect(byKey(failed.steps, "verify").sentence).toBe("The receipt could not be read.");
+  expect(byKey(failed.steps, "compute").sentence).toBe("The batch could not be fetched.");
+  expect(byKey(failed.steps, "verify").sentence).toBe("The receipt could not be fetched.");
 });
 
 test("an absence the wire stated is worded as one: the 503 no-batch book, the manifest with no committed receipt", () => {
@@ -435,7 +485,8 @@ test("the committed example: state ok, receipt exact, the headline is proofTakea
   expect(v.chips[2]).toMatchObject({ value: "exact · 87/87", tone: "ok" });
   expect(v.chips[3]).toMatchObject({ value: "9a4a7c…a2b9", title: REAL_KEY });
   expect(v.steps.map((s) => s.value)).toEqual(["154,796,552", "1", "87/87", "17"]);
-  expect(v.receiptLine).toBe("Reconcile passed: 87 of 87 checked rows matched the chain exactly, 0 drifted.");
+  // The verdict is said once per altitude — headline, chip, step, card — so no strip beneath the steps repeats it.
+  expect(v).not.toHaveProperty("receiptLine");
 });
 
 test("the demo arm: one serving batch, named once — in the dek, in the human tier, with no '#', and never inside the proof's sentence", () => {
@@ -466,22 +517,29 @@ test("the dek's finish instant is the receipt's own finished_at read against the
   expect(verificationDek(unreferenced)).toContain(`finished ${nb("Jul 29, 2026, 02:14 UTC")};`);
 });
 
-test("a failed receipt: crit on the finding and the receipt chip, the failing words on the receipt line — never worded as accepted, never as 0 drift", () => {
+test("a failed receipt: crit on the finding, the chip, the pill and the status row, one word for it everywhere — the receipt's own verdict and exit code on hover and in the drawer, never at reader altitude", () => {
   const v = view(ok(EVIDENCE_PROOF_FAILED));
   expect(v.receipt).toBe("failed");
   expect(v.headline.tone).toBe("crit");
   expect(v.headline.emphasis).toBe(proofTakeawayArms(EVIDENCE_PROOF_FAILED).proof);
   expect(`${v.headline.emphasis} ${v.headline.rest}`).toBe(proofTakeaway(EVIDENCE_PROOF_FAILED));
-  expect(v.headline.emphasis).toBe("The last reconcile run did not match the chain exactly,");
-  expect(v.headline.rest).toBe("84 of 87 checked rows matched; 3 rows drifted.");
+  expect(v.headline.emphasis).toBe("The last reconcile run did not match the chain exactly:");
+  expect(v.headline.rest).toBe("84 of 87 checked rows matched; 3 drifted.");
   // The proof's first sentence claims nothing; the live batch is still named, and no check is said to cover it.
   expect(v.headline.dek).toBe("No exactness is claimed for this deployment until a run passes. Batch 1, served now, is live data; no check covers it.");
   expect(v.headline.dek).not.toContain("does not inherit");
   expect(v.chips[0]).toMatchObject({ value: "5f0b3e2a" });
   expect(v.chips[2]).toMatchObject({ value: "failed · 84/87", tone: "crit", title: 'receipt verdict "fail" (exit 1)' });
-  // The receipt's own verdict words are the chip's title and the drawer's, never the strip's.
-  expect(v.receiptLine).toBe("Reconcile failed: 84 of 87 checked rows matched, 3 drifted.");
-  expect(v.doctrine).toContain('The proof subject was rejected: receipt verdict "fail" (exit 1).');
+  // The receipt's own verdict words are the titles' and the drawer's; the page says "failed", once per altitude.
+  const card = subjectCards(EVIDENCE_PROOF_FAILED).proof;
+  expect(card.status).toEqual({ text: "Receipt failed", tone: "crit" });
+  expect(card.rows[0]).toEqual({ label: "Status", value: "Failed · 3 of 87 checked rows drifted", tone: "crit", title: 'receipt verdict "fail" (exit 1)' });
+  const drawer = proofSubjectEvidence(EVIDENCE_PROOF_FAILED);
+  expect(drawer.subject).toBe('Receipt failed · receipt verdict "fail" (exit 1)');
+  expect(drawer.sections[0]?.rows[0]).toEqual({ label: "Status", value: 'Failed · receipt verdict "fail" (exit 1)', tone: "crit" });
+  expect(v.doctrine).toContain('The receipt failed: receipt verdict "fail" (exit 1).');
+  const reader = JSON.stringify([v.headline, v.chips.map((c) => c.value), card.status, card.rows.map((r) => r.value)]);
+  expect(reader).not.toMatch(/exit 1|Rejected|rejected/);
 });
 
 test("a drifted row is counted, never 'named': the manifest carries the receipt's tallies and no row, so the Verify step says how many drifted and the drawer says where the rows are recorded", () => {
@@ -495,7 +553,7 @@ test("a drifted row is counted, never 'named': the manifest carries the receipt'
   expect(failed.doctrine).toContain("The drifted rows are recorded in the committed drift report, roadmap/evidence/artifacts/w1-reconcile/drift-report.json.");
   expect(JSON.stringify(failed.steps)).not.toContain("drift-report.json");
   // Nothing on the failing page promises a name it cannot print.
-  expect(JSON.stringify([failed.headline, failed.steps, failed.receiptLine, failed.chips, subjectCards(EVIDENCE_PROOF_FAILED)])).not.toMatch(/named/i);
+  expect(JSON.stringify([failed.headline, failed.steps, failed.chips, subjectCards(EVIDENCE_PROOF_FAILED)])).not.toMatch(/named/i);
   // One row is "1 row"; a path that is not publishable is never printed, and the sentence still says where.
   const one = structuredClone(EVIDENCE_PROOF_FAILED);
   if (one.reconcile === null) throw new Error("fixture invariant: reconcile expected");
@@ -516,6 +574,22 @@ test("a drifted row is counted, never 'named': the manifest carries the receipt'
   expect(clean.tone).toBe("crit");
   expect(clean.sentence).toBe("87 of 87 checked rows matched the chain exactly, and the receipt still did not pass clean; the proof subject names the conjunct that failed.");
   expect(clean.sentence).not.toMatch(/0 (rows )?drift/);
+  // Its status row says what failed without the exit code, which is the row's title and the drawer's.
+  expect(subjectCards(cleanTallies).proof.rows[0]).toEqual({
+    label: "Status",
+    value: "Failed · the run's verdict did not pass",
+    tone: "crit",
+    title: 'receipt verdict "fail" (exit 1)',
+  });
+  // A verdict of pass beside a nonzero exit is neither failed nor drifted: the receipt contradicts itself, and is rejected.
+  const inconsistent = structuredClone(EVIDENCE_MANIFEST);
+  if (inconsistent.reconcile === null) throw new Error("fixture invariant: reconcile expected");
+  inconsistent.reconcile.exit_code = 1;
+  inconsistent.proof_subject = { ...inconsistent.proof_subject, status: "rejected" };
+  const inconsistentCard = subjectCards(inconsistent).proof;
+  expect(inconsistentCard.status).toEqual({ text: "Receipt rejected", tone: "crit" });
+  expect(inconsistentCard.rows[0]).toEqual({ label: "Status", value: 'Rejected · verdict "pass" with exit code 1, an internally inconsistent receipt', tone: "crit" });
+  expect(view(ok(inconsistent)).chips[2]).toMatchObject({ value: "rejected · 87/87", tone: "crit" });
   // The exact arm counts too: every checked row matched and none drifted — never a drift "named".
   expect(byKey(view(ok(EVIDENCE_MANIFEST)).steps, "verify").sentence).toBe("Every checked row of the pinned run matched the chain exactly; none drifted.");
 });
@@ -547,7 +621,6 @@ test("a receipt that gated NO rows proves nothing: never 'All 0 checked rows mat
     sentence: "The pinned reconcile run checked no rows, so nothing is proven.",
     line: { before: "", figure: "0/0", after: " checked rows · nothing proven" },
   });
-  expect(v.receiptLine).toBe("Reconcile receipt: the run checked no rows, so nothing is proven.");
   const { proof } = subjectCards(empty);
   expect(proof.status).toEqual({ text: "Receipt checked no rows", tone: "refused" });
   expect(proof.rule).toBe("refused");
@@ -558,7 +631,7 @@ test("a receipt that gated NO rows proves nothing: never 'All 0 checked rows mat
   expect(drawer.marker).toBe("operational");
   expect(drawer.sections[0]?.rows[0]).toEqual({ label: "Status", value: "Nothing proven · the run checked no rows", tone: "refused" });
   // Nowhere a match, a pass or the badge.
-  const printed = JSON.stringify([v.headline, v.chips, v.steps, v.receiptLine, subjectCards(empty), drawer.subject, drawer.sections[0]]);
+  const printed = JSON.stringify([v.headline, v.chips, v.steps, subjectCards(empty), drawer.subject, drawer.sections[0]]);
   for (const claim of ["All 0", "matched the chain", "Proof exact", "Accepted"]) expect(printed).not.toContain(claim);
   // With no batch either, the absence is still said, and the proof is not said to stand.
   const emptyNoBatch = structuredClone(EVIDENCE_NO_BATCH);
@@ -574,7 +647,7 @@ test("a receipt that gated NO rows proves nothing: never 'All 0 checked rows mat
   expect(view(ok(single)).headline).toMatchObject({ emphasis: "The 1 checked row matched the chain exactly,", tone: "ok" });
 });
 
-test("a drifted receipt: warn tone, the warn receipt chip, the drift counted on the receipt line — a weld short names the weld", () => {
+test("a drifted receipt: warn tone, the warn receipt chip, the drift counted on the status row — a weld short names the weld", () => {
   const drifted = structuredClone(EVIDENCE_MANIFEST);
   if (drifted.reconcile === null) throw new Error("fixture invariant: reconcile expected");
   drifted.reconcile.gated_exact = 86;
@@ -583,10 +656,10 @@ test("a drifted receipt: warn tone, the warn receipt chip, the drift counted on 
   const v = view(ok(drifted));
   expect(v.receipt).toBe("drift");
   expect(v.headline.tone).toBe("warn");
-  expect(v.headline.emphasis).toBe("The last reconcile run did not match the chain exactly,");
-  expect(v.headline.rest).toBe("86 of 87 checked rows matched; 1 row drifted.");
-  expect(v.chips[2]).toMatchObject({ value: "drift · 86/87", tone: "warn" });
-  expect(v.receiptLine).toBe("Reconcile receipt: 86 of 87 checked rows matched, 1 drifted; no proof badge.");
+  expect(v.headline.emphasis).toBe("The last reconcile run did not match the chain exactly:");
+  expect(v.headline.rest).toBe("86 of 87 checked rows matched; 1 drifted.");
+  expect(v.chips[2]).toMatchObject({ value: "drifted · 86/87", tone: "warn" });
+  expect(subjectCards(drifted).proof.rows[0]).toEqual({ label: "Status", value: "Drifted · checked rows 86/87 exact · 1 drifted", tone: "warn" });
   expect(byKey(v.steps, "verify").tone).toBe("warn");
   // One receipt, one tone: the card's rule, its status and its short tally all wear warn — a drift is never painted as a failure.
   const card = subjectCards(drifted).proof;
@@ -597,7 +670,7 @@ test("a drifted receipt: warn tone, the warn receipt chip, the drift counted on 
   if (tallyShort.reconcile === null) throw new Error("fixture invariant: reconcile expected");
   tallyShort.reconcile.gated_exact = 86;
   tallyShort.proof_subject = { ...tallyShort.proof_subject, status: "rejected" };
-  expect(view(ok(tallyShort)).receiptLine).toBe("Reconcile receipt: 86 of 87 checked rows matched, 0 drifted; no proof badge.");
+  expect(subjectCards(tallyShort).proof.rows[0]?.value).toBe("Drifted · checked rows 86/87 exact · 0 drifted");
   // Gated tallies clean, one weld short: the line names the weld, never a zero drift as the fault.
   const weldShort = structuredClone(EVIDENCE_MANIFEST);
   if (weldShort.reconcile === null) throw new Error("fixture invariant: reconcile expected");
@@ -607,7 +680,7 @@ test("a drifted receipt: warn tone, the warn receipt chip, the drift counted on 
   expect(short.receipt).toBe("drift");
   expect(short.headline.rest).toBe("Cash matched 26 of 29 account comparisons.");
   expect(`${short.headline.emphasis} ${short.headline.rest}`).not.toContain("0 drift");
-  expect(short.receiptLine).toBe("Reconcile receipt: 87 of 87 checked rows matched, 0 drifted, but Cash · account comparisons 26/29 exact; no proof badge.");
+  expect(subjectCards(weldShort).proof.rows[0]?.value).toBe("Drifted · Cash · account comparisons 26/29 exact");
   expect(subjectCards(weldShort).proof.rows.find((r) => r.id === "weld-debt_manager")?.tone).toBe("warn");
 });
 
@@ -621,8 +694,7 @@ test("no committed receipt: receipt none, the refused register, the proof pin an
   expect(v.chips[0]).toMatchObject({ label: "Proof pin", value: "none", tone: "refused" });
   expect(v.chips[2]).toMatchObject({ value: "none", tone: "refused" });
   expect(v.chips[1]).toMatchObject({ value: "1" });
-  expect(v.receiptLine).toBe(`No reconcile receipt: ${EVIDENCE_NO_RECEIPT.reconcile_unavailable_reason ?? "∅"}.`);
-  expect(v.receiptLine).toContain("no committed receipt artifact is present in this deployment");
+  expect(subjectCards(EVIDENCE_NO_RECEIPT).proof.rows[0]?.value).toBe(`No committed receipt · ${EVIDENCE_NO_RECEIPT.reconcile_unavailable_reason ?? "∅"}`);
   expect(byKey(v.steps, "verify")).toMatchObject({ value: "—", sub: "no committed receipt" });
 });
 
@@ -671,8 +743,9 @@ test("evidence unavailable: its own register, never a refusal — the reader's c
   expect(timed.headline.dek).toBe("The service did not answer the proof request (HTTP 503), so there is no proof to show. Try again after 30s.");
   // The service's own words stand on the card, verbatim; the dek never quotes them.
   expect(timed.stateCard).toEqual({
+    state: "unavailable",
     title: "Proof record unavailable",
-    cause: "Neither subject is shown: nothing stands in for a manifest that was not read.",
+    cause: "Both subject cards are read from this record, so neither is shown until the service answers.",
     serviceSaid: { label: "What the service said", text: "503 no_batch: no complete risk batch is available (http://api/v1/evidence)" },
   });
   expect(timed.headline.dek).not.toContain("no_batch");
@@ -682,17 +755,18 @@ test("evidence unavailable: its own register, never a refusal — the reader's c
   // The live batch the book served still prints; what the manifest would have said is unavailable, and never refused.
   expect(timed.chips.map((c) => c.value)).toEqual(["unavailable", "1", "unavailable", "unavailable"]);
   expect(timed.chips.some((c) => c.tone === "refused")).toBe(false);
-  // The failure and its retry hint are said once, in the header: the receipt strip stands down rather than say them again.
-  expect(timed.receiptLine).toBeNull();
-  const page = JSON.stringify([timed.headline, timed.chips, timed.steps.map((s) => [s.sentence, s.sub]), timed.receiptLine]);
-  expect(page.split("could not be fetched")).toHaveLength(2);
+  // The failure and its retry hint are said once, in the header.
+  const page = JSON.stringify([timed.headline, timed.chips, timed.steps.map((s) => [s.sentence, s.sub])]);
+  // The header says the record could not be fetched; the Verify step says its own part of that, the receipt.
+  expect(page.split("could not be fetched")).toHaveLength(3);
+  expect(page).not.toContain("could not be read");
   expect(page.split("Try again after 30s.")).toHaveLength(2);
   expect(VERIFICATION_COPY.retry).toBe("Try again");
   expect(timed.probes).toEqual([]);
   // The steps still print what meta and the book answered; only Verify is unread.
   expect(timed.steps.map((s) => s.value)).toEqual(["154,796,552", "1", "—", "17"]);
   expect(timed.steps.map((s) => s.line.figure)).toEqual(["154,796,552", "1", "unavailable", "17"]);
-  expect(byKey(timed.steps, "verify")).toMatchObject({ sentence: "The receipt could not be read.", state: "unavailable", stateWord: "Unavailable", tone: "neutral" });
+  expect(byKey(timed.steps, "verify")).toMatchObject({ sentence: "The receipt could not be fetched.", state: "unavailable", stateWord: "Unavailable", tone: "neutral" });
   // A request that never reached the service says so, and claims no status it never received.
   const untimed = view({ phase: "error", message: "Failed to fetch", retryAfterSeconds: null });
   expect(untimed.headline.emphasis).toBe("The verification record could not be fetched.");
@@ -725,7 +799,6 @@ test("a receipt in flight is pending — never 'none', which is the wire's own a
   expect(loading.receipt).toBe("pending");
   expect(failed.receipt).toBe("unavailable");
   expect(absent.receipt).toBe("none");
-  expect(loading.receiptLine).toBe("Reading the reconcile receipt…");
   expect(loading.chips.some((c) => c.tone === "refused")).toBe(false);
   // A fetch that failed is never a refusal: its chips say unavailable, in no refused tone.
   expect(failed.chips.some((c) => c.tone === "refused")).toBe(false);
@@ -759,9 +832,9 @@ test("nothing is green under a receipt of no rows: a weld of 0/0 exact proves no
     ["Checked rows", "0/0 exact · 0 drifted", "dim"],
     ["Cash · account comparisons", "0/0 exact", "dim"],
     ["Aave v3 market (legacy) · account comparisons", "0/0 exact", "dim"],
-    ["Account comparisons", "count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows", "dim"],
+    ["Account comparisons", "Counts every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); not a breakdown of the checked rows.", "dim"],
     // The registry's identity is a record, true whatever the receipt proved: it prints in ink and lends the card no pass's colour.
-    ["Feeds registry", "identical to the service's registry fingerprint, by construction", "default"],
+    ["Feeds registry", "Identical to the service's registry fingerprint, by construction", "default"],
   ]);
   expect(tonesOf(empty)).not.toContain("ok");
   // The same holds when the welds still carry the rows a gate of zero never judged.
@@ -794,8 +867,8 @@ test("the proof card: the pin pill, the answer rows, the hazards hoisted, fiftee
     ["Checked rows", "87/87 exact · 0 drifted", "ok", null],
     ["Cash · account comparisons", "29/29 exact", "ok", "weld-debt_manager"],
     ["Aave v3 market (legacy) · account comparisons", "14/14 exact", "ok", "weld-aave_v3_etherfi"],
-    ["Account comparisons", "count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows", "dim", "welds-note"],
-    ["Feeds registry", "identical to the service's registry fingerprint, by construction", "ok", null],
+    ["Account comparisons", "Counts every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); not a breakdown of the checked rows.", "dim", "welds-note"],
+    ["Feeds registry", "Identical to the service's registry fingerprint, by construction", "ok", null],
   ]);
   if (proof.fold === null) throw new Error("the committed example folds its provenance");
   expect(proof.fold.summary).toBe("15 provenance rows");
@@ -815,10 +888,10 @@ test("the proof card: the pin pill, the answer rows, the hazards hoisted, fiftee
   expect(proof.fold.sections[2]?.rows[0]).toEqual({ label: "Path", value: "recon/feeds.json", tone: "default" });
 });
 
-test("the proof card's failing and absent arms: the rejected pill with its detail, the short weld crit; the absent receipt's pill and reason", () => {
+test("the proof card's failing and absent arms: the failed pill, its status counted with the receipt's own verdict on hover, the short weld crit; the absent receipt's pill and reason", () => {
   const { proof: failed } = subjectCards(EVIDENCE_PROOF_FAILED);
-  expect(failed.status).toEqual({ text: "Receipt rejected", tone: "crit" });
-  expect(failed.rows[0]).toEqual({ label: "Status", value: 'Rejected · receipt verdict "fail" (exit 1)', tone: "crit" });
+  expect(failed.status).toEqual({ text: "Receipt failed", tone: "crit" });
+  expect(failed.rows[0]).toEqual({ label: "Status", value: "Failed · 3 of 87 checked rows drifted", tone: "crit", title: 'receipt verdict "fail" (exit 1)' });
   expect(failed.rows[1]).toMatchObject({ label: "Checked rows", value: "84/87 exact · 3 drifted", tone: "crit" });
   expect(failed.rows[2]).toMatchObject({ label: "Cash · account comparisons", value: "26/29 exact", tone: "crit", id: "weld-debt_manager" });
   const { proof: absent } = subjectCards(EVIDENCE_NO_RECEIPT);
@@ -976,7 +1049,7 @@ test("one map for the receipt's tone: exact ok, drift warn, failed crit, no rows
   expect(byKey(failed.steps, "verify").tone).toBe("crit");
   expect(failed.chips[2]?.tone).toBe("crit");
   expect(subjectCards(EVIDENCE_PROOF_FAILED).proof.rule).toBe("crit");
-  expect(subjectCards(EVIDENCE_PROOF_FAILED).proof.status).toEqual({ text: "Receipt rejected", tone: "crit" });
+  expect(subjectCards(EVIDENCE_PROOF_FAILED).proof.status).toEqual({ text: "Receipt failed", tone: "crit" });
   // The accepted run: ok, and the pill says so in sentence case.
   expect(subjectCards(EVIDENCE_MANIFEST).proof.rule).toBe("ok");
   expect(subjectCards(EVIDENCE_MANIFEST).proof.status).toEqual({ text: "Proof exact @ 5f0b3e2a", tone: "ok" });
@@ -1010,8 +1083,9 @@ test("a fetch that failed is never a refusal: the absent headline, a dek that sa
   expect(byKey(v.steps, "compute").line.figure).toBe("1");
   expect(byKey(v.steps, "verify").state).toBe("unavailable");
   expect(v.stateCard).toEqual({
+    state: "unavailable",
     title: "Proof record unavailable",
-    cause: "Neither subject is shown: nothing stands in for a manifest that was not read.",
+    cause: "Both subject cards are read from this record, so neither is shown until the service answers.",
     serviceSaid: { label: "What the service said", text: verbatim },
   });
   // What stands in for nothing is the drawer's, with the service's words.

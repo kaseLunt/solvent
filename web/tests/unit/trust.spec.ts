@@ -449,7 +449,6 @@ test("a run that checked no rows yet carries account comparisons: no string on V
     view.headline.emphasis,
     view.headline.rest,
     view.headline.dek,
-    view.receiptLine ?? "",
     ...view.chips.map((c) => `${c.label} ${c.value} ${c.title ?? ""}`),
     ...view.steps.map((s) => `${s.value} ${s.sub} ${s.sentence} ${s.line.before}${s.line.figure}${s.line.after}`),
     ...view.doctrine,

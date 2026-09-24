@@ -88,7 +88,14 @@ export function OverviewSurface() {
         <Link href="/book" className={`${kit.btn} ${kit.btnPrimary}`}>
           {CTA.book}
         </Link>
-        <AddressField onInspect={(address) => router.push(`/inspector/${address}`)} hint={CTA.addressHint} testId="overview-address" />
+        <AddressField
+          onInspect={(address) => router.push(`/inspector/${address}`)}
+          hint={CTA.addressHint}
+          placeholder={CTA.addressPlaceholder}
+          hintVisible={false}
+          inspectTone="ghost"
+          testId="overview-address"
+        />
         <Link href="/lab" className={`${kit.btn} ${kit.btnGhost}`}>
           {CTA.scenarios}
         </Link>

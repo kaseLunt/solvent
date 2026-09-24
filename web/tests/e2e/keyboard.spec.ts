@@ -96,7 +96,7 @@ const READY = {
   verification: async (tab: Page) => {
     await expect(tab.getByTestId("verification-surface")).toHaveAttribute("data-state", "ok");
     await expect(tab.getByTestId("verification-surface").locator("[aria-busy='true']")).toHaveCount(0);
-    await expect(tab.getByTestId("verification-receipt")).toBeVisible();
+    await expect(tab.getByTestId("verification-subject-proof")).toBeVisible();
   },
   api: async (tab: Page) => {
     await expect(tab.getByTestId("api-surface")).toBeVisible();

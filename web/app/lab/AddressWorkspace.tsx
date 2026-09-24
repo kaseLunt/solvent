@@ -1,20 +1,18 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { KitTable, KpiTile, SectionHead, StatusPill, VerdictHeader, type KitRow } from "@/components/kit";
+import { KitTable, KpiTile, SectionHead, StatusPill, VerdictHeader, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { projectionWords, roomCell, type StressSide } from "@/lib/address-stress";
-import { PROJECTION_ROW_SUB, PROJECTION_TITLE, PROJECTION_WORD } from "@/lib/inspector-view";
+import { agreedRoomToday, PROJECTION_ROOM_CELL, roomCell, STRESS_ROOM_DEFINITION, type StressSide } from "@/lib/address-stress";
+import { PROJECTION_TITLE, PROJECTION_WORD, projectionRowSub } from "@/lib/inspector-view";
 import type { AddressTile, AddressWorkspace as Space } from "@/lib/lab-address";
 import { EVERY_SCENARIO_TITLE, NO_SCENARIO_APPLIES, OPEN_IN_INSPECTOR } from "@/lib/lab-view";
 import { groupInt } from "@/lib/prose";
 import styles from "./lab.module.css";
 
-const COLUMNS = [
-  { key: "scenario", header: "Scenario" },
-  { key: "before", header: "Room today", align: "right" as const },
-  { key: "after", header: "Room after", align: "right" as const },
-  { key: "flips", header: "Becomes liquidatable?", align: "right" as const },
-];
+const SCENARIO: KitColumn = { key: "scenario", header: "Scenario" };
+const BEFORE: KitColumn = { key: "before", header: "Room today", align: "right" };
+const AFTER: KitColumn = { key: "after", header: "Room after", align: "right" };
+const FLIPS: KitColumn = { key: "flips", header: "Becomes liquidatable?", align: "right" };
 
 /** The one-address workspace: the Inspector's tiles for before and after the selected scenario, and every scenario's row — the subject is the selected row the address carries, else the first it does. */
 export function AddressWorkspace({ space, kicker }: { space: Space; kicker: ReactNode }) {
@@ -24,7 +22,6 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
       : [
           { label: "Result for batch", value: groupInt(space.batchId) },
           ...(space.stressBatchChip === null ? [] : [{ label: "Stress for batch", value: space.stressBatchChip, tone: "warn" as const }]),
-          ...(space.selected === null ? [] : [{ label: "Scenario", value: space.selected.id, title: space.selected.label }]),
         ];
   const t = space.tiles;
   const tile = (key: string, side: "before" | "after", label: string, v: AddressTile | undefined) => {
@@ -50,6 +47,10 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
       </span>
     );
   };
+  // The Inspector's column rule: while every row agrees on room today and the tiles print it, the column goes. Tiles
+  // refused (another batch, no scale) state no room today, so there the column stays.
+  const todayOnce = space.tiles !== null && agreedRoomToday(space.rows, space.decimals, space.scaleAbsence) !== null;
+  const columns = todayOnce ? [SCENARIO, AFTER, FLIPS] : [SCENARIO, BEFORE, AFTER, FLIPS];
   // The room cells and the verdict cell speak from the lib's own words — the room cell every table shares, and the
   // verdict words the view model hands over, which are the Inspector's words for the same row under the same header — so
   // the table can never say what the header refuses, and the two pages can never word one row two ways.
@@ -59,12 +60,23 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
     cells: {
       scenario: (
         <>
-          <span title={r.projection === null ? r.label : (r.projectionNote ?? r.label)}>{r.name}</span>
-          {r.projection !== null && <span className={styles.detail}>{PROJECTION_ROW_SUB}</span>}
+          <span className={styles.scenarioName} title={r.projection === null ? r.label : (r.projectionNote ?? r.label)}>
+            {r.name}
+          </span>
+          {r.projection !== null && (
+            <span className={styles.detail}>{projectionRowSub(r.projection, space.decimals, space.scaleAbsence)}</span>
+          )}
         </>
       ),
       before: room(r.before),
-      after: r.projection === null ? room(r.after) : projectionWords(r.projection, space.decimals, space.scaleAbsence),
+      after:
+        r.projection === null ? (
+          room(r.after)
+        ) : (
+          <span className={styles.stateCell} title={PROJECTION_ROOM_CELL.title}>
+            {PROJECTION_ROOM_CELL.text}
+          </span>
+        ),
       flips:
         verdict.tone !== null ? (
           <StatusPill tone={verdict.tone} title={verdict.title ?? undefined}>
@@ -126,13 +138,16 @@ export function AddressWorkspace({ space, kicker }: { space: Space; kicker: Reac
         />
         <div className={kit.card}>
           <KitTable
-            columns={COLUMNS}
+            columns={columns}
             rows={rows}
             testId="lab-address-table"
             emptyText={space.state === "rows" ? NO_SCENARIO_APPLIES : space.headline.emphasis}
             label={EVERY_SCENARIO_TITLE}
           />
         </div>
+        <p className={styles.dim} data-testid="lab-address-caption">
+          {STRESS_ROOM_DEFINITION}
+        </p>
       </section>
     </>
   );

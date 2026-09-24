@@ -385,49 +385,51 @@ test.describe("severity + bps", () => {
 
 // ---------------------------------------------------------------------------
 // feedTakeaway: the headline over the loaded window, as the finding's core
-// (emphasis) and its scope (rest), MODE-HONEST about what "newest" may claim:
-// a block only where block numbers are the order, a time only over rows that
-// carry one, and NO newest over an untimed or order-broken window. "loaded"
-// never leaves the emphasis; nothing loaded is never a count. The instant is
-// spoken through humanUtc (U+00A0 joins, hence `nb`); feedNewest is the one
-// judge the headline and the header's Newest chip both read.
+// (emphasis) and its scope (rest). Over many rows it states the finding alone:
+// the newest instant and whether more remain are the Newest and Loaded chips'
+// — but an untimed or order-broken window still SAYS it claims no newest.
+// "loaded" never leaves the emphasis; nothing loaded is never a count. One row
+// names itself and where it sits (humanUtc joins with U+00A0, hence `nb`);
+// feedNewest is the one judge the headline and the Newest chip both read.
 // ---------------------------------------------------------------------------
 
 /** humanUtc joins its tokens with U+00A0: an instant inside an expectation is written through this. */
 const nb = (text: string): string => text.replaceAll(" ", " ");
 
 test.describe("feedTakeaway", () => {
-  test("engine-scoped: the newest claim is a BLOCK, and hasMore blocks the totality reading", () => {
+  test("many rows: the finding alone — the newest block and whether more remain are the chips', never restated; 'loaded' keeps the count a floor", () => {
     const rows = [
       row({ block_number: 25635601, block_time: null, type: "liquidation" }),
       row({ block_number: 25635580, block_time: null, type: "supply" }),
     ];
-    expect(feedTakeaway(rows, "engine-scoped", false)).toEqual({
-      emphasis: "1 liquidation among the 2 chain actions loaded,",
-      rest: "the newest at block 25,635,601; that is every action matching this filter.",
-    });
-    expect(feedTakeaway(rows, "engine-scoped", true)).toEqual({
-      emphasis: "1 liquidation among the 2 chain actions loaded,",
-      rest: "the newest at block 25,635,601; more exist beyond these.",
-    });
+    for (const hasMore of [true, false]) {
+      expect(feedTakeaway(rows, "engine-scoped", hasMore)).toEqual({ emphasis: "1 liquidation among the 2 chain actions loaded.", rest: "" });
+    }
     expect(feedNewest(rows, "engine-scoped")).toEqual({ kind: "block", block: 25635601 });
   });
 
-  test("cross-engine: the newest claim is the head row's block TIME, never a block number — spoken from the wire's own UTC fields, the year by the envelope's served_at", () => {
+  test("a bad-debt realization beside liquidations is counted in the headline by its own noun — never read as one of the liquidations", () => {
+    const rows = [
+      row({ block_number: 25635601, block_time: "2026-07-29T09:57:11Z", type: "liquidation" }),
+      row({ block_number: 25635590, block_time: "2026-07-29T09:56:11Z", type: "liquidation", seq: 1 }),
+      row({ block_number: 25635580, block_time: "2026-07-29T09:55:02Z", type: "deficit_created", seq: 2 }),
+      row({ block_number: 25635570, block_time: "2026-07-29T09:54:02Z", type: "repay", seq: 3 }),
+    ];
+    expect(feedTakeaway(rows, "cross-engine", true)).toEqual({
+      emphasis: "2 liquidations and 1 bad-debt realization among the 4 chain actions loaded.",
+      rest: "",
+    });
+    const two = [...rows, row({ block_number: 25635560, block_time: "2026-07-29T09:53:02Z", type: "deficit_created", seq: 4 })];
+    expect(feedTakeaway(two, "cross-engine", false).emphasis).toBe("2 liquidations and 2 bad-debt realizations among the 5 chain actions loaded.");
+  });
+
+  test("cross-engine: the newest is the head row's block TIME, never a block number — and it is the chip's to state", () => {
     const rows = [
       row({ block_number: 25635601, block_time: "2026-07-29T09:57:11Z", type: "borrow" }),
       row({ block_number: 154796490, block_time: null, type: "repay" }),
     ];
     const line = feedTakeaway(rows, "cross-engine", false, { servedAt: "2026-07-29T10:00:05Z" });
-    expect(line).toEqual({
-      emphasis: "No liquidation among the 2 chain actions loaded,",
-      rest: `the newest at ${nb("Jul 29, 09:57 UTC")}; that is every action matching this filter.`,
-    });
-    expect(line.rest).not.toContain("at block");
-    // No served_at at hand, or one from another year: the year prints. Never the browser's clock.
-    expect(feedTakeaway(rows, "cross-engine", false).rest).toContain(nb("Jul 29, 2026, 09:57 UTC"));
-    expect(feedTakeaway(rows, "cross-engine", false, { servedAt: null }).rest).toContain(nb("Jul 29, 2026, 09:57 UTC"));
-    expect(feedTakeaway(rows, "cross-engine", false, { servedAt: "2027-01-01T00:00:00Z" }).rest).toContain(nb("Jul 29, 2026, 09:57 UTC"));
+    expect(line).toEqual({ emphasis: "No liquidation among the 2 chain actions loaded.", rest: "" });
     expect(feedNewest(rows, "cross-engine")).toEqual({ kind: "time", iso: "2026-07-29T09:57:11Z" });
   });
 
@@ -439,7 +441,7 @@ test.describe("feedTakeaway", () => {
     const line = feedTakeaway(rows, "cross-engine", false);
     expect(line).toEqual({
       emphasis: "No liquidation among the 2 chain actions loaded,",
-      rest: "none has a block time yet, so no newest is claimed; that is every action matching this filter.",
+      rest: "none has a block time yet, so no newest is claimed.",
     });
     expect(line.rest).not.toContain("the newest at");
     expect(feedNewest(rows, "cross-engine")).toEqual({ kind: "untimed" });
@@ -452,7 +454,7 @@ test.describe("feedTakeaway", () => {
       row({ block_number: 25635500, block_time: "2026-07-29T09:55:02Z", type: "supply" }),
     ];
     const line = feedTakeaway(rows, "cross-engine", true);
-    expect(line.rest).toBe("no newest is claimed: the service broke its own ordering (see the alert below); more exist beyond these.");
+    expect(line.rest).toBe("no newest is claimed: the service broke its own ordering (see the alert below).");
     expect(line.rest).not.toContain("the newest at");
     expect(feedNewest(rows, "cross-engine")).toEqual({ kind: "order-violated" });
   });
@@ -479,18 +481,18 @@ test.describe("feedTakeaway", () => {
     const at = { servedAt: "2026-07-29T10:00:05Z" };
     expect(feedTakeaway(rows, "cross-engine", true, { ...at, types: ["borrow", "repay"] })).toEqual({
       emphasis: "2 chain actions loaded,",
-      rest: `filtered to borrow and repay; the newest at ${nb("Jul 29, 09:57 UTC")}; more exist beyond these.`,
+      rest: "filtered to borrow and repay.",
     });
     // The filter admits liquidations and none is loaded: a true zero, scoped by "loaded".
     expect(feedTakeaway(rows, "cross-engine", true, { ...at, types: ["borrow", "liquidation"] }).emphasis).toBe(
-      "No liquidation among the 2 chain actions loaded,",
+      "No liquidation among the 2 chain actions loaded.",
     );
     const liquidations = rows.map((event) => ({ ...event, type: "liquidation" as const }));
     expect(feedTakeaway(liquidations, "cross-engine", false, { ...at, ledger: true }).emphasis).toBe("2 liquidations loaded,");
-    expect(feedTakeaway(rows, "cross-engine", false, { ...at, ledger: true }).emphasis).toBe("No liquidation among the 2 chain actions loaded,");
+    expect(feedTakeaway(rows, "cross-engine", false, { ...at, ledger: true }).emphasis).toBe("No liquidation among the 2 chain actions loaded.");
     // Grouped counts, real plurals.
     const many = Array.from({ length: 1200 }, (_, i) => row({ seq: i, type: i === 0 ? "liquidation" : "borrow", block_time: "2026-07-29T09:57:11Z" }));
-    expect(feedTakeaway(many, "cross-engine", true, at).emphasis).toBe("1 liquidation among the 1,200 chain actions loaded,");
+    expect(feedTakeaway(many, "cross-engine", true, at).emphasis).toBe("1 liquidation among the 1,200 chain actions loaded.");
     expect(plural(1, "liquidation")).toBe("1 liquidation");
     expect(plural(0, "liquidation")).toBe("0 liquidations");
     expect(plural(18251, "chain action")).toBe("18,251 chain actions");
@@ -523,9 +525,9 @@ test.describe("feedTakeaway", () => {
     const types = ["deficit_created", "collateral_enabled"] as const;
     expect(feedTakeaway(rows, "cross-engine", false, { ...at, types })).toEqual({
       emphasis: "2 chain actions loaded,",
-      rest: `filtered to bad debt realized and collateral enabled; the newest at ${nb("Jul 29, 09:57 UTC")}; that is every action matching this filter.`,
+      rest: "filtered to bad debt realized and collateral enabled.",
     });
-    expect(feedTakeaway(rows, "cross-engine", false, { ...at, types }).rest).toContain(`filtered to ${joinAnd(types.map(typeWord))};`);
+    expect(feedTakeaway(rows, "cross-engine", false, { ...at, types }).rest).toBe(`filtered to ${joinAnd(types.map(typeWord))}.`);
     // One row: a type the page says as a phrase is a statement and takes no article; a type that is a noun keeps "a".
     expect(feedTakeaway(rows.slice(0, 1), "engine-scoped", false).rest).toBe(
       "bad debt realized, at block 25,635,601; that is the only action matching this filter.",
@@ -554,9 +556,10 @@ test.describe("feedTakeaway", () => {
         const line = feedTakeaway(rows, mode, hasMore);
         const said = `${line.emphasis} ${line.rest}`;
         expect(said).not.toMatch(/cursor|custod|\(s\)|\$| · /);
-        expect(line.emphasis.endsWith(",")).toBe(true);
         expect(line.emphasis).toContain("loaded");
-        expect(line.rest.endsWith(".")).toBe(true);
+        // One sentence: the emphasis ends it, or opens a scope the rest ends.
+        expect(said.trim().endsWith(".")).toBe(true);
+        expect(line.emphasis.endsWith(line.rest === "" ? "." : ",")).toBe(true);
       }
     }
   });

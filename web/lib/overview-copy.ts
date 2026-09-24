@@ -17,11 +17,15 @@ export const HERO_DEK_LEAD =
 export const HERO_DEK_STRONG = "every number opens its evidence";
 export const HERO_DEK_TAIL = ", and anything it can't defend renders as a named refusal — never a guess, never a zero.";
 
-/** The hero's actions: two buttons to other pages, and the address field between them. */
+/**
+ * The hero's actions: two buttons to other pages, and the address field between them. The field's placeholder carries
+ * its purpose because its hint is not shown on the hero (it stays the input's description for a screen reader).
+ */
 export const CTA = {
   book: "Open the book",
   scenarios: "Run a stress scenario",
   addressHint: "Inspect an address",
+  addressPlaceholder: "Inspect an address · 0x…",
 } as const;
 
 /** The three entry cards: the reader's question, the page it opens (a link to another page: the arrow after the words), and what that page holds. */

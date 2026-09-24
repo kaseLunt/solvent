@@ -53,10 +53,10 @@ function Part({ part }: { part: LivePart }) {
   return <>{part.text}</>;
 }
 
-export function FeedLiveStrip() {
+export function FeedLiveStrip({ className = "" }: { className?: string }) {
   const strip = deriveLiveStrip(usePosture());
   return (
-    <div className={`${kit.strip} ${styles.live}`} data-testid="activity-live" role="status">
+    <div className={`${kit.strip} ${styles.live} ${className}`} data-testid="activity-live" role="status">
       <span className={styles.liveLabel} title={strip.law}>
         {strip.label}
       </span>

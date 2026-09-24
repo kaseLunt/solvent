@@ -85,7 +85,7 @@ export interface HistoryView {
   readonly chips: LabChip[];
   /** The four metrics' newest captured points; empty until the series answers. */
   readonly tiles: readonly HistoryTile[];
-  /** gridReadingLine(...) for the drawn metric — the chart card's finding line; null until the series answers. */
+  /** gridReadingLine(...) — the chart card's caption, the same for every metric; null until the series answers. */
   readonly finding: string | null;
   /** The chart's accessible name for the selected metric; null until the series answers. */
   readonly chartLabel: string | null;
@@ -385,8 +385,9 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
       chips: [{ label: "Hourly record", value: "not served here" }],
       stateCard: {
         state: "not-served",
-        title: "No hourly history on this deployment",
-        cause: "The hourly rollup is not available on this deployment's database.",
+        // The headline, dek and chip already say the record is not here; the card says what fills the page.
+        title: "What fills this page",
+        cause: "When this deployment builds its hourly record, each recorded hour appears here as a point and a missing hour as a gap.",
         serviceSaid: saidOf(reading.serviceSaid ?? reading.message),
         action: "book",
       },
@@ -464,7 +465,7 @@ export function deriveHistoryView(reading: HistoryReading): HistoryView {
     headline: { emphasis: takeaway.emphasis, rest: takeaway.rest, tone: takeaway.answered ? "neutral" : "refused", dek: takeaway.dek },
     chips: okChips(response, axis),
     tiles: historyTiles(reading.engine).map((spec) => tileOf(spec, axis, response, scale, first)),
-    finding: gridReadingLine(response, axis, reading.metric),
+    finding: gridReadingLine(response, axis),
     chartLabel: `${metricLabel(reading.metric, reading.engine)} for ${engineName(reading.engine)}, hour by hour`,
     marks: marksFor(buildMetricSeries(axis, response, reading.metric).gapKinds),
     stateCard: null,

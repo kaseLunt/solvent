@@ -76,7 +76,8 @@ function movementSentence(h: HeatmapView): string {
 function nearSentence(h: HeatmapView): string {
   // Silent when nothing moved: the headline already said so, and "none cross it" would restate it.
   if (h.nearLabel === null || h.nearToday === 0 || h.bandChanged === 0) return "";
-  const who = h.nearToday === 1 ? `the 1 account within ${h.nearLabel} of its cap today` : `the ${groupInt(h.nearToday)} accounts within ${h.nearLabel} of their cap today`;
+  // The band edge is the heatmap's, glossed in its caption; beside the Book's 10% line it would be a second threshold.
+  const who = h.nearToday === 1 ? "the 1 account nearest its cap today" : `the ${groupInt(h.nearToday)} accounts nearest their cap today`;
   const crossed = h.nearCrossed === 0 ? "none" : h.nearCrossed === h.nearToday ? `all ${groupInt(h.nearCrossed)}` : groupInt(h.nearCrossed);
   return ` Of ${who}, ${crossed} cross it.`;
 }

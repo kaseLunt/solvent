@@ -3,7 +3,7 @@
 import { ChartCard, DotPlot, StatusPill, type DotPlotRow } from "@/components/kit";
 import type { CompareView } from "@/lib/lab-compare";
 import { compareCaption, compareCellWords } from "@/lib/lab-headline";
-import { COMPARE_AXIS, COMPARE_VALUE_HEADER, compareFinding, compareFreshnessNote, comparePlotEmpty, type CompareState } from "@/lib/lab-view";
+import { COMPARE_AXIS, COMPARE_VALUE_HEADER, compareFinding, compareFreshnessNote, comparePlotEmpty, type CompareState, type HeldCompare } from "@/lib/lab-view";
 import { useMeasuredWidth } from "@/lib/useMeasuredWidth";
 import styles from "./lab.module.css";
 import { PLOT_MEASURE } from "./LegacyCompare";
@@ -21,7 +21,7 @@ export function plotRowsOf(view: CompareView): DotPlotRow[] {
 }
 
 /** The comparison the card draws: the answered set, or the one a failed Compare left standing — a computed comparison is never replaced by a failure. */
-export function comparedViews(state: CompareState): { readonly cash: CompareView; readonly legacy: CompareView } | null {
+export function comparedViews(state: CompareState): HeldCompare | null {
   return state.kind === "ok" ? state : state.kind === "failed" ? state.held : null;
 }
 

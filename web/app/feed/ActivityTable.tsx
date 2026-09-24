@@ -141,7 +141,9 @@ export function ActivityTable({ rows, emptyText, alignAmounts, bonusNote }: Acti
   }));
   return (
     <div>
-      <KitTable testId="activity-table" columns={COLUMNS} rows={kitRows} emptyText={emptyText} label={ACTIVITY_LIST_TITLE} />
+      <div className={kit.card}>
+        <KitTable testId="activity-table" columns={COLUMNS} rows={kitRows} emptyText={emptyText} label={ACTIVITY_LIST_TITLE} />
+      </div>
       {bonusNote !== null && (
         <p className={styles.footnote} data-testid="activity-bonus-note">
           {bonusNote}

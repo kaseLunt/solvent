@@ -1,9 +1,9 @@
 import { KitTable, SectionHead, StatusPill, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
-import { projectionWords, realizationWords, roomCell, rowVerdict, stressVerdictWords, type StressSide } from "@/lib/address-stress";
+import { PROJECTION_ROOM_CELL, realizationWords, roomCell, rowVerdict, stressVerdictWords, type StressSide } from "@/lib/address-stress";
 import {
   OPEN_IN_SCENARIOS,
-  PROJECTION_ROW_SUB,
+  projectionRowSub,
   PROJECTION_TITLE,
   PROJECTION_WORD,
   STRESS_QUALIFIER,
@@ -26,7 +26,8 @@ const FLIPS: KitColumn = { key: "flips", header: "Becomes liquidatable?", align:
  * projection. The lib decides the row's verdict (`rowVerdict`, the one judge the Scenarios page shares), its room
  * cell, its projection's words, the batch note, the caption and the empty words; this file only places the rows.
  * Room today is one figure for the whole table, so the caption states it once while the rows agree; the section wears
- * the one PROJECTION badge its shocked figures sit under.
+ * the one PROJECTION badge its shocked figures sit under. Every Room after cell is a percent of the cap or a state
+ * word: a projection's interest rides under its name, so the column keeps one unit.
  */
 export function StressTable({ view }: { view: InspectorView }) {
   const room = (side: StressSide | null) => {
@@ -53,15 +54,21 @@ export function StressTable({ view }: { view: InspectorView }) {
             cells: {
               scenario: (
                 <>
-                  <span title={r.projection === null ? r.label : (r.projectionNote ?? r.label)}>{r.name}</span>
-                  {r.projection !== null && <span className={styles.detail}>{PROJECTION_ROW_SUB}</span>}
+                  <span className={styles.scenarioName} title={r.projection === null ? r.label : (r.projectionNote ?? r.label)}>
+                    {r.name}
+                  </span>
+                  {r.projection !== null && (
+                    <span className={styles.detail}>{projectionRowSub(r.projection, view.decimals, view.scaleAbsence)}</span>
+                  )}
                   {note !== null && <span className={styles.detail}>{note.rowLabel}</span>}
                 </>
               ),
               before: room(r.before),
               after:
                 r.projection !== null ? (
-                  projectionWords(r.projection, view.decimals, view.scaleAbsence)
+                  <span className={styles.stateCell} title={PROJECTION_ROOM_CELL.title}>
+                    {PROJECTION_ROOM_CELL.text}
+                  </span>
                 ) : (
                   <>
                     {room(r.after)}

@@ -112,6 +112,13 @@ test("near cap — the mockup's account: one sentence, five tiles, chips, what b
   const spark = page.getByTestId("inspector-room-spark");
   await expect(spark.getByTestId("sparkline-reference")).toHaveAttribute("data-tone", "warn");
   await expect(spark.getByTestId("sparkline-reference-label")).toHaveText("10% of cap");
+  // The History room chart's floor is the cap, never the account's own minimum: a boundary line is drawn only where
+  // the domain reaches it, so the 0% line being there proves the floor, in crit and named; the near-cap line stays warn.
+  const history = page.getByTestId("inspector-history");
+  await expect(history.getByTestId("sparkline-boundary")).toHaveAttribute("data-tone", "crit");
+  await expect(history.getByTestId("sparkline-boundary-label")).toHaveText("Borrow cap · 0%");
+  await expect(history.getByTestId("sparkline-reference")).toHaveAttribute("data-tone", "warn");
+  await expect(history.getByTestId("sparkline-newest-value")).toHaveText("3.8%");
 });
 
 test("liquidatable and healthy — the other two spec templates, verbatim", async ({ page }) => {
@@ -354,12 +361,43 @@ test("stress: the committed scenarios inline — two flips, one projection, one 
   await expect(table.locator("tbody tr").nth(2)).toContainText("Cash borrow APY +200 bps");
   await expect(table.locator("tbody tr").nth(2)).toContainText("Rate horizon · prices held flat");
   await expect(table.locator("tbody tr").nth(2)).not.toContainText("PROJECTION");
-  await expect(table.locator("tbody tr").nth(2)).toContainText("30\u00a0d");
+  // One unit down Room after: the projection's interest rides under its name in prose, its cell is a state word.
+  await expect(table.locator("tbody tr").nth(2).locator("td").first()).toContainText(
+    "Rate horizon · prices held flat · +$7.92 interest by 30\u00a0days, +$23.77 by 90\u00a0days",
+  );
+  await expect(table.locator("tbody tr").nth(2).locator("td").nth(1)).toHaveText("Interest only");
+  await expect(table.locator("tbody tr").nth(2).locator("td").nth(1).locator("[title]")).toHaveAttribute(
+    "title",
+    "A rate horizon holds prices flat; its extra interest by each horizon is listed under its name.",
+  );
+  await expect(table.locator("tbody tr").nth(2).locator("td").last()).toHaveText("Not within 90\u00a0d");
   await expect(page.getByTestId("inspector-stress-projection")).toHaveText("PROJECTION");
-  // Room today is one figure for every row: the caption states it once, and the table drops the repeated column.
+  // Room today is one figure for every row: the caption states it once, in the column's unit and in dollars, defines
+  // the cells, and the table drops the repeated column.
   await expect(table.locator("thead th")).toHaveText(["Scenario", "Room after", "Becomes liquidatable?"]);
-  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: $190.50.");
+  await expect(page.getByTestId("inspector-stress-caption")).toHaveText(
+    "Room today: 3.8% of the cap ($190.50). Room after is the share of each scenario’s cap left unborrowed; below zero, the account is over its cap.",
+  );
   await expect(page.getByTestId("inspector-stress")).toHaveAttribute("id", "stress");
+});
+
+test("stress on a phone: Scenario, Room after and the verdict stay in view for every row — the table fits its card, no sideways scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockInspector(page, { address: DEMO_ADDRESS_NEAR });
+  await page.goto(`/inspector/${DEMO_NEAR_ADDR}`);
+  const table = page.getByTestId("inspector-stress-table");
+  await expect(table.locator("tbody tr")).toHaveCount(3);
+  await expect(table.locator("thead th")).toHaveText(["Scenario", "Room after", "Becomes liquidatable?"]);
+  const region = table.locator("xpath=..");
+  await expect.poll(() => region.evaluate((n) => n.scrollWidth <= n.clientWidth)).toBe(true);
+  await expect(region).not.toHaveAttribute("data-overflow", "true");
+  const box = await region.boundingBox();
+  if (box === null) throw new Error("the stress table has no box");
+  for (const k of [0, 1, 2]) {
+    const verdict = await table.locator("tbody tr").nth(k).locator("td").last().boundingBox();
+    if (verdict === null) throw new Error("a verdict cell has no box");
+    expect(verdict.x + verdict.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+  }
 });
 
 test("history: a differing vantage is stated; the drawer opens with the formula substituted", async ({ page }) => {
@@ -530,7 +568,7 @@ test("stress answering for another batch: the section discloses both batches, ea
   await expect(table.locator("tbody tr")).toHaveCount(3);
   for (const k of [0, 1, 2]) await expect(table.locator("tbody tr").nth(k).locator("td").first()).toContainText("batch 18,252");
   // "Room today" is the stress body's own before, for its own batch: stated once, in the caption.
-  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: $190.50.");
+  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: 3.8% of the cap ($190.50).");
   await expect(table.locator("tbody tr").nth(0).locator("td").nth(1)).toHaveText("−28.6%");
   await expect(table.locator("tbody tr").nth(0).locator("td").last()).toHaveText("Yes");
 });
@@ -548,7 +586,7 @@ test("stress: the room cells and the verdict are the one judge's words — a neg
   await expect(eth).toHaveCount(1);
   await expect(ethfi).toHaveCount(1);
   // The demo body as served: both shocks leave the debt above the shocked cap.
-  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: $190.50.");
+  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: 3.8% of the cap ($190.50).");
   await expect(eth.locator("td").nth(1)).toHaveText("−28.6%");
   await expect(eth.locator("td").nth(1).locator("[title]")).toHaveAttribute("title", "Over cap by $1,069");
   await expect(eth.locator("td").nth(2)).toHaveText("Yes");
@@ -574,7 +612,7 @@ test("stress: the room cells and the verdict are the one judge's words — a neg
   await page.reload();
   await expect(table.locator("tbody tr")).toHaveCount(3);
   // No room beside an unknowable verdict, whatever figures ride with it; the side that stands keeps its room, stated once.
-  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: $190.50.");
+  await expect(page.getByTestId("inspector-stress-caption")).toContainText("Room today: 3.8% of the cap ($190.50).");
   await expect(eth.locator("td").nth(1)).toHaveText("Not computed");
   await expect(eth.locator("td").nth(2).locator("[data-tone='refused']")).toHaveText("Cannot say");
   await expect(eth.locator("td").nth(2).locator("[data-tone='refused']")).toHaveAttribute("title", "one side of the comparison is withheld or unknowable");
@@ -633,8 +671,10 @@ test("stress: a projection that carries NO horizon cannot say — never the spot
   await expect(verdict.locator("[data-tone='refused']")).toHaveAttribute("title", "the projection carries no horizon");
   await expect(verdict).not.toContainText("No");
   await expect(verdict).not.toContainText("Not within");
-  // The projection's cell says what is missing; it is not blank and lists no interest.
-  await expect(row.locator("td").nth(1)).toHaveText("No horizon in the projection");
+  // The projection's sub-line says what is missing; its Room after cell is the state word, never blank, and no interest is listed.
+  await expect(row.locator("td").first()).toContainText("Rate horizon · prices held flat · no horizon in the projection");
+  await expect(row.locator("td").nth(1)).toHaveText("Interest only");
+  await expect(row).not.toContainText("interest by");
   // The spot rows beside it keep their own words.
   await expect(table.locator("tbody tr").nth(0).locator("td").last()).toHaveText("Yes");
 });

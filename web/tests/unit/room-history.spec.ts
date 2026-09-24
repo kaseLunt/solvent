@@ -1,7 +1,7 @@
 // web/tests/unit/room-history.spec.ts
 import { expect, test } from "@playwright/test";
 import type { AddressHistoryEngine, AddressHistoryPoint } from "../../lib/inspector-data";
-import { NEAR_LINE_TENTHS, nearCapStreak, roomSeries } from "../../lib/room-history";
+import { NEAR_LINE_TENTHS, nearCapStreak, roomDomain, roomSeries } from "../../lib/room-history";
 
 /** A Debt Manager point: num = cap, den = debt (the engine's exact rational, internal/risk/types.go:774). */
 function point(batchId: number, cap: string | null, debt = "4822000000", extra: Partial<AddressHistoryPoint> = {}): AddressHistoryPoint {
@@ -127,4 +127,17 @@ test("a zero cap is a point past the cap, out-of-contract ids throw, and the str
   // A trailing withheld batch: the run cannot be read past it, and the streak says which kind stopped it.
   const trailing = roomSeries(engine([point(1, "5012500000"), point(2, "5012500000")], [3]));
   expect(nearCapStreak(trailing)).toEqual({ batches: 0, spanSeconds: null, newestKind: "withheld" });
+});
+
+test("the room domain always reaches the cap (0 %) and the near line, and never clips an over-cap room", () => {
+  // An account at 3.8 % room: the floor is the cap, never the account's own minimum.
+  expect(roomDomain([19.6, 12.3, 3.8])).toEqual({ min: 0, max: 19.6 });
+  // Every point under the near line: the top still clears the 10 % line by two points.
+  expect(roomDomain([3.8, 4.1])).toEqual({ min: 0, max: 12 });
+  // Over the cap (negative room): the floor follows the series below zero.
+  expect(roomDomain([2.1, -4.7])).toEqual({ min: -4.7, max: 12 });
+  // Gaps and non-finite values are not geometry; an all-gap series still has the cap and the near line in view.
+  expect(roomDomain([null, 5, null, Number.NaN])).toEqual({ min: 0, max: 12 });
+  expect(roomDomain([null, null])).toEqual({ min: 0, max: 12 });
+  expect(roomDomain([])).toEqual({ min: 0, max: 12 });
 });

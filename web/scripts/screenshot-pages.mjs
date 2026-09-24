@@ -28,13 +28,25 @@ const UNAVAILABLE = { error: { code: "unavailable", message: "the evidence manif
 const OVERRIDES = {
   historyDegraded: (page) => page.route("**/v1/observatory/series*", (r) => json(r, observatory.OBSERVATORY_DEGRADED, 503)),
   activityRefused: (page) => page.route("**/v1/events*", (r) => json(r, feed.FEED_ERROR_BAD_CURSOR, 400)),
-  activityExhausted: (page) => page.route("**/v1/events*", (r) => json(r, feed.FEED_EMPTY)),
+  // Through the real flow: only the bad-debt filter answers empty (the committed empty page echoes that filter), and
+  // the reader presses it (ACTIONS below) — so the capture shows the pressed control, "Filtered out" and "Clear filter".
+  activityExhausted: (page) =>
+    page.route("**/v1/events*", (r) =>
+      new URL(r.request().url()).searchParams.get("types") === "deficit_created" ? json(r, feed.FEED_EMPTY) : r.fallback(),
+    ),
   // Welded to the demo batch as the demo evidence is, so the failed receipt sits beside ONE serving batch.
   verificationFailed: (page) =>
     page.route("**/v1/evidence*", (r) =>
       json(r, { ...proof.EVIDENCE_PROOF_FAILED, substrate: { ...proof.EVIDENCE_PROOF_FAILED.substrate, batch_id: demo.DEMO_BATCH_ID } }),
     ),
   verificationUnavailable: (page) => page.route("**/v1/evidence*", (r) => json(r, UNAVAILABLE, 503)),
+};
+// What a reader does before the capture, for a state a page reaches only through its controls.
+const ACTIONS = {
+  activityExhausted: async (page) => {
+    await page.getByTestId("activity-type-deficit_created").click();
+    await page.locator('[data-testid="activity-surface"][data-state="exhausted"]').waitFor();
+  },
 };
 const wanted = pageArgs.length === 0 ? Object.keys(PAGES) : pageArgs;
 const CORS = { "access-control-allow-origin": "*" };
@@ -90,6 +102,7 @@ for (const theme of ["dark", "light"]) {
     await page.route("**/v1/scenarios", (r) => json(r, demo.DEMO_SCENARIOS));
     await OVERRIDES[name]?.(page);
     await page.goto(`http://localhost:3111${url}`, { waitUntil: "networkidle" });
+    await ACTIONS[name]?.(page);
     await page.waitForTimeout(600);
     await page.screenshot({ path: path.join(out, `${name}-${theme}-fold.png`) });
     await page.screenshot({ path: path.join(out, `${name}-${theme}-full.png`), fullPage: true });

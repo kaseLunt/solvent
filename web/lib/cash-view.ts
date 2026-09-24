@@ -694,7 +694,7 @@ export function deriveLegacyView(legacy: CashBookReading["legacy"]): LegacyView 
     bands,
     bandsNote,
     histogramWithheld,
-    summary: `${finding} · ${debtWord} · ${n(refused)} refused`,
+    summary: `${finding} · ${debtWord} · ${n(refused)} with no verdict`,
     note: LEGACY_NOTE,
     withheldNote: null,
     tiles: legacyTiles(counts),

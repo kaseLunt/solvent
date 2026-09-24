@@ -4,13 +4,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { lookup, type components } from "@solvent/client";
 import {
+  agreedRoomToday,
   horizonLabel,
-  projectionWords,
+  horizonWords,
+  PROJECTION_ROOM_CELL,
+  projectionInterestClauses,
+  projectionSubLine,
   rowVerdict,
   scaleAbsenceWords,
   realizationWords,
   roomCell,
   sideRoomWords,
+  STRESS_ROOM_DEFINITION,
   stressReading,
   stressVerdictWords,
   UNREADABLE_HORIZON,
@@ -98,10 +103,10 @@ test("an empty projection cannot say, FROM THE WIRE: a projection with no horizo
   expect(rowVerdict(empty)).toEqual({ kind: "cannot-say", cause: "no-horizon" });
   expect(stressVerdictWords(rowVerdict(empty))).toEqual({ text: "Cannot say", tone: "refused", title: "the projection carries no horizon" });
   expect(stressVerdictWords(rowVerdict(empty)).text).not.toBe("No");
-  // The projection's own cell says what is missing — with a scale, and with none (the scale is not why it is empty).
-  expect(projectionWords(empty.projection ?? [], 6)).toBe("No horizon in the projection");
-  expect(projectionWords(empty.projection ?? [], null, "no-position")).toBe("No horizon in the projection");
-  expect(projectionWords([], 6)).not.toBe("");
+  // The projection's sub-line says what is missing — with a scale, and with none (the scale is not why it is empty).
+  expect(projectionSubLine(empty.projection ?? [], 6)).toBe("no horizon in the projection");
+  expect(projectionSubLine(empty.projection ?? [], null, "no-position")).toBe("no horizon in the projection");
+  expect(projectionSubLine([], 6)).not.toBe("");
   // The same sides with NO projection are a spot row, and keep the spot's word; with horizons they keep theirs.
   expect(stressVerdictWords(rowVerdict(read(null))).text).toBe("No");
   expect(stressVerdictWords(rowVerdict(read(served))).text).toMatch(/^(Within|Not within) /);
@@ -360,15 +365,76 @@ test("a figure with no scale to print at names the TRUE cause: an unreadable sca
   // The side is asked first, and a readable scale prints the figure whatever cause rides beside it.
   expect(sideRoomWords(null, null, "no-position")).toBe("not computed");
   expect(sideRoomWords(side, 6, "no-position")).toBe("$190.50");
-  // The projection cell keeps the same register: each horizon's interest at the position's scale, or the one true cause — never "+— interest".
+  // The projection sub-line keeps the same register: each horizon's interest at the position's scale, or the one true cause — never "+— interest".
   const horizons: StressHorizon[] = [
     { seconds: 2_592_000, extraInterest: 12_340_000n, verdict: "not-liquidatable" },
     { seconds: 7_776_000, extraInterest: null, verdict: "not-liquidatable" },
   ];
-  expect(projectionWords(horizons, 6)).toBe("30\u00a0d: +$12.34 interest · 90\u00a0d: — interest");
-  expect(projectionWords(horizons, null)).toBe("Unreadable scale");
-  expect(projectionWords(horizons, null, "no-position")).toBe("No Cash position in the lookup");
-  expect(projectionWords(horizons, null, "no-position")).not.toContain("+—");
+  expect(projectionSubLine(horizons, 6)).toBe("+$12.34 interest by 30\u00a0days, interest not computed by 90\u00a0days");
+  expect(projectionSubLine(horizons, null)).toBe("unreadable scale");
+  expect(projectionSubLine(horizons, null, "no-position")).toBe("no Cash position in the lookup");
+  expect(projectionSubLine(horizons, null, "no-position")).not.toContain("+—");
+});
+
+test("horizonWords: the prose form of a horizon — whole units spelled out, singular for one, the same integer truncation; a refused duration prints the refused word", () => {
+  expect(horizonWords(2_592_000)).toBe("30\u00a0days");
+  expect(horizonWords(7_776_000)).toBe("90\u00a0days");
+  expect(horizonWords(86_400)).toBe("1\u00a0day");
+  expect(horizonWords(129_600)).toBe("1\u00a0day 12\u00a0hours");
+  expect(horizonWords(90_000)).toBe("1\u00a0day 1\u00a0hour");
+  expect(horizonWords(43_200)).toBe("12\u00a0hours");
+  expect(horizonWords(86_340)).toBe("23\u00a0hours");
+  expect(horizonWords(2_700)).toBe("45\u00a0minutes");
+  expect(horizonWords(60)).toBe("1\u00a0minute");
+  expect(horizonWords(59)).toBe("<1\u00a0minute");
+  expect(horizonWords(0)).toBe("<1\u00a0minute");
+  for (const bad of [60.5, -1, -0, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53]) expect(horizonWords(bad)).toBe(UNREADABLE_HORIZON);
+});
+
+test("the projection's words: one clause per horizon, the noun once, a missing or negative interest said in words; the room cell is a state word with its reason in the title", () => {
+  const horizons: StressHorizon[] = [
+    { seconds: 2_592_000, extraInterest: 7_920_000n, verdict: "not-liquidatable" },
+    { seconds: 7_776_000, extraInterest: 23_770_000n, verdict: "not-liquidatable" },
+  ];
+  expect(projectionSubLine(horizons, 6)).toBe("+$7.92 interest by 30\u00a0days, +$23.77 by 90\u00a0days");
+  expect(projectionInterestClauses(horizons, 6)).toEqual(["+$7.92 interest by 30\u00a0days", "+$23.77 by 90\u00a0days"]);
+  // A negative extra interest is out of contract: never "+−$".
+  const negative: StressHorizon[] = [{ seconds: 2_592_000, extraInterest: -1n, verdict: "not-liquidatable" }];
+  expect(projectionSubLine(negative, 6)).toBe("interest not computed by 30\u00a0days");
+  expect(PROJECTION_ROOM_CELL).toEqual({
+    text: "Interest only",
+    title: "A rate horizon holds prices flat; its extra interest by each horizon is listed under its name.",
+  });
+});
+
+test("agreedRoomToday: room today is stated once only while every applicable row's before side is the same computable figure — percent and dollars", () => {
+  const before = { debt: 4822000000n, cap: 5012500000n, room: 190500000n, verdict: "not-liquidatable" as const };
+  const row = (id: string, side: StressRow["before"], applicable = true): StressRow => ({
+    id,
+    name: id,
+    label: id,
+    applicable,
+    reason: applicable ? null : "not evaluated for this account",
+    before: side,
+    after: side,
+    flips: null,
+    projection: null,
+    projectionNote: null,
+    marketRealization: null,
+  });
+  expect(agreedRoomToday([row("a", before), row("b", before)], 6)).toEqual({ percent: "3.8%", dollars: "$190.50" });
+  // An inapplicable row states no room today and does not break the agreement.
+  expect(agreedRoomToday([row("a", before), row("b", null, false)], 6)).toEqual({ percent: "3.8%", dollars: "$190.50" });
+  // Over the cap: the signed percent and the prose's words, never a minus on a dollar figure.
+  const over = { debt: 4822000000n, cap: 3752500000n, room: -1069500000n, verdict: "liquidatable" as const };
+  expect(agreedRoomToday([row("a", over)], 6)).toEqual({ percent: "−28.6%", dollars: "over cap by $1,069" });
+  // Rows that disagree, a side with no figure, no scale, or no applicable row: nothing is stated once — the column stays.
+  expect(agreedRoomToday([row("a", before), row("b", over)], 6)).toBeNull();
+  expect(agreedRoomToday([row("a", before), row("b", { ...before, verdict: "unknowable" })], 6)).toBeNull();
+  expect(agreedRoomToday([row("a", before)], null, "no-position")).toBeNull();
+  expect(agreedRoomToday([row("a", { debt: 5000000n, cap: 0n, room: -5000000n, verdict: "liquidatable" })], 6)).toBeNull();
+  expect(agreedRoomToday([], 6)).toBeNull();
+  expect(STRESS_ROOM_DEFINITION).toBe("Room after is the share of each scenario’s cap left unborrowed; below zero, the account is over its cap.");
 });
 
 test("the reading carries the stress response's own batch on every arm; an id the population guard refuses names no batch", () => {

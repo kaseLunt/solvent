@@ -10,6 +10,8 @@
 /* ---- the live strip: the CURRENT connection only, never a record. One plain line on the kit's strip: prose in the
  * page's sans, mono for ids and numbers alone. ---- */
 .live { color: var(--ink-2); }
+/* In the tiles' row it takes the two columns the tiles leave; where the row holds two columns it sits below them. */
+.liveInRow { grid-column: 3 / -1; align-self: stretch; min-width: 0; margin: 0; }
 .liveLabel { font-size: var(--type-small); color: var(--ink-2); }
 .liveChip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--type-small); font-weight: var(--w-medium); }
 .liveChip i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: block; }
@@ -67,3 +69,7 @@
 
 /* ---- foot: the walk's continuation and its page size, or its end ---- */
 .foot { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 4px 2px; font-size: var(--type-small); color: var(--ink-2); }
+
+@media (max-width: 900px) {
+  .liveInRow { grid-column: 1 / -1; }
+}

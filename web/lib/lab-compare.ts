@@ -10,9 +10,9 @@ import { classifySetEnvelope, classifySetResult, classifySetRunEngine, contractF
 import { compareRowWords, type LabHeadline } from "./lab-headline";
 import { bookMoney, signedBookMoney } from "./money";
 import { formatTenths, percentTenths } from "./percent";
-import { joinAnd } from "./prose";
+import { groupInt, joinAnd } from "./prose";
 import { scenarioName } from "./scenario-name";
-import { isWireDecimal, isWireScale } from "./wireGuard";
+import { isWireDecimal, isWirePopulation, isWireScale } from "./wireGuard";
 
 type Schemas = components["schemas"];
 export type RunBookSetResponse = Schemas["RunBookSetResponse"];
@@ -66,6 +66,8 @@ export interface CompareView {
   readonly servedAt: string;
   /** The evaluated batch's own `computed_at`, as the wire states it. */
   readonly computedAt: string;
+  /** The batch's age when the set was served — the wire's `age_seconds` — or null where the population guard refuses it. */
+  readonly ageSeconds: number | null;
 }
 
 /** Signed tenths of a percent, truncated toward zero; null without a positive denominator. The percent law, applied to a signed delta. */
@@ -219,6 +221,7 @@ export function compareRows(set: RunBookSetResponse, engine: string): CompareVie
     configVersion: set.scenario_config_version,
     servedAt: set.served_at,
     computedAt: set.batch.computed_at,
+    ageSeconds: isWirePopulation(set.batch.age_seconds) ? set.batch.age_seconds : null,
   };
 }
 
@@ -280,6 +283,25 @@ export function compareHeadline(view: CompareView): LabHeadline {
     tone: first.deltaUsd > 0n ? "crit" : "neutral",
     dek: [...otherDek, ...unrankedDek].join(" "),
   };
+}
+
+/**
+ * The legacy fold's summary line: the legacy leader by the headline's own ranking, in the legacy book's share — the
+ * legacy market's own finding, never a Cash figure and never summed with one. Every leader of a tie is named. The
+ * fold is collapsed and has no dek, so the line claims only what was ranked: "no scenario" only when every row was
+ * measured at zero, and a row that could not be evaluated is counted — it could move the book more than the leader.
+ */
+export function legacyCompareSummary(view: CompareView): string {
+  const points = view.rows.filter(isPoint);
+  const first = points[0];
+  if (first === undefined) return "No scenario could be ranked for the legacy book";
+  const refused = view.rows.filter((r) => REFUSAL_KINDS.has(r.kind)).length;
+  const unevaluated = refused > 0 ? ` · ${groupInt(refused)} not evaluated` : "";
+  if (points.every((p) => p.deltaUsd === 0n)) {
+    return points.length === view.rows.length ? "No scenario moves the legacy book" : `No ranked scenario moves the legacy book${unevaluated}`;
+  }
+  const leaders = points.filter((p) => p.deltaUsd === first.deltaUsd);
+  return `${joinAnd(leaders.map((p) => p.label))} ${leaders.length === 1 ? "moves" : "move"} the most: ${first.shareText} of the legacy book${unevaluated}`;
 }
 
 /**

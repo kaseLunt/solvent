@@ -1,11 +1,14 @@
-/* API: the committed contract set in the Console register. Page-local rules only — the header, tiles, cards and
- * table are the kit's; these are the contract's own vocabulary (verb, path, params, response codes), the endpoint
+/* API: the committed contract set in the Console register. Page-local rules only — the header, cards and table
+ * are the kit's; these are the contract's own vocabulary (verb, path, params, response codes), the endpoint
  * index, and the terminal treatment for code, which the kit does not carry. Every figure on the page is the
  * contract's own text; the styling only sets it. A verb, a required flag and a status code are contract vocabulary,
  * never a warning: they wear ink, and the word alone tells them apart. The shell owns the page's top offset. */
 .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; padding: 0 0 24px; }
 /* A URL is an identifier: mono wherever the page prints it, the identity chip included. */
 .page [data-chip="Base URL"] b { font-family: var(--mono); font-size: var(--type-mono-sm); }
+
+/* ---- the census above the index: contract vocabulary in a quiet line, never a verdict ---- */
+.census { margin: 0; font-size: var(--type-small); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 
 /* ---- endpoint index: aligned mono rows read down a verb column; an anchor wears no button form ---- */
 .toc { columns: 3; column-gap: 24px; }

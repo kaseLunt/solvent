@@ -14,3 +14,7 @@
 .detail { display: block; color: var(--ink-3); font-size: var(--type-floor); white-space: normal; }
 /* A room over its cap: the crit ink on the cell's own figure. */
 .over { color: var(--crit-text); }
+/* A cell that states a kind rather than a figure: ink-2, never a blank or a dash. */
+.stateCell { color: var(--ink-2); }
+/* A scenario's name may wrap: on a phone the stress table keeps all three columns in view rather than scrolling. */
+.scenarioName { white-space: normal; }

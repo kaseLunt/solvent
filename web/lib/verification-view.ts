@@ -8,7 +8,7 @@
 // absences. The four architecture steps are the
 // Overview's pipeline law, derived here once and rendered by both pages
 // (app/overview/Pipeline.tsx and app/proof/VerificationArchitecture.tsx).
-import { UnavailableError, type components } from "@solvent/client";
+import { MalformedResponseError, UnavailableError, type components } from "@solvent/client";
 import { CASH_ENGINE_MISSING, wholeRefusal } from "./cash-refusal";
 import {
   CHECKED_ROWS_LABEL,
@@ -22,7 +22,9 @@ import {
   RECEIPT_CHECKED_NONE,
   RECEIPT_EMPTY_PILL,
   RECEIPT_EMPTY_STATUS,
+  RECEIPT_FAULT_WORDS,
   receiptCheckedNothing,
+  receiptFault,
   REGISTRY_LABEL,
   REGISTRY_MATCH,
   REGISTRY_MISMATCH,
@@ -36,7 +38,7 @@ import type { StateRegister } from "./kit";
 import { CASH, LEGACY } from "./inspector-position";
 import { sentence, terminated, type LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
-import { publishable, type EvidenceResponse } from "./proof-data";
+import { ProofFetchError, publishable, type EvidenceResponse } from "./proof-data";
 import { groupInt, PIPELINE_STEPS, plural } from "./prose";
 import { plainCause } from "./refusal-phrasebook";
 import { isWirePopulation, readWirePopulation } from "./wireGuard";
@@ -53,7 +55,8 @@ export type BookResponse = Schemas["BookResponse"];
 export interface BookReading {
   readonly phase: "loading" | "ok" | "no-batch" | "error";
   readonly book: BookResponse | null;
-  readonly failure: { readonly message: string; readonly retryAfterSeconds: number | null } | null;
+  /** `unreadable`: the service answered with a body the page could not read — a failure, but not of the request. */
+  readonly failure: { readonly message: string; readonly retryAfterSeconds: number | null; readonly unreadable?: boolean } | null;
 }
 
 /** The `/v1/book` ask before it answers: pending — never refused, never an absence. */
@@ -64,13 +67,27 @@ export const bookAnswered = (book: BookResponse): BookReading => ({ phase: "ok",
 
 /**
  * The book's failure as the steps read it. The wire's own 503 is "no-batch" —
- * the one absence it states; anything else is a book that could not be read,
- * never an absence.
+ * the one absence it states; a 2xx body that is not JSON is a book the page
+ * could not read; anything else is a read that failed. Neither is an absence.
  */
 export function bookFailed(cause: unknown): BookReading {
-  return cause instanceof UnavailableError
-    ? { phase: "no-batch", book: null, failure: { message: cause.body.error.message, retryAfterSeconds: cause.retryAfterSeconds } }
-    : { phase: "error", book: null, failure: { message: cause instanceof Error ? cause.message : String(cause), retryAfterSeconds: null } };
+  if (cause instanceof UnavailableError) {
+    return { phase: "no-batch", book: null, failure: { message: cause.body.error.message, retryAfterSeconds: cause.retryAfterSeconds } };
+  }
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return answeredUnreadably(cause)
+    ? { phase: "error", book: null, failure: { message, retryAfterSeconds: null, unreadable: true } }
+    : { phase: "error", book: null, failure: { message, retryAfterSeconds: null } };
+}
+
+/**
+ * Whether a failed ask was answered with a body the page could not read. Only
+ * a 2xx body counts: the client raises the same error for a non-2xx answer
+ * that lacks the contract's envelope — usually a proxy's error page — and that
+ * request never reached the service's answer, so it failed.
+ */
+export function answeredUnreadably(cause: unknown): boolean {
+  return cause instanceof MalformedResponseError && cause.status >= 200 && cause.status < 300;
 }
 
 /**
@@ -240,10 +257,10 @@ export type ReceiptRegister = ReceiptState | "pending" | "unavailable";
 export type ReceiptTone = "ok" | "warn" | "crit" | "refused" | "unavailable" | "pending";
 
 /**
- * ONE verdict, ONE tone: the headline's finding, the Verify step, the Receipt chip, the receipt strip and the proof
- * card's rule and status rows all read this map. An unqualified pass is ok; a verdict that passed while its own tallies
+ * ONE verdict, ONE tone: the headline's finding, the Verify step, the Receipt chip and the proof card's rule, pill
+ * and status rows all read this map. An unqualified pass is ok; a verdict that passed while its own tallies
  * disagree is warn; a failed receipt is crit; a receipt that checked no rows, and a manifest with no receipt, are the
- * refused register — a finding withheld, an absence the wire stated; a manifest that could not be read is unavailable,
+ * refused register — a finding withheld, an absence the wire stated; a manifest that did not arrive is unavailable,
  * never refused; a read in flight is pending.
  */
 export const RECEIPT_TONE: Readonly<Record<ReceiptRegister, ReceiptTone>> = {
@@ -313,11 +330,14 @@ const wordOf = (pending: boolean, sub: string): string | undefined => (pending ?
 
 /** Each engine's indexer cursor is its `last_block` on `/v1/meta` (the watermark vector). */
 const INDEX_SENTENCE = "Latest block indexed for each engine, ahead of every batch.";
-// Three states of one read, never folded: in flight (it has not failed), failed (it could not be read), and the absence the wire itself stated.
+// The states of one read, never folded: in flight (it has not failed), failed (the request did not come back), answered
+// with a body the page could not read, and the absence the wire itself stated.
 const COMPUTE_PENDING = "Reading the batch…";
+const COMPUTE_UNFETCHED = "The batch could not be fetched.";
 const COMPUTE_UNREAD = "The batch could not be read.";
 const COMPUTE_ABSENT = "No batch is servable; nothing is computed.";
 const VERIFY_PENDING = "Reading the receipt…";
+const VERIFY_UNFETCHED = "The receipt could not be fetched.";
 const VERIFY_UNREAD = "The receipt could not be read.";
 const VERIFY_ABSENT = "No reconcile receipt is committed; nothing is verified against the chain.";
 const VERIFY_EMPTY = "The pinned reconcile run checked no rows, so nothing is proven.";
@@ -338,6 +358,8 @@ const CENSUS_REFUSED = { withheld: "Cash accounts withheld", missing: "Cash engi
 export interface PipelineInFlight {
   readonly meta: boolean;
   readonly evidence: boolean;
+  /** The manifest's answer was a body the page could not read: its step says "could not be read", not "fetched". */
+  readonly evidenceUnreadable?: boolean;
 }
 
 const ALL_SETTLED: PipelineInFlight = { meta: false, evidence: false };
@@ -359,7 +381,7 @@ function shortReceiptSentence(receipt: ManifestReconcile): string {
 }
 
 /**
- * Where a drifted receipt's rows are recorded — the drawer's line, never a tile's or the strip's: the committed drift
+ * Where a drifted receipt's rows are recorded — the drawer's line, never a tile's or a step's: the committed drift
  * report, by its path when that path is publishable. Null when nothing drifted.
  */
 function driftReportLine(receipt: ManifestReconcile): string | null {
@@ -434,7 +456,13 @@ export function pipelineSteps(
           pending: bookPending,
           state: noFigure(bookPending, reading.phase !== "no-batch"),
           stateWord: wordOf(bookPending, reading.phase === "no-batch" ? "no servable batch" : UNAVAILABLE),
-          sentence: bookPending ? COMPUTE_PENDING : reading.phase === "no-batch" ? COMPUTE_ABSENT : COMPUTE_UNREAD,
+          sentence: bookPending
+            ? COMPUTE_PENDING
+            : reading.phase === "no-batch"
+              ? COMPUTE_ABSENT
+              : reading.failure?.unreadable === true
+                ? COMPUTE_UNREAD
+                : COMPUTE_UNFETCHED,
           line: { before: "", figure: UNAVAILABLE, after: "" },
         }
       : census.kind === "refused"
@@ -481,7 +509,13 @@ export function pipelineSteps(
           pending: evidencePending,
           state: noFigure(evidencePending, evidence === null),
           stateWord: wordOf(evidencePending, evidence === null ? UNAVAILABLE : "no committed receipt"),
-          sentence: evidencePending ? VERIFY_PENDING : evidence === null ? VERIFY_UNREAD : VERIFY_ABSENT,
+          sentence: evidencePending
+            ? VERIFY_PENDING
+            : evidence === null
+              ? inFlight.evidenceUnreadable === true
+                ? VERIFY_UNREAD
+                : VERIFY_UNFETCHED
+              : VERIFY_ABSENT,
           line: { before: "", figure: UNAVAILABLE, after: " checked rows exact" },
         }
       : receipt === "empty"
@@ -589,6 +623,27 @@ const rowTone = (register: ReceiptRegister): CardTone => {
   return tone === "ok" || tone === "warn" || tone === "crit" ? tone : "refused";
 };
 
+/**
+ * A failed receipt's status at reader altitude: what failed, counted — the receipt's own verdict and exit code are the
+ * row's title and the drawer's, never the row's words.
+ */
+function failedSummary(reconcile: ManifestReconcile): string {
+  const exact = readWirePopulation(reconcile.gated_exact, "gated_exact");
+  const rows = readWirePopulation(reconcile.gated_rows, "gated_rows");
+  const drift = readWirePopulation(reconcile.gated_drift, "gated_drift");
+  if (drift > 0) return `${groupInt(drift)} of ${groupInt(rows)} checked ${rows === 1 ? "row" : "rows"} drifted`;
+  if (exact !== rows) return `${groupInt(exact)} of ${groupInt(rows)} checked ${rows === 1 ? "row" : "rows"} matched`;
+  return "the run's verdict did not pass";
+}
+
+function rejectedStatusRow(manifest: EvidenceResponse, reconcile: ManifestReconcile, detail: string, tone: CardTone): CardRow {
+  const fault = receiptFault(manifest, reconcile);
+  const word = RECEIPT_FAULT_WORDS[fault].status;
+  return fault === "failed"
+    ? { label: "Status", value: `${word} · ${failedSummary(reconcile)}`, tone, title: detail }
+    : { label: "Status", value: `${word} · ${detail}`, tone };
+}
+
 function proofCard(manifest: EvidenceResponse): SubjectCard {
   const status = proofSubjectStatus(manifest);
   const receipt = receiptState(manifest);
@@ -613,7 +668,7 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
         ? { label: "Status", value: RECEIPT_EMPTY_STATUS, tone }
         : { label: "Status", value: RECEIPT_ACCEPTED_STATUS, tone }
       : status.kind === "rejected"
-        ? { label: "Status", value: `Rejected · ${status.detail}`, tone }
+        ? rejectedStatusRow(manifest, status.reconcile, status.detail, tone)
         : { label: "Status", value: `No committed receipt · ${pub(status.reason)}`, tone },
   ];
   if (reconcile !== null) {
@@ -683,7 +738,7 @@ function proofCard(manifest: EvidenceResponse): SubjectCard {
           ? { text: RECEIPT_EMPTY_PILL, tone: "refused" }
           : { text: `Proof exact @ ${proofPin(status.reconcile)}`, tone: "ok" }
         : status.kind === "rejected"
-          ? { text: "Receipt rejected", tone: receipt === "drift" ? "warn" : "crit" }
+          ? { text: RECEIPT_FAULT_WORDS[receiptFault(manifest, status.reconcile)].pill, tone: receipt === "drift" ? "warn" : "crit" }
           : { text: "No committed receipt", tone: "refused" },
     rule: tone === "default" || tone === "dim" ? "refused" : tone,
     explain: "Explain the proof subject",
@@ -792,7 +847,7 @@ function probeRows(manifest: EvidenceResponse): readonly ProbeRow[] {
 }
 
 // ---------------------------------------------------------------------------
-// The header's chips, the receipt line, the identity line.
+// The header's chips and the identity line.
 // ---------------------------------------------------------------------------
 
 /** The Receipt chip's tone: a verdict's, or the dashed refused chip for a withheld finding or an absent receipt. */
@@ -821,9 +876,10 @@ function chips(manifest: EvidenceResponse, receipt: ReceiptState): LabChip[] {
       ? { label: "Live batch", value: n(live.substrate.batch_id) }
       : { label: "Live batch", value: "none", tone: "refused", title: pub(live.reason) };
   const tally = reconcile === null ? "" : ` · ${n(reconcile.gated_exact)}/${n(reconcile.gated_rows)}`;
+  const word = proof.kind === "rejected" ? RECEIPT_FAULT_WORDS[receiptFault(manifest, proof.reconcile)].chip : receipt;
   const receiptChip: LabChip = {
     label: "Receipt",
-    value: receipt === "none" ? "none" : `${receipt}${tally}`,
+    value: receipt === "none" ? "none" : `${word}${tally}`,
     tone: chipTone(receipt),
     title: proof.kind === "rejected" ? proof.detail : proof.kind === "unavailable" ? pub(proof.reason) : receipt === "empty" ? RECEIPT_EMPTY_TITLE : undefined,
   };
@@ -854,34 +910,6 @@ function unavailableChips(reading: BookReading): LabChip[] {
   ];
 }
 
-/**
- * The receipt strip, one plain sentence: what the reconcile found, counted. The receipt's own verdict detail — its
- * result word and exit code — and where drifted rows are recorded are the drawer's, never the strip's.
- */
-function receiptLine(manifest: EvidenceResponse, receipt: ReceiptState): string {
-  const proof = proofSubjectStatus(manifest);
-  if (proof.kind === "unavailable") return `No reconcile receipt: ${terminated(pub(proof.reason))}`;
-  const r = proof.reconcile;
-  const exact = n(r.gated_exact);
-  const rows = n(r.gated_rows);
-  const drift = typeof r.gated_drift === "number" ? n(r.gated_drift) : UNAVAILABLE;
-  switch (receipt) {
-    case "exact":
-      return `Reconcile passed: ${exact} of ${rows} checked rows matched the chain exactly, ${drift} drifted.`;
-    case "empty":
-      return `Reconcile receipt: ${RECEIPT_CHECKED_NONE}, so nothing is proven.`;
-    case "drift":
-      // A fault beyond the checked tally (a weld short) is named; a tally short is its own fault, counted — never "named": the manifest carries no row to name.
-      return r.gated_drift === 0 && r.gated_exact === r.gated_rows && proof.kind === "rejected"
-        ? `Reconcile receipt: ${exact} of ${rows} checked rows matched, 0 drifted, but ${proof.detail}; no proof badge.`
-        : `Reconcile receipt: ${exact} of ${rows} checked rows matched, ${drift} drifted; no proof badge.`;
-    case "failed":
-      return `Reconcile failed: ${exact} of ${rows} checked rows matched, ${drift} drifted.`;
-    case "none":
-      return `No reconcile receipt: ${terminated(pub(manifest.reconcile_unavailable_reason ?? "no reason served"))}`;
-  }
-}
-
 /** The identity line — batch, key, commit, receipt — one line of the drawer's doctrine; an absent value is the dash and its reason. */
 function identityLine(manifest: EvidenceResponse): string {
   const live = liveSubjectStatus(manifest);
@@ -893,11 +921,13 @@ function identityLine(manifest: EvidenceResponse): string {
   return `Batch ${batch} · key ${key} · commit ${commit} · receipt ${receipt}.`;
 }
 
-/** Why the proof subject was rejected, in the receipt's own detail, for the drawer: what the strip and the headline leave to it. Null unless rejected. */
+/** What the receipt's fault is, in its own detail, for the drawer: what the card and the headline leave to it. Null unless rejected. */
 function receiptDetailLine(manifest: EvidenceResponse): string | null {
   const proof = proofSubjectStatus(manifest);
   if (proof.kind !== "rejected") return null;
-  return `The proof subject was rejected: ${terminated(proof.detail)}`;
+  const fault = receiptFault(manifest, proof.reconcile);
+  const lead = fault === "rejected" ? "The proof subject was rejected" : `The receipt ${fault}`;
+  return `${lead}: ${terminated(proof.detail)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -906,8 +936,26 @@ function receiptDetailLine(manifest: EvidenceResponse): string | null {
 
 export type EvidenceState =
   | { phase: "loading" }
-  | { phase: "error"; message: string; retryAfterSeconds: number | null; status?: number | null }
+  | { phase: "error"; message: string; retryAfterSeconds: number | null; status?: number | null; unreadable?: boolean }
   | { phase: "ok"; manifest: EvidenceResponse };
+
+/**
+ * The manifest's failure as the page holds it: the status whenever the
+ * service answered — the envelope's, or a proxy's page's — and unreadable only
+ * for a 2xx body the page could not read.
+ */
+export function evidenceFailed(cause: unknown): Extract<EvidenceState, { phase: "error" }> {
+  if (cause instanceof ProofFetchError) {
+    return { phase: "error", message: cause.message, retryAfterSeconds: cause.retryAfterSeconds, status: cause.status, unreadable: false };
+  }
+  return {
+    phase: "error",
+    message: cause instanceof Error ? cause.message : String(cause),
+    retryAfterSeconds: null,
+    status: cause instanceof MalformedResponseError ? cause.status : null,
+    unreadable: answeredUnreadably(cause),
+  };
+}
 
 export interface VerificationInput {
   readonly state: EvidenceState;
@@ -917,8 +965,10 @@ export interface VerificationInput {
   readonly book: BookReading;
 }
 
-/** The two subjects' place when the manifest could not be read: which absence it is, and the service's own words. */
+/** The two subjects' place when the manifest did not arrive whole: which failure it is, and the service's own words. */
 export interface VerificationStateCard {
+  /** A request that failed is unavailable; an answer the page could not read is unreadable. */
+  readonly state: "unavailable" | "unreadable";
   readonly title: string;
   readonly cause: string;
   readonly serviceSaid: { readonly label: string; readonly text: string } | null;
@@ -932,8 +982,6 @@ export interface VerificationView {
   /** Proof pin · Live batch · Receipt · Batch key. */
   readonly chips: LabChip[];
   readonly steps: readonly PipelineStep[];
-  /** The receipt strip's one sentence, or the pending words. Null when the record could not be fetched: the header says so once, and no strip says it again. */
-  readonly receiptLine: string | null;
   readonly probes: readonly ProbeRow[];
   /** The card standing where the two subjects would, when the manifest could not be read; null otherwise. */
   readonly stateCard: VerificationStateCard | null;
@@ -984,6 +1032,9 @@ function headlineTone(receipt: ReceiptState): LabHeadline["tone"] {
   return tone === "ok" || tone === "warn" || tone === "crit" ? tone : "refused";
 }
 
+/** The dek for a manifest that arrived as a body the page could not read: an answer came, and nothing of it is shown. */
+const UNREADABLE_DEK = "The proof request was answered with a body this page could not read, so there is no proof to show.";
+
 /** What a manifest read that failed says at reader altitude: only what failed — step 02 still shows the batch the book served. */
 function unavailableDek(status: number | null | undefined, retryAfterSeconds: number | null): string {
   const said =
@@ -997,7 +1048,8 @@ function unavailableDek(status: number | null | undefined, retryAfterSeconds: nu
 export function deriveVerificationView(input: VerificationInput): VerificationView {
   const { state, meta, metaInFlight, book } = input;
   const evidence = state.phase === "ok" ? state.manifest : null;
-  const steps = pipelineSteps(meta, evidence, book, { meta: metaInFlight, evidence: state.phase === "loading" });
+  const unreadable = state.phase === "error" && state.unreadable === true;
+  const steps = pipelineSteps(meta, evidence, book, { meta: metaInFlight, evidence: state.phase === "loading", evidenceUnreadable: unreadable });
   const doctrine = [VERIFICATION_INTRO, VERIFICATION_SPLIT, PROOF_CAPTION, LIVE_CAPTION];
   if (state.phase === "loading") {
     return {
@@ -1007,28 +1059,33 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
       headline: { emphasis: "Loading this deployment's verification record…", rest: "", tone: "absent", dek: VERIFICATION_LOADING_DEK },
       chips: pendingChips(),
       steps,
-      receiptLine: "Reading the reconcile receipt…",
       probes: [],
       stateCard: null,
       doctrine,
     };
   }
   if (state.phase === "error") {
-    const emphasis = "The verification record could not be fetched.";
     // The failure is said once, in the header, in reader words; the fetch's own words move under the card's
-    // disclosure, and what stands in for the unread manifest — nothing — is the drawer's.
+    // disclosure, and what stands in for the missing manifest — nothing — is the drawer's. A request that failed is
+    // never said to be unreadable, nor an unreadable answer to be unfetched.
     return {
       state: "unavailable",
       receipt: "unavailable",
       kicker: VERIFICATION_KICKER,
-      headline: { emphasis, rest: "", tone: "absent", dek: unavailableDek(state.status, state.retryAfterSeconds) },
+      headline: unreadable
+        ? { emphasis: "The verification record could not be read.", rest: "", tone: "absent", dek: UNREADABLE_DEK }
+        : { emphasis: "The verification record could not be fetched.", rest: "", tone: "absent", dek: unavailableDek(state.status, state.retryAfterSeconds) },
       chips: unavailableChips(book),
       steps,
-      receiptLine: null,
       probes: [],
       stateCard: {
-        title: "Proof record unavailable",
-        cause: "Neither subject is shown: nothing stands in for a manifest that was not read.",
+        ...(unreadable
+          ? { state: "unreadable", title: "Proof record unreadable", cause: "Both subject cards are read from this record, so neither is shown." }
+          : {
+              state: "unavailable",
+              title: "Proof record unavailable",
+              cause: "Both subject cards are read from this record, so neither is shown until the service answers.",
+            }),
         serviceSaid: state.message.trim() === "" ? null : { label: VERIFICATION_COPY.serviceSaid, text: state.message },
       },
       doctrine: [...doctrine, NO_SUBSTITUTE],
@@ -1048,7 +1105,6 @@ export function deriveVerificationView(input: VerificationInput): VerificationVi
     headline: { emphasis: arms.proof, rest: arms.scope, tone: headlineTone(receipt), dek: verificationDek(manifest) },
     chips: chips(manifest, receipt),
     steps,
-    receiptLine: receiptLine(manifest, receipt),
     probes: probeRows(manifest),
     stateCard: null,
     doctrine: [...doctrine, ...(detailLine === null ? [] : [detailLine]), ...(driftLine === null ? [] : [driftLine]), identityLine(manifest)],

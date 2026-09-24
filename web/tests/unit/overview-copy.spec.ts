@@ -38,6 +38,11 @@ test("the hero carries no figure, and every entry card's name is a link to anoth
   expect(copy.HOW_IT_WORKS.link).toEqual({ href: "/proof#architecture", label: "Architecture & verification →" });
 });
 
+test("the hero's address field says what it does in its own placeholder: the hint is not shown there, so the field keeps its words on a phone", () => {
+  expect(copy.CTA.addressPlaceholder).toBe("Inspect an address · 0x…");
+  expect(copy.CTA.addressPlaceholder.startsWith(copy.CTA.addressHint)).toBe(true);
+});
+
 const step = (over: Partial<PipelineStep> & Pick<PipelineStep, "key">): PipelineStep => ({
   label: "",
   ordinal: "",

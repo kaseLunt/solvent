@@ -16,8 +16,8 @@ import { humanAge } from "@/lib/freshness";
 import { ADDRESS_HINT, deriveInspectorView, PROJECTION_TITLE, PROJECTION_WORD } from "@/lib/inspector-view";
 import { CASH } from "@/lib/inspector-position";
 import { addressWorkspace, rowOutcome } from "@/lib/lab-address";
-import { compareHeadline } from "@/lib/lab-compare";
-import { scenarioName } from "@/lib/lab-library";
+import { compareHeadline, legacyCompareSummary } from "@/lib/lab-compare";
+import { comparedLibrary, scenarioName } from "@/lib/lab-library";
 import {
   conflictNotice,
   deepLinkDecision,
@@ -29,6 +29,7 @@ import {
   addressKicker,
   ASSUMPTIONS_BUTTON,
   COMPARE_KICKER,
+  compareAgeReceipt,
   compareChips,
   compareControl,
   deriveLabView,
@@ -70,7 +71,7 @@ function kickerOf(k: LabKicker): ReactNode {
     k.scope
   ) : (
     <>
-      <span className={kit.kickCase}>{k.name}</span> · {k.scope}
+      <span className={kit.kickCase} title={k.title}>{k.name}</span> · {k.scope}
     </>
   );
 }
@@ -263,7 +264,7 @@ export function LabSurface() {
   const chips: LabChip[] =
     computed === null
       ? book.chips
-      : [...book.chips.slice(0, 2), computed, ...book.chips.slice(2)];
+      : [...book.chips.slice(0, 1), computed, ...book.chips.slice(1)];
   const running = book.state === "running";
   const name = definition === null ? null : scenarioName(definition);
   const run = () => {
@@ -287,6 +288,9 @@ export function LabSurface() {
   // The comparison leads the page only once a set has settled: while one runs, the single run's answer stays above its card.
   const settledSet = comparedViews(view.compare);
   const compared = focus === "compare" ? settledSet : null;
+  // Anchored on the settled set's own settle clocks whatever the focus, so neither returning to the comparison nor a
+  // failed Compare that shows it again restarts its age.
+  const compareAge = useAnchoredAgeSeconds(compareAgeReceipt(settledSet));
   const compareAnswer = compared === null ? null : compareHeadline(compared.cash);
   const busy =
     mode === "book"
@@ -303,7 +307,7 @@ export function LabSurface() {
           // scenario the address was not stressed under falls back to the first row, and the highlight with it.
           selected: r.id === (space.selected?.id ?? null),
         }))
-      : view.library;
+      : comparedLibrary(view.library, compared?.cash ?? null);
 
   return (
     <div
@@ -368,6 +372,8 @@ export function LabSurface() {
                   label: runLabel(name),
                   disabled: definition === null || running,
                   onRun: run,
+                  // Served and not run, the header's Run is the view's one primary; the comparison's header has no Run.
+                  tone: compared === null && book.state === "not-run" && definition !== null ? "ghost" : "primary",
                 }
               : undefined
           }
@@ -415,11 +421,11 @@ export function LabSurface() {
               rest={compareAnswer.rest}
               tone={compareAnswer.tone}
               dek={compareAnswer.dek}
-              chips={compareChips(compared.cash)}
+              chips={compareChips(compared.cash, compareAge)}
             />
             <CompareCard state={view.compare} />
             {/* The legacy market's shares: its own fold, after all Cash content, on its own axis. */}
-            {compared.legacy.rows.length > 0 && <LegacyCompare rows={plotRowsOf(compared.legacy)} />}
+            {compared.legacy.rows.length > 0 && <LegacyCompare rows={plotRowsOf(compared.legacy)} summary={legacyCompareSummary(compared.legacy)} />}
           </>
         ) : (
           <>
@@ -467,7 +473,9 @@ export function LabSurface() {
             )}
             {book.legacy !== null && <LegacyResult reading={book.legacy} book={book} />}
             {/* The set's legacy shares never vanish when the focus returns to the run: they follow all Cash content, after the run's own legacy fold. */}
-            {settledSet !== null && settledSet.legacy.rows.length > 0 && <LegacyCompare rows={plotRowsOf(settledSet.legacy)} />}
+            {settledSet !== null && settledSet.legacy.rows.length > 0 && (
+              <LegacyCompare rows={plotRowsOf(settledSet.legacy)} summary={legacyCompareSummary(settledSet.legacy)} />
+            )}
             <AssumptionsDrawer
               open={drawerOpen}
               onClose={() => setDrawerOpen(false)}

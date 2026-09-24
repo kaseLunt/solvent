@@ -5,7 +5,7 @@ import { LIBRARY, libraryCompareLabel } from "@/lib/chrome";
 import styles from "./kit.module.css";
 
 export type LibraryOutcomeKey =
-  "not-run" | "running" | "result" | "withheld" | "not-covered" | "failed" | "definition-changed";
+  "not-run" | "running" | "result" | "compared" | "withheld" | "not-covered" | "failed" | "definition-changed";
 /** A row of the one tone grammar (lib/kit.ts TONE_VOCABULARIES.libraryOutcome); `dim` is an outcome of record, ink-2. */
 export type LibraryOutcomeTone = "crit" | "warn" | "ok" | "refused" | "dim";
 
@@ -33,8 +33,11 @@ export interface ScenarioLibraryProps {
   onCheck: (id: string, on: boolean) => void;
   /** Rendered under the header in one-address mode: the AddressField. */
   addressSlot?: ReactNode;
-  /** Absent when the mode has its own action (one-address mode runs on Inspect). */
-  run?: { label: string; disabled: boolean; onRun: () => void };
+  /**
+   * Absent when the mode has its own action (one-address mode runs on Inspect). `tone` "ghost" where another Run on the
+   * view is the one primary.
+   */
+  run?: { label: string; disabled: boolean; onRun: () => void; tone?: "primary" | "ghost" };
   /**
    * Null hides the button (address mode, or Compare not built yet). `hint` is why a disabled Compare cannot act: shown
    * beside it and read as its description, since a title never reaches keyboard or touch.
@@ -146,7 +149,7 @@ export function ScenarioLibrary({
             {run !== undefined && (
               <button
                 type="button"
-                className={`${styles.btn} ${styles.btnPrimary}`}
+                className={`${styles.btn} ${run.tone === "ghost" ? styles.btnGhost : styles.btnPrimary}`}
                 disabled={run.disabled}
                 onClick={run.onRun}
                 data-testid="lab-run"

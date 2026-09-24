@@ -26,7 +26,7 @@ test("the committed book fixture previews one line per shocked grid point, per e
   if (aave.kind !== "view") return;
   expect(aave.scenarioId).toBe("eth_minus_30");
   expect(aave.lines.map((l) => l.shock)).toEqual(["ETH −10%", "ETH −20%", "ETH −30%", "ETH −40%", "ETH −50%"]);
-  expect(aave.lines[0]?.text).toBe("ETH −10%: +$6,000 liquidatable · 1 account · bad debt unchanged at $0");
+  expect(aave.lines[0]?.text).toBe("ETH −10%: +$6,000 liquidatable · 1 account · bad debt unchanged at $0");
   expect(aave.lines[0]?.deltaDebt).toBe(600_000_000_000n);
   expect(aave.lines[0]?.deltaAccounts).toBe(1);
   expect(aave.unmeasured).toBeNull();
@@ -44,7 +44,7 @@ test("bad debt is framed as the Scenarios page frames it — the rise over the g
   // The unshocked point carries $239.60 of standing bad debt; ETH −30% carries $1,427.72.
   expect(dm.lines.map((l) => l.text)).toEqual([
     "ETH −10%: no new liquidatable debt · bad debt +$396.03, to $635.64",
-    "ETH −20%: no new liquidatable debt · bad debt +$792.07, to $1,031",
+    "ETH −20%: no new liquidatable debt · bad debt +$792, to $1,031",
     "ETH −30%: no new liquidatable debt · bad debt +$1,188, to $1,427",
     "ETH −40%: no new liquidatable debt · bad debt +$1,584, to $1,823",
     "ETH −50%: no new liquidatable debt · bad debt +$1,980, to $2,219",
@@ -53,7 +53,7 @@ test("bad debt is framed as the Scenarios page frames it — the rise over the g
   // No rise is said as such, at the figure it holds; a fall carries U+2212, never a hyphen and never a "+".
   const aave = stressPreview(waterfall, "aave_v3_etherfi");
   if (aave.kind !== "view") throw new Error("expected a view");
-  expect(aave.lines[0]?.text).toBe("ETH −10%: +$6,000 liquidatable · 1 account · bad debt unchanged at $0");
+  expect(aave.lines[0]?.text).toBe("ETH −10%: +$6,000 liquidatable · 1 account · bad debt unchanged at $0");
   const falling = structuredClone(waterfall);
   at(falling, 1, "debt_manager").cumulative_bad_debt_usd = "100000000";
   const fell = stressPreview(falling, "debt_manager");
@@ -61,6 +61,29 @@ test("bad debt is framed as the Scenarios page frames it — the rise over the g
   expect(fell.lines[0]?.text).toBe("ETH −10%: no new liquidatable debt · bad debt −$139.60, to $100");
   // The line never points: an arrow on this product means a link to another page, and the line's own words say what moved.
   for (const line of [...dm.lines, ...aave.lines]) expect(line.text).not.toContain("→");
+});
+
+test("a change and the total it lands at print at one precision, and never alike when they differ; a count never parts from its noun", () => {
+  // The unshocked point carries $240.20 of standing bad debt on Cash; from ETH −30% on, 118 more accounts are liquidatable.
+  const book = structuredClone(waterfall);
+  const base = at(book, 0, "debt_manager");
+  base.cumulative_bad_debt_usd = "240200000";
+  at(book, 1, "debt_manager").cumulative_bad_debt_usd = "1204590000";
+  at(book, 2, "debt_manager").cumulative_bad_debt_usd = "118900000000";
+  for (const i of [3, 4, 5]) {
+    const point = at(book, i, "debt_manager");
+    point.cumulative_bad_debt_usd = "118900000000";
+    point.cumulative_debt_eligible_usd = (BigInt(base.cumulative_debt_eligible_usd) + 118_000_000_000n).toString();
+    point.cumulative_eligible_accounts = base.cumulative_eligible_accounts + 118;
+  }
+  const out = stressPreview(book, "debt_manager");
+  if (out.kind !== "view") throw new Error(`expected a view, got ${JSON.stringify(out)}`);
+  // Not "+$964.39, to $1,204": the total's tier prints both.
+  expect(out.lines[0]?.text).toBe("ETH −10%: no new liquidatable debt · bad debt +$964, to $1,204");
+  // Not "+$118K, to $118K" for two different values: both take a digit.
+  expect(out.lines[1]?.text).toBe("ETH −20%: no new liquidatable debt · bad debt +$118.6K, to $118.9K");
+  // "118 accounts" is one unit: the no-break space keeps the count on its noun's line.
+  expect(out.lines[2]?.text).toBe("ETH −30%: +$118K liquidatable · 118 accounts · bad debt +$118.6K, to $118.9K");
 });
 
 test("a shock is named by the one name builder: the grid's axis word and the factor's own exact percent; an axis this product does not name prints the wire's id", () => {

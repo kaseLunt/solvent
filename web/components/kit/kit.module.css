@@ -187,15 +187,17 @@
 .tgSet button:disabled { color: var(--ink-3); cursor: not-allowed; }
 
 /* ---- bars ---- */
-.bars { display: grid; gap: 10px; align-items: end; height: 160px; margin-top: 22px; }
-.bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
+/* A column is as tall as its bar, count and label: the grid's end alignment gives every column one baseline, and a
+   label never wraps, so a two-line label cannot lift its bar off that baseline. */
+.bars { display: grid; gap: 10px; align-items: end; height: auto; min-height: 160px; margin-top: 22px; }
+.bar { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: auto; min-width: 0; }
 .bar i { display: block; width: 100%; height: var(--bar-h, 0); background: var(--chart-fill); border-radius: 4px 4px 0 0; }
 .barCrit i { background: var(--crit); }
 .barWarn i { background: var(--warn); }
 .barDim i { background: var(--line); }
 .barCnt { font-size: var(--type-small); color: var(--ink); margin-bottom: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .barCnt small { color: var(--ink-3); font-size: var(--type-floor); }
-.barLab { font-size: var(--type-floor); color: var(--ink-3); margin-top: 8px; text-align: center; }
+.barLab { font-size: var(--type-floor); color: var(--ink-3); margin-top: 8px; text-align: center; white-space: nowrap; }
 
 /* ---- table ---- */
 .r { text-align: right; }
@@ -210,7 +212,9 @@
    keeps its full width and grows past it only to its min-content (its nowrap cells), so a cell allowed to wrap still
    wraps. While the region overflows, the first column holds still and the far edge fades where columns remain. */
 .tblScroll { overflow-x: auto; max-width: 100%; }
-.tblScroll[data-overflow="true"] .tbl th:first-child, .tblScroll[data-overflow="true"] .tbl td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+/* The held column paints the ground its table sits on: the card's panel by default; a table left on the page ground
+   sets --tbl-ground: var(--bg) on its wrapper. */
+.tblScroll[data-overflow="true"] .tbl th:first-child, .tblScroll[data-overflow="true"] .tbl td:first-child { position: sticky; left: 0; z-index: 1; background: var(--tbl-ground, var(--panel)); }
 .tblScroll[data-fade="end"], .tblScroll[data-fade="both"] { mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
 /* The ring sits outside the box, where the fade's mask would clip it away: a focused region drops the fade. */
 .tblScroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; mask-image: none; }
@@ -248,6 +252,8 @@
 .searchIn:focus-within { border-color: var(--accent); }
 .searchInvalid, .searchInvalid:focus-within { border-color: var(--crit); }
 .searchHint { margin-left: auto; color: var(--ink-3); font-family: var(--sans); font-size: var(--type-small); white-space: nowrap; }
+/* A hint kept as the input's description, read and not shown — the phone rule below, at every width. */
+.searchHintHidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .searchRefused { flex-basis: 100%; color: var(--crit-text); font-size: var(--type-small); margin: 0; }
 /* .k-check — the Trust checklist (mockup pages-console.html:115-119) */
 .check { list-style: none; margin: 12px 0 0; padding: 0; font-size: var(--type-body); }

@@ -129,8 +129,8 @@ test("the proof drawer speaks the page's word — checked rows — and keeps the
   expect(said).toContain("Checked rows | 87/87 exact · 0 drifted");
   expect(said).toContain("Cash · account comparisons | 29/29 exact");
   expect(said).toContain("Aave v3 market (legacy) · account comparisons | 14/14 exact");
-  expect(said).toContain("Account comparisons | count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
-  expect(said).toContain("Feeds registry | identical to the service's registry fingerprint, by construction");
+  expect(said).toContain("Account comparisons | Counts every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); not a breakdown of the checked rows.");
+  expect(said).toContain("Feeds registry | Identical to the service's registry fingerprint, by construction");
   // The receipt's own term survives in one row, its gloss beside it; the verbatim comparator keeps the wire's field names.
   const gated = rows.filter((row) => /gated/i.test(`${row.label} ${row.value}`));
   expect(gated).toEqual([{ label: "Gated", value: "checked rows — the rows that must match for the run to pass", tone: "dim" }]);
@@ -340,21 +340,21 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
 
   test("a rejected receipt SURFACES in the head — never a silent pass, never worded as a match, never as '0 drift'", () => {
     const line = proofTakeaway(EVIDENCE_PROOF_FAILED);
-    expect(line).toBe("The last reconcile run did not match the chain exactly, 84 of 87 checked rows matched; 3 rows drifted.");
+    expect(line).toBe("The last reconcile run did not match the chain exactly: 84 of 87 checked rows matched; 3 drifted.");
     expect(line).not.toContain("All 87");
-    expect(proofTakeaway(ONE_DRIFT)).toBe("The last reconcile run did not match the chain exactly, 86 of 87 checked rows matched; 1 row drifted.");
+    expect(proofTakeaway(ONE_DRIFT)).toBe("The last reconcile run did not match the chain exactly: 86 of 87 checked rows matched; 1 drifted.");
     // A row short with no drift counted: the tally is the fault, and a zero drift is not printed beside it.
-    expect(proofTakeaway(ROW_SHORT_NO_DRIFT)).toBe("The last reconcile run did not match the chain exactly, 86 of 87 checked rows matched.");
+    expect(proofTakeaway(ROW_SHORT_NO_DRIFT)).toBe("The last reconcile run did not match the chain exactly: 86 of 87 checked rows matched.");
     for (const manifest of EVERY_ARM) expect(proofTakeaway(manifest)).not.toMatch(/\b0 (rows? )?drift/);
   });
 
   test("a weld short with the gated tally clean names the engine in the reader's word, and its own account comparisons — the weld row's noun", () => {
-    expect(proofTakeaway(WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly, Aave v3 market (legacy) matched 13 of 14 account comparisons.");
-    expect(proofTakeaway(CASH_WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly, Cash matched 28 of 29 account comparisons.");
+    expect(proofTakeaway(WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly: Aave v3 market (legacy) matched 13 of 14 account comparisons.");
+    expect(proofTakeaway(CASH_WELD_SHORT)).toBe("The last reconcile run did not match the chain exactly: Cash matched 28 of 29 account comparisons.");
     const one = receiptWith((r) => {
       r.welds = r.welds.map((w) => (w.engine === "debt_manager" ? { ...w, rows_compared: 1, rows_exact: 0 } : w));
     });
-    expect(proofTakeaway(one)).toBe("The last reconcile run did not match the chain exactly, Cash matched 0 of 1 account comparison.");
+    expect(proofTakeaway(one)).toBe("The last reconcile run did not match the chain exactly: Cash matched 0 of 1 account comparison.");
   });
 
   test("a receipt whose tallies are clean but whose verdict is not a clean pass says so — it is never worded by the tallies it kept clean", () => {
@@ -417,7 +417,7 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
     expect(line).not.toContain("Batch ");
     const failedNoBatch: EvidenceManifest = { ...structuredClone(EVIDENCE_PROOF_FAILED), substrate: null, substrate_unavailable_reason: "no complete risk batch is available", live_subject: { status: "no_batch", reason: "no complete risk batch is available" } };
     expect(proofTakeaway(failedNoBatch)).toBe(
-      "The last reconcile run did not match the chain exactly, 84 of 87 checked rows matched; 3 rows drifted. No batch can be served right now either.",
+      "The last reconcile run did not match the chain exactly: 84 of 87 checked rows matched; 3 drifted. No batch can be served right now either.",
     );
     const noneNoBatch: EvidenceManifest = { ...structuredClone(EVIDENCE_NO_RECEIPT), substrate: null, substrate_unavailable_reason: "no complete risk batch is available", live_subject: { status: "no_batch", reason: "no complete risk batch is available" } };
     expect(proofTakeaway(noneNoBatch)).toBe("Nothing is proven for this deployment: no reconcile receipt is committed. No batch can be served right now either.");
@@ -430,6 +430,6 @@ test.describe("proofTakeaway — the head sentence, every arm", () => {
     const claimsServing: EvidenceManifest = { ...structuredClone(EVIDENCE_NO_BATCH), live_subject: { status: "serving", reason: "" } };
     expect(proofTakeawayArms(claimsServing).scope).toBe("in the pinned reconcile run — but the manifest contradicts itself about the live batch, so none is claimed.");
     const failedContradicted: EvidenceManifest = { ...structuredClone(EVIDENCE_PROOF_FAILED), live_subject: LIVE_CONTRADICTED.live_subject };
-    expect(proofTakeawayArms(failedContradicted).scope).toBe("84 of 87 checked rows matched; 3 rows drifted. The manifest also contradicts itself about the live batch, so none is claimed.");
+    expect(proofTakeawayArms(failedContradicted).scope).toBe("84 of 87 checked rows matched; 3 drifted. The manifest also contradicts itself about the live batch, so none is claimed.");
   });
 });

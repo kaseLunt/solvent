@@ -1,7 +1,19 @@
 // The one-address workspace. It is the Inspector's reading — its stress rows,
 // its decimals, its Cash position as today — arranged under the selected
 // scenario. No second stress reader exists; the Inspector's laws hold here.
-import { cannotSayTitle, computableSide, horizonLabel, rowVerdict, sideRoomWords, stressVerdictWords, type ScaleAbsence, type StressRow, type StressSide, type StressVerdictWords } from "./address-stress";
+import {
+  cannotSayTitle,
+  computableSide,
+  horizonWords,
+  projectionInterestClauses,
+  rowVerdict,
+  sideRoomWords,
+  stressVerdictWords,
+  type ScaleAbsence,
+  type StressRow,
+  type StressSide,
+  type StressVerdictWords,
+} from "./address-stress";
 import { truncateAddress } from "./format";
 import { headroomBand } from "./headroom";
 import { humanUsdFull } from "./human-price";
@@ -151,10 +163,7 @@ function rowHeadline(row: StressRow, decimals: number): LabHeadline {
   const cannot = `Cannot say whether this account becomes liquidatable under ${name}.`;
   // The comparison dek sets the two sides beside each other; the projection dek lists each horizon's interest.
   const compared = `Room today ${today}; ${projected ? "under the projection" : "after the shock"}, ${sideRoomWords(row.after, decimals)}.`;
-  const interest = (row.projection ?? []).map(
-    (h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null || h.extraInterest < 0n ? "not computed" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`,
-  );
-  const horizonsDek = `Room today ${today}; ${interest.join("; ")}.`;
+  const horizonsDek = `Room today ${today}; ${projectionInterestClauses(row.projection ?? [], decimals).join("; ")}.`;
   switch (verdict.kind) {
     case "cannot-say":
       switch (verdict.cause) {
@@ -169,11 +178,11 @@ function rowHeadline(row: StressRow, decimals: number): LabHeadline {
       }
       break;
     case "liquidatable":
-      if (verdict.within !== null) return { emphasis: `Becomes liquidatable within ${horizonLabel(verdict.within.seconds)}`, rest: `under ${name}.`, tone: "warn", dek: horizonsDek };
+      if (verdict.within !== null) return { emphasis: `Becomes liquidatable within ${horizonWords(verdict.within.seconds)}`, rest: `under ${name}.`, tone: "warn", dek: horizonsDek };
       if (verdict.already) return { emphasis: "Liquidatable today,", rest: `and stays so under ${name}.`, tone: "crit", dek: compared };
       return { emphasis: `Becomes liquidatable under ${name}:`, rest: `${sideRoomWords(row.after, decimals)}.`, tone: "crit", dek: `Room today ${today}.` };
     case "inside":
-      if (verdict.through !== null) return { emphasis: `Stays inside its cap through ${horizonLabel(verdict.through.seconds)}`, rest: `under ${name}.`, tone: "ok", dek: horizonsDek };
+      if (verdict.through !== null) return { emphasis: `Stays inside its cap through ${horizonWords(verdict.through.seconds)}`, rest: `under ${name}.`, tone: "ok", dek: horizonsDek };
       return { emphasis: "Stays inside its cap", rest: `under ${name}.`, tone: "ok", dek: compared };
   }
 }
@@ -349,9 +358,9 @@ export function rowOutcome(row: StressRow | undefined): LibraryOutcome {
     case "cannot-say":
       return { key: "withheld", text: "Cannot say", tone: "refused" };
     case "liquidatable":
-      if (verdict.within !== null) return { key: "result", text: `Becomes liquidatable within ${horizonLabel(verdict.within.seconds)}`, tone: "warn" };
+      if (verdict.within !== null) return { key: "result", text: `Becomes liquidatable within ${horizonWords(verdict.within.seconds)}`, tone: "warn" };
       return { key: "result", text: verdict.already ? "Liquidatable today and after" : "Becomes liquidatable", tone: "crit" };
     case "inside":
-      return { key: "result", text: verdict.through === null ? "Stays inside its cap" : `Stays inside its cap through ${horizonLabel(verdict.through.seconds)}`, tone: "ok" };
+      return { key: "result", text: verdict.through === null ? "Stays inside its cap" : `Stays inside its cap through ${horizonWords(verdict.through.seconds)}`, tone: "ok" };
   }
 }

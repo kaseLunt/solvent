@@ -51,6 +51,15 @@ export interface Streak {
 /** The near-cap line, in tenths of a percent of the cap. */
 export const NEAR_LINE_TENTHS = BigInt(WARN_HEADROOM_PCT) * 10n;
 
+/**
+ * The drawn y-domain of a room chart. 0% room is the cap. The domain always reaches it and never clips a negative
+ * (over-cap) room; its top clears the near-cap line.
+ */
+export function roomDomain(values: readonly (number | null)[]): { min: number; max: number } {
+  const plotted = values.filter((v): v is number => v !== null && Number.isFinite(v));
+  return { min: Math.min(0, ...plotted), max: Math.max(Number(NEAR_LINE_TENTHS) / 10 + 2, ...plotted) };
+}
+
 const gap = (batchId: number, computedAt: string | null, kind: RoomPointKind, title: string, display: string): RoomPoint => ({
   batchId,
   computedAt,

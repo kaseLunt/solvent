@@ -16,11 +16,25 @@ export interface AddressFieldProps {
   /** A ghost action beside Inspect: a link to another page, so its label ends in "→". */
   secondary?: { href: string; label: string };
   hint?: string;
+  /** "ghost" where another action on the view is the one primary; the refusal and the navigation are the same. */
+  inspectTone?: "primary" | "ghost";
+  placeholder?: string;
+  /** False keeps the hint as the input's description, read and not shown, at every width. */
+  hintVisible?: boolean;
   testId: string;
 }
 
 /** Strict address entry (0x + 40 hex, verbatim). An invalid input is refused inline and never navigates. */
-export function AddressField({ initial = "", onInspect, secondary, hint = ADDRESS_FIELD.hint, testId }: AddressFieldProps) {
+export function AddressField({
+  initial = "",
+  onInspect,
+  secondary,
+  hint = ADDRESS_FIELD.hint,
+  inspectTone = "primary",
+  placeholder = ADDRESS_FIELD.placeholder,
+  hintVisible = true,
+  testId,
+}: AddressFieldProps) {
   const [value, setValue] = useState(initial);
   const [refused, setRefused] = useState(false);
   const hintId = useId();
@@ -51,7 +65,7 @@ export function AddressField({ initial = "", onInspect, secondary, hint = ADDRES
             setValue(event.target.value);
             setRefused(false);
           }}
-          placeholder={ADDRESS_FIELD.placeholder}
+          placeholder={placeholder}
           aria-label={ADDRESS_FIELD.inputLabel}
           aria-invalid={refused ? "true" : undefined}
           aria-describedby={refused ? `${hintId} ${refusedId}` : hintId}
@@ -59,11 +73,11 @@ export function AddressField({ initial = "", onInspect, secondary, hint = ADDRES
           autoComplete="off"
           data-testid={`${testId}-input`}
         />
-        <small id={hintId} className={styles.searchHint}>
+        <small id={hintId} className={hintVisible ? styles.searchHint : `${styles.searchHint} ${styles.searchHintHidden}`}>
           {hint}
         </small>
       </label>
-      <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`} data-testid={`${testId}-inspect`}>
+      <button type="submit" className={`${styles.btn} ${inspectTone === "ghost" ? styles.btnGhost : styles.btnPrimary}`} data-testid={`${testId}-inspect`}>
         {ADDRESS_FIELD.inspect}
       </button>
       {secondary !== undefined && (

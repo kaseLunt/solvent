@@ -160,15 +160,16 @@ test("cold load: the demo page — 50 rows in wire order, the headline IS feedTa
   await expect(surface).toHaveAttribute("data-mode", "cross-engine");
 
   const sentence = takeawayText(DEMO_FEED_PAGE_1.events, "cross-engine", true, asServed(DEMO_FEED_PAGE_1.served_at));
-  expect(sentence).toBe(`3 liquidations among the 50 chain actions loaded, the newest at ${nb("Aug 8, 20:21 UTC")}; more exist beyond these.`);
+  // The finding, not pagination: the newest instant and "more available" are the chips' below it.
+  expect(sentence).toBe("3 liquidations and 1 bad-debt realization among the 50 chain actions loaded.");
   await expect(headline(page)).toHaveText(sentence);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(sentence);
   // The finding's core is the emphasis; a record is ink — the neutral tone, never the health green.
-  await expect(headline(page).locator("b")).toHaveText("3 liquidations among the 50 chain actions loaded,");
+  await expect(headline(page).locator("b")).toHaveText("3 liquidations and 1 bad-debt realization among the 50 chain actions loaded.");
   await expect(page.getByTestId("activity-verdict")).toHaveAttribute("data-variant", "neutral");
   await expect(page.getByTestId("activity-verdict")).toContainText("Activity · All engines");
   await expect(page.getByTestId("activity-verdict-dek")).toHaveText(
-    "1 of them records bad debt being realized. 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
+    "21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
   );
 
   // The chips never restate a control: the scope is the kicker's, the view the toggle's; the order key always stays.
@@ -332,9 +333,7 @@ test("types print in sentence case: the type buttons and the Type cells say them
     false,
     asServed(served, { types: ["deficit_created", "collateral_enabled"] }),
   );
-  expect(two).toBe(
-    `4 chain actions loaded, filtered to bad debt realized and collateral enabled; the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`,
-  );
+  expect(two).toBe("4 chain actions loaded, filtered to bad debt realized and collateral enabled.");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(two);
   await expect(page.getByTestId("activity-verdict")).not.toContainText(/collateral_|deficit_/);
 });
@@ -556,9 +555,7 @@ test("since-block: a stated impossibility with no single engine — short form, 
   await expect(page.getByTestId("activity-end")).toHaveText(END_OF_FEED);
   await expect(page.getByTestId("activity-tail")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(2);
-  await expect(headline(page)).toHaveText(
-    "1 liquidation among the 2 chain actions loaded, the newest at block 25,635,601; that is every action matching this filter.",
-  );
+  await expect(headline(page)).toHaveText("1 liquidation among the 2 chain actions loaded.");
   await expect(page.getByTestId("activity-verdict-dek")).toHaveText("Listed newest first, by block number on the legacy Aave v3 market's chain.");
   await expect(rows(page).nth(1).locator("td").first()).toHaveText("block 25,635,580");
   await expect(rows(page).nth(1)).not.toHaveClass(/dim/);
@@ -654,7 +651,7 @@ test("a refusal with NOTHING loaded: the service's words are disclosed once, no 
   for (const tile of ["activity-kpi-liquidations", "activity-kpi-deficits"]) {
     await expect(page.getByTestId(tile)).toHaveAttribute("data-state", "refused");
     await expect(page.getByTestId(tile)).toContainText("Refused");
-    await expect(page.getByTestId(tile)).toContainText("This page was refused");
+    await expect(page.getByTestId(tile)).toContainText("Nothing counted");
     await expect(page.getByTestId(tile)).not.toContainText("0");
     await expect(page.getByTestId(tile)).not.toContainText("—");
   }
@@ -671,7 +668,7 @@ test("a refusal with NOTHING loaded: the service's words are disclosed once, no 
   for (const params of asked) expect(params.get("cursor")).toBeNull();
 });
 
-test("load more appends the cursor page: the loaded chip counts, the tail grows, the end is stated, the headline says these are every action matching the filter", async ({ page }) => {
+test("load more appends the cursor page: the loaded chip counts and states the end, the tail grows, the headline counts the whole window", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
@@ -685,9 +682,8 @@ test("load more appends the cursor page: the loaded chip counts, the tail grows,
   await expect(page.getByTestId("activity-end")).toHaveText("End of the list.");
   await expect(page.locator('[data-testid^="activity-row-"][class*="dim"]')).toHaveCount(4);
   await expect(page.getByTestId("activity-drift")).toHaveCount(0);
-  // The reference year is the newest envelope's own served_at — the continuation page's.
   const all = takeawayText([...DEMO_FEED_PAGE_1.events, ...FEED_CROSS_PAGE_2.events], "cross-engine", false, asServed(FEED_CROSS_PAGE_2.served_at));
-  expect(all).toBe(`3 liquidations among the 52 chain actions loaded, the newest at ${nb("Aug 8, 20:21 UTC")}; that is every action matching this filter.`);
+  expect(all).toBe("3 liquidations and 1 bad-debt realization among the 52 chain actions loaded.");
   await expect(headline(page)).toHaveText(all);
   // The stitched tail (two fixture pages) does not show the service's own tail order, so that order is left unsaid.
   await expect(page.getByTestId("activity-verdict-dek")).toContainText("4 have no block time yet and are listed last.");
@@ -852,7 +848,7 @@ test("ordering drift: a timed row inside the untimed tail — the alert stands o
   await expect(alert).toContainText("The service sent a timed row inside the untimed tail");
   await expect(alert).toContainText("treat this walk as suspect");
   await expect(headline(page)).toHaveText(
-    "2 liquidations among the 3 chain actions loaded, no newest is claimed: the service broke its own ordering (see the alert below); that is every action matching this filter.",
+    "2 liquidations among the 3 chain actions loaded, no newest is claimed: the service broke its own ordering (see the alert below).",
   );
   await expect(headline(page)).not.toContainText("the newest at");
   // No newest anywhere: no chip; and the list's head claims no order the service did not keep.
@@ -878,9 +874,12 @@ test("the live strip: no base frame → said, never pretended, on ONE plain line
   // No public string names the roadmap, on the strip or anywhere on the page.
   await expect(page.locator("main")).not.toContainText("P4");
   await expect(page.locator("main")).not.toContainText(/outbox/i);
-  // One plain line at the desk's width: the strip is a single row tall, and its prose is the page's sans — the dek's family, not mono.
+  // One plain line at the desk's width: the strip's sentence sits on a single line (the strip itself stands as tall as the
+  // tiles it shares a row with), and its prose is the page's sans — the dek's family, not mono.
   await page.setViewportSize({ width: 1440, height: 900 });
-  expect((await strip.boundingBox())?.height ?? Number.NaN).toBeLessThan(56);
+  const sentence = page.getByTestId("activity-live-none");
+  const lineHeight = await sentence.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+  expect((await sentence.boundingBox())?.height ?? Number.NaN).toBeLessThan(lineHeight * 1.5);
   const family = (testId: string) => page.getByTestId(testId).evaluate((el) => getComputedStyle(el).fontFamily);
   expect(await family("activity-live-none")).toBe(await family("activity-verdict-dek"));
 
@@ -938,7 +937,7 @@ test("before the first page answers NOTHING is counted: the headline names the l
   release();
   await expect(rows(page)).toHaveCount(50);
   await expect(page.getByTestId("activity-surface")).toHaveAttribute("data-state", "ok");
-  await expect(headline(page)).toContainText("3 liquidations among the 50 chain actions loaded,");
+  await expect(headline(page)).toContainText("3 liquidations and 1 bad-debt realization among the 50 chain actions loaded.");
 });
 
 test("the doctrine lives in the drawer, verbatim — sentences only: the intro, the forensics note, the tail note, the order's full sentence, the since-block law and the live strip's law, then the service's own liquidation notes; the list's name is the list head's, not a paragraph; the intro's opening is not page copy; Escape closes it and the button regains focus", async ({ page }) => {
@@ -978,14 +977,23 @@ test("the doctrine lives in the drawer, verbatim — sentences only: the intro, 
   await expect(page.getByTestId("activity-drawer")).toBeFocused();
 });
 
-test("answer before evidence: header above tiles above the live strip above the list's head above the controls (engine and since-block, then view and type) above the table above the foot", async ({ page }) => {
+test("answer before evidence: header above tiles, the live strip completing the tiles' row, then the list's head above the controls (engine and since-block, then view and type) above the table above the foot", async ({ page }) => {
   await muteStream(page);
   await mockEvents(page, demoWalk);
   await page.goto("/feed");
   await expect(rows(page)).toHaveCount(50);
-  const y = async (id: string) => (await page.getByTestId(id).boundingBox())?.y ?? Number.NaN;
+  const box = async (id: string) => {
+    const b = await page.getByTestId(id).boundingBox();
+    if (b === null) throw new Error(`${id} has no box`);
+    return b;
+  };
+  const y = async (id: string) => (await box(id)).y;
   expect(await y("activity-verdict")).toBeLessThan(await y("activity-kpi-liquidations"));
-  expect(await y("activity-kpi-liquidations")).toBeLessThan(await y("activity-live"));
+  // No half-empty row: the strip takes the columns the two tiles leave, top and bottom with them.
+  const [liq, def, live] = [await box("activity-kpi-liquidations"), await box("activity-kpi-deficits"), await box("activity-live")];
+  expect(live.y).toBeCloseTo(liq.y, 0);
+  expect(live.x).toBeGreaterThan(def.x + def.width);
+  expect(live.y + live.height).toBeCloseTo(liq.y + liq.height, 0);
   expect(await y("activity-live")).toBeLessThan(await y("activity-order"));
   expect(await y("activity-order")).toBeLessThan(await y("activity-engine-all"));
   // Two control rows — the engine with its since-block bound, then the view and the type — then the tail's one-line
@@ -995,4 +1003,21 @@ test("answer before evidence: header above tiles above the live strip above the 
   expect(await y("activity-view-all")).toBeLessThan(await y("activity-tail"));
   expect(await y("activity-tail")).toBeLessThan(await y("activity-table"));
   expect(await y("activity-table")).toBeLessThan(await y("activity-foot"));
+});
+
+test("on a phone the live strip sits below the two tiles, across the row's full width", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await muteStream(page);
+  await mockEvents(page, demoWalk);
+  await page.goto("/feed");
+  await expect(rows(page)).toHaveCount(50);
+  const box = async (id: string) => {
+    const b = await page.getByTestId(id).boundingBox();
+    if (b === null) throw new Error(`${id} has no box`);
+    return b;
+  };
+  const [liq, def, live] = [await box("activity-kpi-liquidations"), await box("activity-kpi-deficits"), await box("activity-live")];
+  expect(live.y).toBeGreaterThan(liq.y + liq.height);
+  expect(live.x).toBeCloseTo(liq.x, 0);
+  expect(live.x + live.width).toBeCloseTo(def.x + def.width, 0);
 });

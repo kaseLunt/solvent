@@ -1,5 +1,5 @@
 /* Verification: the pinned proof and the live batch, set in the Console register. Page-local rules only — the header,
- * step strip, state card, table and drawer are the kit's; these are the receipt line, the two subject cards' rules,
+ * step strip, state card, table and drawer are the kit's; these are the two subject cards' rules,
  * rows and provenance folds, the identifier + copy pairing, and the raw-JSON terminal. The proof card's rule wears the
  * receipt's one tone and the live card's the live accent: the split is the product, and neither borrows the other's
  * rule. The shell owns the page's top offset. */
@@ -8,14 +8,6 @@
 /* ---- Architecture & verification: the anchor the Overview lands on clears the app bar ---- */
 .architecture { scroll-margin-top: 72px; }
 .architecture > ol { margin-top: 12px; }
-/* The receipt's one sentence, in the receipt's one tone: a verdict's colour on its rule and words; the refused register
- * dashed; a read that failed or is in flight solid, in the secondary ink — never the refused register. */
-.receipt { margin: 12px 0 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: var(--type-body); color: var(--ink); font-variant-numeric: tabular-nums; }
-.receipt[data-tone="ok"] { border-color: var(--ok); }
-.receipt[data-tone="warn"] { border-color: var(--warn); color: var(--warn-text); }
-.receipt[data-tone="crit"] { border-color: var(--crit); color: var(--crit-text); }
-.receipt[data-tone="refused"] { border-style: dashed; border-color: var(--ink-3); background: linear-gradient(var(--refused-bg), var(--refused-bg)) var(--panel); color: var(--ink-2); }
-.receipt[data-tone="unavailable"], .receipt[data-tone="pending"] { color: var(--ink-2); }
 
 /* ---- the two subjects ---- */
 /* Two cards in one row share a bottom edge, as the Book's do. */

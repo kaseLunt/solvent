@@ -245,6 +245,10 @@ test("the address field refuses a non-address inline and routes a real one to th
   await page.goto("/");
   // The kit's address field: the same control, hint and refusal the Inspector uses.
   const field = page.getByTestId("overview-address-input");
+  // One primary action on the hero ("Open the book"): Inspect is a ghost, and the field names its purpose itself.
+  await expect(field).toHaveAttribute("placeholder", "Inspect an address · 0x…");
+  await expect(page.getByTestId("overview-address-inspect")).toHaveClass(/btnGhost/);
+  await expect(page.getByTestId("overview-hero").locator("[class*='btnPrimary']")).toHaveCount(1);
   await field.fill("not an address");
   await field.press("Enter");
   await expect(page.getByTestId("overview-address-refused")).toBeVisible();

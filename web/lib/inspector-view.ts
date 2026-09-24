@@ -9,7 +9,7 @@
 // derived here too, so a component only places what it is handed.
 import { positionVerdict, type RefinedPosition } from "@solvent/client";
 import type { AddressReading, Phase } from "./address-lookup";
-import { sideRoomWords, stressReading, type ScaleAbsence, type StressReading } from "./address-stress";
+import { agreedRoomToday, projectionSubLine, STRESS_ROOM_DEFINITION, stressReading, type ScaleAbsence, type StressHorizon, type StressReading } from "./address-stress";
 import type { ViewChip } from "./cash-view";
 import { formatBlock, truncateAddress } from "./format";
 import { humanAge } from "./freshness";
@@ -519,6 +519,8 @@ export const LEGACY_CHART_TITLE = "Legacy · Aave v3 health factor";
 export const LEGACY_CHART_FINDING = "Judged by its own health factor; liquidatable strictly below 1.0.";
 /** The near-cap line's name on a room chart, from the one near-cap edge. */
 export const NEAR_LINE_LABEL = `${String(WARN_HEADROOM_PCT)}% of cap`;
+/** The cap line's name on a room chart. It names the line itself, so it reads true above or below it. */
+export const CAP_LINE_LABEL = "Borrow cap · 0%";
 /** The legacy health-factor line's name: it IS the liquidation boundary. */
 export const LIQUIDATION_LINE_LABEL = "Health factor 1.0";
 export const ROOM_CHART_ARIA = `room as a percent of the borrow cap, per batch; the dashed line is the ${String(WARN_HEADROOM_PCT)}% near-cap line`;
@@ -533,24 +535,29 @@ export const STRESS_QUALIFIER = "Under each committed scenario";
 /** The one badge over a projected section, and what it stands for. */
 export const PROJECTION_WORD = "PROJECTION";
 export const PROJECTION_TITLE = "Shocked figures are projections, not readings.";
-/** The sub-line under a projection row: what it projects, and what it holds. */
-export const PROJECTION_ROW_SUB = "Rate horizon · prices held flat";
+/** What a projection row projects, and what it holds. */
+const PROJECTION_ROW_SUB = "Rate horizon · prices held flat";
 
-/**
- * The stress table's caption. Room today is one figure for every row — the stress body's own before side — so it is
- * stated once, here, while the rows agree on it; null when they do not, and the table keeps its column.
- */
-export function stressRoomToday(view: InspectorView): string | null {
-  const stress = view.stress;
-  if (stress === null || stress.kind !== "rows") return null;
-  const words = new Set(stress.rows.filter((r) => r.applicable).map((r) => sideRoomWords(r.before, view.decimals, view.scaleAbsence)));
-  return words.size === 1 ? [...words][0] ?? null : null;
+/** The line under a projection row's name in either stress table: what it projects and holds, then its interest by each horizon. */
+export function projectionRowSub(horizons: readonly StressHorizon[], decimals: number | null, absence: ScaleAbsence | null = null): string {
+  return `${PROJECTION_ROW_SUB} · ${projectionSubLine(horizons, decimals, absence)}`;
 }
 
+/**
+ * Room today, once for the stress table: one figure for every row — the stress body's own before side — so it is
+ * stated in the caption while the rows agree on it; null when they do not, and the table keeps its column.
+ */
+export function stressRoomToday(view: InspectorView): { percent: string; dollars: string } | null {
+  const stress = view.stress;
+  if (stress === null || stress.kind !== "rows") return null;
+  return agreedRoomToday(stress.rows, view.decimals, view.scaleAbsence);
+}
+
+/** The stress table's caption: room today while the rows agree on it, then what the Room after cells print. */
 export function stressCaption(view: InspectorView): string {
   const today = stressRoomToday(view);
-  const lead = today === null ? "" : `Room today: ${today}. `;
-  return `${lead}Room after is the engine’s own cap less debt under each scenario; the rate horizon lists its extra interest instead.`;
+  const lead = today === null ? "" : `Room today: ${today.percent} of the cap (${today.dollars}). `;
+  return `${lead}${STRESS_ROOM_DEFINITION}`;
 }
 
 /** What the Trust card says when there is no Cash position to vouch for — in the state's own words. */

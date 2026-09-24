@@ -29,19 +29,20 @@
 //   - values are DISPLAY-PRECISION geometry only; exact decimal strings
 //     belong in adjacent mono text (displayMetric), grouped as money and
 //     counts always are;
-//   - the two sentences the page leads with (observatoryTakeaway,
-//     gridReadingLine) speak the reader's tier — compact money, grouped
-//     counts, an instant read from the wire's own UTC fields — about ONE
-//     engine at ONE scale, and a missing or withheld hour is named as such
-//     in them, never as a zero.
+//   - the headline (observatoryTakeaway) speaks the reader's tier — compact
+//     money, grouped counts, an instant read from the wire's own UTC fields —
+//     about ONE engine at ONE scale, and a missing or withheld hour is named
+//     as such, never as a zero; the chart's caption (gridReadingLine) states
+//     the recorded span and what a point and a gap are, and no figure.
 //
 // Pure functions — pinned by tests/unit/observatory-series.spec.ts.
 
 import { formatUnits } from "@solvent/client";
 import { renderUsdAmount } from "./book-format";
-import { EM_DASH, MINUS, formatBlock } from "./format";
+import { EM_DASH, formatBlock } from "./format";
 import { humanUsd } from "./human-usd";
 import { humanUtc } from "./human-utc";
+import { bookMoneyAt } from "./money";
 import type {
   ObservatoryEngine,
   ObservatorySeriesPoint,
@@ -362,9 +363,12 @@ export function describeStride(stepSeconds: number | null): string {
   return `Stride ${String(readWirePopulation(stepSeconds, "step_seconds"))}s: the service serves at most one recorded hour per stride, each verbatim; skipped hours are never averaged.`;
 }
 
+/** A range's dash: a spaced en dash (U+2013). An arrow on this product is a link, never a span. */
+const RANGE_DASH = " \u2013 ";
+
 /** The served range on the exact layer — the chip's title: the wire's own instants, an absent bound said as unbounded. */
 export function describeRange(from: string | null, to: string | null): string {
-  return `${from ?? "unbounded"} → ${to ?? "unbounded"}`;
+  return `${from ?? "unbounded"}${RANGE_DASH}${to ?? "unbounded"}`;
 }
 
 /**
@@ -372,7 +376,7 @@ export function describeRange(from: string | null, to: string | null): string {
  * served_at, an open start the earliest hour on record and an open end the latest.
  */
 export function rangeWords(from: string | null, to: string | null, servedAt: string): string {
-  return `${from === null ? "earliest" : humanUtc(from, servedAt)} → ${to === null ? "latest" : humanUtc(to, servedAt)}`;
+  return `${from === null ? "earliest" : humanUtc(from, servedAt)}${RANGE_DASH}${to === null ? "latest" : humanUtc(to, servedAt)}`;
 }
 
 /**
@@ -423,35 +427,8 @@ function moneyOf(point: ObservatorySeriesPoint, metric: BucketMetric): bigint | 
   return raw === null || !isWireDecimal(raw) ? null : wireBigInt(raw);
 }
 
-const groupWhole = (whole: bigint): string => whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-
-/**
- * Money in the book register with `extra` more significant digits than it prints by default — truncated toward zero,
- * like every register: "$27.9M" → "$27.94M" → "$27.942M". Used only to tell two labels apart whose figures differ but
- * print alike; the default (extra 0) IS humanUsd.
- */
-export function bookMoneyAt(value: bigint, decimals: number, extra: number): string {
-  if (extra <= 0) return humanUsd(value, decimals);
-  if (value < 0n) return `${MINUS}${bookMoneyAt(-value, decimals, extra)}`;
-  const dollar = 10n ** BigInt(decimals);
-  const dollars = value / dollar;
-  const tier =
-    dollars >= 1_000_000_000n
-      ? { unit: 1_000_000_000n, places: 1, suffix: "B" }
-      : dollars >= 1_000_000n
-        ? { unit: 1_000_000n, places: 1, suffix: "M" }
-        : dollars >= 10_000n
-          ? { unit: 1_000n, places: 0, suffix: "K" }
-          : dollars >= 1_000n
-            ? { unit: 1n, places: 0, suffix: "" }
-            : { unit: 1n, places: 2, suffix: "" };
-  if (dollars < 1_000n && value * 100n < dollar) return humanUsd(value, decimals);
-  const scale = dollar * tier.unit;
-  const places = tier.places + extra;
-  const whole = value / scale;
-  const fraction = ((value % scale) * 10n ** BigInt(places)) / scale;
-  return `$${groupWhole(whole)}.${fraction.toString().padStart(places, "0")}${tier.suffix}`;
-}
+// The book register with extra digits lives in the money module; the chart's labels read it from there.
+export { bookMoneyAt };
 
 /** A point's figure at chart altitude: money in the book register (with `extra` digits when two labels collide), a count grouped. */
 function bookFigure(point: ObservatorySeriesPoint, metric: BucketMetric, decimals: number, extra = 0): string {
@@ -862,30 +839,10 @@ function humanUtcSpan(first: string, last: string, referenceIso: string): string
   const b = humanUtc(last, referenceIso);
   // humanUtc returns a malformed instant verbatim, so an end it rewrote is an end it parsed — and ends with its zone.
   const zone = / UTC$/;
-  return a !== first && b !== last && zone.test(a) ? `${a.replace(zone, "")} → ${b}` : `${a} → ${b}`;
+  return a !== first && b !== last && zone.test(a) ? `${a.replace(zone, "")}${RANGE_DASH}${b}` : `${a}${RANGE_DASH}${b}`;
 }
 
 const ends = (both: boolean): string => (both ? "either end" : "one end");
-
-/**
- * One money metric's movement: ONE bigint subtraction of two values of one
- * engine at one scale, each through the decimal guard first. A delta, not
- * "A → B": the compact tier truncates both ends of a quiet week to the same
- * figure. Never a percentage. "rose by X, to Y": the two figures are told
- * apart in words — "rose 1 to 49" reads as a range.
- */
-function moneyMove(name: string, first: string | null, last: string | null, decimals: number): string {
-  if (first === null || last === null) {
-    return `${name} not stated at ${ends(first === null && last === null)}, so no change is given`;
-  }
-  const a = wireBigInt(first);
-  const b = wireBigInt(last);
-  if (a === null || b === null) {
-    return `${name} unreadable at ${ends(a === null && b === null)}, so no change is given`;
-  }
-  if (a === b) return `${name} unchanged at ${humanUsd(b, decimals)}`;
-  return `${name} ${b > a ? "rose" : "fell"} by ${humanUsd(b > a ? b - a : a - b, decimals)}, to ${humanUsd(b, decimals)}`;
-}
 
 /** One count metric's movement; each non-null end passes the population guard before the subtraction. */
 function countMove(name: string, first: number | null, last: number | null): string {
@@ -899,16 +856,13 @@ function countMove(name: string, first: number | null, last: number | null): str
 }
 
 /**
- * The chart's finding: the drawn metric's movement between the FIRST and LAST
- * recorded hours of the window, as a delta in the reader's tier. It reads only
- * what was recorded — refusals and absences are the takeaway's job — and the
- * exact values it leans on are each mark's own title and any hour's record.
+ * The chart's caption: what a point and a gap are, over the span between the
+ * FIRST and LAST recorded hours of the window. It states no figure and no
+ * change — the headline carries the debt's change and each tile its own — so
+ * it reads the same whichever metric is drawn. The exact values stay in each
+ * mark's own title and any hour's record.
  */
-export function gridReadingLine(
-  response: ObservatorySeriesResponse,
-  axis: BucketAxis,
-  metric: BucketMetric = "debt_usd",
-): string {
+export function gridReadingLine(response: ObservatorySeriesResponse, axis: BucketAxis): string {
   const captured = recordedHours(axis);
   const first = captured[0];
   const last = captured[captured.length - 1];
@@ -918,11 +872,7 @@ export function gridReadingLine(
   if (captured.length === 1) {
     return `Only one hour in this window was recorded (${humanUtc(first.bucket_start, response.served_at)}), so there is no movement to state.`;
   }
-  const name = metricWord(metric, response.engine);
-  const move = isMoneyMetric(metric)
-    ? moneyMove(name, rawMetric(first, metric) as string | null, rawMetric(last, metric) as string | null, response.usd_decimals)
-    : countMove(name, rawMetric(first, metric) as number | null, rawMetric(last, metric) as number | null);
-  return `Between the first and last recorded hours (${humanUtcSpan(first.bucket_start, last.bucket_start, response.served_at)}), ${move}.`;
+  return `Each point is one recorded hour, ${humanUtcSpan(first.bucket_start, last.bucket_start, response.served_at)}; a gap is an hour with no figures to draw.`;
 }
 
 /**

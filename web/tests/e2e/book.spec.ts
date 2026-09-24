@@ -119,7 +119,7 @@ test("committed fixture: the verdict, its identity, six tiles, the attention tab
   // The kit's fold, titled once for every page; the lib's summary beside the title.
   await expect(legacy.locator("summary span").first()).toHaveText("Legacy · Aave v3 market");
   // The market's own finding over the positions it computed: 1 of the 2 was refused and is counted on its own.
-  await expect(legacy.locator("summary span").nth(1)).toHaveText("0 of 1 computed position is liquidatable · $6,000 debt · 1 refused");
+  await expect(legacy.locator("summary span").nth(1)).toHaveText("0 of 1 computed position is liquidatable · $6,000 debt · 1 with no verdict");
   // The section head states the census and anchors to the legacy block that is on the page.
   await expect(page.getByTestId("book-section-cash")).toContainText("Debt Manager engine · OP Mainnet · 2 borrowing accounts");
   await expect(page.getByTestId("book-section-cash").getByRole("link", { name: "Legacy Aave v3 market ↓" })).toHaveAttribute("href", "#legacy");
@@ -186,7 +186,7 @@ test("demo scale: money-first headline, the dust toggle restates the count, band
   await expect(page.getByTestId("book-verdict-dek")).toContainText("6 accounts have no verdict in this batch; their debt is not known.");
   // The legacy fold's line states the market's own finding over its computed positions — never summed with Cash.
   await expect(page.getByTestId("book-legacy").locator("summary span").nth(1)).toHaveText(
-    "46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused",
+    "46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 with no verdict",
   );
 });
 
@@ -295,7 +295,7 @@ test("a Cash book whose every account the engine refused one by one: no verdict,
   await expect(page.getByTestId("book-bands-note")).toHaveText(distance.barsNote ?? "");
   // The legacy fold reads one decision: its line and its tiles say not computed, and no zero stands in for either.
   const legacy = page.getByTestId("book-legacy");
-  await expect(legacy.locator("summary span").nth(1)).toHaveText("1 position · debt not computed · 1 refused");
+  await expect(legacy.locator("summary span").nth(1)).toHaveText("1 position · debt not computed · 1 with no verdict");
   await legacy.locator("summary").click();
   for (const id of ["debt", "liquidatable"]) {
     const tile = page.getByTestId(`book-legacy-kpi-${id}`);

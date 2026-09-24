@@ -722,7 +722,7 @@ export interface ProofTakeawayArms {
   readonly scope: string;
 }
 
-const DID_NOT_MATCH = "The last reconcile run did not match the chain exactly,";
+const DID_NOT_MATCH = "The last reconcile run did not match the chain exactly:";
 /** The finding withheld: no receipt is committed, or the committed one checked no rows. */
 const NOTHING_PROVEN = "Nothing is proven for this deployment:";
 
@@ -768,7 +768,8 @@ function rejectedArms(manifest: EvidenceManifest, reconcile: ManifestReconcile):
   const rows = readWirePopulation(reconcile.gated_rows, "gated_rows");
   const drift = readWirePopulation(reconcile.gated_drift, "gated_drift");
   if (drift !== 0 || exact !== rows) {
-    const drifted = drift === 0 ? "" : `; ${groupInt(drift)} ${rowsWord(drift)} drifted`;
+    // "drifted" follows "checked rows" in the same clause: the noun is not said twice.
+    const drifted = drift === 0 ? "" : `; ${groupInt(drift)} drifted`;
     return { proof: DID_NOT_MATCH, scope: `${groupInt(exact)} of ${groupInt(rows)} checked ${rowsWord(rows)} matched${drifted}.` };
   }
   const short = reconcile.welds.find(
@@ -915,13 +916,13 @@ export function weldLabel(engine: string): string {
 export const WELDS_NOTE: EvidenceRow = {
   label: ACCOUNT_COMPARISONS,
   value:
-    "count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows",
+    "Counts every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); not a breakdown of the checked rows.",
   tone: "dim",
 };
 
 /** The feeds registry's identity row: its label, and its value when the registry's fingerprint is the service's, or when it is not. */
 export const REGISTRY_LABEL = "feeds registry";
-export const REGISTRY_MATCH = "identical to the service's registry fingerprint, by construction";
+export const REGISTRY_MATCH = "Identical to the service's registry fingerprint, by construction";
 export const REGISTRY_MISMATCH = "Mismatch against the service's registry fingerprint, which the contract says are identical by construction";
 
 /**
@@ -960,6 +961,26 @@ export const RECEIPT_EMPTY_PILL = "Receipt checked no rows";
 const sentenceLabel = (words: string): string => `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 
 /**
+ * Which fault a rejected receipt holds, for its one word: `failed` — its own verdict did not pass; `drifted` — the
+ * verdict passed while its own tallies disagree; `rejected` — neither can be said: a pass beside a nonzero exit code
+ * (the receipt contradicts itself), or a wire that contradicts a receipt which passes on its own numbers.
+ */
+export type ReceiptFault = "failed" | "drifted" | "rejected";
+
+export function receiptFault(manifest: EvidenceManifest, reconcile: ManifestReconcile): ReceiptFault {
+  if (deriveProofSubjectStatus(manifest).kind !== "rejected") return "rejected";
+  if (reconcile.result !== "pass") return "failed";
+  return readWirePopulation(reconcile.exit_code, "exit_code") === 0 ? "drifted" : "rejected";
+}
+
+/** One word per receipt fault, wherever the state is named: the status row, the pill, the Receipt chip. */
+export const RECEIPT_FAULT_WORDS: Readonly<Record<ReceiptFault, { readonly status: string; readonly pill: string; readonly chip: string }>> = {
+  failed: { status: "Failed", pill: "Receipt failed", chip: "failed" },
+  drifted: { status: "Drifted", pill: "Receipt drifted", chip: "drifted" },
+  rejected: { status: "Rejected", pill: "Receipt rejected", chip: "rejected" },
+};
+
+/**
  * A rejected receipt's tone, as the Verification page's one map gives it: a verdict that passed while its own tallies
  * disagree is warn; a failed verdict, or a wire that contradicts a receipt, is crit.
  */
@@ -982,7 +1003,11 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
         ? { label: "Status", value: RECEIPT_EMPTY_STATUS, tone: "refused" }
         : { label: "Status", value: RECEIPT_ACCEPTED_STATUS, tone: "ok" }
       : status.kind === "rejected"
-        ? { label: "Status", value: `Rejected · ${status.detail}`, tone: rejectedTone(manifest, status.reconcile) }
+        ? {
+            label: "Status",
+            value: `${RECEIPT_FAULT_WORDS[receiptFault(manifest, status.reconcile)].status} · ${status.detail}`,
+            tone: rejectedTone(manifest, status.reconcile),
+          }
         : { label: "Status", value: `No committed receipt · ${status.reason}`, tone: "refused" };
 
   const sections: EvidenceSection[] = [{ title: "This subject", rows: [statusRow] }];
@@ -1048,7 +1073,7 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
           ? RECEIPT_EMPTY_PILL
           : `Proof exact @ ${proofPin(status.reconcile)}`
         : status.kind === "rejected"
-          ? `Receipt rejected · ${status.detail}`
+          ? `${RECEIPT_FAULT_WORDS[receiptFault(manifest, status.reconcile)].pill} · ${status.detail}`
           : "No committed receipt",
     comparator: PROOF_COMPARATOR,
     marker: proven ? "proven" : "operational",

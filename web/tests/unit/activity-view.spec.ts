@@ -12,6 +12,7 @@ import {
   ACTIVITY_AMOUNT_HEADER,
   ACTIVITY_CLEAR_FILTER_DEK,
   ACTIVITY_DRIFT,
+  ACTIVITY_EMPTY_NOTE,
   ACTIVITY_EXHAUSTED_DEK,
   ACTIVITY_FORENSICS,
   ACTIVITY_INTRO,
@@ -348,9 +349,7 @@ test("types print in sentence case — in the row and on the type buttons — wi
 
   const filtered = ROWS.filter((event) => event.type === "deficit_created" || event.type === "collateral_enabled");
   const types = ["deficit_created", "collateral_enabled"] as const;
-  expect(h1(base({ rows: filtered, types, hasMore: false }))).toBe(
-    `4 chain actions loaded, filtered to bad debt realized and collateral enabled; the newest at ${nb("Aug 8, 20:06 UTC")}; that is every action matching this filter.`,
-  );
+  expect(h1(base({ rows: filtered, types, hasMore: false }))).toBe("4 chain actions loaded, filtered to bad debt realized and collateral enabled.");
   const lone = ROWS.filter((event) => event.type === "deficit_created");
   expect(h1(base({ rows: lone, types: ["deficit_created"], hasMore: false }))).toBe(
     `1 chain action loaded, bad debt realized, at ${nb("Aug 8, 20:06 UTC")}; that is the only action matching this filter.`,
@@ -410,27 +409,32 @@ test("header: the kicker names the scope, the headline IS feedTakeaway's two par
   expect(v.headline).toEqual({
     ...takeaway,
     tone: "neutral",
-    dek: "1 of them records bad debt being realized. 21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
+    dek: "21 are on Cash and 29 on the legacy Aave v3 market. 2 have no block time yet and are listed last, by chain and then block number.",
   });
-  expect(v.headline.emphasis).toBe("3 liquidations among the 50 chain actions loaded,");
-  expect(v.headline.rest).toBe(`the newest at ${nb("Aug 8, 20:21 UTC")}; more exist beyond these.`);
-  expect(deriveActivityView(base({ envelope: null })).headline.rest).toBe(`the newest at ${nb("Aug 8, 2026, 20:21 UTC")}; more exist beyond these.`);
+  // The finding, not pagination: the newest instant and "more available" are the chips'.
+  expect(v.headline.emphasis).toBe("3 liquidations and 1 bad-debt realization among the 50 chain actions loaded.");
+  expect(v.headline.rest).toBe("");
+  expect(chipValue(base(), "Loaded")).toBe("50 · more available");
+  // With no served_at at hand the chip's instant prints its year — never the browser's clock.
+  expect(chipValue(base({ envelope: null }), "Newest")).toBe(nb("Aug 8, 2026, 20:21 UTC"));
   expect(deriveActivityView(base({ engine: "debt_manager", mode: "engine-scoped" })).kicker).toBe("Activity · Cash");
   expect(deriveActivityView(base({ engine: "aave_v3_etherfi", mode: "engine-scoped" })).kicker).toBe("Activity · Aave v3 market (legacy)");
   const scoped = deriveActivityView(base({ engine: "aave_v3_etherfi", mode: "engine-scoped", hasMore: false }));
-  expect(scoped.headline.rest).toBe("the newest at block 155,323,392; that is every action matching this filter.");
+  expect(scoped.headline.rest).toBe("");
+  expect(chipValue(base({ engine: "aave_v3_etherfi", mode: "engine-scoped", hasMore: false }), "Newest")).toBe("block 155,323,392");
   expect(v.state).toBe("ok");
 });
 
-test("the dek counts what is loaded, each sentence conditional on its own count: every number is the rows' own, the two engines side by side and never summed, the tail's order as the service keeps it", () => {
+test("the dek counts what is loaded, each sentence conditional on its own count: every number is the rows' own, the two engines side by side and never summed, the tail's order as the service keeps it; a realization the headline already counts is not said twice", () => {
   const count = (test: (event: (typeof ROWS)[number]) => boolean): number => ROWS.filter(test).length;
   const deficits = count((e) => e.type === "deficit_created");
   const cash = count((e) => e.engine === "debt_manager");
   const legacy = count((e) => e.engine === "aave_v3_etherfi");
   const untimed = count((e) => e.block_time === null);
   expect([deficits, cash, legacy, untimed]).toEqual([1, 21, 29, 2]);
+  // The headline counts the realization beside the liquidations, so the dek does not.
   expect(deriveActivityView(base()).headline.dek).toBe(
-    `${String(deficits)} of them records bad debt being realized. ${String(cash)} are on Cash and ${String(legacy)} on the legacy Aave v3 market. ${String(untimed)} have no block time yet and are listed last, by chain and then block number.`,
+    `${String(cash)} are on Cash and ${String(legacy)} on the legacy Aave v3 market. ${String(untimed)} have no block time yet and are listed last, by chain and then block number.`,
   );
   const timed = ROWS.filter((e) => e.block_time !== null && e.type !== "deficit_created");
   expect(deriveActivityView(base({ rows: timed })).headline.dek).toBe("20 are on Cash and 27 on the legacy Aave v3 market.");
@@ -443,12 +447,19 @@ test("the dek counts what is loaded, each sentence conditional on its own count:
   );
   const deficit = ROWS.find((e) => e.type === "deficit_created");
   if (deficit === undefined) throw new Error("fixture: the demo page carries a deficit_created row");
-  expect(deriveActivityView(base({ rows: [deficit, { ...deficit, log_index: 99 }, ...cashOnly] })).headline.dek).toBe(
-    "2 of them record bad debt being realized. 20 are on Cash and 2 on the legacy Aave v3 market.",
+  // With no liquidation loaded the headline does not count them: the dek does, naming what it counts them among.
+  const quiet = cashOnly.filter((e) => e.type !== "liquidation");
+  const realized = [deficit, { ...deficit, log_index: 99 }, ...quiet];
+  expect(deriveActivityView(base({ rows: realized })).headline.dek).toBe(
+    `2 of the ${String(realized.length)} loaded actions record bad debt being realized. ${String(quiet.length)} are on Cash and 2 on the legacy Aave v3 market.`,
+  );
+  expect(deriveActivityView(base({ rows: [deficit, ...quiet] })).headline.dek).toMatch(
+    new RegExp(`^1 of the ${String(quiet.length + 1)} loaded actions records bad debt being realized\\. `),
   );
   const foreign = [...cashOnly.slice(0, 2), { ...deficit, type: "borrow" as const, engine: "morpho_blue" }];
   expect(deriveActivityView(base({ rows: foreign })).headline.dek).toBe("2 are on Cash and 1 on an engine this page does not name.");
-  expect(deriveActivityView(base({ rows: [deficit] })).headline.dek).toBe("It records bad debt being realized. It is on the legacy Aave v3 market.");
+  // One row: the headline names its type, so the dek says only where it sits.
+  expect(deriveActivityView(base({ rows: [deficit] })).headline.dek).toBe("It is on the legacy Aave v3 market.");
   expect(deriveActivityView(base({ rows: cashOnly, engine: "debt_manager", mode: "engine-scoped" })).headline.dek).toBe(
     "Listed newest first, by block number on Cash's chain.",
   );
@@ -518,14 +529,38 @@ test("tiles: liquidations and bad debt realized among the loaded rows, grouped �
     return { ...row, seq: i };
   });
   expect(deriveActivityView(base({ rows: big })).tiles.liquidations).toMatchObject({ value: "72", sub: "among the 1,200 loaded" });
-  expect(deriveActivityView(base({ rows: big })).headline.emphasis).toBe("72 liquidations among the 1,200 chain actions loaded,");
+  // Grouped counts in the headline too.
+  expect(deriveActivityView(base({ rows: big })).headline.emphasis).toBe("72 liquidations and 24 bad-debt realizations among the 1,200 chain actions loaded,");
   // The ledger pins the type to liquidation: its bad-debt count is not the chain's zero, it is filtered out.
-  const ledger = deriveActivityView(base({ view: "ledger", rows: ROWS.filter((e) => e.type === "liquidation") }));
+  const echoed = (types: string[]) => ({ filter: { ...DEMO_FEED_PAGE_1.filter, types }, limit: DEMO_FEED_PAGE_1.limit, served_at: DEMO_FEED_PAGE_1.served_at });
+  const ledger = deriveActivityView(base({ view: "ledger", rows: ROWS.filter((e) => e.type === "liquidation"), envelope: echoed(["liquidation"]) }));
   expect(ledger.tiles.deficits).toEqual({ label: "Bad debt realized", value: "", sub: "The filter excludes it", state: "not-served", stateWord: "Filtered out" });
   expect(ledger.tiles.liquidations).toMatchObject({ value: "3", state: null });
-  const borrows = deriveActivityView(base({ types: ["borrow"], rows: ROWS.filter((e) => e.type === "borrow") }));
+  const borrows = deriveActivityView(base({ types: ["borrow"], rows: ROWS.filter((e) => e.type === "borrow"), envelope: echoed(["borrow"]) }));
   expect(borrows.tiles.liquidations.stateWord).toBe("Filtered out");
   expect(borrows.tiles.deficits.stateWord).toBe("Filtered out");
+  // Before the service has echoed a filter, the reader's own request decides what is filtered out.
+  const asked = deriveActivityView(base({ view: "ledger", rows: [], hasMore: true, envelope: null }));
+  expect(asked.tiles.deficits.stateWord).toBe("Filtered out");
+});
+
+test("one scope for the whole answer: once the service has echoed its filter, the headline, the dek, the tiles and the clear-filter offer all read the echo — the controls stay the reader's request", () => {
+  // The service answered for the bad-debt type while the page's own state names no type.
+  const answer = deriveActivityView(
+    base({ rows: [], hasMore: false, types: [], envelope: { filter: { engine: null, types: ["deficit_created"], since_block: null }, limit: 50, served_at: DEMO_FEED_PAGE_1.served_at } }),
+  );
+  expect(answer.headline.emphasis).toBe("No recorded chain action is a bad-debt realization.");
+  expect(answer.headline.dek).toBe(ACTIVITY_CLEAR_FILTER_DEK);
+  expect(answer.clearFilter).toBe(true);
+  expect(answer.tiles.liquidations).toMatchObject({ state: "not-served", stateWord: "Filtered out" });
+  expect(answer.tiles.deficits).toEqual({ label: "Bad debt realized", value: "0", sub: "No rows loaded", state: null, stateWord: null });
+  // An echo that narrows nothing is no filter to clear, whatever the page's own state held.
+  const wide = deriveActivityView(
+    base({ rows: [], hasMore: false, types: ["borrow"], envelope: { filter: { engine: null, types: [], since_block: null }, limit: 50, served_at: DEMO_FEED_PAGE_1.served_at } }),
+  );
+  expect(wide.headline).toMatchObject({ emphasis: "No chain action is recorded.", dek: ACTIVITY_EXHAUSTED_DEK });
+  expect(wide.clearFilter).toBe(false);
+  expect(wide.tiles.liquidations).toMatchObject({ value: "0", state: null });
 });
 
 test("a refused page: the refused register, emphasis only; the dek in reader words and the next step; the service's verbatim words move into the state card's disclosure, said once; the table's empty row names the state", () => {
@@ -557,8 +592,8 @@ test("a refused page: the refused register, emphasis only; the dek in reader wor
   expect(cold.refusal?.cause).toBe("No row of the list was read.");
   expect(cold.emptyText).toBe("Refused");
   // Nothing loaded behind a refusal is the refused register's word, never a zero and never a bare dash.
-  expect(cold.tiles.liquidations).toEqual({ label: "Liquidations", value: "", sub: "This page was refused", state: "refused", stateWord: null });
-  expect(cold.tiles.deficits).toMatchObject({ state: "refused", sub: "This page was refused" });
+  expect(cold.tiles.liquidations).toEqual({ label: "Liquidations", value: "", sub: "Nothing counted", state: "refused", stateWord: null });
+  expect(cold.tiles.deficits).toMatchObject({ state: "refused", sub: "Nothing counted" });
   expect(h1(base({ rows: [], refusal: { status: 400, code: null, message: "refused" } }))).not.toMatch(/\d/);
   const one = deriveActivityView(base({ rows: ROWS.slice(0, 1), refusal: { status: 400, code: "bad_request", message: "no" } }));
   expect(one.headline.emphasis).toBe("The next page was refused, after 1 chain action loaded.");
@@ -621,7 +656,11 @@ test("exhausted: an empty list is a real answer in ink, and the H1 names the sco
   expect(plain.state).toBe("exhausted");
   expect(plain.emptyText).toBe("No rows");
   expect(plain.headline).toEqual({ emphasis: "No chain action is recorded.", rest: "", tone: "neutral", dek: ACTIVITY_EXHAUSTED_DEK });
-  expect(ACTIVITY_EXHAUSTED_DEK).toBe("That is the service's real answer, not a loading state.");
+  // What fills the page, said once; why an empty list is an answer is the drawer's.
+  expect(ACTIVITY_EXHAUSTED_DEK).toBe("Actions appear here as the indexer records them.");
+  expect(plain.doctrine.at(-1)).toBe(ACTIVITY_EMPTY_NOTE);
+  expect(ACTIVITY_EMPTY_NOTE).toBe("An empty list is the service's real answer for its filter, not a loading state.");
+  expect(deriveActivityView(base()).doctrine).not.toContain(ACTIVITY_EMPTY_NOTE);
   expect(plain.clearFilter).toBe(false);
   expect(plain.tiles.liquidations).toEqual({ label: "Liquidations", value: "0", sub: "No rows loaded", state: null, stateWord: null });
 

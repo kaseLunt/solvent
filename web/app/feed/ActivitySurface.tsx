@@ -300,12 +300,13 @@ export function ActivitySurface() {
         }
       />
 
+      {/* The live strip completes the tiles' row: two tiles alone would leave half the row an empty frame. It stays its
+          own instrument, labelled as the current connection. */}
       <div className={`${kit.kpis} ${kit.kpis4} ${styles.tiles}`}>
         <Tile tile={activity.tiles.liquidations} pending={pending} testId="activity-kpi-liquidations" />
         <Tile tile={activity.tiles.deficits} pending={pending} testId="activity-kpi-deficits" />
+        <FeedLiveStrip className={styles.liveInRow} />
       </div>
-
-      <FeedLiveStrip />
 
       {/* The recorded list's own head: the strip above and the record below stay two instruments with two names. The
           qualifier is the order in short form; its full sentence is the drawer's. */}

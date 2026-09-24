@@ -3,13 +3,13 @@
 // engine of a result is read once, by id, in `lab-engine` — the same reading
 // the library's row prints in one word — and a refusal of any kind is its own
 // state here with its own sentence.
-import type { ReceivedAt } from "./freshness";
+import { humanAge, receiptIdentity, type AgeReceipt, type ReceivedAt } from "./freshness";
 import { WARN_HEADROOM_PCT } from "./headroom";
 import { humanUtc } from "./human-utc";
 import { engineName } from "./inspector-headline";
 import { CASH, LEGACY } from "./inspector-position";
 import type { LoadPhase } from "./inspector-view";
-import type { StateRegister } from "./kit";
+import { stateWordOf, type StateRegister } from "./kit";
 import { truncateAddress } from "./format";
 import { classifyRunBookEnvelope, contractFaults } from "./lab-classify";
 import { compareRows, setFault, type CompareView } from "./lab-compare";
@@ -44,6 +44,7 @@ import { CONTRACT_LANE_EDGES, roomBoundLabel, type HeatmapView } from "./lab-tra
 import { bookMoney, signedBookMoney } from "./money";
 import { engineList, groupInt, joinAnd } from "./prose";
 import type { ResultIdentity } from "./resultIdentity";
+import type { LiveAgeReading } from "./live-age";
 import type { LabRunBook, RunBookOutcome } from "./runbook";
 import { scenarioName } from "./scenario-name";
 
@@ -83,35 +84,37 @@ export const ASSUMPTIONS_NOT_RUN = "Not run yet: the applied shocks, the held-fl
 export const assumptionsTitle = (name: string | null): string => (name === null ? ASSUMPTIONS_TITLE : `${ASSUMPTIONS_TITLE} · ${name}`);
 
 /**
- * The transition grid's reading. On Cash the grid joins the service's risk
- * buckets into fewer room bands, so its band count runs below the lane tile's
- * bucket count, and the axes say how the bands are made. Unmerged, the grid
- * draws one bucket to a row, so its count is the tile's, in the tile's word.
+ * The transition grid's reading: the finding first, then the axes. On Cash the grid joins the service's risk buckets
+ * into fewer room bands, so its band count runs below the lane tile's bucket count, and the caption says how the bands
+ * are made, once. Unmerged, the grid draws one bucket to a row, so its count is the tile's, in the tile's word.
  */
 export function transitionFinding(view: HeatmapView): string {
   const one = (n: number, plural: string, singular: string) => (n === 1 ? singular : plural);
-  const bucketBands = view.bands.filter((b) => b.kind === "bucket");
-  const buckets = bucketBands.reduce((n, b) => n + b.lanes.length, 0);
-  const axes = view.merged
-    ? `Rows: room under cap today, in ${groupInt(bucketBands.length)} bands made from the service's ${groupInt(buckets)} risk buckets · columns: after the shock · cells are accounts.`
-    : "Rows: risk bucket today · columns: after the shock, as the wire serves them · cells are accounts.";
   const unit = view.merged ? "band" : "bucket";
   const improved = view.improved === 0 ? "none improve" : `${groupInt(view.improved)} ${one(view.improved, "improve", "improves")}`;
   const moves = `${groupInt(view.bandChanged)} ${one(view.bandChanged, "accounts change", "account changes")} ${unit}; ${groupInt(view.crossedCap)} ${one(view.crossedCap, "cross", "crosses")} the cap; ${improved}.`;
   const unmeasured = view.unmeasuredRows === 0 ? "" : ` ${groupInt(view.unmeasuredRows)} not measured.`;
-  return `${axes} ${moves}${unmeasured}${bandEdgesSentence(view)}`;
+  const axes = view.merged
+    ? "Rows are room under the cap today and columns room after the shock; each cell counts accounts."
+    : "Rows are the risk bucket today and columns the bucket after the shock, as the wire serves them; each cell counts accounts.";
+  return `${moves}${unmeasured} ${axes}${bandEdgesSentence(view)}`;
 }
 
 /**
- * Where the merged bands' edges fall, built from the contract's own bucket edges — never typed — so a reader who
- * knows the Book's near-cap line is told the two are not one cut. Said only when no edge IS that line.
+ * How the merged bands are made, and where their edges fall, built from the contract's own bucket edges — never typed
+ * — so a reader who knows the Book's near-cap line is told the two are not one cut. The edges are said only when no
+ * edge IS that line.
  */
 function bandEdgesSentence(view: HeatmapView): string {
   if (!view.merged) return "";
+  const bucketBands = view.bands.filter((b) => b.kind === "bucket");
+  const buckets = bucketBands.reduce((n, b) => n + b.lanes.length, 0);
+  const bands = bucketBands.length === 1 ? "The 1 band joins" : `The ${groupInt(bucketBands.length)} bands join`;
+  const made = ` ${bands} the service's ${groupInt(buckets)} risk buckets`;
   const edges = CONTRACT_LANE_EDGES.slice(2, 5).map(roomBoundLabel);
   const line = `${String(WARN_HEADROOM_PCT)}%`;
-  if (edges.includes(line)) return "";
-  return ` Bands follow the service's risk buckets, so their edges fall at ${joinAnd(edges)} of cap, not at the Book's ${line} line.`;
+  if (edges.includes(line)) return `${made}.`;
+  return `${made}, so their edges fall at ${joinAnd(edges)} of cap, not at the Book's ${line} line.`;
 }
 
 /** A tile's words: its figure, its sub-line and, where the figure has a finer sibling count, the title that names it. */
@@ -157,20 +160,7 @@ export interface TileAbsence {
  * and not run is not run; a request the service declined is refused.
  */
 export function tileAbsence(book: Pick<BookWorkspace, "state" | "headline">, reading: EngineReading | null): TileAbsence | null {
-  if (reading !== null) {
-    switch (reading.kind) {
-      case "result":
-        return null;
-      case "withheld":
-        return { register: "refused", word: "Withheld" };
-      case "not-covered":
-        return { register: "not-run", word: "Not modelled" };
-      case "contradictory":
-        return { register: "unreadable", word: "Contradictory" };
-      case "unreadable":
-        return { register: "unreadable" };
-    }
-  }
+  if (reading !== null) return readingAbsence(reading);
   switch (book.state) {
     case "listing-loading":
     case "running":
@@ -192,11 +182,59 @@ export function tileAbsence(book: Pick<BookWorkspace, "state" | "headline">, rea
   }
 }
 
-/** The kicker: the scenario's name, which keeps its own case under the kicker's capitals, and the scope beside it. */
+/** The absence an engine's own reading shows in place of a result; null for a result. */
+function readingAbsence(reading: EngineReading): TileAbsence | null {
+  switch (reading.kind) {
+    case "result":
+      return null;
+    case "withheld":
+      return { register: "refused", word: "Withheld" };
+    case "not-covered":
+      return { register: "not-run", word: "Not modelled" };
+    case "contradictory":
+      return { register: "unreadable", word: "Contradictory" };
+    case "unreadable":
+      return { register: "unreadable" };
+  }
+}
+
+/**
+ * The legacy fold's summary line: the legacy market's own finding, in its own unit and noun (positions) — the Cash
+ * library row's form — never a Cash figure and never summed with one. A net count at or below zero claims no count;
+ * a reading with no result says why in the tiles' own word.
+ */
+export function legacyResultSummary(reading: EngineReading): string {
+  switch (reading.kind) {
+    case "result": {
+      const { newly, deltaEligibleDebt, decimals } = reading.result;
+      const debt = `${signedBookMoney(decimals)(deltaEligibleDebt)} liquidatable`;
+      if (newly > 0) return `${debt} · ${groupInt(newly)} position${newly === 1 ? "" : "s"}`;
+      return deltaEligibleDebt > 0n ? debt : "No new liquidatable debt";
+    }
+    case "withheld":
+      return "Result withheld";
+    case "not-covered":
+      return "Not modelled for this market";
+    case "contradictory":
+    case "unreadable": {
+      const absence = readingAbsence(reading);
+      return absence === null ? "" : stateWordOf(absence.register, absence.word);
+    }
+  }
+}
+
+/**
+ * The kicker: the scenario's name, which keeps its own case under the kicker's capitals, and the scope beside it. The
+ * wire's id, version and label ride the name's title.
+ */
 export interface LabKicker {
   readonly name: string | null;
   readonly scope: string;
+  readonly title?: string;
 }
+
+/** A scenario's kicker: its one name, and the wire's identity behind it for the title. */
+const scenarioKicker = (def: ScenarioDefinition): LabKicker => ({ name: scenarioName(def), scope: "Cash book", title: `${def.id} · ${def.version} — ${def.label}` });
 
 /** The compare page's kicker. */
 export const COMPARE_KICKER: LabKicker = { name: null, scope: "Compare · Cash book" };
@@ -250,12 +288,14 @@ export interface BookWorkspace {
 export type CompareState =
   | { readonly kind: "idle" }
   | { readonly kind: "running"; readonly ids: readonly string[] }
-  | { readonly kind: "ok"; readonly cash: CompareView; readonly legacy: CompareView }
+  | ({ readonly kind: "ok" } & HeldCompare)
   /** `held`: the comparison a failed Compare left standing — the last set that read, both engines' views — or null when there is none. */
   | { readonly kind: "failed"; readonly headline: LabHeadline; readonly held: HeldCompare | null };
+/** A comparison on screen: both engines' views of one set, and the clocks at which this tab settled that set. */
 export interface HeldCompare {
   readonly cash: CompareView;
   readonly legacy: CompareView;
+  readonly receivedAt: ReceivedAt;
 }
 
 /** The Compare button, and while it cannot act, the reason shown beside it. */
@@ -307,7 +347,7 @@ const emptyBook = (state: BookState, headline: LabHeadline, definition: Scenario
   rerunFailure: null,
   heldCondition: null,
   retained: null,
-  kicker: definition === null ? { name: null, scope: "Scenarios · Cash book" } : { name: scenarioName(definition), scope: "Cash book" },
+  kicker: definition === null ? { name: null, scope: "Scenarios · Cash book" } : scenarioKicker(definition),
   headline,
   chips,
   identity: null,
@@ -320,23 +360,44 @@ const emptyBook = (state: BookState, headline: LabHeadline, definition: Scenario
 });
 
 /**
- * The chips of a set run's answer: its own batch, config and computed instant — never the single run's. A batch that
- * is no longer the newest says so.
+ * The chips of a set run's answer: its own batch, computed age and config — never the single run's. A batch that is
+ * no longer the newest says so. Computed is the single run's form: the batch's age, anchored by the tab on the wire's
+ * own number (`age`), with the typeset instant and the wire's ISO in its title. An age the tab cannot vouch for, or one
+ * the wire did not state readably, is "age unknown"; before the tab has anchored it there is no chip.
  */
-export function compareChips(view: CompareView): LabChip[] {
+export function compareChips(view: CompareView, age: Pick<LiveAgeReading, "seconds" | "unresolved">): LabChip[] {
   const freshness =
     view.freshness === "still_newest"
       ? { label: "Result for batch", value: groupInt(view.batchId) }
       : { label: "Result for batch", value: `${groupInt(view.batchId)} · ${view.freshness === "superseded" ? "superseded" : "not the newest"}`, tone: "warn" as const };
-  return [freshness, { label: "Config", value: view.configVersion }, { label: "Computed", value: humanUtc(view.computedAt, view.servedAt), title: view.computedAt }];
+  const title = `${humanUtc(view.computedAt, view.servedAt)} · ${view.computedAt}`;
+  const computed: LabChip | null =
+    view.ageSeconds === null || age.unresolved
+      ? { label: "Computed", value: "age unknown", tone: "warn", title }
+      : age.seconds === null
+        ? null
+        : { label: "Computed", value: `${humanAge(age.seconds)} ago`, title };
+  return [freshness, ...(computed === null ? [] : [computed]), { label: "Config", value: view.configVersion }];
 }
 
-/** The chips of a book that has no result: the definition's own identity and the listing's config version. */
+/**
+ * A comparison's age receipt: the wire's own batch age, identified by the set's serve and batch, anchored at the clocks
+ * this tab settled the set on. A held comparison shown again beside a failed Compare keeps those clocks, so its age
+ * never restarts at the failure. Null where the wire did not state the age readably.
+ */
+export function compareAgeReceipt(set: HeldCompare | null): AgeReceipt | null {
+  if (set === null || set.cash.ageSeconds === null) return null;
+  return {
+    ageSeconds: set.cash.ageSeconds,
+    receiptId: receiptIdentity(set.cash.servedAt, set.cash.batchId),
+    receivedAtMs: set.receivedAt.monotonicMs,
+    receivedAtWallMs: set.receivedAt.wallMs,
+  };
+}
+
+/** The chips of a book that has no result: the listing's config version, the scenario's wire id and version in its title — the kicker names it. */
 function definitionChips(def: ScenarioDefinition, configVersion: string): LabChip[] {
-  return [
-    { label: "Scenario", value: `${def.id} · ${def.version}`, title: def.label },
-    { label: "Config", value: configVersion },
-  ];
+  return [{ label: "Config", value: configVersion, title: `${def.id} · ${def.version}` }];
 }
 
 /**
@@ -368,7 +429,7 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
   }
   const skew = definitionSkew(def, configVersion, run);
   const superseded = run.batch.supersession.superseded;
-  const kicker: LabKicker = { name, scope: "Cash book" };
+  const kicker = scenarioKicker(def);
   // The answered engines, distinct and in wire order; a withheld engine is a refusal, never an answer.
   const identity: ResultIdentity = { scope: "book", batchId: run.batch.id, configVersion: run.scenario_config_version, engines: [...new Set(run.engines.map((e) => e.engine))], servedAt: run.served_at };
   const cash = readEngine(run, CASH, def);
@@ -377,9 +438,15 @@ function resultBook(def: ScenarioDefinition, configVersion: string, run: LabRunB
     superseded
       ? { label: "Result for batch", value: `${groupInt(run.batch.id)} · superseded`, tone: "warn", title: "a newer complete batch exists; run again for it" }
       : { label: "Result for batch", value: groupInt(run.batch.id) },
-    { label: "Scenario", value: `${run.scenario_id} · ${run.scenario_version}`, title: run.label },
+    // The kicker names the scenario; its wire id stays at reader altitude only where the version no longer matches.
+    ...(skew.includes("version") ? [{ label: "Scenario", value: `${run.scenario_id} · ${run.scenario_version}`, title: run.label, tone: "warn" as const }] : []),
     enginesChip(run, cash),
-    { label: "Config", value: run.scenario_config_version, tone: skew.includes("config version") ? "warn" : undefined },
+    {
+      label: "Config",
+      value: run.scenario_config_version,
+      title: `Scenario ${run.scenario_id} · ${run.scenario_version}; config ${run.scenario_config_version}`,
+      tone: skew.includes("config version") ? "warn" : undefined,
+    },
   ];
   const base = { kicker, chips, identity, receivedAt, definition: def, run, cash, legacy, skew, rerunFailure: null, heldCondition: null, retained: null };
   // Precedence. A body that does not read is a failed answer whatever else it says, so it is judged FIRST — before
@@ -488,7 +555,10 @@ function compareOf(reading: LabReading): CompareState {
   if (set.phase === "running") return { kind: "running", ids: set.ids };
   const o = set.outcome;
   // A failed Compare never replaces the comparison it had: the last set that READ stands beside the failure.
-  const held: HeldCompare | null = set.held === null ? null : { cash: compareRows(set.held.response, CASH), legacy: compareRows(set.held.response, LEGACY) };
+  const held: HeldCompare | null =
+    set.held === null
+      ? null
+      : { cash: compareRows(set.held.response, CASH), legacy: compareRows(set.held.response, LEGACY), receivedAt: { wallMs: set.held.at, monotonicMs: set.held.atMonotonicMs } };
   const failed = (headline: LabHeadline): CompareState => ({ kind: "failed", headline, held });
   switch (o.kind) {
     case "ok": {
@@ -498,7 +568,7 @@ function compareOf(reading: LabReading): CompareState {
       // never drawn as one dashed row beside dots the next failure would take away. Every fault is named.
       const fault = setFault(set.ids, o.response);
       if (fault !== null) return failed(fault.kind === "membership" ? setMembershipHeadline(fault.faults) : setUnreadableHeadline(fault.faults));
-      return { kind: "ok", cash: compareRows(o.response, CASH), legacy: compareRows(o.response, LEGACY) };
+      return { kind: "ok", cash: compareRows(o.response, CASH), legacy: compareRows(o.response, LEGACY), receivedAt: { wallMs: set.at, monotonicMs: set.atMonotonicMs } };
     }
     case "busy":
       return failed(failureHeadline("busy", { message: o.message, inFlight: o.inFlight, maxInFlight: o.maxInFlight }));
@@ -643,8 +713,6 @@ export const COMPARE_AXIS = {
   legacy: { label: "change in liquidatable legacy debt, percent of the legacy book", caption: "Share of the legacy book" },
 } as const;
 
-/** The legacy market's folds on this page: what each holds, and the law they keep. */
-export const LEGACY_RESULT_SUMMARY = "Its own result, in its own unit";
-export const LEGACY_COMPARE_SUMMARY = "Its own shares, on its own book";
+/** The law the legacy market's folds keep, inside each fold; the summary lines state their findings (`legacyResultSummary`, `legacyCompareSummary`). */
 export const LEGACY_RESULT_FOOTNOTE = "Judged by its own health factor, in its own unit. The two books are never added together.";
 export const LEGACY_COMPARE_FOOTNOTE = "Shares of the legacy book, in its own unit. The two books are never added together.";

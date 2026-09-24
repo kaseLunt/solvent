@@ -2,6 +2,7 @@ import { ChartCard, SectionHead } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import {
   batchAxisLabel,
+  CAP_LINE_LABEL,
   HISTORY_CAPTION,
   HISTORY_QUALIFIER,
   HISTORY_TITLE,
@@ -15,7 +16,7 @@ import {
   ROOM_CHART_TITLE,
   type InspectorView,
 } from "@/lib/inspector-view";
-import { NEAR_LINE_TENTHS } from "@/lib/room-history";
+import { NEAR_LINE_TENTHS, roomDomain } from "@/lib/room-history";
 import styles from "../inspector.module.css";
 import { MeasuredSparkline } from "./MeasuredSparkline";
 
@@ -47,6 +48,9 @@ export function HistoryCard({ view }: { view: InspectorView }) {
               referenceValue={Number(NEAR_LINE_TENTHS) / 10}
               referenceTone="warn"
               referenceLabel={NEAR_LINE_LABEL}
+              boundaryValue={0}
+              boundaryLabel={CAP_LINE_LABEL}
+              domain={roomDomain(room.values)}
               height={140}
               label={ROOM_CHART_ARIA}
               xLabels={xLabels}

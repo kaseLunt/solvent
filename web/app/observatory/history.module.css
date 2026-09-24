@@ -39,6 +39,14 @@
 .forensics { margin-top: var(--sp-3); border-top: 1px solid var(--line); }
 .forensics > summary { cursor: pointer; padding: var(--sp-2) 0; color: var(--ink-2); font-size: var(--type-small); }
 
+/* Wide enough for two: the record reads in two columns of pairs at the subject cards' measure, top to bottom, so a
+ * name never sits a page-width from its value. A row never splits across the columns; each column keeps its own
+ * hairlines, closed at the foot rather than opened at the head. */
+@media (min-width: 901px) {
+  .rows { column-count: 2; column-gap: 48px; }
+  .row { break-inside: avoid; border-top: 0; border-bottom: 1px solid var(--line); }
+}
+
 /* A phone's width. The page never scrolls sideways: the record's rows stack, the rate table and the plot scroll inside
  * their own frames, and an identity chip whose value is longer than the screen wraps inside itself. */
 @media (max-width: 640px) {

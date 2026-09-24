@@ -256,8 +256,11 @@ export interface ActivityView {
 /** The loading arm's dek: what will be here, before anything is counted. */
 export const ACTIVITY_LOADING_DEK = "Borrows, repays, supplies, withdrawals and liquidations, as recorded from the chain.";
 
-/** The exhausted arm's dek with no filter narrowing the list: an empty answer is an answer. */
-export const ACTIVITY_EXHAUSTED_DEK = "That is the service's real answer, not a loading state.";
+/** The exhausted arm's dek with no filter narrowing the list: what fills the page. */
+export const ACTIVITY_EXHAUSTED_DEK = "Actions appear here as the indexer records them.";
+
+/** The drawer's word on an empty answer, while the list is empty: why it is not a load still to come. */
+export const ACTIVITY_EMPTY_NOTE = "An empty list is the service's real answer for its filter, not a loading state.";
 
 /** The exhausted arm's dek under a narrowing filter: the one way to see more. */
 export const ACTIVITY_CLEAR_FILTER_DEK = "Clear the filter to see every recorded action.";
@@ -593,20 +596,19 @@ function engineSplit(rows: readonly FeedChainEvent[]): string {
 
 /**
  * The answered page's dek: computed facts about the loaded rows, each sentence conditional on its own count — the
- * bad-debt realizations, where the rows sit, and the untimed tail. Every number is counted here from the rows. When
- * none applies, the dek says how the list is ordered.
+ * bad-debt realizations (only where the headline does not already count them: it names a lone row's type, and counts
+ * realizations beside any liquidation), where the rows sit, and the untimed tail. Every number is counted here from
+ * the rows. When none applies, the dek says how the list is ordered.
  */
 function factDek(input: ActivityInput): string {
   const { rows, mode, engine } = input;
   const n = rows.length;
   const sentences: string[] = [];
   const deficits = rows.filter((event) => event.type === "deficit_created").length;
-  if (deficits > 0) {
-    sentences.push(
-      n === 1
-        ? "It records bad debt being realized."
-        : `${groupInt(deficits)} of them record${deficits === 1 ? "s" : ""} bad debt being realized.`,
-    );
+  const liquidations = rows.filter((event) => event.type === "liquidation").length;
+  if (deficits > 0 && n > 1 && liquidations === 0) {
+    // Its antecedent named: "of them" would read as a share of a count the headline never gave.
+    sentences.push(`${groupInt(deficits)} of the ${groupInt(n)} loaded actions record${deficits === 1 ? "s" : ""} bad debt being realized.`);
   }
   if (mode === "cross-engine") {
     sentences.push(engineSplit(rows));
@@ -643,28 +645,46 @@ function joinOr(nouns: readonly string[]): string {
   return `${nouns.slice(0, -1).join(", ")} or ${nouns[nouns.length - 1] ?? ""}`;
 }
 
+/** The filter an answer speaks for: its engine, its types (none = every type) and its block bound, grouped for prose. */
+interface ListScope {
+  readonly engine: string | null;
+  readonly types: readonly string[];
+  readonly since: string | null;
+}
+
+/**
+ * The scope the list answers for, read from ONE source so the headline, the dek, the tiles and the clear-filter offer
+ * never describe two scopes: the service's own echo of the filter it applied once it has answered (each integer
+ * through the population guard), before that the page's own request. The controls keep showing the request.
+ */
+function listScope(input: ActivityInput): ListScope {
+  const echo = input.envelope?.filter ?? null;
+  if (echo === null) {
+    return {
+      engine: input.engine,
+      types: input.view === "ledger" ? ["liquidation"] : input.types,
+      since: input.sinceBlock === null ? null : typedBlock(input.sinceBlock),
+    };
+  }
+  return {
+    engine: echo.engine,
+    types: echo.types ?? [],
+    since: echo.since_block === null ? null : groupInt(readWirePopulation(echo.since_block, "since_block")),
+  };
+}
+
 /** Whether anything narrows the list beyond every action of every engine. */
 function narrowed(input: ActivityInput): boolean {
-  return input.engine !== null || input.view === "ledger" || input.types.length > 0 || input.sinceBlock !== null;
+  const scope = listScope(input);
+  return scope.engine !== null || scope.types.length > 0 || scope.since !== null;
 }
 
 /**
  * An empty answer, scoped to what it answers for: the engine, the block bound and the types — never an unscoped
- * negative. The scope is the service's own echo of the filter it applied when it has answered (the empty page IS its
- * answer for exactly that filter), each integer through the population guard; before that, the page's own choice.
+ * negative. The empty page IS the service's answer for exactly the filter it echoed.
  */
 function exhaustedSentence(input: ActivityInput): string {
-  const echo = input.envelope?.filter ?? null;
-  const engine = echo === null ? input.engine : echo.engine;
-  const since =
-    echo === null
-      ? input.sinceBlock === null
-        ? null
-        : typedBlock(input.sinceBlock)
-      : echo.since_block === null
-        ? null
-        : groupInt(readWirePopulation(echo.since_block, "since_block"));
-  const types: readonly string[] = echo === null ? (input.view === "ledger" ? ["liquidation"] : input.types) : (echo.types ?? []);
+  const { engine, types, since } = listScope(input);
   const where = [...(engine === null ? [] : [`on ${engineInProse(engine)}`]), ...(since === null ? [] : [`since block ${since}`])];
   const scope = where.length === 0 ? "" : ` ${where.join(" ")}`;
   if (types.length === 0) return `No chain action is recorded${scope}.`;
@@ -734,10 +754,10 @@ function failureCard(input: ActivityInput): ActivityStateCard | null {
   };
 }
 
-/** Whether the list's filter admits a type: every type when none is chosen; the ledger admits liquidations alone. */
+/** Whether the list's scope admits a type: every type when none is named; the ledger admits liquidations alone. */
 function admits(input: ActivityInput, type: EventDisplayType): boolean {
-  if (input.view === "ledger") return type === "liquidation";
-  return input.types.length === 0 || input.types.includes(type);
+  const { types } = listScope(input);
+  return types.length === 0 || types.includes(type);
 }
 
 function tileOf(label: string, type: EventDisplayType, state: ActivityState, input: ActivityInput): ActivityTile {
@@ -746,7 +766,7 @@ function tileOf(label: string, type: EventDisplayType, state: ActivityState, inp
   if (!admits(input, type)) return { label, value: "", sub: "The filter excludes it", state: "not-served", stateWord: "Filtered out" };
   if (n === 0) {
     // Nothing loaded is not zero: the tile states which absence it is — except an exhausted list, whose zero is true.
-    if (state === "refused") return { ...plain, value: "", sub: "This page was refused", state: "refused" };
+    if (state === "refused") return { ...plain, value: "", sub: "Nothing counted", state: "refused" };
     if (state === "error") return { ...plain, value: "", sub: "This page could not be fetched", state: "unavailable" };
     if (state === "exhausted") return { ...plain, value: "0", sub: "No rows loaded" };
     return { ...plain, value: "", sub: "" };
@@ -1014,6 +1034,7 @@ export function deriveActivityView(input: ActivityInput): ActivityView {
       sentence(mode === "cross-engine" ? ORDER_CROSS : orderScoped(engine)),
       ACTIVITY_SINCE_NOTE,
       ACTIVITY_LIVE_NOTE,
+      ...(state === "exhausted" ? [ACTIVITY_EMPTY_NOTE] : []),
     ],
     notes: distinctNotes(rows),
     drift: drifted ? ACTIVITY_DRIFT : null,

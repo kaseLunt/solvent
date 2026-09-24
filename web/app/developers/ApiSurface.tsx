@@ -1,4 +1,4 @@
-import { KitTable, KpiTile, SectionHead, VerdictHeader, type KitColumn, type KitRow } from "@/components/kit";
+import { KitTable, SectionHead, VerdictHeader, type KitColumn, type KitRow } from "@/components/kit";
 import kit from "@/components/kit/kit.module.css";
 import { solventBaseUrl } from "@/lib/api";
 import { API_COPY, API_ERROR_COLUMNS, deriveApiView, errorSampleCopy } from "@/lib/api-view";
@@ -49,10 +49,9 @@ export function ApiSurface() {
         actions={<ApiDrawer label={API_COPY.drawer} doctrine={view.doctrine} />}
       />
 
-      <div className={`${kit.kpis} ${kit.kpis4}`}>
-        <KpiTile testId="api-kpi-operations" label={view.tiles.operations.label} value={view.tiles.operations.value} sub={view.tiles.operations.sub} />
-        <KpiTile testId="api-kpi-errors" label={view.tiles.errors.label} value={view.tiles.errors.value} sub={view.tiles.errors.sub} />
-      </div>
+      <p className={styles.census} data-testid="api-census">
+        {view.census}
+      </p>
 
       {/* The endpoint index: aligned rows, read down a verb column. Each row is an anchor and nothing else — it wears no
           button form, because one tab away that form is a pressable filter. DOM order is reading order, so Tab walks the
@@ -80,7 +79,9 @@ export function ApiSurface() {
 
       <SectionHead title={API_COPY.errorsTitle} />
       <div>
-        <KitTable testId="api-errors" columns={ERROR_COLUMNS} rows={errorRows} />
+        <div className={kit.card}>
+          <KitTable testId="api-errors" columns={ERROR_COLUMNS} rows={errorRows} />
+        </div>
         {/* Each row's body sample folds beneath the table, its provenance beside it; the copy is the verbatim JSON. */}
         <div className={styles.samples}>
           {ERROR_RESPONSES.map((error) => {

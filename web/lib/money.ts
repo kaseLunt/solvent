@@ -9,6 +9,9 @@
 // exempt from the one-precision rule: each asset's quote keeps its own places (`humanPrice`), because a $1.25 token
 // needs digits a $4,000 one does not.
 //
+// A change and the level it lands at, printed in one sentence, share ONE tier (`bookMoneyPair`): "+$964, to $1,204",
+// never "+$964.39, to $1,204".
+//
 // Every register truncates toward zero — a figure at risk is never rounded up. Null prints "—", a nonzero figure
 // below what the precision can show prints "<$0.01" (or "<$1" in a whole-dollar column), "$0" is a true zero only,
 // and a scale the wire guard refuses prints UNREADABLE_SCALE — never a figure at a scale nobody licensed.
@@ -108,4 +111,86 @@ export function accountMoneyColumn(values: readonly (bigint | null | undefined)[
   const thousand = 1000n * 10n ** BigInt(decimals);
   const whole = values.some((value) => value != null && (value < 0n ? -value : value) >= thousand);
   return guarded(decimals, whole ? wholeDollars : fixedCents);
+}
+
+interface Tier {
+  /** Dollars per printed unit: 1 for whole dollars and cents, 1,000 for K, and so on. */
+  readonly unit: bigint;
+  /** Places the book register prints at this tier. */
+  readonly places: number;
+  readonly suffix: string;
+}
+
+const CENTS: Tier = { unit: 1n, places: 2, suffix: "" };
+
+/** humanUsd's tiers, picked from a magnitude in whole dollars. */
+function tierOf(dollars: bigint): Tier {
+  if (dollars >= 1_000_000_000n) return { unit: 1_000_000_000n, places: 1, suffix: "B" };
+  if (dollars >= 1_000_000n) return { unit: 1_000_000n, places: 1, suffix: "M" };
+  if (dollars >= 10_000n) return { unit: 1_000n, places: 0, suffix: "K" };
+  if (dollars >= 1_000n) return { unit: 1n, places: 0, suffix: "" };
+  return CENTS;
+}
+
+/** A non-negative figure at `places` places of `tier`, truncated; null when that truncates a nonzero figure to zero. */
+function figureAt(value: bigint, decimals: number, tier: Tier, places: number): string | null {
+  const scale = 10n ** BigInt(decimals) * tier.unit;
+  const scaled = (value * 10n ** BigInt(places)) / scale;
+  if (scaled === 0n && value !== 0n) return null;
+  const whole = scaled / 10n ** BigInt(places);
+  const fraction = scaled % 10n ** BigInt(places);
+  return places === 0 ? `$${group(whole)}${tier.suffix}` : `$${group(whole)}.${fraction.toString().padStart(places, "0")}${tier.suffix}`;
+}
+
+/**
+ * Money in the book register with `extra` more significant digits than it prints by default — truncated toward zero,
+ * like every register: "$27.9M" → "$27.94M" → "$27.942M". Used only to tell two figures apart whose values differ but
+ * print alike; the default (extra 0) IS humanUsd.
+ */
+export function bookMoneyAt(value: bigint, decimals: number, extra: number): string {
+  if (extra <= 0) return humanUsd(value, decimals);
+  if (value < 0n) return `${MINUS}${bookMoneyAt(-value, decimals, extra)}`;
+  const tier = tierOf(value / 10n ** BigInt(decimals));
+  // Under a cent (and a true zero) the register's own words stand: "<$0.01", "$0".
+  if (tier === CENTS && value * 100n < 10n ** BigInt(decimals)) return humanUsd(value, decimals);
+  return figureAt(value, decimals, tier, tier.places + extra) ?? humanUsd(value, decimals);
+}
+
+const magnitude = (value: bigint): bigint => (value < 0n ? -value : value);
+
+/**
+ * A non-negative figure at a shared tier: the book register's own form there (extra 0) or `extra` digits more. A
+ * nonzero figure the tier would print as zero prints at its own tier instead — never "$0K".
+ */
+function pairFigure(value: bigint, decimals: number, tier: Tier, extra: number): string {
+  if (tier === CENTS && extra === 0) return humanUsd(value, decimals);
+  if (extra === 0 && tier.places === 1) {
+    const tenths = figureAt(value, decimals, tier, 1);
+    return tenths === null ? humanUsd(value, decimals) : tenths.replace(/\.0(?=[A-Z]$)/, "");
+  }
+  return figureAt(value, decimals, tier, tier.places + extra) ?? bookMoneyAt(value, decimals, extra);
+}
+
+/**
+ * A change and the level it lands at, for one sentence ("bad debt +$964, to $1,204"): both at ONE tier of the book
+ * register, picked once from the larger of the two — the level, whenever the change is a rise to it. The change is
+ * signed ("+", U+2212; a zero carries none). When the two figures print alike while their values differ, both take
+ * one more digit, and a second if one is not enough. Truncated toward zero, like every register.
+ */
+export function bookMoneyPair(change: bigint, level: bigint, decimals: number | null): { change: string; level: string } {
+  if (decimals === null || !isWireScale(decimals)) {
+    const unreadable = guarded(decimals, humanUsd);
+    return { change: unreadable(change), level: unreadable(level) };
+  }
+  const size = magnitude(change) > magnitude(level) ? magnitude(change) : magnitude(level);
+  const tier = tierOf(size / 10n ** BigInt(decimals));
+  const print = (extra: number) => ({ change: pairFigure(magnitude(change), decimals, tier, extra), level: pairFigure(magnitude(level), decimals, tier, extra) });
+  let extra = 0;
+  let out = print(extra);
+  while (extra < 2 && out.change === out.level && magnitude(change) !== magnitude(level)) {
+    extra += 1;
+    out = print(extra);
+  }
+  const sign = change === 0n ? "" : change < 0n ? MINUS : "+";
+  return { change: `${sign}${out.change}`, level: `${level < 0n ? MINUS : ""}${out.level}` };
 }

@@ -2,7 +2,9 @@
 // record, and the definition-skew law.
 import { expect, test } from "@playwright/test";
 import { readEngine } from "../../lib/lab-engine";
-import { definitionSkew, libraryRows, outcomeLine, type RunRecord } from "../../lib/lab-library";
+import { compareRows } from "../../lib/lab-compare";
+import { compareOutcome, comparedLibrary, definitionSkew, libraryRows, outcomeLine, type RunRecord } from "../../lib/lab-library";
+import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
 import { SCENARIOS } from "../fixtures/lab-book";
 import { cashEngine, DEFINITION_ETH, DEMO_CASH_TABLE, legacyEngine, runBookOf, transitionsOf } from "./helpers/run-book-engine";
 
@@ -117,4 +119,38 @@ test("outcomeLine: a 200 whose Cash reading does not read never replaces the hel
   // A retained body whose definition changed does not speak for a malformed answer either.
   const otherVersion = runBookOf([cashEngine(DEMO_CASH_TABLE, { newly_eligible_accounts: 118, eligible_debt_delta_usd: "1280000000000" })], { ...DEFINITION_ETH, version: "v2" });
   expect(outcomeLine(over({ ...held, response: otherVersion }), def, cfg)).toEqual({ key: "failed", text: "Unreadable", tone: "refused" });
+});
+
+test("a compared scenario's row speaks from the set run the headline reads — never 'Not run yet' under a scenario the headline ranked", () => {
+  const view = compareRows(DEMO_RUN_BOOK_SET, "debt_manager");
+  const word = (id: string) => compareOutcome(view.rows.find((r) => r.id === id)!);
+  expect(word("eth_minus_30")).toEqual({ key: "compared", text: "+$1.2M liquidatable · 4.5% of the book", tone: "crit" });
+  expect(word("ethfi_minus_50")).toEqual({ key: "compared", text: "+$9,800 liquidatable · <0.1% of the book", tone: "crit" });
+  expect(word("weeth_market_depeg_oracles_held")).toEqual({ key: "compared", text: "No new liquidatable debt", tone: "dim" });
+  // Not ranked, in the compare card's own words: a projection is a kind, not a refusal.
+  expect(word("dm_rate_horizon_plus_200bps")).toEqual({ key: "compared", text: "Projection, no spot pass", tone: "dim" });
+  // Less liquidatable debt: the same form, the dot's own tone.
+  const falling = compareRows(
+    { ...DEMO_RUN_BOOK_SET, results: DEMO_RUN_BOOK_SET.results.map((r) => (r.scenario_id !== "eth_minus_30" ? r : { ...r, engines: r.engines.map((e) => (e.engine === "debt_manager" ? { ...e, eligible_debt_delta_usd: "-4500000000000" } : e)) })) },
+    "debt_manager",
+  );
+  expect(compareOutcome(falling.rows.find((r) => r.id === "eth_minus_30")!)).toEqual({ key: "compared", text: "−$4.5M liquidatable · 16.1% of the book", tone: "ok" });
+  // A refused member keeps the compare card's word, in the refused register.
+  const withheld = compareRows(
+    { ...DEMO_RUN_BOOK_SET, results: DEMO_RUN_BOOK_SET.results.map((r) => (r.scenario_id !== "ethfi_minus_50" ? r : { ...r, withheld_engines: ["debt_manager"], engines: [] })) },
+    "debt_manager",
+  );
+  expect(compareOutcome(withheld.rows.find((r) => r.id === "ethfi_minus_50")!)).toEqual({ key: "compared", text: "Withheld", tone: "refused" });
+  // The rail: members take the comparison's word, every other row keeps its own; no comparison leaves the rail as it was.
+  const rows = libraryRows(SCENARIOS, new Map(), "eth_minus_30", new Set(["eth_minus_30", "ethfi_minus_50"]));
+  const twoOnly = compareRows(
+    { ...DEMO_RUN_BOOK_SET, requested_scenario_ids: ["eth_minus_30", "ethfi_minus_50"], results: DEMO_RUN_BOOK_SET.results.filter((r) => r.scenario_id === "eth_minus_30" || r.scenario_id === "ethfi_minus_50") },
+    "debt_manager",
+  );
+  const rail = comparedLibrary(rows, twoOnly);
+  expect(rail.find((r) => r.id === "eth_minus_30")?.outcome.text).toBe("+$1.2M liquidatable · 4.5% of the book");
+  expect(rail.find((r) => r.id === "ethfi_minus_50")?.outcome.key).toBe("compared");
+  for (const r of rail.filter((x) => x.id !== "eth_minus_30" && x.id !== "ethfi_minus_50")) expect(r.outcome).toEqual({ key: "not-run", text: "Not run yet", tone: "dim" });
+  expect(rail.filter((r) => r.outcome.text === "Not run yet").map((r) => r.id)).not.toContain("eth_minus_30");
+  expect(comparedLibrary(rows, null)).toBe(rows);
 });

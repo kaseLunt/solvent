@@ -23,6 +23,7 @@ export interface BandBarsProps {
 }
 
 const BAR_CLASS = { neutral: "", crit: styles.barCrit, warn: styles.barWarn, dim: styles.barDim } as const;
+// A column's height is its content (bar + count + label), never a fixed box: the tallest column never spills out.
 const MAX_PX = 128;
 /** A nonzero band is never invisible: the risk bands are the small ones. */
 const MIN_PX = 4;

@@ -29,6 +29,11 @@
   margin: 0 0 var(--sp-7);
 }
 
+/* A table specimen left on the page ground: its held first column paints that ground, never the card's panel. */
+.onGround {
+  --tbl-ground: var(--bg);
+}
+
 .section > h2 {
   font-size: var(--type-h2);
   font-weight: var(--w-semibold);

@@ -248,19 +248,68 @@ export function realizationWords(m: StressShortfall | null): string | null {
   return parts.length === 0 ? null : cellCase(parts.join(" · "));
 }
 
-/** The projection cell of a projection that lists no horizon — the cell's own words beside the verdict's "Cannot say". */
-const NO_HORIZON_WORDS = "No horizon in the projection";
+/** A projection that lists no horizon, in its sub-line: the words beside the verdict's "Cannot say". */
+const NO_HORIZON_WORDS = "no horizon in the projection";
 
 /**
- * A projection's cell: each horizon's extra interest at the position's scale, a dash for a horizon that carries none.
- * With no scale to print at the cell is the one true cause, said once — never "+— interest" per horizon. A
- * projection that carries no horizon says so, whatever the scale: the cell is never empty, and a missing scale is
- * not why it has nothing to list.
+ * A projection's interest by each horizon, as prose clauses at the position's scale: "+$7.92 interest by 30 days",
+ * then "+$23.77 by 90 days" — the noun once, on the first. A horizon with no interest, or a negative one (out of
+ * contract, never "+−$"), says "interest not computed by 30 days".
  */
-export function projectionWords(horizons: readonly StressHorizon[], decimals: number | null, absence: ScaleAbsence | null = null): string {
+export function projectionInterestClauses(horizons: readonly StressHorizon[], decimals: number): string[] {
+  let named = false;
+  return horizons.map((h) => {
+    const by = `by ${horizonWords(h.seconds)}`;
+    if (h.extraInterest === null || h.extraInterest < 0n) {
+      named = true;
+      return `interest not computed ${by}`;
+    }
+    const figure = `+${humanUsdFull(h.extraInterest, decimals)}`;
+    const clause = named ? `${figure} ${by}` : `${figure} interest ${by}`;
+    named = true;
+    return clause;
+  });
+}
+
+/**
+ * The line under a projection row's name: its interest by each horizon. With no scale to print at it is the one true
+ * cause, said once — never "+— interest" per horizon. A projection that carries no horizon says so, whatever the
+ * scale: a missing scale is not why it has nothing to list. It follows a " · " in the sub-line, so it starts lower case.
+ */
+export function projectionSubLine(horizons: readonly StressHorizon[], decimals: number | null, absence: ScaleAbsence | null = null): string {
   if (horizons.length === 0) return NO_HORIZON_WORDS;
-  if (decimals === null) return cellCase(scaleAbsenceWords(absence));
-  return horizons.map((h) => `${horizonLabel(h.seconds)}: ${h.extraInterest === null ? "—" : `+${humanUsdFull(h.extraInterest, decimals)}`} interest`).join(" · ");
+  if (decimals === null) return scaleAbsenceWords(absence);
+  return projectionInterestClauses(horizons, decimals).join(", ");
+}
+
+/**
+ * A projection row's Room after cell: a state word, never a blank or a dash. A rate horizon holds prices flat, so its
+ * spot room is unchanged; printing it would read as a shocked room.
+ */
+export const PROJECTION_ROOM_CELL = {
+  text: "Interest only",
+  title: "A rate horizon holds prices flat; its extra interest by each horizon is listed under its name.",
+} as const;
+
+/** What a stress table's Room after cells print, said once under the table. */
+export const STRESS_ROOM_DEFINITION = "Room after is the share of each scenario’s cap left unborrowed; below zero, the account is over its cap.";
+
+/**
+ * Room today, once for a whole table: every applicable row's before side is the same computable figure, so it is
+ * stated in the column's unit (the signed percent) and in dollars. Null when the rows disagree, a side has no figure
+ * or no percent, there is no scale, or no row applies — and the table keeps its Room today column.
+ */
+export function agreedRoomToday(rows: readonly StressRow[], decimals: number | null, absence: ScaleAbsence | null = null): { percent: string; dollars: string } | null {
+  if (decimals === null) return null;
+  const agreed = new Map<string, { percent: string; dollars: string }>();
+  for (const r of rows) {
+    if (!r.applicable) continue;
+    const figures = computableSide(r.before);
+    if (figures === null || headroomTenths(figures.cap, figures.debt) === null) return null;
+    const today = { percent: roomCell(r.before, decimals, absence).text, dollars: sideRoomWords(r.before, decimals, absence) };
+    agreed.set(`${today.percent}|${today.dollars}`, today);
+  }
+  return agreed.size === 1 ? ([...agreed.values()][0] ?? null) : null;
 }
 
 /**
@@ -372,4 +421,22 @@ export function horizonLabel(seconds: number): string {
   const days = (seconds - (seconds % DAY)) / DAY;
   const restHours = ((seconds % DAY) - (seconds % HOUR)) / HOUR;
   return restHours === 0 ? `${String(days)}${NBSP}d` : `${String(days)}${NBSP}d ${String(restHours)}${NBSP}h`;
+}
+
+/** A count and its unit, singular for one, never parted across a line. */
+const unit = (n: number, one: string): string => `${String(n)}${NBSP}${n === 1 ? one : `${one}s`}`;
+
+/**
+ * The prose form of `horizonLabel` — "30 days", "1 day", "12 hours", "45 minutes", "<1 minute" — for sentences; the
+ * label's abbreviations stay in dense table cells. The same guard and the same integer truncation, so a horizon is
+ * never printed longer than it is, and a duration the guard refuses prints the refused word.
+ */
+export function horizonWords(seconds: number): string {
+  if (!isWirePopulation(seconds)) return UNREADABLE_HORIZON;
+  if (seconds < MINUTE) return `<1${NBSP}minute`;
+  if (seconds < HOUR) return unit((seconds - (seconds % MINUTE)) / MINUTE, "minute");
+  if (seconds < DAY) return unit((seconds - (seconds % HOUR)) / HOUR, "hour");
+  const days = unit((seconds - (seconds % DAY)) / DAY, "day");
+  const restHours = ((seconds % DAY) - (seconds % HOUR)) / HOUR;
+  return restHours === 0 ? days : `${days} ${unit(restHours, "hour")}`;
 }

@@ -635,7 +635,7 @@ export default function StyleguidePage() {
       </section>
 
       {/* ---- §9 table pattern + pagination + drawer ---------------------- */}
-      <section className={styles.section} data-testid="sg-table">
+      <section className={`${styles.section} ${styles.onGround}`} data-testid="sg-table">
         <h2>KitTable · a refused row is dimmed, never dropped; small and dust rows fold behind the toggle</h2>
         <TableSpecimen />
         <p className={styles.note}>
@@ -644,7 +644,7 @@ export default function StyleguidePage() {
         </p>
       </section>
 
-      <section className={styles.section} data-testid="sg-pagination">
+      <section className={`${styles.section} ${styles.onGround}`} data-testid="sg-pagination">
         <h2>KitTable and useCursorPages · cursor pagination</h2>
         <PaginationDemo />
       </section>
@@ -944,8 +944,8 @@ export default function StyleguidePage() {
       </section>
 
       <section className={styles.section} data-testid="sg-fold">
-        <h2>LegacyFold · the legacy market, after all Cash content, with its own figures</h2>
-        <LegacyFold testId="sg-fold-legacy" title={LEGACY_FOLD_TITLE} summary="Its own figures, never summed with Cash's.">
+        <h2>LegacyFold · the legacy market, after all Cash content, its summary naming its own finding</h2>
+        <LegacyFold testId="sg-fold-legacy" title={LEGACY_FOLD_TITLE} summary="2 of 551 computed positions are liquidatable · $18.2M debt">
           <div className={kit.kpis4}>
             <KpiTile label="Debt" value="$18.2M" sub="Aave v3 market (legacy) only" />
             <KpiTile label="Liquidatable positions" value="2" sub="Of 551 computed" />

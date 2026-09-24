@@ -2,7 +2,7 @@
 // pins read it and check it; nothing below it decides a sentence twice. Every
 // figure is the generated contract extract's own (lib/proof-contract.gen.ts,
 // drift-gated against api/openapi.yaml by tests/unit/proof-contract-fidelity.spec.ts):
-// the page cannot say what the contract does not, and a tile's sub is counted
+// the page cannot say what the contract does not, and the census is counted
 // from the same extract the page renders — never typed beside it. The one
 // deployment-specific value is the API origin the samples target, passed in by
 // the caller and stated once, on its chip.
@@ -10,13 +10,6 @@ import type { LabHeadline } from "./lab-headline";
 import type { LabChip } from "./lab-view";
 import { groupInt } from "./prose";
 import { CONTRACT_META, ERROR_RESPONSES, OPERATIONS, type ContractErrorResponse, type ContractOperation } from "./proof-contract.gen";
-
-/** A tile as the page prints it: its label, its figure, and the sub that says what the figure is made of. */
-export interface ApiTile {
-  readonly label: string;
-  readonly value: string;
-  readonly sub: string;
-}
 
 /** One row of the endpoint index: the anchor's target, the method in its own column, the path beside it. */
 export interface ApiIndexRow {
@@ -31,10 +24,14 @@ export interface ApiView {
   /** The kicker in its two parts: the page's name, and the version the kicker's capitals must not recase. */
   readonly kickerParts: { readonly lead: string; readonly version: string };
   readonly headline: LabHeadline;
-  /** Contract · Base URL · Source — identity only; a count is a measure and lives on its tile. */
+  /** Contract · Base URL · Source — identity only; a count is a measure and lives in the census. */
   readonly chips: LabChip[];
-  /** The two measures. The version is the kicker's and the Contract chip's: no tile states it a third time. */
-  readonly tiles: { readonly operations: ApiTile; readonly errors: ApiTile };
+  /**
+   * The line above the endpoint index: the verb census and the error statuses — "15 GET · 2 POST · error responses
+   * 400 · 404 · …". The headline already counts the endpoints and the index lists them: tiles restating the count
+   * would frame half a row of nothing.
+   */
+  readonly census: string;
   /** The endpoint index, one row per contract operation, in the contract's order. */
   readonly index: readonly ApiIndexRow[];
   /** The Endpoints section's qualifier: where the cards' words come from. */
@@ -291,10 +288,7 @@ export function deriveApiView(baseUrl: string): ApiView {
       { label: "Base URL", value: baseUrl, title: BASE_URL_NOTE },
       { label: "Source", value: CONTRACT_META.sourcePath },
     ],
-    tiles: {
-      operations: { label: "Endpoints", value: groupInt(OPERATIONS.length), sub: verbCensus() },
-      errors: { label: "Error responses", value: groupInt(ERROR_RESPONSES.length), sub: errorStatuses() },
-    },
+    census: `${verbCensus()} · error responses ${errorStatuses()}`,
     index: OPERATIONS.map((op) => ({ id: op.operationId, method: op.method, path: op.path })),
     endpointsQualifier: `${CONTRACT_META.sourcePath}, verbatim`,
     errors: ERROR_RESPONSES.map((e) => ({

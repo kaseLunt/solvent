@@ -52,7 +52,7 @@ test("the demo result: the §3.5 template, money first, the dek from the wire's 
   expect(h.rest).toBe("across 118 accounts.");
   expect(h.tone).toBe("crit");
   expect(h.dek).toBe(
-    "Bad debt would rise by $40K if all 167 were liquidated at the shocked prices. 425 accounts move to a worse band; none improve. Of the 27 accounts within 9.09% of their cap today, all 27 cross it.",
+    "Bad debt would rise by $40K if all 167 were liquidated at the shocked prices. 425 accounts move to a worse band; none improve. Of the 27 accounts nearest their cap today, all 27 cross it.",
   );
 });
 
@@ -67,7 +67,7 @@ test("no change, band changes only, accounts flipping without a debt delta, impr
   expect(moved.emphasis).toBe("No Cash account becomes liquidatable under ETH −30%,");
   expect(moved.rest).toBe("but 5 change band.");
   expect(moved.tone).toBe("warn");
-  expect(moved.dek).toBe("Bad debt at liquidation does not change. 5 accounts move to a worse band; none improve. Of the 1 account within 9.09% of its cap today, none cross it.");
+  expect(moved.dek).toBe("Bad debt at liquidation does not change. 5 accounts move to a worse band; none improve. Of the 1 account nearest its cap today, none cross it.");
 
   const flipped = resultHeadline({ ...DEMO, newly: 2, deltaEligibleDebt: 0n, heat: null, heatReason: "the matrix's lanes, outflows and two margins are not the same length" });
   expect(flipped.emphasis).toBe("2 accounts become liquidatable under ETH −30%.");
@@ -77,12 +77,12 @@ test("no change, band changes only, accounts flipping without a debt delta, impr
   const better = resultHeadline({ ...DEMO, newly: 0, deltaEligibleDebt: -3_000_000_000n, deltaBadDebt: -1_000_000n, heat: heatOf({ 2: { 3: 4 }, 4: { 3: 2 } }) });
   expect(better.emphasis).toBe("No Cash account becomes liquidatable under ETH −30%,");
   expect(better.rest).toBe("but 6 change band.");
-  expect(better.dek).toBe("Bad debt at liquidation would fall by $1. 6 accounts change band; 4 improve. Of the 4 accounts within 9.09% of their cap today, none cross it.");
+  expect(better.dek).toBe("Bad debt at liquidation would fall by $1. 6 accounts change band; 4 improve. Of the 4 accounts nearest their cap today, none cross it.");
 
   const single = resultHeadline({ ...DEMO, newly: 1, deltaEligibleDebt: 5_000_000n, afterEligible: 50, deltaBadDebt: 0n, heat: heatOf({ 3: { 0: 1 } }) });
   expect(single.emphasis).toBe("$5 more Cash debt becomes liquidatable,");
   expect(single.rest).toBe("across 1 account.");
-  expect(single.dek).toBe("Bad debt at liquidation does not change. 1 account moves to a worse band; none improve. Of the 1 account within 9.09% of its cap today, all 1 cross it.");
+  expect(single.dek).toBe("Bad debt at liquidation does not change. 1 account moves to a worse band; none improve. Of the 1 account nearest its cap today, all 1 cross it.");
 });
 
 test("the states without a result: not run, running, withheld, not covered, contradictory, definition changed — never a verdict, and an absence never worn as a refusal", () => {
@@ -179,7 +179,7 @@ test("signedCount: a negative count prints the true minus; a count at or above z
 });
 
 test("a net count at or below zero has its own sentence: the net and the gross the merged lanes show, never a 'no'; a net without crossings is the fewer sentence", () => {
-  const dek = "Bad debt would rise by $40K if all 167 were liquidated at the shocked prices. 425 accounts move to a worse band; none improve. Of the 27 accounts within 9.09% of their cap today, all 27 cross it.";
+  const dek = "Bad debt would rise by $40K if all 167 were liquidated at the shocked prices. 425 accounts move to a worse band; none improve. Of the 27 accounts nearest their cap today, all 27 cross it.";
   // The demo lanes: 118 cross the cap; the wire's net says three fewer — both stated, in the warn tone, the dek unchanged.
   const net = resultHeadline({ ...DEMO, newly: -3 });
   expect(net).toEqual({ emphasis: "Net, 3 fewer Cash accounts are liquidatable under ETH −30%,", rest: "though 118 accounts cross the cap.", tone: "warn", dek });
@@ -200,7 +200,7 @@ test("the singular: one account becomes, one changes band, one improves", () => 
   const changes = resultHeadline({ ...DEMO, newly: 0, deltaEligibleDebt: 0n, deltaBadDebt: 0n, heat: heatOf({ 2: { 3: 1 }, 7: { 7: 2 } }) });
   expect(changes.emphasis).toBe("No Cash account becomes liquidatable under ETH −30%,");
   expect(changes.rest).toBe("but 1 changes band.");
-  expect(changes.dek).toBe("Bad debt at liquidation does not change. 1 account changes band; 1 improves. Of the 1 account within 9.09% of its cap today, none cross it.");
+  expect(changes.dek).toBe("Bad debt at liquidation does not change. 1 account changes band; 1 improves. Of the 1 account nearest its cap today, none cross it.");
 });
 
 test("the failed arm requires its status: the type refuses an unnumbered answer", () => {

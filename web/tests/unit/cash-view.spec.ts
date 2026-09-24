@@ -303,7 +303,7 @@ test("the legacy view: a withheld engine names its cause and prints no populatio
   const legacy = { engine: find(BOOK.engines), badDebt: find(BOOK.bad_debt), histogram: find(BOOK.hf_histogram.engines), refusedWhole: null };
   const served = deriveLegacyView(legacy);
   // The line is the market's own finding over its computed positions; the refused one is a count of its own.
-  expect(served?.summary).toBe("0 of 1 computed position is liquidatable · $6,000 debt · 1 refused");
+  expect(served?.summary).toBe("0 of 1 computed position is liquidatable · $6,000 debt · 1 with no verdict");
   expect(served?.bands?.map((b) => b.count)).toEqual([0, 0, 0, 1, 0, 0, 0, 0]);
   expect(served?.eligibleDebt).toEqual({ kind: "value", value: 0n, text: "$0" });
   // A fractional bucket count refuses by name before it can weigh a bar.
@@ -469,7 +469,7 @@ function legacyWith(c: { positions: number; computed: number; liquidatable: numb
 
 test("the legacy fold's line is the market's own finding over computed positions; never a negative over nothing computed", () => {
   expect(deriveLegacyView(legacyWith({ positions: 8552, computed: 8552, liquidatable: 46, refused: 0, debt: DEMO_LEGACY_DEBT }))?.summary)
-    .toBe("46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
+    .toBe("46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 with no verdict");
   // The aggregate sums debt over computed positions only, so with none computed the wire serves a zero that is no
   // position's debt: the line names the debt as not computed and never prints that zero.
   const zero = deriveLegacyView(legacyWith({ positions: 3, computed: 0, liquidatable: 0, refused: 3, debt: "0" }))?.summary ?? "";
@@ -481,14 +481,14 @@ test("the legacy fold's line is the market's own finding over computed positions
   expect(none).not.toMatch(/liquidatable|\b0 of\b/);
   // One computed position is said in the singular; counts are grouped.
   expect(deriveLegacyView(legacyWith({ positions: 1, computed: 1, liquidatable: 1, refused: 0 }))?.summary).toBe(
-    "1 of 1 computed position is liquidatable · $1.9M debt · 0 refused",
+    "1 of 1 computed position is liquidatable · $1.9M debt · 0 with no verdict",
   );
   expect(deriveLegacyView(legacyWith({ positions: 12_000, computed: 10_500, liquidatable: 1_046, refused: 1_500 }))?.summary).toBe(
-    "1,046 of 10,500 computed positions are liquidatable · $1.9M debt · 1,500 refused",
+    "1,046 of 10,500 computed positions are liquidatable · $1.9M debt · 1,500 with no verdict",
   );
   // The demo book as served: the same line, and no Cash figure in it.
   const demo = deriveLegacyView({ engine: DEMO_LEGACY, badDebt: null, histogram: null, refusedWhole: null });
-  expect(demo?.summary).toBe("46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 refused");
+  expect(demo?.summary).toBe("46 of 8,552 computed positions are liquidatable · $1.9M debt · 0 with no verdict");
 });
 
 test("the Debt tile is the view's decision: the figure against its collateral, a malformed field named, an absence in its own word", () => {
@@ -564,7 +564,7 @@ test("the legacy fold reads one decision over nothing computed — its line, its
   // A market with no positions refused nothing: "not computed" would name a failure that did not happen, so its zero
   // debt is the market's own finding, as the server totals an empty book.
   const empty = deriveLegacyView(legacyWith({ positions: 0, computed: 0, liquidatable: 0, refused: 0, debt: "0" }));
-  expect(empty?.summary).toBe("0 positions · $0 debt · 0 refused");
+  expect(empty?.summary).toBe("0 positions · $0 debt · 0 with no verdict");
   expect(empty?.debt).toEqual({ kind: "value", value: 0n, text: "$0" });
   expect(empty?.liquidatable).toBe(0);
   // Computed positions: the count stands, zero included.

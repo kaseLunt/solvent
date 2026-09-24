@@ -7,6 +7,8 @@ import {
   accountMoney,
   accountMoneyColumn,
   bookMoney,
+  bookMoneyAt,
+  bookMoneyPair,
   exactDecimal,
   exactMoney,
   guarded,
@@ -152,6 +154,65 @@ test.describe("accountMoneyColumn — one precision per column", () => {
       const money = accountMoneyColumn([5n, null], decimals);
       expect(money(5n)).toBe(UNREADABLE_SCALE);
       expect(money(null)).toBe("—");
+    }
+  });
+});
+
+test.describe("bookMoneyAt — the book register with more digits, to tell two figures apart", () => {
+  test("extra 0 IS the book register; each extra digit is one more truncated place at the figure's own tier", () => {
+    expect(bookMoneyAt(27_942_906_330_446n, 6, 0)).toBe("$27.9M");
+    expect(bookMoneyAt(27_942_906_330_446n, 6, 1)).toBe("$27.94M");
+    expect(bookMoneyAt(27_942_906_330_446n, 6, 2)).toBe("$27.942M");
+    expect(bookMoneyAt(11_220_000_000n, 6, 1)).toBe("$11.2K");
+    expect(bookMoneyAt(1_234_567_000n, 6, 1)).toBe("$1,234.5");
+    expect(bookMoneyAt(619_186_008n, 6, 1)).toBe("$619.186");
+    expect(bookMoneyAt(27_999_999_999_999n, 6, 1)).toBe("$27.99M");
+    expect(bookMoneyAt(-11_220_000_000n, 6, 1)).toBe(`${MINUS}$11.2K`);
+  });
+});
+
+test.describe("bookMoneyPair — a change and the level it lands at, in one sentence at one precision", () => {
+  test("the level's tier prints both figures: never cents beside whole dollars", () => {
+    expect(bookMoneyPair(964_390_000n, 1_204_000_000n, 6)).toEqual({ change: "+$964", level: "$1,204" });
+    expect(bookMoneyPair(40_500_000_000n, 41_300_000_000n, 6)).toEqual({ change: "+$40K", level: "$41K" });
+    expect(bookMoneyPair(1_850_000_000_000n, 27_942_906_330_446n, 6)).toEqual({ change: "+$1.8M", level: "$27.9M" });
+    expect(bookMoneyPair(150_000_000_000n, 1_200_000_000_000n, 6)).toEqual({ change: "+$0.1M", level: "$1.2M" });
+    // Under $1,000 both print in cents, the book register's own way (a whole-dollar figure drops its ".00").
+    expect(bookMoneyPair(396_030_000n, 635_640_000n, 6)).toEqual({ change: "+$396.03", level: "$635.64" });
+    expect(bookMoneyPair(-139_603_961n, 100_000_000n, 6)).toEqual({ change: `${MINUS}$139.60`, level: "$100" });
+  });
+
+  test("truncation toward zero at the shared tier — never rounded up", () => {
+    expect(bookMoneyPair(999_999_999n, 1_999_999_999n, 6)).toEqual({ change: "+$999", level: "$1,999" });
+    expect(bookMoneyPair(117_999_999_999n, 1_199_999_999_999n, 6)).toEqual({ change: "+$0.1M", level: "$1.1M" });
+  });
+
+  test("two different values never print alike: both take a digit, then a second, and never more than two", () => {
+    expect(bookMoneyPair(118_300_000_000n, 118_900_000_000n, 6)).toEqual({ change: "+$118.3K", level: "$118.9K" });
+    expect(bookMoneyPair(118_310_000_000n, 118_390_000_000n, 6)).toEqual({ change: "+$118.31K", level: "$118.39K" });
+    expect(bookMoneyPair(118_311_000_000n, 118_319_000_000n, 6)).toEqual({ change: "+$118.31K", level: "$118.31K" });
+    // Equal values print alike: a rise from nothing lands where it rose to.
+    expect(bookMoneyPair(118_300_000_000n, 118_300_000_000n, 6)).toEqual({ change: "+$118K", level: "$118K" });
+  });
+
+  test("a nonzero change that the shared tier would print as zero prints at its own tier — never '+$0K'", () => {
+    expect(bookMoneyPair(5_000_000n, 41_300_000_000n, 6)).toEqual({ change: "+$5", level: "$41K" });
+    expect(bookMoneyPair(40_000_000_000n, 1_200_000_000_000n, 6)).toEqual({ change: "+$40K", level: "$1.2M" });
+    expect(bookMoneyPair(1n, 41_300_000_000n, 6)).toEqual({ change: "+<$0.01", level: "$41K" });
+  });
+
+  test("a fall larger than the level it lands at sets the tier by its own size; the level then keeps its own", () => {
+    expect(bookMoneyPair(-1_500_000_000_000n, 10_000_000_000n, 6)).toEqual({ change: `${MINUS}$1.5M`, level: "$10K" });
+  });
+
+  test("no change carries no sign; a zero level is a true zero", () => {
+    expect(bookMoneyPair(0n, 1_427_720_000n, 6)).toEqual({ change: "$0", level: "$1,427" });
+    expect(bookMoneyPair(-239_603_961n, 0n, 6)).toEqual({ change: `${MINUS}$239.60`, level: "$0" });
+  });
+
+  test("a scale the guard refuses prints the unreadable word for both figures", () => {
+    for (const decimals of [null, 1001, -0, 2.5]) {
+      expect(bookMoneyPair(5n, 10n, decimals)).toEqual({ change: UNREADABLE_SCALE, level: UNREADABLE_SCALE });
     }
   });
 });

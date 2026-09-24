@@ -18,9 +18,11 @@
 //     names (the peak above the line, the newest figure above its point, the
 //     0 on top of the floor rule), is painted after the line and the points,
 //     and wears a halo in the panel's ground;
-//   - no direct label overprints another: the peak's label sits over the
-//     peak, else at the plot's left edge, else on a row of its own above the
-//     plot — the only case in which the top strip grows;
+//   - no direct label overprints another, and a direct label sits on its
+//     datum: the peak's label is centred over the peak, else on a row of its
+//     own above the plot at the peak's same x — the only case in which the top
+//     strip grows; a small dot marks the peak it names (its title the exact
+//     figure). Only a caller that names no peak gets the plot's left edge;
 //   - the panel answers WITHOUT a click — the drawn y-max wears its figure
 //     and the word that says what it is, the x-axis states its extent buckets
 //     (compact forms where the full ones would run together, the full strings
@@ -69,11 +71,13 @@ export interface ObservatorySeriesChartProps {
   yMaxLabel?: string;
   /**
    * The axis index the y-max belongs to. With it the label sits over the peak
-   * itself; without it — or where it would run into the newest figure's label —
-   * the label keeps the plot's left edge, where its word still says what it is;
-   * where the edge would run into it too, the label takes a row of its own.
+   * itself, or — where it would run into the newest figure's label — on a row
+   * of its own above the plot, at the same x. Without it the label keeps the
+   * plot's left edge, where its word still says what it is.
    */
   yMaxIndex?: number;
+  /** The peak's exact figure (the exact register), the title of the dot that marks the peak. */
+  yMaxExact?: string;
   /** The oldest axis entry's bucket hour (the head's own UTC format). */
   xStartLabel?: string;
   /** The newest axis entry's bucket hour (the head's own UTC format). */
@@ -176,6 +180,7 @@ export function ObservatorySeriesChart({
   onSelect,
   yMaxLabel,
   yMaxIndex,
+  yMaxExact,
   xStartLabel,
   xEndLabel,
   xStartCompact,
@@ -222,8 +227,8 @@ export function ObservatorySeriesChart({
     const start = newest.onRight ? x(newest.index) - 6 - length : x(newest.index) + 6;
     return { left: start, right: start + length, baselineY: newestBaseline(newest, 0) };
   })();
-  // The peak's label: over the peak, else at the plot's left edge, else on a row of its own (lib/sparkline-scale).
-  const peak =
+  const peakIndex = yMaxIndex !== undefined && yMaxIndex >= 0 && yMaxIndex < values.length ? yMaxIndex : null;
+  const placed =
     yMaxLabel === undefined
       ? null
       : seriesPeakLabelPlacement({
@@ -231,10 +236,17 @@ export function ObservatorySeriesChart({
           padX,
           glyphPx,
           labelChars: yMaxLabel.length,
-          peakX: yMaxIndex !== undefined && yMaxIndex >= 0 && yMaxIndex < values.length ? x(yMaxIndex) : null,
+          peakX: peakIndex === null ? null : x(peakIndex),
           peakBaselineY: yAt(max, 0) - 6,
           newest: newestSpan,
         });
+  // Where the label over the peak would run into the newest figure, it takes the row above at the peak's own x: at
+  // the plot's far edge a figure reads as the window's starting value, detached from the datum it names.
+  const labelHalf = yMaxLabel === undefined ? 0 : (yMaxLabel.length * glyphPx) / 2;
+  const peak =
+    placed?.place === "edge" && peakIndex !== null && labelHalf * 2 < width
+      ? { place: "raised" as const, x: Math.min(Math.max(x(peakIndex), labelHalf + 1), width - labelHalf - 1), anchor: "middle" as const }
+      : placed;
   // The top strip grows only when the peak label takes its own row; the plot keeps its size.
   const raise = peak?.place === "raised" ? SERIES_PEAK_RAISE_PX : 0;
   const y = (value: number) => yAt(value, raise);
@@ -451,6 +463,22 @@ export function ObservatorySeriesChart({
           </circle>
         );
       })}
+
+      {peak !== null && peakIndex !== null && (
+        // The datum the peak's label names, marked: a small dot in the secondary ink, its exact figure on hover. The
+        // point beneath it stays the target that selects the hour.
+        <circle
+          data-testid="obs-peak-dot"
+          cx={x(peakIndex)}
+          cy={y(max)}
+          r={1.5}
+          style={{ fill: "var(--ink-2)", pointerEvents: yMaxExact === undefined ? "none" : undefined, ...(selectable ? { cursor: "pointer" } : {}) }}
+          aria-hidden="true"
+          onClick={selectable ? () => { select(peakIndex); } : undefined}
+        >
+          {yMaxExact !== undefined && <title>{yMaxExact}</title>}
+        </circle>
+      )}
 
       {selectedIndex !== null &&
         selectedIndex >= 0 &&

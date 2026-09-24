@@ -8,6 +8,7 @@ import type { AddressReading } from "../../lib/address-lookup";
 import { TIER_FALLBACK } from "../../lib/freshnessTiers";
 import {
   batchAxisLabel,
+  CAP_LINE_LABEL,
   deriveInspectorView,
   drawerEmptyText,
   drawerSweepBlock,
@@ -19,6 +20,7 @@ import {
   NEAR_LINE_LABEL,
   OPEN_IN_SCENARIOS,
   PRICE_INPUTS,
+  projectionRowSub,
   stressBatchNote,
   stressCaption,
   stressEmptyText,
@@ -774,18 +776,32 @@ test("the surface's words: arrows only on links to another page, the lines on th
   // A drawer trigger is no page: no arrow.
   expect(PRICE_INPUTS).toBe("Price inputs");
   expect(NEAR_LINE_LABEL).toBe("10% of cap");
+  // The label names the line itself, so it stays true on either side of it.
+  expect(CAP_LINE_LABEL).toBe("Borrow cap · 0%");
   expect(LIQUIDATION_LINE_LABEL).toBe("Health factor 1.0");
   expect(batchAxisLabel(18152)).toBe("Batch 18,152");
 });
 
-test("the stress caption states room today once — the stress body's own before side — while every row agrees on it", () => {
+test("the stress caption states room today once — the stress body's own before side, in the column's unit and in dollars — while every row agrees on it, and defines the cells", () => {
   const view = deriveInspectorView(
     reading({ address: STRESS_DM.address, lookup: { phase: "ready", value: found([nearWire({ account: STRESS_DM.address })]) }, stress: { phase: "ready", value: lookup(STRESS_DM) } }),
     TIER_FALLBACK,
   );
-  expect(stressCaption(view)).toMatch(/^Room today: over cap by \$[\d,.]+\. Room after is the engine’s own cap less debt under each scenario/);
-  // No rows, no figure to state.
-  expect(stressCaption(deriveInspectorView(reading({}), TIER_FALLBACK))).toBe("Room after is the engine’s own cap less debt under each scenario; the rate horizon lists its extra interest instead.");
+  expect(stressCaption(view)).toMatch(
+    /^Room today: −\d+\.\d% of the cap \(over cap by \$[\d,.]+\)\. Room after is the share of each scenario’s cap left unborrowed; below zero, the account is over its cap\.$/,
+  );
+  // No rows, no figure to state: the definition alone.
+  expect(stressCaption(deriveInspectorView(reading({}), TIER_FALLBACK))).toBe("Room after is the share of each scenario’s cap left unborrowed; below zero, the account is over its cap.");
+});
+
+test("a projection row's sub-line is one line both stress tables print: what it projects and holds, then its interest by each horizon or the one true cause", () => {
+  const horizons = [
+    { seconds: 2_592_000, extraInterest: 7_920_000n, verdict: "not-liquidatable" as const },
+    { seconds: 7_776_000, extraInterest: 23_770_000n, verdict: "not-liquidatable" as const },
+  ];
+  expect(projectionRowSub(horizons, 6)).toBe("Rate horizon · prices held flat · +$7.92 interest by 30 days, +$23.77 by 90 days");
+  expect(projectionRowSub(horizons, null, "no-position")).toBe("Rate horizon · prices held flat · no Cash position in the lookup");
+  expect(projectionRowSub([], 6)).toBe("Rate horizon · prices held flat · no horizon in the projection");
 });
 
 test("the legacy fold: its own figures and verdict, sentence case, a missing health factor named and never a dash", () => {

@@ -5,12 +5,13 @@
 // of its own kind (unreadable — never zero, never a throw), nothing is ever
 // interpolated across any of them, and a stride serves each hour VERBATIM
 // (gap detection respects it).
-// The two sentences the page leads with are pinned in their parts: the
-// reader's tier (compact money, grouped counts, the instant from the wire's
-// own UTC fields against the envelope's served_at), every arm — the change
-// leads — and a missing or withheld hour named as such, never as a zero. The
-// chart's direct labels speak the book register and are never printed alike
-// for two different values.
+// The headline is pinned in its parts: the reader's tier (compact money,
+// grouped counts, the instant from the wire's own UTC fields against the
+// envelope's served_at), every arm — the change leads — and a missing or
+// withheld hour named as such, never as a zero. The chart's caption states the
+// recorded span and what a point and a gap are, no figure. The chart's direct
+// labels speak the book register and are never printed alike for two
+// different values.
 
 import { expect, test } from "@playwright/test";
 import {
@@ -40,7 +41,6 @@ import { EM_DASH, formatBlock } from "../../lib/format";
 import { humanUsd } from "../../lib/human-usd";
 import { humanUtc } from "../../lib/human-utc";
 import type { ObservatorySeriesPoint, ObservatorySeriesResponse } from "../../lib/observatory-data";
-import { groupInt } from "../../lib/prose";
 import { WireIntegerError } from "../../lib/wireGuard";
 import { DEMO_OBSERVATORY_AAVE, DEMO_OBSERVATORY_DM } from "../fixtures/demo";
 import { OBSERVATORY_SERIES_AAVE, OBSERVATORY_SERIES_DM } from "../fixtures/observatory";
@@ -304,14 +304,15 @@ test("the stride's word for the chip: hourly at the native stride; an applied on
   expect(() => strideWord(7200.5)).toThrow(WireIntegerError);
 });
 
-test("the served range: the reader's words on the chip's face — an open end is the latest hour, an open start the earliest — and the wire's own instants, unbounded ends stated as unbounded, on its title", () => {
-  expect(describeRange(null, null)).toBe("unbounded → unbounded");
-  expect(describeRange("2026-07-29T08:00:00Z", null)).toBe("2026-07-29T08:00:00Z → unbounded");
-  expect(rangeWords("2026-08-01T21:00:00Z", null, "2026-08-08T20:22:50Z")).toBe(`${nb("Aug 1, 21:00 UTC")} → latest`);
-  expect(rangeWords(null, "2026-08-08T20:00:00Z", "2026-08-08T20:22:50Z")).toBe(`earliest → ${nb("Aug 8, 20:00 UTC")}`);
-  expect(rangeWords("2025-12-31T23:00:00Z", null, "2026-01-01T00:10:00Z")).toBe(`${nb("Dec 31, 2025, 23:00 UTC")} → latest`);
+test("the served range: the reader's words on the chip's face — an open end is the latest hour, an open start the earliest — and the wire's own instants, unbounded ends stated as unbounded, on its title; a range takes a spaced en dash, since an arrow is a link", () => {
+  expect(describeRange(null, null)).toBe("unbounded – unbounded");
+  expect(describeRange("2026-07-29T08:00:00Z", null)).toBe("2026-07-29T08:00:00Z – unbounded");
+  expect(rangeWords("2026-08-01T21:00:00Z", null, "2026-08-08T20:22:50Z")).toBe(`${nb("Aug 1, 21:00 UTC")} – latest`);
+  expect(rangeWords(null, "2026-08-08T20:00:00Z", "2026-08-08T20:22:50Z")).toBe(`earliest – ${nb("Aug 8, 20:00 UTC")}`);
+  expect(rangeWords("2025-12-31T23:00:00Z", null, "2026-01-01T00:10:00Z")).toBe(`${nb("Dec 31, 2025, 23:00 UTC")} – latest`);
   // A bound that is no UTC instant prints verbatim — never repaired.
-  expect(rangeWords("yesterday", null, "2026-08-08T20:22:50Z")).toBe("yesterday → latest");
+  expect(rangeWords("yesterday", null, "2026-08-08T20:22:50Z")).toBe("yesterday – latest");
+  for (const range of [describeRange(null, null), rangeWords(null, null, "2026-08-08T20:22:50Z")]) expect(range).not.toContain("→");
 });
 
 test("an axis end's compact form is the reader's instant with its clock dropped; text humanUtc could not read is its own compact form", () => {
@@ -737,75 +738,23 @@ test.describe("observatoryTakeaway — the headline's parts and the dek", () => 
   });
 });
 
-test.describe("gridReadingLine — the drawn metric's finding, as a delta", () => {
-  test("movement between the first and last RECORDED hours: one subtraction, in the reader's tier, for the metric the chart draws", () => {
+test.describe("gridReadingLine — the chart's caption: what a point and a gap are, over the recorded span", () => {
+  test("the span between the first and last RECORDED hours, its zone stated once at the end, a spaced en dash between; the same words for every metric — the change is the headline's and the tiles'", () => {
     const axis = buildBucketAxis(DEMO_OBSERVATORY_AAVE);
     const captured = axis.entries.filter((entry) => entry.point !== null && !entry.point.refused);
     const first = captured[0]?.point;
     const last = lastOf(captured).point;
     if (first === null || first === undefined || last === null) throw new Error("fixture invariant: aave carries captured buckets");
-    if (first.debt_usd === null || last.debt_usd === null || first.accounts === null || last.accounts === null) {
-      throw new Error("fixture invariant: the demo's end hours state debt and accounts");
-    }
-    const usd = DEMO_OBSERVATORY_AAVE.usd_decimals;
     const served = DEMO_OBSERVATORY_AAVE.served_at;
-    const debtFall = BigInt(first.debt_usd) - BigInt(last.debt_usd);
-    const accountsFall = first.accounts - last.accounts;
-    expect(debtFall > 0n && accountsFall > 0).toBe(true);
-    const span = `${humanUtc(first.bucket_start, served).replace(/ UTC$/, "")} → ${humanUtc(last.bucket_start, served)}`;
-    expect(gridReadingLine(DEMO_OBSERVATORY_AAVE, axis)).toBe(
-      `Between the first and last recorded hours (${span}), debt fell by ${humanUsd(debtFall, usd)}, to ${humanUsd(BigInt(last.debt_usd), usd)}.`,
-    );
-    expect(gridReadingLine(DEMO_OBSERVATORY_AAVE, axis, "accounts")).toBe(
-      `Between the first and last recorded hours (${span}), accounts fell by ${groupInt(accountsFall)}, to ${groupInt(last.accounts)}.`,
-    );
+    const span = `${humanUtc(first.bucket_start, served).replace(/ UTC$/, "")} – ${humanUtc(last.bucket_start, served)}`;
+    expect(gridReadingLine(DEMO_OBSERVATORY_AAVE, axis)).toBe(`Each point is one recorded hour, ${span}; a gap is an hour with no figures to draw.`);
   });
 
-  test("the demo, both engines, literally — a delta, never a percentage, never an arrow pair the compact tier would flatten; the liquidatable count in its engine's noun", () => {
-    const span = `${nb("Aug 1, 21:00")} → ${nb("Aug 8, 20:00 UTC")}`;
-    const aaveAxis = buildBucketAxis(DEMO_OBSERVATORY_AAVE);
-    const dmAxis = buildBucketAxis(DEMO_OBSERVATORY_DM);
-    expect(gridReadingLine(DEMO_OBSERVATORY_AAVE, aaveAxis)).toBe(`Between the first and last recorded hours (${span}), debt fell by $11K, to $1.9M.`);
-    expect(gridReadingLine(DEMO_OBSERVATORY_AAVE, aaveAxis, "liquidatable_positions")).toBe(
-      `Between the first and last recorded hours (${span}), liquidatable positions rose by 1, to 46.`,
-    );
-    expect(gridReadingLine(DEMO_OBSERVATORY_DM, dmAxis)).toBe(`Between the first and last recorded hours (${span}), debt rose by $1.8M, to $27.8M.`);
-    expect(gridReadingLine(DEMO_OBSERVATORY_DM, dmAxis, "liquidatable_positions")).toBe(
-      `Between the first and last recorded hours (${span}), liquidatable accounts rose by 1, to 49.`,
-    );
-    expect(gridReadingLine(DEMO_OBSERVATORY_DM, dmAxis, "collateral_usd")).toBe(
-      `Between the first and last recorded hours (${span}), collateral fell by $2.7M, to $153.1M.`,
-    );
-    for (const line of [gridReadingLine(DEMO_OBSERVATORY_AAVE, aaveAxis), gridReadingLine(DEMO_OBSERVATORY_DM, dmAxis)]) {
-      expect(line).not.toMatch(/(rose|fell) [$\d][^ ]* to /);
-      expect(line).not.toMatch(/%|\$[0-9.,KMB]+ → \$|\d{4}-\d{2}-\d{2}T/);
-    }
-  });
-
-  test("unchanged, and not stated: an equal end is said as unchanged; a null end gives no change — never a delta against zero", () => {
-    const axis = buildBucketAxis(OBSERVATORY_SERIES_AAVE);
-    const span = `${nb("Jul 29, 06:00")} → ${nb("Jul 29, 10:00 UTC")}`;
-    expect(gridReadingLine(OBSERVATORY_SERIES_AAVE, axis)).toBe(`Between the first and last recorded hours (${span}), debt unchanged at $619.18.`);
-    expect(gridReadingLine(OBSERVATORY_SERIES_AAVE, axis, "accounts")).toBe(`Between the first and last recorded hours (${span}), accounts rose by 1, to 6.`);
-    expect(gridReadingLine(OBSERVATORY_SERIES_AAVE, axis, "liquidatable_positions")).toBe(
-      `Between the first and last recorded hours (${span}), liquidatable positions unchanged at 0.`,
-    );
-    const two = (change: Partial<ObservatorySeriesPoint>, metric: "debt_usd" | "accounts" | "liquidatable_positions", both = false) => {
-      const body = {
-        ...OBSERVATORY_SERIES_DM,
-        points: [{ ...DM_CAPTURED, ...(both ? change : {}) }, { ...DM_CAPTURED, bucket_start: "2026-07-29T09:00:00Z", ...change }],
-      };
-      return gridReadingLine(body, buildBucketAxis(body), metric);
-    };
-    expect(two({ accounts: null }, "accounts")).toContain(", accounts not stated at one end, so no change is given.");
-    expect(two({ accounts: null }, "accounts", true)).toContain(", accounts not stated at either end, so no change is given.");
-    expect(two({ debt_usd: null }, "debt_usd")).toContain(", debt not stated at one end, so no change is given.");
-    expect(two({ debt_usd: "12.5" }, "debt_usd")).toContain(", debt unreadable at one end, so no change is given.");
-    expect(two({ debt_usd: "" }, "debt_usd", true)).toContain(", debt unreadable at either end, so no change is given.");
-    expect(two({ liquidatable_positions: null }, "liquidatable_positions")).toContain(", liquidatable accounts not stated at one end, so no change is given.");
-    for (const line of [two({ accounts: null }, "accounts"), two({ debt_usd: null }, "debt_usd")]) expect(line).not.toMatch(/\$0\b|fell by 3, to|to 0\b/);
-    // A count outside the contract is refused before the subtraction.
-    expect(() => two({ accounts: 2.5 }, "accounts")).toThrow(WireIntegerError);
+  test("the demo, both engines, literally: no figure, no change, no arrow", () => {
+    const line = `Each point is one recorded hour, ${nb("Aug 1, 21:00")} – ${nb("Aug 8, 20:00 UTC")}; a gap is an hour with no figures to draw.`;
+    expect(gridReadingLine(DEMO_OBSERVATORY_AAVE, buildBucketAxis(DEMO_OBSERVATORY_AAVE))).toBe(line);
+    expect(gridReadingLine(DEMO_OBSERVATORY_DM, buildBucketAxis(DEMO_OBSERVATORY_DM))).toBe(line);
+    expect(line).not.toMatch(/→|\$|rose|fell|%/);
   });
 
   test("one recorded hour: no movement is stated, and no refused number stands in; none: nothing to read", () => {

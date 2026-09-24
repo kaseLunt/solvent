@@ -402,13 +402,15 @@ export const FEED_LOADING = "Loading recorded chain actions…";
 export const FEED_EXHAUSTED = "No recorded chain action matches this filter.";
 
 /**
- * The Activity headline over the loaded WINDOW's own numbers — the liquidation count among the loaded rows, then
- * the newest row's coordinate — as the finding's core and its scope. "loaded" never leaves the emphasis: a window
- * is a floor of the filtered record, never its total, while a cursor remains, and `hasMore` says which. Nothing
- * loaded is never a count: it is a load in flight or the service's real empty answer. The newest claim is
- * `feedNewest`'s. The instant is spoken through `humanUtc` from the wire's own UTC fields with the envelope's
- * `served_at` as the reference year — never the browser's clock or zone; the exact instant rides the `Newest` chip.
- * A type is said in the page's words (`typeLabel`), as the controls beside the headline say it — never the wire's id.
+ * The Activity headline over the loaded WINDOW's own numbers, as the finding's core and its scope. Over many rows it
+ * is the finding alone — the liquidations and bad-debt realizations among the loaded rows — because the header's
+ * `Newest` and `Loaded` chips carry the newest instant and whether more remain; a window that licenses no newest
+ * (`feedNewest`: untimed, or an order the service broke) still says so, since no chip can. One row, and the ledger,
+ * name where they sit and whether more remain. "loaded" never leaves the emphasis: a window is a floor of the
+ * filtered record, never its total. Nothing loaded is never a count: it is a load in flight or the service's real
+ * empty answer. An instant is spoken through `humanUtc` from the wire's own UTC fields with the envelope's
+ * `served_at` as the reference year — never the browser's clock or zone. A type is said in the page's words
+ * (`typeLabel`), as the controls beside the headline say it — never the wire's id.
  */
 export function feedTakeaway(
   rows: readonly FeedChainEvent[],
@@ -441,31 +443,44 @@ export function feedTakeaway(
       : { emphasis: "1 chain action loaded,", rest: `${only === undefined ? "a chain action" : typeInSentence(only.type)}, ${where}; ${more}` };
   }
 
-  const loaded = plural(n, "chain action");
-  let emphasis: string;
-  let filtered = "";
+  const withheld =
+    newest.kind === "untimed"
+      ? "none has a block time yet, so no newest is claimed"
+      : newest.kind === "order-violated"
+        ? "no newest is claimed: the service broke its own ordering (see the alert below)"
+        : null;
+
   if (ledger) {
-    emphasis = `${plural(n, "liquidation")} loaded,`;
-  } else if (liquidations > 0) {
-    emphasis = `${plural(liquidations, "liquidation")} among the ${loaded} loaded,`;
-  } else if (types.length === 0 || types.includes("liquidation")) {
-    // A true zero, scoped by "loaded": the filter admits liquidations and none is among these rows.
-    emphasis = `No liquidation among the ${loaded} loaded,`;
-  } else {
-    emphasis = `${loaded} loaded,`;
-    filtered = `filtered to ${joinAnd(types.map(typeWord))}; `;
+    const claim =
+      newest.kind === "time"
+        ? `the newest at ${humanUtc(newest.iso, reference)}`
+        : newest.kind === "block"
+          ? `the newest at block ${formatBlock(newest.block)}`
+          : (withheld ?? "");
+    const more = hasMore ? "more exist beyond these." : "that is every action matching this filter.";
+    return { emphasis: `${plural(n, "liquidation")} loaded,`, rest: `${claim}; ${more}` };
   }
 
-  const claim =
-    newest.kind === "time"
-      ? `the newest at ${humanUtc(newest.iso, reference)}`
-      : newest.kind === "block"
-        ? `the newest at block ${formatBlock(newest.block)}`
-        : newest.kind === "untimed"
-          ? "none has a block time yet, so no newest is claimed"
-          : "no newest is claimed: the service broke its own ordering (see the alert below)";
-  const more = hasMore ? "more exist beyond these." : "that is every action matching this filter.";
-  return { emphasis, rest: `${filtered}${claim}; ${more}` };
+  const loaded = plural(n, "chain action");
+  const deficits = rows.filter((event) => event.type === "deficit_created").length;
+  let lead: string;
+  let filtered: string | null = null;
+  if (liquidations > 0 && deficits > 0) {
+    // Its own noun, so a realization is never read as one of the liquidations.
+    lead = `${plural(liquidations, "liquidation")} and ${plural(deficits, "bad-debt realization")} among the ${loaded} loaded`;
+  } else if (liquidations > 0) {
+    lead = `${plural(liquidations, "liquidation")} among the ${loaded} loaded`;
+  } else if (types.length === 0 || types.includes("liquidation")) {
+    // A true zero, scoped by "loaded": the filter admits liquidations and none is among these rows.
+    lead = `No liquidation among the ${loaded} loaded`;
+  } else {
+    lead = `${loaded} loaded`;
+    filtered = `filtered to ${joinAnd(types.map(typeWord))}`;
+  }
+  // The newest instant and whether more remain are the Newest and Loaded chips': the headline states the finding. A
+  // window that licenses no newest still says so, since no chip can.
+  const scopeWords = [filtered, withheld].filter((part): part is string => part !== null);
+  return scopeWords.length === 0 ? { emphasis: `${lead}.`, rest: "" } : { emphasis: `${lead},`, rest: `${scopeWords.join("; ")}.` };
 }
 
 /**

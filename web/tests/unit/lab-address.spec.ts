@@ -49,7 +49,7 @@ const cashRowEdited = (body: typeof DEMO_ADDRESS_NEAR, edit: (p: Position) => Po
   positions: body.positions.map((p) => (p.engine === "debt_manager" ? edit(p) : p)),
 });
 const PROJECTION_LABEL = "Cash borrow APY +200 bps";
-const PROJECTION_DEK = "Room today $190.50; 30\u00a0d: +$7.92 interest; 90\u00a0d: +$23.77 interest.";
+const PROJECTION_DEK = "Room today $190.50; +$7.92 interest by 30\u00a0days; +$23.77 by 90\u00a0days.";
 /** A tile with no figure names its absence in its register — never a dash. */
 const REFUSED = { value: "Not computed", tone: "refused", state: "refused" };
 const NOT_COMPUTED = REFUSED;
@@ -142,7 +142,7 @@ test("rows: the demo near account under its three scenarios, the selection, the 
   // The projection row is judged by its horizons, not by its after (the spot): no horizon flips, so the account holds through the longest.
   const proj = addressWorkspace({ address: DEMO_NEAR_ADDR, view: near(), selectedId: "dm_rate_horizon_plus_200bps" });
   expect(proj.selected?.projection).not.toBeNull();
-  expect(proj.headline).toEqual({ emphasis: "Stays inside its cap through 90\u00a0d", rest: `under ${PROJECTION_LABEL}.`, tone: "ok", dek: PROJECTION_DEK });
+  expect(proj.headline).toEqual({ emphasis: "Stays inside its cap through 90\u00a0days", rest: `under ${PROJECTION_LABEL}.`, tone: "ok", dek: PROJECTION_DEK });
   // Its after is the spot, which the Inspector reads as near cap: the after status follows the band, and the room beside it carries the same tone.
   expect(proj.tiles?.statusAfter).toEqual({ value: "Near cap", tone: "warn" });
   expect(proj.tiles?.roomAfter).toEqual({ value: "$190.50", tone: "warn", sub: "Room left" });
@@ -150,7 +150,7 @@ test("rows: the demo near account under its three scenarios, the selection, the 
 
 test("a projection's horizons decide: a liquidatable horizon is named in the warn tone, an unknowable one is a refusal naming it", () => {
   const within = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(projected(1, true)), selectedId: "dm_rate_horizon_plus_200bps" });
-  expect(within.headline).toEqual({ emphasis: "Becomes liquidatable within 90\u00a0d", rest: `under ${PROJECTION_LABEL}.`, tone: "warn", dek: PROJECTION_DEK });
+  expect(within.headline).toEqual({ emphasis: "Becomes liquidatable within 90\u00a0days", rest: `under ${PROJECTION_LABEL}.`, tone: "warn", dek: PROJECTION_DEK });
   const unknown = addressWorkspace({ address: DEMO_NEAR_ADDR, view: nearWith(projected(0, null)), selectedId: "dm_rate_horizon_plus_200bps" });
   expect(unknown.headline).toEqual({
     emphasis: `Cannot say whether this account becomes liquidatable under ${PROJECTION_LABEL}.`,
@@ -370,9 +370,9 @@ test("rowOutcome: the library word is the row's own verdict — the same judgeme
   expect(eth.flips).toBe(true);
   expect(rowOutcome(eth)).toEqual({ key: "result", text: "Becomes liquidatable", tone: "crit" });
   // A projection speaks through its horizons: inside through the longest, or liquidatable within the first that flips.
-  expect(rowOutcome(dm)).toEqual({ key: "result", text: "Stays inside its cap through 90\u00a0d", tone: "ok" });
+  expect(rowOutcome(dm)).toEqual({ key: "result", text: "Stays inside its cap through 90\u00a0days", tone: "ok" });
   const flipsAt30d = near(projected(0, true)).find((r) => r.id === "dm_rate_horizon_plus_200bps");
-  expect(rowOutcome(flipsAt30d)).toEqual({ key: "result", text: "Becomes liquidatable within 30\u00a0d", tone: "warn" });
+  expect(rowOutcome(flipsAt30d)).toEqual({ key: "result", text: "Becomes liquidatable within 30\u00a0days", tone: "warn" });
   // A side the tiles refuse yields no verdict word, whatever the wire's booleans say.
   const unreadable = near(withResult("eth_minus_30", (x) => (!x.after ? x : { ...x, after: { ...x.after, debt_usd: "-4822000000" } }))).find((r) => r.id === "eth_minus_30")!;
   expect(unreadable.flips).toBe(true);

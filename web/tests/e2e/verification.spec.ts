@@ -45,7 +45,7 @@ if (REAL_KEY.length === 0) throw new Error("fixture invariant: the example carri
 const dm = META.watermark_vector.find((w) => w.engine === "debt_manager");
 if (dm === undefined) throw new Error("fixture invariant: meta carries the debt_manager watermark");
 
-test("the committed example: state ok, receipt exact, the takeaway headline with only the proof's finding toned, the two-fact dek, four chips, the four-step strip, the receipt line", async ({
+test("the committed example: state ok, receipt exact, the takeaway headline with only the proof's finding toned, the two-fact dek, four chips, the four-step strip and no receipt strip beneath it", async ({
   page,
 }) => {
   await mockAll(page);
@@ -99,9 +99,8 @@ test("the committed example: state ok, receipt exact, the takeaway headline with
   await expect(step(page, "serve")).toContainText("17 endpoints · typed TypeScript client");
   // No step prints a dash for a figure it has.
   await expect(page.getByTestId("verification-step")).not.toContainText("—");
-  const receipt = page.getByTestId("verification-receipt");
-  await expect(receipt).toHaveText("Reconcile passed: 87 of 87 checked rows matched the chain exactly, 0 drifted.");
-  await expect(receipt).toHaveAttribute("data-tone", "ok");
+  // The verdict is said once per altitude — headline, chip, step, card — so no strip beneath the steps repeats it.
+  await expect(page.getByTestId("verification-receipt")).toHaveCount(0);
   // One word for the receipt's rows: the page counts checked rows, and the wire's term waits in the drawer.
   for (const id of ["verification-verdict", "verification-architecture", "verification-subject-proof"]) await expect(page.getByTestId(id)).not.toContainText("gated");
 
@@ -164,7 +163,7 @@ test("the materialization key renders with a copy affordance that copies the COM
   expect(copied).toBe(REAL_KEY);
 });
 
-test("a failed receipt: data-receipt failed, the crit header, the rejected pill, the drift counted — never 'named' — and where its rows are recorded in the drawer, the failing receipt line, no proof badge anywhere", async ({
+test("a failed receipt: data-receipt failed, the crit header, one word for it — 'failed' — on the pill, the chip and the status row, the drift counted — never 'named' — the receipt's own verdict on hover and in the drawer, no proof badge anywhere", async ({
   page,
 }) => {
   await mockAll(page, EVIDENCE_PROOF_FAILED);
@@ -172,16 +171,21 @@ test("a failed receipt: data-receipt failed, the crit header, the rejected pill,
   await expect(surface(page)).toHaveAttribute("data-receipt", "failed");
   await expect(verdict(page)).toHaveAttribute("data-variant", "crit");
   // Never worded as accepted, and never as "0 drift": the receipt's own tally is the finding.
-  await expect(headline(page)).toHaveText("The last reconcile run did not match the chain exactly, 84 of 87 checked rows matched; 3 rows drifted.");
-  await expect(headline(page).locator("b")).toHaveText("The last reconcile run did not match the chain exactly,");
+  await expect(headline(page)).toHaveText("The last reconcile run did not match the chain exactly: 84 of 87 checked rows matched; 3 drifted.");
+  await expect(headline(page).locator("b")).toHaveText("The last reconcile run did not match the chain exactly:");
   await expect(page.getByTestId("verification-verdict-dek")).toHaveText(
     "No exactness is claimed for this deployment until a run passes. Batch 1, served now, is live data; no check covers it.",
   );
   await expect(chip(page, "Receipt")).toContainText("failed · 84/87");
   await expect(chip(page, "Receipt")).toHaveClass(/chipCrit/);
-  await expect(page.getByTestId("verification-proof-status")).toHaveText("Receipt rejected");
+  await expect(page.getByTestId("verification-proof-status")).toHaveText("Receipt failed");
   await expect(page.getByTestId("verification-subject-proof")).toHaveAttribute("data-rule", "crit");
-  await expect(page.getByTestId("verification-subject-proof")).toContainText('receipt verdict "fail"');
+  // The status row counts what failed; the receipt's own verdict and exit code are its title, never its words.
+  const status = page.getByTestId("verification-subject-proof").getByText("Failed · 3 of 87 checked rows drifted", { exact: true });
+  await expect(status).toBeVisible();
+  await expect(status).toHaveAttribute("title", 'receipt verdict "fail" (exit 1)');
+  await expect(page.getByTestId("verification-subject-proof")).not.toContainText('receipt verdict "fail"');
+  for (const other of ["Rejected", "Receipt rejected", "exit 1"]) await expect(surface(page)).not.toContainText(other);
   // The drift is real in the weld data, and it renders.
   await expect(page.getByTestId("verification-weld-debt_manager")).toContainText("26/29 exact");
   await expect(step(page, "verify")).toHaveAttribute("data-tone", "crit");
@@ -190,9 +194,7 @@ test("a failed receipt: data-receipt failed, the crit header, the rejected pill,
   await expect(page.getByTestId("verification-architecture")).not.toContainText("drift-report.json");
   await expect(page.getByTestId("verification-architecture")).not.toContainText("named");
   await expect(page.getByTestId("verification-verdict")).not.toContainText("named");
-  const receipt = page.getByTestId("verification-receipt");
-  await expect(receipt).toHaveText("Reconcile failed: 84 of 87 checked rows matched, 3 drifted.");
-  await expect(receipt).toHaveAttribute("data-tone", "crit");
+  await expect(page.getByTestId("verification-receipt")).toHaveCount(0);
   // The proof badge appears NOWHERE on this page.
   await expect(page.getByText("Proof exact @")).toHaveCount(0);
   // The live subject still serves — the split holds in this direction too.
@@ -200,11 +202,11 @@ test("a failed receipt: data-receipt failed, the crit header, the rejected pill,
   // The receipt's own verdict and where its drifted rows are recorded are the drawer's.
   await page.getByTestId("verification-drawer").click();
   const body = page.getByTestId("verification-drawer-body");
-  await expect(body).toContainText('The proof subject was rejected: receipt verdict "fail" (exit 1).');
+  await expect(body).toContainText('The receipt failed: receipt verdict "fail" (exit 1).');
   await expect(body).toContainText("The drifted rows are recorded in the committed drift report, roadmap/evidence/artifacts/w1-reconcile/drift-report.json.");
 });
 
-test("a rejected receipt names its fault in the page's words — a short weld by its engine's name, a short checked tally as its row reads — on the card, the Receipt chip, the strip and the drawer; never 'gated', never an engine's wire id", async ({
+test("a drifted receipt names its fault in the page's words — a short weld by its engine's name, a short checked tally as its row reads — on the card, the Receipt chip and the drawer, under one word for its state; never 'gated', never an engine's wire id", async ({
   page,
 }) => {
   const legacyShort = structuredClone(EVIDENCE_MANIFEST);
@@ -215,20 +217,21 @@ test("a rejected receipt names its fault in the page's words — a short weld by
   await page.goto("/proof");
   await expect(surface(page)).toHaveAttribute("data-receipt", "drift");
   const fault = "Aave v3 market (legacy) · account comparisons 13/14 exact";
-  await expect(page.getByTestId("verification-subject-proof")).toContainText(`Rejected · ${fault}`);
+  await expect(page.getByTestId("verification-subject-proof")).toContainText(`Drifted · ${fault}`);
   await expect(chip(page, "Receipt")).toHaveAttribute("title", fault);
-  await expect(page.getByTestId("verification-receipt")).toHaveText(`Reconcile receipt: 87 of 87 checked rows matched, 0 drifted, but ${fault}; no proof badge.`);
+  await expect(chip(page, "Receipt")).toContainText("drifted · 87/87");
   // A passing verdict whose own tallies disagree is drift: warn, never the failure's crit.
-  await expect(page.getByTestId("verification-receipt")).toHaveAttribute("data-tone", "warn");
+  await expect(page.getByTestId("verification-proof-status")).toHaveText("Receipt drifted");
   await expect(page.getByTestId("verification-subject-proof")).toHaveAttribute("data-rule", "warn");
-  await expect(headline(page)).toHaveText("The last reconcile run did not match the chain exactly, Aave v3 market (legacy) matched 13 of 14 account comparisons.");
+  await expect(page.getByTestId("verification-receipt")).toHaveCount(0);
+  await expect(headline(page)).toHaveText("The last reconcile run did not match the chain exactly: Aave v3 market (legacy) matched 13 of 14 account comparisons.");
   for (const id of ["verification-verdict", "verification-architecture", "verification-subject-proof"]) {
     await expect(page.getByTestId(id)).not.toContainText("gated");
     await expect(page.getByTestId(id)).not.toContainText("aave_v3_etherfi");
   }
   await page.getByRole("button", { name: "Explain the proof subject" }).click();
   const evidence = page.getByTestId("verification-drawer-evidence");
-  await expect(evidence).toContainText(`Receipt rejected · ${fault}`);
+  await expect(evidence).toContainText(`Receipt drifted · ${fault}`);
   await expect(evidence).not.toContainText("aave_v3_etherfi weld");
   await page.keyboard.press("Escape");
 
@@ -240,10 +243,8 @@ test("a rejected receipt names its fault in the page's words — a short weld by
   await page.route("**/v1/evidence*", (route) => json(route, rowShort));
   await page.goto("/proof");
   await expect(surface(page)).toHaveAttribute("data-receipt", "drift");
-  await expect(page.getByTestId("verification-subject-proof")).toContainText("Rejected · checked rows 86/87 exact · 0 drifted");
+  await expect(page.getByTestId("verification-subject-proof")).toContainText("Drifted · checked rows 86/87 exact · 0 drifted");
   await expect(chip(page, "Receipt")).toHaveAttribute("title", "checked rows 86/87 exact · 0 drifted");
-  // The short tally is the fault, counted once on the strip — never repeated as the detail beside it.
-  await expect(page.getByTestId("verification-receipt")).toHaveText("Reconcile receipt: 86 of 87 checked rows matched, 0 drifted; no proof badge.");
   for (const id of ["verification-verdict", "verification-architecture", "verification-subject-proof"]) await expect(page.getByTestId(id)).not.toContainText("gated");
 });
 
@@ -268,8 +269,6 @@ test("a receipt that gated no rows proves nothing: data-receipt empty, the refus
   await expect(verify).toHaveAttribute("data-tone", "refused");
   await expect(verify).toContainText("0/0 checked rows · nothing proven");
   await expect(verify).toContainText("The pinned reconcile run checked no rows, so nothing is proven.");
-  await expect(page.getByTestId("verification-receipt")).toHaveText("Reconcile receipt: the run checked no rows, so nothing is proven.");
-  await expect(page.getByTestId("verification-receipt")).toHaveAttribute("data-tone", "refused");
   await expect(page.getByTestId("verification-proof-status")).toHaveText("Receipt checked no rows");
   await expect(page.getByTestId("verification-subject-proof")).toContainText("Nothing proven · the run checked no rows");
   // A run with no checked rows may still carry account comparisons: nothing on the page says no comparison happened.
@@ -297,7 +296,7 @@ test("nothing is green under a receipt of no rows: a weld of 0/0 exact is dim on
     await expect(weld.locator("[data-tone]")).toHaveAttribute("data-tone", "dim");
   }
   // The line beneath the welds states their counting rule and what "advisory" means, true of welds of 0/0: no row is said to be advisory.
-  await expect(proof.getByTestId("verification-welds-note")).toContainText("count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
+  await expect(proof.getByTestId("verification-welds-note")).toContainText("Counts every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); not a breakdown of the checked rows.");
   await expect(proof).not.toContainText("include advisory rows");
   // The fold's rows are in the DOM whether or not it is open, so the count covers the whole card.
   await expect(proof.locator("[data-tone='ok']")).toHaveCount(0);
@@ -326,8 +325,6 @@ test("a missing receipt is a first-class state: data-receipt none, the refused r
   await expect(page.getByTestId("verification-proof-status")).toHaveText("No committed receipt");
   await expect(page.getByTestId("verification-subject-proof")).toHaveAttribute("data-rule", "refused");
   await expect(page.getByTestId("verification-subject-proof")).toContainText("no committed receipt artifact is present in this deployment");
-  await expect(page.getByTestId("verification-receipt")).toHaveText("No reconcile receipt: no committed receipt artifact is present in this deployment.");
-  await expect(page.getByTestId("verification-receipt")).toHaveAttribute("data-tone", "refused");
   // The wire stated the absence, so the step and its sentence may say so, in the refused register — this is not an unread receipt, and never a dash.
   await expect(step(page, "verify")).toHaveAttribute("data-state", "refused");
   await expect(step(page, "verify")).toContainText("No committed receipt");
@@ -425,6 +422,7 @@ test("evidence unavailable: state unavailable, its own register — never a refu
   const card = page.getByTestId("verification-unavailable");
   await expect(card).toHaveAttribute("data-state", "unavailable");
   await expect(card).toContainText("Proof record unavailable");
+  await expect(card).toContainText("Both subject cards are read from this record, so neither is shown until the service answers.");
   await expect(card).toContainText("What the service said");
   for (const label of ["Proof pin", "Receipt", "Batch key"]) {
     await expect(chip(page, label)).toContainText("unavailable");
@@ -440,11 +438,11 @@ test("evidence unavailable: state unavailable, its own register — never a refu
   await expect(step(page, "verify")).toHaveAttribute("data-state", "unavailable");
   await expect(step(page, "verify")).toContainText("Unavailable");
   await expect(step(page, "verify")).not.toContainText("—");
-  await expect(step(page, "verify")).toContainText("The receipt could not be read.");
-  // The failure is said once, in the header: the receipt strip stands down rather than say it again beneath the tiles.
-  await expect(page.getByTestId("verification-receipt")).toHaveCount(0);
+  // The request failed: the step says its part of it — fetched — and never borrows the words for a body that could not be read.
+  await expect(step(page, "verify")).toContainText("The receipt could not be fetched.");
+  await expect(surface(page)).not.toContainText("could not be read");
   const said = (await surface(page).innerText()).split("could not be fetched").length - 1;
-  expect(said).toBe(1);
+  expect(said).toBe(2);
   // One thing to do next: the retry asks again, and the page answers from the new read.
   // What stands in for the unread manifest — nothing — is the drawer's.
   await page.getByTestId("verification-drawer").click();
@@ -458,7 +456,7 @@ test("evidence unavailable: state unavailable, its own register — never a refu
   await expect(surface(page)).toHaveAttribute("data-receipt", "exact");
   await expect(page.getByTestId("verification-retry")).toHaveCount(0);
   await expect(page.getByTestId("verification-unavailable")).toHaveCount(0);
-  await expect(page.getByTestId("verification-receipt")).toHaveText("Reconcile passed: 87 of 87 checked rows matched the chain exactly, 0 drifted.");
+  await expect(step(page, "verify")).toContainText("Every checked row of the pinned run matched the chain exactly; none drifted.");
 });
 
 test("retry keeps focus: pressed from the keyboard, the control leaves with the failure it answered and focus lands on the page's heading — never on <body> — and the heading is no Tab stop", async ({
@@ -497,7 +495,7 @@ test("retry keeps focus: pressed from the keyboard, the control leaves with the 
   expect(await focused()).not.toBe("H1");
 });
 
-test("a read in flight has not failed: while /v1/evidence, /v1/book and /v1/meta are unanswered every step is pending in its own words — 'could not be read' and 'unavailable' wait for a failure", async ({
+test("a read in flight has not failed: while /v1/evidence, /v1/book and /v1/meta are unanswered every step is pending in its own words — 'could not be fetched' and 'unavailable' wait for a failure", async ({
   page,
 }) => {
   let release: () => void = () => undefined;
@@ -527,12 +525,7 @@ test("a read in flight has not failed: while /v1/evidence, /v1/book and /v1/meta
   }
   await expect(step(page, "compute")).toContainText("Reading the batch…");
   await expect(step(page, "verify")).toContainText("Reading the receipt…");
-  // The receipt is pending, as its step is: the strip is pending and busy, drawn with the solid rule — the dashed, dimmed strip is a refusal's — and the page's receipt is not "none", the manifest's own absence.
-  const strip = page.getByTestId("verification-receipt");
-  await expect(strip).toHaveText("Reading the reconcile receipt…");
-  await expect(strip).toHaveAttribute("data-tone", "pending");
-  await expect(strip).toHaveAttribute("aria-busy", "true");
-  expect(await strip.evaluate((el) => getComputedStyle(el).borderTopStyle)).toBe("solid");
+  // The receipt is pending, as its step is: the page's receipt is not "none", the manifest's own absence.
   await expect(surface(page)).toHaveAttribute("data-receipt", "pending");
   // Every identity chip waits with it: the word, and no refused chip — nothing has been withheld.
   for (const label of ["Proof pin", "Live batch", "Receipt", "Batch key"]) {
@@ -550,7 +543,7 @@ test("a read in flight has not failed: while /v1/evidence, /v1/book and /v1/meta
   await expect(surface(page)).toHaveAttribute("data-state", "ok");
   await expect(surface(page).locator("[aria-busy='true']")).toHaveCount(0);
   await expect(surface(page)).toHaveAttribute("data-receipt", "exact");
-  await expect(strip).toHaveAttribute("data-tone", "ok");
+  await expect(step(page, "verify")).toHaveAttribute("data-tone", "ok");
   await expect(step(page, "verify")).toContainText("Every checked row of the pinned run matched the chain exactly; none drifted.");
 });
 
@@ -566,11 +559,34 @@ test("with the whole API unreachable every step but Serve is unavailable — unr
     await expect(step(page, key)).toHaveAttribute("data-tone", "neutral");
   }
   await expect(step(page, "serve")).toContainText("17 endpoints");
-  await expect(step(page, "compute")).toContainText("The batch could not be read.");
-  await expect(step(page, "verify")).toContainText("The receipt could not be read.");
+  await expect(step(page, "compute")).toContainText("The batch could not be fetched.");
+  await expect(step(page, "verify")).toContainText("The receipt could not be fetched.");
+  await expect(page.locator("body")).not.toContainText("could not be read");
   await expect(page.locator("body")).not.toContainText("No batch is servable");
   await expect(page.locator("body")).not.toContainText("No reconcile receipt is committed");
   for (const zero of ["0 checked rows", "0 gated rows"]) await expect(page.locator("body")).not.toContainText(zero);
+});
+
+test("a proxy's error page is a request that failed, never a body the page could not read: the status in the dek, the solid card, the fetched words on Compute and Verify", async ({
+  page,
+}) => {
+  const gateway = (route: Route) =>
+    route.fulfill({ status: 502, headers: CORS, contentType: "text/html", body: "<html><body><h1>502 Bad Gateway</h1></body></html>" });
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", gateway);
+  await page.route("**/v1/positions*", (route) => json(route, POSITIONS_DM_PAGE_1));
+  await page.route("**/v1/meta*", (route) => json(route, META));
+  await page.route("**/v1/evidence*", gateway);
+  await page.goto("/proof");
+  await expect(surface(page)).toHaveAttribute("data-state", "unavailable");
+  await expect(headline(page)).toHaveText("The verification record could not be fetched.");
+  await expect(page.getByTestId("verification-verdict-dek")).toHaveText("The service did not answer the proof request (HTTP 502), so there is no proof to show.");
+  const card = page.getByTestId("verification-unavailable");
+  await expect(card).toHaveAttribute("data-state", "unavailable");
+  await expect(card).toContainText("Proof record unavailable");
+  await expect(step(page, "compute")).toContainText("The batch could not be fetched.");
+  await expect(step(page, "verify")).toContainText("The receipt could not be fetched.");
+  for (const words of ["could not be read", "could not read", "unreadable"]) await expect(surface(page)).not.toContainText(words);
 });
 
 test("an absence the wire stated is worded as one: a 503 no-batch book on the Compute step, a manifest with no receipt on the Verify step", async ({
@@ -633,7 +649,7 @@ test("the drawer: the doctrine from the header; a subject's explain puts its evi
   await expect(evidence).toContainText("gated_exact == gated_rows");
   // The wire's term is kept once, beside its gloss in the page's word.
   await expect(evidence).toContainText("checked rows — the rows that must match for the run to pass");
-  await expect(evidence).toContainText("count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
+  await expect(evidence).toContainText("Counts every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); not a breakdown of the checked rows.");
   await expect(body).toContainText("Two subjects, never one.");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -669,13 +685,13 @@ test("the proof card's answer layer stays visible; provenance folds counted and 
   // The welds count every compared row whatever its gate, so they are no split of the checked tally: the card states that rule beneath them, dim.
   const note = proof.getByTestId("verification-welds-note");
   await expect(note).toBeVisible();
-  await expect(note).toContainText("count every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); they are not a breakdown of the checked rows");
+  await expect(note).toContainText("Counts every compared row, checked or advisory (an advisory row is recorded but never decides whether the run passes); not a breakdown of the checked rows.");
   await expect(note.locator("[data-tone]")).toHaveAttribute("data-tone", "dim");
-  await expect(proof.getByText("identical to the service's registry fingerprint, by construction")).toBeVisible();
+  await expect(proof.getByText("Identical to the service's registry fingerprint, by construction")).toBeVisible();
   const fold = proof.getByTestId("verification-proof-forensics");
   await expect(fold.getByTestId("verification-weld-debt_manager")).toHaveCount(0);
   await expect(fold.getByTestId("verification-welds-note")).toHaveCount(0);
-  await expect(fold.getByText("identical to the service's registry fingerprint, by construction")).toHaveCount(0);
+  await expect(fold.getByText("Identical to the service's registry fingerprint, by construction")).toHaveCount(0);
   // The counted summary: 6 receipt rows + 6 identity rows + 3 feeds rows.
   await expect(fold.locator("summary")).toHaveText("15 provenance rows");
   // Forensic facts render only once the fold opens.

@@ -6,12 +6,13 @@ import { KitTable, SectionHead, StateCard, VerdictHeader, type KitRow } from "@/
 import kit from "@/components/kit/kit.module.css";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import type { EvidenceDescriptor } from "@/lib/evidence";
-import { fetchEvidence, ProofFetchError } from "@/lib/proof-data";
+import { fetchEvidence } from "@/lib/proof-data";
 import {
   BOOK_LOADING,
   bookAnswered,
   bookFailed,
   deriveVerificationView,
+  evidenceFailed,
   PROBE_COLUMNS,
   PROBES_EMPTY,
   probesSummary,
@@ -72,17 +73,7 @@ export function VerificationSurface() {
         if (!controller.signal.aborted) setState({ phase: "ok", manifest });
       })
       .catch((cause: unknown) => {
-        if (controller.signal.aborted) return;
-        if (cause instanceof ProofFetchError) {
-          setState({ phase: "error", message: cause.message, retryAfterSeconds: cause.retryAfterSeconds, status: cause.status });
-          return;
-        }
-        setState({
-          phase: "error",
-          message: cause instanceof Error ? cause.message : String(cause),
-          retryAfterSeconds: null,
-          status: null,
-        });
+        if (!controller.signal.aborted) setState(evidenceFailed(cause));
       });
     getSolventClient()
       .book(controller.signal)
@@ -172,12 +163,13 @@ export function VerificationSurface() {
           </button>
         }
       />
-      <VerificationArchitecture steps={view.steps} receipt={view.receipt} receiptLine={view.receiptLine} />
+      <VerificationArchitecture steps={view.steps} />
       {view.stateCard !== null && (
-        // The two subjects' place, when the manifest could not be read: a failed read, in its own solid register — never
-        // a refusal — with the service's own words disclosed, and the one way forward.
+        // The two subjects' place, when the manifest did not arrive whole: a failed request in its own solid register, an
+        // answer the page could not read in the unreadable one — never a refusal — with the service's own words
+        // disclosed, and the one way forward.
         <StateCard
-          state="unavailable"
+          state={view.stateCard.state}
           testId="verification-unavailable"
           title={view.stateCard.title}
           cause={view.stateCard.cause}
@@ -198,7 +190,9 @@ export function VerificationSurface() {
               qualifier={probesSummary(manifest)}
               link={{ href: "/developers", label: VERIFICATION_COPY.probesLink }}
             />
-            <KitTable testId="verification-probes" columns={[...PROBE_COLUMNS]} rows={probeRows} emptyText={PROBES_EMPTY} />
+            <div className={kit.card}>
+              <KitTable testId="verification-probes" columns={[...PROBE_COLUMNS]} rows={probeRows} emptyText={PROBES_EMPTY} />
+            </div>
           </section>
           <div>
             <button

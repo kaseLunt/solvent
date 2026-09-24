@@ -7,9 +7,11 @@
 // record's outcome is sealed by law before anything here reads it.
 import type { components } from "@solvent/client";
 import { CASH } from "./inspector-position";
+import type { CompareRow, CompareView } from "./lab-compare";
 import { answerFault, readEngine } from "./lab-engine";
-import { signedCount } from "./lab-headline";
+import { compareCellWords, signedCount } from "./lab-headline";
 import { signedBookMoney } from "./money";
+import { formatTenths } from "./percent";
 import { engineList, groupInt } from "./prose";
 import type { LabRunBook, RunBookOutcome } from "./runbook";
 import type { RunBookSetResponse, SetRunOutcome } from "./runbookSet";
@@ -33,18 +35,20 @@ export type RunRecord =
   // `at` is the wall clock and `atMonotonicMs` the monotonic clock at settle: the pair a later re-selection anchors the result's age on.
   | { readonly phase: "settled"; readonly outcome: RunBookOutcome; readonly at: number; readonly atMonotonicMs: number; readonly held: HeldResult | null };
 
-/** The last set response that READ — it answered its request and every row it draws read — with its ask and its settle clock: a failed Compare stands beside it, never in its place. */
+/** The last set response that READ — it answered its request and every row it draws read — with its ask and its settle clocks: a failed Compare stands beside it, never in its place. */
 export interface HeldSet {
   readonly ids: readonly string[];
   readonly response: RunBookSetResponse;
   readonly at: number;
+  readonly atMonotonicMs: number;
 }
 
 export type SetRecord =
   | { readonly phase: "running"; readonly ids: readonly string[]; readonly startedAt: number; readonly held: HeldSet | null }
-  | { readonly phase: "settled"; readonly ids: readonly string[]; readonly outcome: SetRunOutcome; readonly at: number; readonly held: HeldSet | null };
+  // The settle clocks, as a run's: the comparison's age stays anchored on them however often the set is shown again.
+  | { readonly phase: "settled"; readonly ids: readonly string[]; readonly outcome: SetRunOutcome; readonly at: number; readonly atMonotonicMs: number; readonly held: HeldSet | null };
 
-export type LibraryOutcomeKey = "not-run" | "running" | "result" | "withheld" | "not-covered" | "failed" | "definition-changed";
+export type LibraryOutcomeKey = "not-run" | "running" | "result" | "compared" | "withheld" | "not-covered" | "failed" | "definition-changed";
 export type LibraryOutcomeTone = "crit" | "warn" | "ok" | "refused" | "dim";
 export interface LibraryOutcome {
   readonly key: LibraryOutcomeKey;
@@ -130,6 +134,31 @@ function cashOutcome(response: LabRunBook, definition: ScenarioDefinition, confi
       return { key: "result", text: `${groupInt(heat.bandChanged)} change band`, tone: "warn" };
     }
   }
+}
+
+/**
+ * A compared scenario's word, from the set run the headline reads — never the single run's record, so a scenario the
+ * headline ranked never reads "Not run yet". A point is its money and its unsigned share of the book (the sign is the
+ * money's); a measured zero says so; a row the comparison does not rank keeps the compare card's own words, refused
+ * only where the service or the engine declined.
+ */
+export function compareOutcome(row: CompareRow): LibraryOutcome {
+  if (row.kind === "point" && row.deltaUsd !== null && row.shareTenths !== null) {
+    if (row.deltaUsd === 0n) return { key: "compared", text: "No new liquidatable debt", tone: "dim" };
+    const tenths = row.shareTenths < 0n ? -row.shareTenths : row.shareTenths;
+    const share = tenths === 0n ? "<0.1%" : formatTenths(tenths);
+    return { key: "compared", text: `${row.deltaText} liquidatable · ${share} of the book`, tone: row.deltaUsd > 0n ? "crit" : "ok" };
+  }
+  return { key: "compared", text: compareCellWords(row, CASH), tone: row.kind === "not-covered" || row.kind === "projection" ? "dim" : "refused" };
+}
+
+/** The rail while a comparison leads the page: its members speak from it, every other row keeps its own word. */
+export function comparedLibrary(rows: readonly LibraryRow[], view: CompareView | null): readonly LibraryRow[] {
+  if (view === null) return rows;
+  return rows.map((r) => {
+    const member = view.rows.find((c) => c.id === r.id);
+    return member === undefined ? r : { ...r, outcome: compareOutcome(member) };
+  });
 }
 
 export function libraryRows(listing: ScenariosResponse | null, records: ReadonlyMap<string, RunRecord>, selectedId: string | null, checked: ReadonlySet<string>): LibraryRow[] {

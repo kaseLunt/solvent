@@ -4,7 +4,16 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import { compareHeadline, compareRows, setMembership, shareTenths, type RunBookSetResponse, type SetRunEngineSummary, type SetRunScenarioResult } from "../../lib/lab-compare";
+import {
+  compareHeadline,
+  compareRows,
+  legacyCompareSummary,
+  setMembership,
+  shareTenths,
+  type RunBookSetResponse,
+  type SetRunEngineSummary,
+  type SetRunScenarioResult,
+} from "../../lib/lab-compare";
 import { DEMO_RUN_BOOK_SET } from "../fixtures/demo";
 
 const BASE = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/run-book-set.json", import.meta.url)), "utf8")) as RunBookSetResponse;
@@ -267,6 +276,37 @@ test("the rows are named from their own definitions, the wire's label kept for t
   expect(v.rows.map((r) => r.label)).toEqual(["ETH −30%", "ETHFI −50%", "weETH depeg to 0.95, oracles held", "Cash borrow APY +200 bps"]);
   expect(v.rows[0]?.wireLabel).toBe("ETH -30 percent");
   expect(v.computedAt).toBe(DEMO_RUN_BOOK_SET.batch.computed_at);
+  // The batch's own age, the wire's number, for the Computed chip; one the population guard refuses is no age.
+  expect(v.ageSeconds).toBe(DEMO_RUN_BOOK_SET.batch.age_seconds);
+  expect(compareRows({ ...DEMO_RUN_BOOK_SET, batch: { ...DEMO_RUN_BOOK_SET.batch, age_seconds: -1 } }, "debt_manager").ageSeconds).toBeNull();
+  expect(compareRows({ ...DEMO_RUN_BOOK_SET, batch: { ...DEMO_RUN_BOOK_SET.batch, age_seconds: 1.5 } }, "debt_manager").ageSeconds).toBeNull();
+});
+
+test("the legacy fold's summary names the legacy leader by the headline's own ranking, in the legacy book's share — never a Cash figure", () => {
+  expect(legacyCompareSummary(compareRows(demoSetFor(ALL), "aave_v3_etherfi"))).toBe("ETH −30% moves the most: +0.3% of the legacy book");
+  const legacyDelta = (delta: string) => (r: SetRunScenarioResult): SetRunScenarioResult => ({
+    ...r,
+    engines: r.engines.map((e) => (e.engine === "aave_v3_etherfi" ? { ...e, eligible_debt_delta_usd: delta } : e)),
+  });
+  // "No scenario" only when every row was measured at zero; a row the set could not rank keeps the claim to the ranked rows.
+  const bothPoints = ["eth_minus_30", "weeth_market_depeg_oracles_held"];
+  expect(legacyCompareSummary(compareRows(edit(demoSetFor(bothPoints), "eth_minus_30", legacyDelta("0")), "aave_v3_etherfi"))).toBe("No scenario moves the legacy book");
+  expect(legacyCompareSummary(compareRows(edit(demoSetFor(ALL), "eth_minus_30", legacyDelta("0")), "aave_v3_etherfi"))).toBe("No ranked scenario moves the legacy book");
+  // A withheld legacy row is never summed up as "does not move": it is counted beside the zero, and beside a leader.
+  const withheldLegacy = (r: SetRunScenarioResult): SetRunScenarioResult => ({
+    ...r,
+    withheld_engines: ["aave_v3_etherfi"],
+    engines: r.engines.filter((e) => e.engine !== "aave_v3_etherfi"),
+  });
+  const withheldBesideZero = edit(edit(demoSetFor(bothPoints), "eth_minus_30", legacyDelta("0")), "weeth_market_depeg_oracles_held", withheldLegacy);
+  expect(legacyCompareSummary(compareRows(withheldBesideZero, "aave_v3_etherfi"))).toBe("No ranked scenario moves the legacy book · 1 not evaluated");
+  const withheldBesideLeader = edit(demoSetFor(ALL), "weeth_market_depeg_oracles_held", withheldLegacy);
+  expect(legacyCompareSummary(compareRows(withheldBesideLeader, "aave_v3_etherfi"))).toBe("ETH −30% moves the most: +0.3% of the legacy book · 1 not evaluated");
+  // A tie names every leader, as the headline does.
+  const tie = edit(edit(demoSetFor(ALL), "eth_minus_30", legacyDelta("600000000000")), "weeth_market_depeg_oracles_held", legacyDelta("600000000000"));
+  expect(legacyCompareSummary(compareRows(tie, "aave_v3_etherfi"))).toBe("ETH −30% and weETH depeg to 0.95, oracles held move the most: +0.3% of the legacy book");
+  // Nothing ranked on the legacy book: said, never a zero.
+  expect(legacyCompareSummary(compareRows(demoSetFor(["ethfi_minus_50", "dm_rate_horizon_plus_200bps"]), "aave_v3_etherfi"))).toBe("No scenario could be ranked for the legacy book");
 });
 
 test("compareHeadline: the leader named with its money phrase, every other scenario one clause of the dek, a projection never ranked on spot liquidatability", () => {
